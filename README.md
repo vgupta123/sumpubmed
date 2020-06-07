@@ -1,10 +1,10 @@
 <p align="center"><img width="80%" src="logo.png" /></p>
 
-## SumPubMed : Summarization Dataset of PubMed Scientific Article
+## SUMPUBMED: Summarization Dataset of PubMed Scientific Article
 
-SumPubmed is a dataset for abstractive summarization over scientific article. The dataset use the [PubMed bio-medical article](https://catalog.data.gov/dataset/pubmed) to create the summarization dataset. PubMed comprises of more than 26 million citations for biomedical literature from MEDLINE, life science journals, and online books. Citations may include links to full-text content from PubMed Central and publisher web sites. 
+SUMPUBMED is a dataset for abstractive summarization over scientific article. The dataset use the [PubMed bio-medical article](https://catalog.data.gov/dataset/pubmed) to create the SUMPUBMED summarization dataset. PubMed comprises of more than 26 million citations for biomedical literature from MEDLINE, life science journals, and online books. Citations may include links to full-text content from PubMed Central and publisher web sites. 
 
-For creating SumPubmed, we downloaded around 33,772 documents identified as BMC literature. BMC (BIO MED CENTRAL) literature incorporates BMC health services research papers related to medicine, pharmacy, nursing, dentistry, health care, and so on. 
+For creating SUMPUBMED, we downloaded around 33,772 documents identified as BMC literature. BMC (BIO MED CENTRAL) literature incorporates BMC health services research papers related to medicine, pharmacy, nursing, dentistry, health care, and so on. 
 
 ### DataSet Structure
 
@@ -23,7 +23,7 @@ Please cite the below paper if you intent to use the dataset for your research.
 
 ```
 @article{bharti2020,
-  title={SumPubMed: Summarization Dataset of PubMed Scientific Article},
+  title={SUMPUBMED: Summarization Dataset of PubMed Scientific Article},
   author={Bharti, Prerna and Gupta, Vivek and Nokhiz, Pegah and Karnick, Harish},
   url={https://vgupta123.github.io/docs/submubmed.pdf}
   year={2020}
