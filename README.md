@@ -14,7 +14,8 @@ After downloading, you have multiple sub-folders with several text files. Datase
 shorter_abstract: final short summary of the text
 abstract: long summary of the text (background, results, conclusions)
 line_text: text with a single sentence in a line
-text: contain the PubMed text in the raw form 
+text: contain the PubMed text in the raw form
+human_annotation.tsv : human annotation of random 50 examples 
 ```
 
 ### Recomended Citation
@@ -32,3 +33,7 @@ Please cite the below paper if you intent to use the dataset for your research.
 ### LICENCE
 
 Carefully read the ***LICENCE*** and the ***Datasheet*** for non-academic usage. This dataset is licensed under the terms of the MIT license. Feel free to use the dataset for non-commercial academic purpose.
+
+```
+Note: Associated script for the baseline models would be made available soon.
+```
