@@ -1,0 +1,115 @@
+BACKGROUND
+since the appearance of next generation sequencing  technologies, a large number of bioinformatics softwares and methods have been developed and publicly released to work with these massive sequence data  <cit> . depending on the type of data and experiments, multiple steps may be required such as quality control, adapter removal or trimming or both, mapping, variant detection, read counting and so on, and dedicated software may be used for each step. thus, biologists have to perform a lot of chained manipulations in order to obtain the final information for their research. the vast majority of bioinformatics softwares are command-lines tools, generally designed to work on powerful computers and high-performance calculation  infrastructures. bioinformaticians have developed dedicated pipelines for specific experiments, using those bioinformatics softwares, as well as combinations of home-made filters  and loops   <cit> . however, those scripts are generally monolithic, in the sense that they cannot easily be transferred from one installation to another, or from one experimental subject to the following . moreover, even if some flexibility is offered to the user by modification of several options before launching, these modifications are generally not trivial, requiring either a long list in the command line, or provision of a complex option file. in addition, writing a new pipeline from scratch is labor-intensive and time-consuming, especially if all safeguards for file format, software execution, or file transfer are implemented each time.
+
+the toggle suite  was developed to optimize the creation of new ngs analysis workflows. what we propose here is a set of packages designed for fast implementation of robust and reliable pipelines. each package represents either a ngs software manipulation or a set of dedicated tools . these packages are written in perl, with unitary modules the most generic possible. toggle is able to manage hundreds of samples at once, and is not limited to one application. it can be used on dnaseq, rna-seq, smallrna, gbs, and any other sequence data. it can be installed on a variety of infrastructure, from a simple laptop computer to a large hpc cluster. finally, the toggle assays and options are based on a unique configuration file, that can be easily changed and adapted to each run. the tool and test data are available on github: https://github.com/southgreenplatform/toggle. a docker image for immediate installation is available , as well as an user-space install script .
+
+
+implementation/
+RESULTS
+packages and modules
+we designed toggle in a suite of more than  <dig> packages, gathering more than  <dig> different modules , which can be used independantly to quickly implement pipelines for ngs analyses. each package represents either the use of a software suite , or a set of tools dedicated to a given operation or more general tools. modules are perl code wrappers for a central command or function, with a validation system for the entry file format, running command, and output . each module starts generally by calling the file format validation modules from the toolbox.pm package , and then by sending a specific command line to the toolbox::run module. this module launches the command through the unix system, and will return either a given value for correct execution, a warning, or an error.
+
+the toolbox.pm package gathers general tools and functionalities. this package will, among other things, read the software.config.txt file, manage printing of log files printing  and the system command for all modules . the software.config.txt file can be used to manage the options for the different softwares and modules of toggle. this file is constructed in a basic layout, as shown in fig.  <dig>  using the option representation specific for each software. if no specific parameters for a given software or module are provided in this file, the default values of the software/module will be used. the software.config.txt file  was developed with biologist users in mind: this file is the only one to change for any option of any step of a given pipeline. the localconfig.pm package will inform of the different softwares paths  on the user’s local machine or server. users can adapt the paths in this package, and can also test different versions or installations of the same software without having to change the whole pipeline code. only those three packages/files are mandatory when creating a new script using toggle.
+fig.  <dig> software execution presentation.  input data are submitted to a given module.  the module will construct a command line to toolbox::run.  the text of the command line and the run report are sent to toolbox::exportlog.  the output of the command  is sent back to the original module.  the module will send a report to toolbox::exportlog.  the output data are delivered from the module
+
+fig.  <dig> softwares configuration file. the lines starting with “$” correspond to the name of the current module called . the lines just after list the option associated with this call; the list of options is finished with an empty line. lines starting with “ ♯” are reserved for comments
+
+
+
+a large part of the coding effort was to produce a logging system that can be scaled for hundreds of individual analyses run in parallel . the dedicated toolbox::exportlog module will recover the value transmitted by other modules to generate log information:  the module call succeeded;  the module call started correctly but finished incorrectly;  the module was not able to execute the command. the last two types of information will be recovered in the error log file . correct execution of the command will be written to the output log file . the log system allows the user to check step by step the progess of the analysis.
+fig.  <dig> directories tree structure. representation of the tree of directories with the log files during the execution of globalanalysis.pl pipeline, with the example of three individuals representing each possibility. the first one is a paired-end data, the second one is a single-end data, and the last one is a paired-end data which generate single reads during the cleaning step
+
+
+
+adding new modules or packages is relatively simple, with a sample package provided with the complete suite. linking to the different tools , as well as the replacement of a given module by another in a pipeline is easy to perform. a template for a new pipeline design is also provided.
+
+example of implementation
+all the modules can be arranged to easily generate robust pipelines for ngs analyses. as an example, we provide two functional pipelines: an rnaseq data one  and a dnaseq pipeline for single and paired-end illumina genomic data for snp and indel detection in any eukaryotic diploid species. this latter, that we describe here in details, is based on four scripts: pairanalysis.pl, singleanalysis.pl, mergeanalysis.pl and globalanalysis.pl . the first three can be launched independently, while the last, globalanalysis.pl, is a turn-key pipeline which launches and manages the three others .
+fig.  <dig> pipeline dnaseq presentation. basic overview of the pairanalysis.pl, singleanalysis.pl, mergeanalysis.pl pipelines, and of the wrapping globalanalysis.pl pipeline. each colored box represents a given module, and each color a specific package. see text for the corresponding steps. a more complete figure is available on the toggle website
+
+
+
+both start with fastq format validation , followed by a quality control using the fastqc software   <cit> , and a cleaning step performed by the cutadapt software  <cit>  . for pairanalysis.pl, an additional “repairing” stage  re-associates the paired-end reads and exports the single-end reads  to the singleanalysis.pl script independently from cutadapt. this step may be excluded when using the last version of cutadapt and its pair-end mode, but this is not yet implemented in toggle. after cleaning, both scripts follow the same stages again, with specific parameters: mapping using bwa aln   <cit> ; sorting, cleaning and indexing of the bam files using picardtools  <cit>  and samtools  <cit>  ; local realignment with the gatk   <cit> ; and finally removal of duplicates using picardtools . the mapping is performed here using the bwa aln/sampe/samse back-track version. it is possible to switch to the bwa mem version by changing the code, as this module is already provided in the bwa.pm package. however, we decided to remain on the back-track version in this pipeline, as it is used in our labs and allows comparison with older mapping data. the data are then treated through the third script mergeanalysis.pl, for single nucleotide polymorphism  and insertion/deletions  calling using haplotypecaller, followed by the sorting and quality filtering of the obtained variants. all of these steps are performed using gatk, and are multiple sample variant calling. the final variant call format  file is cleaned and filtered as much as possible through generic bioinformatics tools, but subsequent specific analyses may be required to optimize it for specific purposes .
+
+in order to automate these steps for multiple samples, we created the globalanalysis.pl script . this script will also organize the data into different directories with a specific tree structure  defined to facilitate access to intermediate files.
+
+the globalanalysis.pl script will deal with a unique directory where the whole raw fastq data are stored, without correspondance of names between the two paired files . the script will use the pairing::pairrecognition.pm module  to associate files of paired-end data. the first sequence id  is used to create the pairs, and we validated this association step of more than  <dig> paired and single files. it creates independent folders for each sample/individual, on which pairanalysis.pl or singleanalysis.pl will be launched according to the data type. after these analyses, globalanalysis.pl will recover the final bam file and its index for each sample, and will execute the mergeanalysis.pl script as described earlier .
+
+all those scripts are associated with an indicator file, individusoft.txt, which inform which step of the analysis has been launched. this indicator file also permits to create the various logs files. indeed we constructed different level of log files: at global level ; at sample/individuals level , and at package per individual level .
+
+this pipeline is a classical one for dnaseq analyses from fastq sequences to bam files then vcf files, but with a lot of control regarding file structure and format, and is easy to manage in terms of specific and global options through the software.config.txt file. moreover, it can be used with any reference genome . a rnaseq pipeline is also provided in the toggle suite, based on a tophat and htseq  <cit>  approach .
+
+parallelization
+toggle can manage parallelized jobs, and may be implemented on hpc cluster machines. concurrent jobs can be launched using the globalanalysissge.pl script for example, which will launch all individual pairanalysis.pl  instances in different jobs. the specific sge parameters for all individual jobs can be specified in the option file. for the moment, the main level of the paralellization is based on the sample level  only. we are conscious this is a main drawback compared to system such as hugeseq  <cit>  or churchill  <cit>  . however, toggle was designed to requested a very limited number of mandatory softwares/configuration outside of bioinformatics one. thus it could be deployed on any kind of infrastructure. nevertheless, in future versions we plan to develop a finer approach using a mapreduce/embarrassingly parallel approach, splitting each sample in multiples subsamples at the different levels , in a similar way to churchill  <cit> .
+
+still, the current scripts do not manage the parallelization based on specific options. if a given parameter in the option file specifies a certain number of parallel threads , and if the sge options provided do not require the same number of cores, more than one thread per core will be launched, which could have a major impact on the general efficiency of the job  if too much threads per core are requested.
+
+comparison with already available pipeline tools
+different pipelines or pipeline development tools exist for ngs data. the graphical systems  are limited in their options or the available tools, and are generally not able to reach the scale of thousands of samples. the command-line based systems are more versatile , but harder to use.
+gatk-queue
+hugeseq
+churchill
+gotcloud
+bcbio-nextgen
+
+y signals that a feature is present, n is absent. evolutivity means the possibility to add future module or functions to the system
+
+
+aavailable as separated steps
+
+
+bdepending the considered step
+
+
+
+gatk-queue  <cit>  is a scripting framework for the genome analysis toolkit, which treats sam/bam or vcf files using gatk tools. gatk-queue is based on the scala language, and can create simple scripts. however, it is limited to gatk tools and will start only after mapping.
+
+the hugeseq pipeline  <cit>  uses a mapreduce-like approach on hpc clusters to optimize the calculation of genomic variants from a set of a few already cleaned fastq data. the scripts are fixed, and parameters can be changed only in hard code modifications or through an extensive and complex command-line. moreover, a lot of external commands have to be performed before analyses .
+
+churchill  <cit>  also uses an embarassingly parallel approach in order to achieve mapreduce performance. it is dedicated mainly to identification of genomic variants, and scripts are hard coded and can not be modified. it is possible to switch between different mappers and variant callers using a dedicated option file. however, the index and dictionaries for the references have to be created independently, and pair recognition is based only on file names. the whole path for all fastq files must be provided, and not all options are available for all softwares. finally, churchill is freely available for academic purposes, as the other ones, but is not open-source.
+
+gotcloud  <cit>  is a set of pipelines dedicated to massive ngs analyses, from already cleaned sequence data to association results. it is dedicated to detection of genomics variations, and can switch between mappers or callers. the options system is also based on a single file, but requires that the user knows the gotcloud version for each software option. moreover, it runs only on clusters or in the cloud , and the name of all fastq files has to be provided.
+
+the bcbio-nextgen framework  <cit> , written in python, is highly modular, and is similar to toggle. different mappers and callers are already available, and others can be add easily. the framework can be used for germline variants, somatic variants and rna-seq, as for toggle. however, the reference sequences are limitated to a fixed set, and even if it is possible to add new items, the system requests those references to be listed.
+
+compared to the similar frameworks currently available, the current implementations of toggle scripts work on dna and rna, and begin with a set of raw fastq in a given folder. it will automate all steps, from identification of pairs , creation of indexes and dictionaries for the reference, data cleaning and so on. the end-users only have to modify the basic option file software.config.txt, in which the very same options as for the command line softwares need to be written. toggle can be extended easily for new bricks and software plugins, and new scripts for dedicated analyses can be assembled quickly. moreover, toggle can be installed in the user space  as well as at the system level, from a simple laptop to a hpc cluster or in the cloud.
+
+installation
+power users can install toggle following the manual provided on github https://github.com/southgreenplatform/toggle. we are aware that installing all dependencies and working versions of a such large number of softwares is generally problematic and complex. therefore, we provide alternative methods for installation, a docker image  and a bash script . the docker image, based on the basic ubuntu  <dig>  image from docker hub, is ready to run out of the box any ngs data transferred in the container. the bash script can be run at user space level and will download all the versions that work with the current version of toggle, and will adapt the different paths for toggle to work. nevertheless, for an optimized and stable installation, we recommend a more precise installation as detailed on github.
+
+CONCLUSIONS
+toggle is a combination of tools for large-scale ngs analyses of dna and rnaseq data. users can easily modify the different options of the numerous softwares using the software.config.txt file, without going through the code for each step. users who want to use the general scripts provided in the suite just have to launch the globalanalysis.pl pipeline on the raw fastq files  and wait to get the bam and vcf files. the efficient log files provide information and statistics on the data and pipeline progress quickly, as well as on potential errors or warnings. thus, users can concentrate on the biological relevance of the results rather than on technical aspects, even if using a huge amount of data.
+
+bioinformaticians can rapidly write new packages and modules useful for biologists using a highly reliable system. the addition of new modules is fast, and they can be easily linked to the logging system. a lot of tools are available already, and we will add new modules for structural variant analyses, with softwares such as novelseq  <cit>  or breakdancer  <cit>  in the near future.
+
+availability and requirement
+project name: toggle
+
+project home page:https://github.com/southgreenplatform/toggle
+
+operating system: linux
+
+programming language:perl
+
+other requirements:java  <dig> , bwa  <dig> . <dig> or higher, samtools  <dig> . <dig> or higher, cutadapt  <dig> . <dig> or higher, fastqc  <dig> . <dig> or higher, picardtools  <dig>  or higher, gatk  <dig> x or higher, perl modules: data::dumper, data::translate, test:more, test::deep, capture::tiny.
+
+license: gnu gplv3/cecill-c
+
+
+
+additional file
+additional file  <dig> 
+complete scheme of the
+globalanalysis.pl
+ script. colored boxes correspond to analysis steps, with color related to a given package . white and black boxes correspond to input/output files. the globalanalysis.pl script will determine the state of each sample , then launch the corresponding subscript, and finally will gather all corrected bam files to the mergeanalysis.pl script that will perform the multiple sample calling. 
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+cm: blueprint, code of modules and packages, code of pipelines, coordination, writing of the manuscript. ctd: blueprint, code of modules and packages, code of pipelines, correction of the manuscript. ak: code of modules and packages, code of pipelines. ms: code of modules and packages. cf: code of modules and packages. ma: code of modules and packages. job: code of modules and packages. sr: code of modules and packages. sa: code of modules and packages, code of rnaseq pipeline. eoa: code of modules and packages, installation scripts. fs: initiator of the program, code of modules and packages, docker image, coordination, correction of the manuscript. all authors read and approved the final manuscript.
+

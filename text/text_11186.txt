@@ -1,0 +1,365 @@
+BACKGROUND
+it is becoming increasingly apparent that stochasticity, whether intrinsic or extrinsic, plays an important role in the dynamics and behavior of biological systems. in systems biology and the study of gene expression  <cit> , the consequences of stochasticity can manifest in numerous ways such as slow promoter kinetics leading to gene transcription bursting  <cit> , finite-number effects and mrna translation bursting  <cit> , propagation of noise in gene regulatory cascades  <cit> , and phenotypic switching  <cit> . in some cases, biological systems evolve to minimize the effects of noise such as through negative feedback loops  <cit> , but there is also evidence that biology exploits randomness such as to create phenotypic diversity in populations thus allowing better adaptation to changing environments  <cit> . with the growing awareness of stochasticity in biology and the increasing use of stochastic models in computational systems biology, there is a need to develop new analysis and computational techniques for studying, understanding and designing these stochastic models.
+
+one particular analysis technique and challenge in computational systems biology is the inference of rate parameters from experimental data for a specified biochemical system  <cit> . parameter inference for continuous deterministic models has a considerable body of research literature and can often be converted into an optimization problem for which many computational methods are available  <cit> . the strategies of these methods can be classified as either deterministic or stochastic. deterministic strategies are generally only applicable for specific mathematical formulations of the model where a statement about the existence of the global optimum can be guaranteed along with a constructive algorithm to find it. many problems are not that well-defined so stochastic strategies are popular including stochastic gradient descent  <cit> , simulated annealing  <cit> , evolutionary computation  <cit> , and other heuristics. regardless, considerable computational effort is required for all of these methods as many simulations of the continuous deterministic model are performed. a discrete stochastic model is essentially a more adequate description for a biochemical system, but it has the disadvantage of being computationally expensive to simulate as well as requiring numerous independent simulations to be performed in order to calculate expectation values of various model outputs  <cit> . these computational challenges mean that approximation techniques are frequently used for parameter inference including simplification of the stochastic model  <cit>  and approximate inference such as using the chemical langevin equation  <cit>  in place of the markov jump process  <cit> . recent research has shown that parameter inference for stochastic models is feasible given time course observations of the system, even if only a partial set of molecular species are observed  <cit> . however the current algorithms, based on the bayesian framework, are typically time-consuming due to the need of sampling high dimensional space. therefore there are significant challenges in applying the method to real systems, such as gene regulatory networks  <cit> .
+
+most proposed methods for parameter inference in stochastic biochemical models consider how to calculate the maximum likelihood for the rate parameter values given a stochastic model and observational data. except for the simple models, the likelihood function is computationally intractable, so these methods either perform exact inference on an approximated model where the likelihood computation is tractable, or they approximate the likelihood with a more tractable function, or some combination of the two. tian et al.  <cit>  considered the simulated maximum likelihood  method that estimates likelihood by generating samples from many simulations of the stochastic model. the ratio of samples matching observations to the total number of samples is used to estimate the transitional density and the log-likelihood. then a genetic algorithm is used to obtain the optimal rate parameter values that minimize the log-likelihood function. while the sml approach is straightforward, it is computationally expensive because it requires a large number of simulations of the stochastic model. similarly, approximate bayesian computation also requires the stochastic model to be simulated, but it avoids calculating the likelihood function by comparing simulated data with observations using a rejection sampler  <cit> . in a similar framework, yosiphon et al.  <cit>  used a simulated annealing procedure in an mcmc algorithm to estimate the parameters in stochastic models of reaction networks. reinker et al.  <cit>  proposed a method utilizing a hidden markov model to approximate the stochastic model that takes observational error into account. boys et al.  <cit>  showed how full bayesian inference can be performed on the stochastic lotka-volterra model along with performance of various markov chain monte carlo  algorithms. interestingly they showed that with partially observed data, i.e., only one of the two species in the model, they can still make inferences about all three rate parameters in the model; though it is unclear how well this would work on larger models with many parameters. wilkinson and colleagues have investigated additional methods including using diffusion approximations  <cit>  and incorporating multiple data sources  <cit> .
+
+in this paper, we describe an alternative method for parameter inference in discretely observed stochastic kinetic models. instead of calculating and approximating the likelihood function as in the previous methods, we focus on estimating the gradients of the likelihood function with respect to the parameters. in particular, we propose a general methodology for efficiently estimating the gradients using reversible jump markov chain monte carlo . rjmcmc is an extension of the standard mcmc method that allows for generating samples on spaces of varying dimensions  <cit> . an implementation challenge for rjmcmc is the lack of a general way to construct the jump proposals such that detailed balance is preserved  <cit> . for stochastic kinetic models, the jump proposal corresponds to moves that change the number and the time of reactions that occur between two observations of the system. for most models, there is an infinite set of possible reaction processes  that can occur between two time points, and the probabilities of different reaction paths depend upon the rate parameter values. utilizing the research in flux balance analysis for metabolic networks  <cit> , we provide an algorithm so that jump proposals can be automatically constructed from any standard biochemical model, thus allowing rjmcmc to be used without requiring any manual analysis by the modeler.
+
+the availability of the gradient information allows for inference of the rate parameters of stochastic kinetic models using gradient descent-based methods. we implement a steepest gradient descent method for parameter inference using the estimated gradient information in a matlab software package http://cbcl.ics.uci.edu/sgd. we demonstrate the utility of our algorithms using two example stochastic models, including a birth-death process and a gene auto-regulation model.
+
+methods
+stochastic kinetic model of reaction systems with discrete states
+consider a general reaction system involving m reactions r <dig>  r <dig> ..., rm and k species s <dig>  s <dig> ..., sk. we denote the state of the reaction system by x =  where xa is the number of species sa. each reaction ri has an associated rate law, represented by a hazard function hi , where Θ ≡ {θr} is a set of parameters associated with the reactions. suppose the reaction system takes the following form   
+
+where ura and vra are the positive integer stoichiometries associated with reaction rr for reactant sa, representing the amount of species sa that decrease and increase respectively when reaction rr occurs. eq.  can be represented more compactly as us → vs, where u =  and v =  are m × k matrices. we define the net effect reaction matrix a = v - u, which reflects the net change of species numbers associated with reactions.
+
+asumming the reaction system is in well-stirred condition with a fixed volume, we can introduce the master equation model, also known as "chemical master equation " in the biochemical modeling field  <cit> , which describe the time evolution of the state probability using a set of ordinary differential equations. the cme can be derived for any biochemical reaction system using the standard continuous time markov process theory. denote p the probability of the system in state x at time t. for an infinitesimal time increment Δt, p can be written as the sum of probabilities of the number of ways in which the system can reach or leave the current state:   
+
+where ai denotes the ith row of the net effect matrix a, and hi is the hazard function, determining the rate of probability transition out of state x due to reaction type i. in the limit of Δt →  <dig>  eq.  adopts the standard master equation form,   
+
+with   
+
+suppose all possible system states  are ordered and represented by indices  <dig>   <dig> ..., etc. then eq.  can be rewritten as , where  is a row vector with pi representing the probability of the i-th state at time t.
+
+for reactions that obey mass-action law kinetics, one rate parameter θr is associated with each reaction type i, and consequently the hazard function has the form of   
+
+where ura is the stoichiometry coefficient of reactants a in reaction rr. forms of other rate laws for chemical kinetics, e.g. the michaelis-menten model, can be found in  <cit> . although we will focus our discussion on the hazard function in the form of eq., the following analysis can handle more general cases as long as the explicit functional form of the hazard function is known.
+
+gradient of the likelihood function with discrete observations
+our goal is to estimate the rate parameters of a stochastic model based on the observations at a set of discrete time points. suppose we have observations {xΓ, xΓ,⋯,xΓ} of the system at m discrete time points {t <dig>  t <dig> ...,tm} for a subset of species Γ ⊆ { <dig> ⋯,k}. we say the system is fully observed if Γ = { <dig> ⋯,k}, and partially observed otherwise. denoting the likelihood of the observations for a given set of rate parameters by l, xΓ,⋯,xΓ; Θ), we estimate the rate parameters by maximizing the likelihood function.
+
+for simplicity of discussion, consider first a single time interval  with full observations available at the start and the end of the interval, denoted by x and x respectively. let l, x;Θ) denote the likelihood of observing x and x under a model with parameters Θ. in appendix, we show that the gradient of the likelihood function with respective to parameters can be calculated using the following formula, for any stochastic system with a master equation eq.    
+
+where tk is the time duration of the system at state k, and nk, k' is the number of transitions from state k to k' occurred during the interval. both tk and nk, k' are random variables, and can be viewed as the sufficient statistics of the model. e represents the expectation of the random variables. the formula suggests that we can calculate the gradient of the likelihood function by estimating the expectations of the two sufficient statistics.
+
+for the biochemical reaction system in eq. , suppose j reactions have occurred during the time interval  with the types and the corresponding times of the reactions denoted by . then by eq. , the gradient of the likelihood function can be rewritten as   
+
+where , which is fully specified by Ξ, denotes the state of the system between , and . eq.  can also be written in an alternative form   
+
+where  
+
+is the likelihood of the reaction process Ξ. if all the reactions follow mass-action law in eq., the gradient formula can be further written as   
+
+now return to the general case where the observations are available at multiple time points from a subset of the species. the above formula for calculating gradient can still hold if we view the entire duration of the observations as a single time interval. however, the expectation in eq.  is now taken on the systems states whose distribution is conditioned on the observations at the intermediate time points.
+
+in general, the expectation in eq.  cannot be calculated exactly. instead we utilize a sampling method to approximate the expectation. more specifically, we sample the latent path conditioned on the parameters and the observations, and then calculate the quantity in eq.  by averaging over the sampled paths to obtain the gradient. the same strategy also applies to the partially observed case, as long as the reaction paths are sampled conditioned on the partial observation data.
+
+reversible jump markov chain monte carlo sampling
+to calculate the gradient, we need to find an efficient way to sample the latent reaction processes conditioned on the observations. one commonly used sampling method is the stochastic simulation algorithm   <cit> , which can be used as a rejection method to discard samples that do that match the end state. the ssa method is computationally inefficient for generating samples between two measurements when the total number of possible states is high , because the chance of a sampled trajectory matching the end state is typically small and consequently most of the samples will likely be rejected.
+
+here we use the framework of rjmcmc  <cit>  to sample the latent process. rjmcmc is a generalized mcmc method that can construct a sampler between models of different dimensions, which in our case corresponds to reaction paths with different number of reactions. to sample latent paths in biochemical reaction systems, the rjmcmc method  <cit>  first generates an initial reaction path that is consistent with the observations. then rjmcmcm constructs a markov chain by a) proposing a new sample path by adding or deleting a specific set of reactions from the current path, and b) determining whether to accept the new sample or keep the previous one according to an acceptance probability.
+
+therefore, to construct a rjmcmc sampler, we will need to consider three issues: 1) how to generate the initial path; 2) how to propose a set of reactions for addition or deletion; and 3) how to determine the acceptance probability of a new path. note that both the initial path and the proposed path have to match the observations at the start and the end of the interval, implying that only a subset of the reactions can be used for either initialization or addition/deletion. while the rjmcmc sampler exists for some specific reaction systems  <cit> , usually taking advantage of the domain-specific knowledge, the challenge, however, is to find a general method that can work for any arbitrary reaction system.
+
+next we address the three issues mentioned above, and describe a general method to automatically construct a rjmcmc sampler for an arbitrary reaction system.
+
+1) generating an initial reaction path using integer programming
+the first issue of generating the initial path is relatively easy to address. let r be a vector representing the number of each reaction type occurred within the initial path. to match the observations at the start and the end of each interval, r has to satisfy certain constraints. fortunately, all these constraints are linear, and thus we can use linear integer programming to find a solution. in practice, we used the gnu linear programming kit   <cit> , which is incorporated into our matlab package using the interface glpkmex  <cit> .
+
+2) proposing a new sample by adding or removing reactions
+after an initial path is generated, our next step is to use proposal moves to add or remove reactions. before describing our method, we first introduce two concepts that are used in studying biochemical reaction systems.
+
+definition 1: elementary mode
+an elementary mode  of a biochemical reaction network is a set of reactions that does not alter the observed number of molecular species. formally, an elementary mode is a column vector of non-negative integers that satisfies , where Ã = a  when all species are observable, and is a sub-matrix of a with columns corresponding to the observed species when only a subset of species are observable.
+
+definition 2: null set
+the null set is a set consisting of all independent elementary modes, denoted by .
+
+note that the null set is usually different between the fully and the partially observed case because of the different Ã matrix used.
+
+elementary modes analysis is well studied in metabolic networks theory and is used to find the flux distribution of the metabolic network at a steady state  <cit> . various tools have been developed to identify ems  <cit> . in this work, we used the metatool package  <cit>  to calculate the null set of any specific reaction network, which has been shown to be efficient for large networks.
+
+provided with a valid reaction path and the null set, we then proceed to generate a new sample by taking one of the following three move types. after randomly choosing an elementary mode  from the null set,
+
+ <dig>  with probability α <dig>  add the set of reactions in  with random reaction times uniformly distributed within the interval.
+
+ <dig>  with probability α <dig>  remove one set of randomly selected reactions in  from the current path within the interval.
+
+ <dig>  with probability 1-α1-α <dig>  randomly move the time of all reactions.
+
+using  ensures that the proposed reaction path is always consistent with the observations. however, there are two additional conditions for a new sample path to be valid: 1) the number of any reaction type must be positive after the move, and 2) the population numbers for all species remain positive throughout the whole process. if either of the two conditions is violated, we set the likelihood of the new sample path to be zero and reject the new sampled path. the proposal probability in rjmcmc for different moves is set be to α <dig> = α <dig> =  <dig>  in practice. note that the initial path and the null set only need to be calculated once, and thus they only impose a modest computational burden on the sampling algorithm.
+
+3) determining acceptance probability
+next we address the third issue on how to determine the acceptance probability of a proposed sample. we discuss the fully observed case first, and then the partially observed case.
+
+fully observed case
+the observations at m discrete time points break the entire observation window into m- <dig> subintervals. because all species are observed, the reaction path at each sub-interval is completely independently of each other conditioned on the observations. the reaction path at each sub-interval can therefore be sampled independently using rjmcmc. let Ξ denote the current reaction path and Ξ denote the proposed reaction path. the probability of accepting the new path is specified by min, with p =  <dig>   <dig>  or  <dig> denoting the type of the move  
+
+where π, defined in eq. , is the likelihood of sample path Ξ, rj is the number of type j reaction in the current sample path, qk, j denotes the number of reaction type j in the elementary mode , and τ is the time length of the sub-interval. appendix, algorithm  <dig> provides the pseudo-code for the fully observed case.
+
+partially observed case
+in the partially observed case, observations are only available for a subset of the species. different from the fully observed case, the reaction paths at different sub-intervals are now correlated, caused by unobserved species. consequently, rjmcmc can no longer be applied independently for each sub-interval.
+
+to account for the correlation, we use a new strategy in which the reaction paths at two consecutive sub-intervals are sampled together at each sampling step using correlated moves. let {qk'}, k ∈  be the null set corresponding to the partially observed case. note that adding/deleting the set of reactions in  only ensures that the observed species' numbers remain unchanged, but not the unobserved species. suppose we are to update the reaction path following the time point ti. we first generate a new sample path in the i-th interval  using the same reversible jump moves as described for the fully observed case, with a randomly chosen elementary mode. if the move changes the unobserved species numbers at time ti+ <dig>  we subsequently update the -th interval using a complementary move that keeps the system state at the end of the second interval unchanged. for example, if move type  <dig>  is chosen to update the first interval with an elementary mode q'k, move type  <dig>  will be applied to the second interval to remove  the same elementary mode q'k. the complementary moves guarantee that the new reaction paths proposed for the two sub-intervals do not change the species numbers, including those of the unobserved species, at the end of the second interval. as with the fully observed case, the two conditions of a valid path  must be satisfied, otherwise the proposal move will be rejected. the acceptance probability is calculated as , where p' denotes the complementary move type of p. in this way, the state of unobserved species at time ti  can be updated sequentially. an additional step is used to update the state at the first observation time point t <dig>  which is done by keeping the species number at the end of the first interval fixed and changing the start state according to the proposed move. appendix, algorithm  <dig> provides the pseudo-code of using rjmcmc for the partially observed case.
+
+stochastic gradient descent algorithm
+given the estimated gradient of the likelihood function, we use the method of steepest descent to find an optimal solution of the parameters. at each step of the algorithm, we first generate sample paths using the rjmcmc algorithm at current parameter values. after burn-in, we calculate the gradient of the likelihood function using the formula in . the estimated gradient is then used to update the parameter values until convergence. a simple strategy for choosing the step size is to set it to be a constant. although this works well for simple systems, it sometimes induces over-shooting of the parameter values or slow convergence during the gradient descent. when this happens, we adaptively adjust the step size within a certain range according to the gradient value. an overview of the stochastic gradient descent algorithm is given in appendix, algorithm  <dig> 
+
+RESULTS
+next we illustrate the utility of our algorithm using two example reaction systems. in both cases, we simulated the reactions of the system using the stochastic simulation algorithm, and recorded the species numbers at a set of discrete time points, which were treated as observations of the system. our method was then applied to infer the rate parameters for each system based on these observations.
+
+example 1: birth-death process
+we first applied our algorithm to a well-studied birth-death process, which can be seen as a simplified model of production and degradation of a single molecular species  <cit> . the reactions are  
+
+we assume that r <dig> and r <dig> follow the first-order and zeroth-order mass-action law respectively. denote the number of a molecules by na, thus the hazard function is given by h <dig> = k1na and h <dig> = k <dig>  the net-effect reaction matrix of the system is a = t. consequently, the null set of the system contains only one elementary mode , i.e. the combination of r <dig> and r <dig> 
+
+we generated observations by simulating the reaction process using ssa with different parameter sets  = , , ,  and . for each parameter set, four observation datasets were generated that differ on the total observation time  and the observation interval  .
+
+dataset
+*true values of parameters
+
+m : total number of observations; Δt: the time between two observations.
+
+we first examined the convergence property of the rjmcmc sampler with the different datasets generated with the first parameter set. figure  <dig> shows the trace plots and autocorrelations of the total number of reactions in the sample paths. in all cases, we found the rjmcmc sampler is efficient and induces good mixing of sample paths, with convergence occurring typically within  <dig> samples. as expected, larger correlation length is observed for data with longer observation intervals .
+
+we applied the sgd algorithm to estimate the two rate parameters for each dataset. the convergence criterion is set to be that the relative changes of all parameter values are less than  <dig> . we used  <dig> samples after a burn-in of  <dig> samples to estimate the gradient for a given set of parameter values. the estimated parameters for each dataset are summarized in table  <dig>  in all cases, the inferred parameters showed a good agreement with the true values, although the accuracy of the estimation clearly correlates with the number of observations and the observation time intervals. for datasets with larger observation interval and fewer data points, larger variation is the observed for the inferred value between different datasets, indicating the parameters are less constrained in these cases . additional file  <dig>  figure s <dig> shows a typical gradient descent run using the one of the datasets generated with  = , which consists of  <dig> data points with a total time period of t =  <dig>  we observed that the parameters converge very quickly during the gradient descent, typically within  <dig> steps for our tested random start values.
+
+example 2: prokaryotic auto-regulatory gene network
+the second model we tested is a prokaryotic auto-regulatory gene network in which dimmers of a protein repress its own gene transcription by binding to a regulatory region upstream of the gene. the system, involving both transcription and translation, can serve as a simple, yet illustrative, example of gene regulation  <cit> . the reactions in the network are given below:  
+
+here dna, p, p <dig> and mrna represent promoter sequences, proteins, protein dimmers and messenger rna respectively. in this model, mrnas and proteins are synthesized by transcription and translation processes , and destroyed by degradation . the proteins can form a dimmer p <dig> , which binds and unbinds to dna . when a protein dimmer binds to the promoter, it represses mrna production. overall, the network implements a self-regulatory mechanism to control the synthesis of the protein product, suppressing the transcription when the protein product is abundant. note that dnat = dna + dna.p <dig> is a conserved quantity in the system. the rate functions of reactions are assumed to follow mass-action law with rate parameters k <dig> to k <dig>  e.g. h <dig> = k1·p2·dna.
+
+we applied our algorithm to both the fully and partially observed cases. we generated  <dig> datasets as observations within a time window of [ <dig> 50) with  = . datasets d <dig> - d <dig> have total copy number dnat to be  <dig> with the time interval between observations  from  <dig>  to  <dig> . the other five datasets d <dig> - d <dig> are generated with dnat =  <dig>  detailed information of the datasets is shown in table  <dig>  for the partially observed case, we assume that only three of the species, mrna, p and p <dig>  are observed. in addition, we assume that the total copy number dnat is known to avoid systematic bias in the sampling the system. while using the same datasets in the fully observed case, we only retain the observations corresponding to mrna, p and p <dig>  hereinafter, we denote the datasets by d1*, d2* etc.
+
+* true values of parameters
+
+total observation time window =  <dig>  for datasets d1-d5: dnat = 10; d6-d10:dnat =  <dig> 
+
+average % err. ≡ ⟨|ki - ki, true|/ki, true⟩i
+
+for the fully observed case, the net effect reaction matrix is, shown with the corresponding reactions and species  
+
+the corresponding null set contains four elementary modes, consisting of the following four pairs of reactions: r <dig> - r <dig>  r <dig> - r <dig>  r <dig> - r <dig>  and r <dig> - r <dig> 
+
+we focus our analysis on datasets d <dig> - d <dig>  of which the observation intervals range from  <dig>  to  <dig> . the results from datasets d <dig> - d <dig> are similar. the convergence property of the rjmcmc sampler is shown in figure  <dig>  it shows the rjmcmc sampler is efficient and induces good mixing for all the datasets, with convergence occurring typically after  <dig> samples. the correlation lengths between the samples are smaller for the more densely observed dataset . the correlation length increases for the datasets with increasing Δt, suggesting the need of using larger sample size for sparse observed datasets.
+
+we applied the stochastic gradient descent method to estimate the rate parameters given the observations. the initial parameter values were randomly chosen between  <dig>  and  <dig>  we used  <dig> samples to calculate the gradient with a burn-in size of  <dig>  the estimated parameters for each dataset are summarized in table  <dig>  we observed a good agreement between the estimated and true values for most of the parameters. also we observed that there is differences in the estimation accuracy for different parameters, with some  showing consistently better results than others . the estimation of k <dig> and k <dig> showed large deviation for the first two datasets with large observation interval , but improved with finer-sampled data. this is likely due to the faster dynamics of the two reactions  than other reactions in the system.
+
+* true values
+
+datasets d1*-d10* correspond to d1-d <dig> in table  <dig> but with speices mrna, p and p <dig> only.
+
+average % err. ≡ ⟨|ki - ki, true|/ki, true⟩i
+
+next we applied our algorithm to the partially observed case. the convergence property of the rjmcmc sampler for the partially observed case is shown in figure  <dig>  compared with the fully observed case, the autocorrelation length in the partially observed case is typically longer, but the rjmcmc sampler can still induce good mixing for each dataset with adequately large sample size.
+
+
+the parameter inference results are summarized in table  <dig>  we found that the accuracy of the inferred parameter varies for different datasets. for the densely observed dataset d5*, the estimated values of all eight parameters are similar to those in the fully observed case and close to the true values. but for more sparsely observed datasets, the average percent of error of the inferred parameters increases significantly  for some of the datasets . the parameters k <dig> and k <dig>  which are associated with the unobserved species, showed large variations between different datasets. in general, the results showed that parameter inference with partially observed data is more difficult than the one with fully observed data, and to achieve good estimation accuracy, more observations with small observation intervals will be needed.
+
+additional file  <dig>  figure s <dig> shows the changes of parameters and gradients during one gradient descent run for the most sparsely observed dataset d <dig> and d1* with the dataset  shown in additional file  <dig>  figure s <dig>  some of the parameters  showed slow convergence during gradient descent in both fully and partially observed cases, which may reflect a flat likelihood surface in the corresponding parameter direction and an inherent difficulty in identifying these parameters.
+
+discussions
+recently there has been a growing interest in describing biological systems using stochastic models. however, most of the parameters in the stochastic models are unknown and difficult to measure. in this paper we described a maximum likelihood method to infer the parameters of a stochastic kinetic model directly from observations. our method works by estimating the gradient of the likelihood function first, and then searching for an optimal solution by iteratively updating the parameters along the gradient descent direction. we developed a general rjmcmc algorithm to sample the latent reaction path in a constrained setting, where the reaction path has to match the observations given at the two ends of a time interval. the sampled reaction paths are used to calculate the gradient of the likelihood function using a formula that we derived. the availability of the gradient information makes it possible to develop other algorithms to solve the maximum likelihood estimation problem, in addition to the steepest descent method that we implemented. furthermore, the availability of the gradient information also enables other possible applications such as parameter sensitivity analysis, which has already attracted considerable interest in deterministic modeling  <cit> .
+
+our method is significantly faster than the sml method  <cit> , which is also a maximum likelihood based parameter inference method. sml uses two steps to estimate parameters. first, it estimates the transition density on reaction species numbers after a given time interval, using a ssa-based sampling methods. the estimated transition density is then used to calculate the likelihood function. because the gradient of the likelihood function is not directly available, sml uses a genetic algorithm to solve the maximum likelihood problem. comparing the sml and our method for the birth-death example, we tested the cpu time used to generate a new sample for both methods, eg. ssa for sml  and rjmcmc for sgd, which is approximately the same. however, sml uses  <dig> ×  <dig> evaluations of transition density to reach a solution. by contrast, sgd typically requires less than  <dig> evaluations of the gradient before convergence. if we ignore the computational time of the gradient descent steps, overall sgd achieves a reduction of computational time by an order of  <dig>  <dig> compared to sml.
+
+in terms of accuracy, our approach, based on exact sampling, should be less biased than approximation-based methods. in this regard, we compared sgd to the method by golightly et al.  <cit> , who used a diffusion approximation to calculate the transition density. comparing the results obtained by both methods on the same datasets , we note that the estimated values for k <dig> and k <dig> by our method are closer to the true results in all three test datasets while the result from  <cit>  are biased toward low values, although the estimates for other parameters from the two methods are similar . interestingly, k <dig> and k <dig> are associated with low copy number of reaction species . we also tested the method in  <cit>  with the datasets of dnat =  <dig> and found that the algorithm gives worse results, especially for the first two parameters . this reflects the advantage of our method and possibly the limitation of the diffusion approximation, which assumes that the values of the hazard functions are approximately constants between two observation/latent states. this assumption is not valid if the copy numbers of species are small in the reactions. for example, in case of dnat =  <dig>  reactions r <dig> and r <dig> can only happen alternatively and this clearly violates the approximation assumption.
+
+our method is closely related to the full bayesian approach proposed by boys et al.  <cit>  as both methods use rjmcmc to sample the reaction process. comparing to the method by boys et al., our method offers two improvements. first, we provide a general method for rcmcmc sampling, which can be applied to an arbitrary biochemical reaction system, while the previous method is only tailored to a specific reaction system . second, the gradient-based method is significantly faster than the full bayesian method as sampling the parameter space is often computationally challenging. however, the bayesian approach offers certain advantage over the maximum likelihood method in that it provides a posterior distribution of the parameters rather than just an optimal solution. in this regard, we note that the general rjmcmc sampling method we developed can be easily extended for bayesian inference after introducing additional metropolis-hasting steps for sampling parameters.
+
+CONCLUSIONS
+in this paper, we proposed a new algorithm for inferring rate parameters in stochastic models and tested it using simulated data. although few biological systems with measurements of species numbers across multiple time points are currently available, this type of data will likely become more common in the future, given rapid advances in single cell measurement technology  <cit> . the method could also be applied to cell colony data, e.g. in  <cit> , which proposed some interesting models involving stem cell homeostasis process. as we observed, the current rjmcmc sampler can be inefficient in some cases with large observation intervals. one possible improvement of the current algorithm is to use more efficient sampling algorithm, for example, the blocking updating scheme in  <cit> . it is evident that significant challenges remain in dealing with true biological systems, including measurement noise, uncertainty in models, and sparsity of the data. however, studying stochastic systems with parameters inferred directly from data should be able to lead to a better understanding of the systems than the current approach of manually setting these parameters.
+
+authors' contributions
+the study was initially conceived by em and yw, and later extended by sc and xx. yw implemented the algorithm and carried out most of the computational analysis. yw, sc and xx wrote the paper. all authors read and approved the final manuscript.
+
+appendix
+derivation of the formula on calculating the gradient of the likelihood function
+consider the time interval  with full observations available at the start and the end of the interval, denoted by x and x respectively. to calculate the likelihood function l, x;Θ), we discretize the time interval into n subintervals and denote the system states at these discrete points by {xi|i =  <dig> ⋯,n}, where x <dig> = x and xn = x are two observations, and all other xi s are intermediate states and not directly observable.
+
+after the discretization, the likelihood function becomes, after using the markov property of the process   
+
+for sufficiently large n, from the master equation eq. , the conditional probability can be approximated by , where dt = /n and δx', x is the kronecker delta function.
+
+we are interested in the gradient of the likelihood function instead of calculating the likelihood function explicitly. so we take the partial derivative of l, x;Θ) w.r.t. the parameters,   
+
+note that when n → ∞,  
+
+therefore   
+
+where tk is the time duration of the system at state k, and nk, k' is the number of transitions from state k to k' occurred during the interval. both tk and nk, k' are random variables, and can be viewed as the sufficient statistics of the model. e represents the expectation of the random variables. for hazard functions of the form ,  and , thus equation  and  follow.
+
+the formula can also be derived by the time ordered product expansion described in  <cit>  without resorting to time discretization, as shown below. this result  suggests that the gradient of the likelihood function can be calculated by estimating the expectation of the two sufficient statistics. note that the formula is quite general and holds for any stochastic system obeying the master equation .
+
+derivation of the rjmcmc algorithm based on the time ordered product expansion of master equation
+representing the probability vector of system state as , the master equation  can be written in a compact matrix form, using column vector notation ,  
+
+where h is the time evolution matrix, of which the elements are uniquely determined by the stoichiometry matrix and the hazard functions.
+
+the formal solution of master equation is  
+
+the probability of system evolving from a particular start state to an end state is given by the corresponding elements of the probability matrix . the time evolution matrix h is usually an infinite dimension matrix, for there are usually no upper bound for the species numbers.
+
+the time ordered product expansion  formula, which originates from quantum field theory, is useful to make series expansion of the matrix exponential. if we decompose the evolution matrix into two parts, h = h <dig> + h <dig>  the tope formula gives  <cit>   
+
+where τ <dig> = t <dig>  τ <dig> = t <dig> - t <dig> etc. a proper choice is to decompose h into diagonal and off-diagonal matrices h = Ĥ - d, i.e. h <dig> = - d and h <dig> = Ĥ. this leads to the tope formula  
+
+where d represents the diagonal part  and Ĥ is the off-diagonal part of the matrix. the terms inside the integral, conditioned on a given markov jump process, is the likelihood  of the process. in case of reaction systems, a process corresponds to a set of reaction events. thus the kth order integration gives the total probability of all reaction events with k reactions. we note that the tope formula provides a possible way to estimate the matrix exponential  by monte carlo integration by randomly casting reaction events and summing up the likelihood.
+
+in the fully observed case, the likelihood function is the product of the likelihood of each sub-interval,  
+
+the likelihood for each sub-interval can be denoted as  
+
+where τ = ts+ <dig> - ts, and in the last step of the above equation we approximate the integration by a monte-carlo integral with π|θr) to be the likelihood of latent process Ξ  which is constrained by start/end observation  and xa) and  in which nr is the number of reaction type r. vk is the multiplication of two parts: the first part arises from the simplex integration of the time variables, which can be viewed as the measure of integration space when we convert the integration to summation; the second part is a combinatorial factor resulting from the permutation invariance of the same reaction type in a given reaction path.
+
+recalling that in the rjmcmc algorithm, we generate samples with different number and type of reactions via the metropolis-hasting steps. the ratio between π/vk of two samples gives the same acceptance probability as in eq. .
+
+assuming all the reaction follows mass-action law, we can derive the gradient of the likelihood function using tope formula. we can write Ĥ and d matrix in terms of the component of each reaction type, i.e. . thus  
+
+we define , which is the branching ratio for reaction r in state x'. then  
+
+thus,  
+
+which gives the gradient formula in eq. ,  and , since the average of a frequency gives the probability.
+
+algorithm  <dig>  pseudo-code of rjmcmc algorithm for fully observed case
+input observations {n} and generate initial path for each interval using glpk;
+
+calculate the null set {q'k} with the net-effect reaction matrix a;
+
+for iter = 1: maxiteration
+
+   randomly choose an elementary mode qk·;
+
+   for i = 1: number of time intervals
+
+      randomly choose a move type p and update the reaction path in sub-interval [ti, ti+1) according to ;
+
+      calculate the number of each reaction type rm
+
+      if min ==  <dig>  ap = 0; break
+
+      else
+
+         for j = 1: j 
+
+            if is negative for any a ∈ ,
+
+               ap = 0; break
+
+            else
+
+            calculate the intermediate species number after the reaction: 
+
+            endif
+
+         endfor
+
+         ap = min;
+
+      endif
+
+      if ap > rand
+
+         accept the new path;
+
+      endif
+
+   endfor
+
+endfor
+
+algorithm  <dig>  pseudo-code of rjmcmc algorithm for partially observed case
+   input observations {nΓ} and randomly specify state for the unobserved species, generate initial path for each interval with glpk; 
+
+   calculate the null set {} using the partial reaction matrix ap;
+
+   for iter = 1: maxiteration
+
+      for i = 1: number of time intervals
+
+         randomly choose an elementary mode and a move type p; update the reaction path in sub-interval  according to ;
+
+         calculate the number of each reaction type: , ap = 0; break
+
+         else
+
+            for j = 1: number of reactions within the ith interval
+
+               if is negative for any species a ap = 0; break
+
+               else
+
+               calculate the intermediate species number after the reaction: ;
+
+               endif
+
+            endfor
+
+         endif
+
+         if xa, j +  <dig> == xa
+
+            
+
+         else
+
+            update the second interval via complementary move p';
+
+            calculate the number of each reaction type: 
+
+               if , ap = 0; break
+
+               else
+
+                     for j' = 1: number of reactions within the th interval
+
+                     if is negative for any species a ap = 0; break
+
+                     else
+
+                     calculate the intermediate species number after the reaction: ;
+
+                     endif
+
+                  endfor
+
+               endif
+
+            calculate  for the new path and the acceptance probability ;
+
+         endif
+
+      if ap > rand
+
+            accept the new path;
+
+      endif
+
+   endfor
+
+endfor
+
+algorithm 3: stochastic gradient descent algorithm
+   input: time-course data 
+
+   output: set of inferred parameters {θr}
+
+    <dig>  initialize the reaction path using glpk and set initial values of rate parameters;
+
+    <dig>  sample the latent paths for the entire observation interval with reversible jump mcmc
+
+      -for fully observed case: sample latent paths for each interval s ∈  using algorithm 1;
+
+      -for partially observed case: sample latent paths for each paired intervals and separately for the first interval using algorithm 2;
+
+      calculate the gradient of each sample path according to eq.  after burn in;
+
+    <dig>  calculate the gradient by averaging over sample paths;
+
+    <dig>  update parameter values by gradient descent step:  
+
+      for all r, where η is the step size;
+
+    <dig>  if convergence condition  is not satisfied, return to step  <dig> 
+
+supplementary material
+additional file 1
+supplementary figures and tables. this file contains supplementary figure s1-s <dig>  table s <dig> 
+
+click here for file
+
+ acknowledgements
+this work was partially supported by nsf grant dbi- <dig> to xx. sc was supported by nih grants r01gm <dig> and p50gm <dig>  em was supported by grants nsf ef- <dig> and nih r01gmo <dig>  we thank jacob biesinger, qing nie and gui-bo ye for helpful discussions.

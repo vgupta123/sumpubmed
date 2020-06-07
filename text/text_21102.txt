@@ -1,0 +1,139 @@
+BACKGROUND
+somatic internal tandem duplication  mutations are an important oncogenic driver in acute myeloid leukemia , where an itd within the juxta-membrane domain of flt <dig> confers poor prognosis  <cit> . both the length and the somatic allelic ratios have been shown to affect patient outcomes  <cit> . flt3-itd's, ranging in size from  <dig> to 300 bp, are found in 20–30 % of aml patients and are associated with increased risk of disease relapse and decreased overall survival  <cit> . patients harboring flt3-itds are treated more aggressively. sensitive detection of flt3-itd mutations in aml patients is therefore clinically important.
+
+detection of insertions in short read ngs data is a challenge because insert-containing reads often fail to align to the reference genome using bwa  <cit> , causing poor ascertainment of insertions in 15–80 bp range. reads that contain or span the junction of tandem duplications will either be marked as unmapped or only partially aligned . detection of itds using de novo assembly methods may partially overcome the limitations of alignment-based algorithms; however, even de novo sequence assembly approaches may fail to assemble duplicate regions of genomes . construction of de bruijn graphs, by kmer-based assembly methods, results in loops in the de bruijn graph, potentially causing duplicated regions to collapse and making it difficult to accurately represent complex repetitive sequence structures. alternatively, overlap-layout-consensus  assembly methods accurately assemble duplicated regions, but are not efficiently scalable to datasets typical of current next generation sequencing technologies.
+
+to overcome these limitations, we developed a two-step assembly approach, itd assembler, which relies on the strengths of both assembly strategies to discover duplicated inserts on a length scale consistent with known itds. in this approach, all unmapped and softclipped reads, which partially align to the genome, are subjected to a kmer frequency spectrum analysis and de bruijn graph assembly process. from this analysis we accurately identify groups of candidate reads that span a tandem duplication. reads containing these itd signatures are then assembled into contigs using an olc algorithm and subsequently mapped back to the reference genome.
+
+itd assembler takes a bam file as input, and outputs an annotated bed file. it performs a kmer frequency analysis to infer the putative read sets containing duplications and includes an optional de bruijn graph construction-based resource optimization module, easily customized for user specific computing constraints and mutational allele fraction requirements. it can detect tandem duplications with an upper bound that is 10 bp less than read length, lower bound of length 10 bp, and scales well with larger length reads. detection sensitivity is a function of user requirements on runtime and memory. read assembly is accomplished with the olc based assembly algorithm phrap  <cit> , which is run with parameters agnostic to read fragment information and quality, and outputs an ace file for each of the contigs. a post processing annotation pipeline performs contig alignment to the reference and filters alignments capturing internal tandem duplication in the human reference sequence.
+
+there has been some past work on using assembly based approaches for detecting insertions, which also apply to detecting tandem duplications . in the tool mindthegap  <cit> , a de bruijn graph based approach is used to infer insertion events followed by a kmer based de novo assembly of putative insertion sites. while we also perform de novo assembly of contigs at the last stage, our pipeline only uses de bruijn graphs to identify reads which could harbor duplications. the assembly of tandem duplications is always carried out using phrap, thereby overcoming any limitations of de bruijn graph based methods in resolving complex tandem duplications.
+
+in the tool anise  <cit> , an olc method is used for assembling insertions, but the assembly process is guided only by unmapped reads which have their mates mapped. while itd assembler also uses alignment information indirectly by selecting unmapped reads, inference of breakpoints is carried out post assembly thereby reducing reference bias in detecting tandem duplications. the fermikit algorithm  <cit>  also does indel discovery post assembly, but is focused on short insertion events. while all the algorithms presented above overlap with some aspects of assembly-based insertion discovery, the design of the itd assembler algorithm is novel in the context of finding tandem duplications, and is specifically tuned to provide high sensitivity in their detection.
+
+algorithms relying on an unusual presence of softclipped reads or reads with a mapped mate may miss detecting tandem duplications captured with low coverage or tandem duplications with novel sequences. since itd assembler makes use of all unmapped reads along with softclipped reads, it has high detection sensitivity for such variants.
+
+itd assembler was applied to  <dig> aml patient samples  from  <dig> aml patients sequenced by whole exome capture to an average of 165x coverage, with corresponding rna sequencing data, all within the tcga program  <cit> .
+
+methods
+algorithm overview
+beginning with the entire set of unmapped and soft-clipped reads from a binary alignment/map  file, itd assembler progressively filters reads through a series of steps to produce groups of reads for olc assembly using phrap  <cit>  . in the first stage of the algorithm, all reads not containing the signature of a tandem duplication are eliminated from the pipeline using a stringent filtering criteria and kmer frequency analysis. the algorithm then performs an overlap clustering of the remaining reads, where each cluster contains reads of a particular length tandem duplication signature . a de bruijn graph is constructed from reads in each bin, with kmers of those reads constituting the vertices of that graph. a fast matrix exponentiation method evaluates the adjacency matrix of the de bruijn graph to find all cycles of the representative bin length supported by kmer coverage above a user defined cutoff. only reads that contain kmers that participate in a cycle are included from that bin for further analysis. the reads remaining at the end of this stage are assembled using phrap. contigs from phrap are then compared to the human reference using blast  <cit>  to annotate their origin relative to coding exons, and the proportion of reads supporting the itd, which are reported as a proportion of the total coverage over the target . to this point, itd assembler has identified tandem duplications over the range of 15–80 bp. analysis of the blast alignments separates the tandem duplications representing insertions from those that do not, and annotates those representing insertions as coding  or intronic. an ancillary component to the post processing pipeline compares the contigs to rna sequencing data, if available, to verify expression of the mutation. for exome sequencing experiments, contigs that do not map to a target interval in the user defined capture region are removed from further analysis.fig.  <dig> itd assembler workflow schema. the major itd assembler processing steps are depicted with transitional blue arrows decreasing in size, representing a serial reduction in the number of reads at each step. to the left of the itd assembler workflow is an example read set containing two repeated kmers, one  <dig> bases and another  <dig> bases apart, which are placed into bins  <dig> and  <dig>  de bruijn graph construction is performed on these three example reads using, for illustration purposes, kmer length  <dig>  the integer values near each vertex are the coverage of each vertex in the graph. there are two cycles of length  <dig> and  <dig> in this graph representing the two independent itds. olc assembly is performed on those read sets from bins  <dig> and  <dig>  with resulting contigs being annotated and itds reported
+
+
+
+preprocessing and binning step: input parameters = p_kmer,
+notations are as follows: a kmer of a string of s of size k, is defined as any contiguous substring of k bases. let nk be defined as the set of all kmers of a string s. let cs be the number of times base x occurs in the string s. let |s| be the length of the string s. for a de bruijn graph g, let ag be the adjacency matrix of this graph and for any matrix a let ai be the ith power of a.
+
+all the unmapped reads and soft-clipped reads with an unaligned head or tail segment of at least  <dig> base pairs are extracted from the bam file using samtools  <cit>  and bamtools  <cit> . the subsequent steps of this stage of the pipeline are as follows:identify all unmapped and soft-clipped reads with soft-clipped regions ≥4 bp.
+
+identify and filter unmapped reads s where cs >  <dig> 
+
+identify and filter unmapped reads s with homopolymer runs of  <dig> or more.
+
+identify and filter unmapped reads s which do not contain a duplication sequence signature of defined length p_kmer, i.e. if np_kmer = |s|- +  <dig>  remaining unmapped reads are annotated with unique distances between the starts of the two duplicated kmer patterns.
+
+binning: all reads annotated with distance i in the previous step are clustered into bin i. . in case of multiple duplication lengths, the same read will go to all bins with a representative duplication length.
+
+
+
+the parameter p_kmer is the partial tandem duplication parameter. once initialized, itd assembler will not be sensitive to any partial duplication with less than p_kmer length. the variables r_min and r_max are user-defined variables that specify the range of itd lengths for which bins are created. this range is upper bounded by |s|-p_kmer, where |s| is the read length. this algorithm cannot find tandem duplications outside the range defined by .
+
+the treatment of soft-clipped reads is similar to the unmapped reads, with p_kmer assigned the value of the length of the soft clipped region. for unmapped reads, a kmer frequency analysis is done for all kmers, whereas in the soft clipped reads we search for duplications of the soft clipped region only.
+
+de bruijn graph assembly: input parameters = d_kmer, cov_cutoff_min, cov_cutoff_max
+in this step, the algorithm iterates over each length in the user defined range, and constructs a de bruijn graph using the reads in that bin with kmer size d_kmer. the value of d_kmer cannot be less than partial tandem duplication parameter p_kmer , but making d_kmer larger than p_kmer, one will only be able to detect partial tandem duplications of length d_kmer and above, by default d_kmer = p_kmer. let gi be the subgraph of the de bruijn graph constructed on bin i with only vertices having coverage between cov_cutoff_min and cov_cutoff_max included in gi. the algorithm uses the standard exponential by squaring method to compute aigi. reads devoid of kmers that are part of i-cycle in agi are excluded from further analysis.
+
+olc assembly and annotation
+itd assembler then iterates through all the bins, taking kmer read subsets that formed de bruijn graph cycles and assembles them into contigs using the olc assembler phrap. the computational overhead of phrap is within reasonable resource bounds for a typical super-computing environment. the phrap produced contigs are then passed through an annotation pipeline that derives genome location, affected genes and mutational allelic fraction . in the annotation pipeline, each contig that has a duplicated kmer of size d_kmer  is selected for further analysis and the region between the repeated kmer is deleted from the contig. it is then aligned to the reference genome using blast  <cit> . local alignments with high mapping specificity are annotated with the targeted capture bed file  to assign coordinates and gene names to the contigs. phrap is run with default parameters and all quality values are ignored in this version of the algorithm.
+
+test case: flt <dig> detection in aml
+itd assembler was applied to  <dig> aml patient samples  from  <dig> aml patients sequenced as part of the tcga program  <cit> . whole exome sequencing achieved 165x-fold average coverage. the tcga aml study reported  <dig> patients harboring somatic flt3-itd mutations, providing a positive control set for comparison  <cit> . assessment of sensitivity was performed by cross-validation of flt3-itd detection employing the itd assembler tool, the orthogonal tandem duplication detection tools pindel, genomon itdetector and published tcga flt3-itds reported from rna-seq data using barnacle v <dig>   <cit> . tcga aml samples exhibiting evidence of somatic flt3-itd mutation from any of the four methods are detailed in table  <dig> table  <dig> somatic flt3-itd detection in tcga data 
+
+all lengths are in base pairs
+
+
+areference  <dig>  tcga aml marker paper used as reference set for algorithmic discovery
+
+
+breference  <dig>  ye et al.  <cit> 
+
+
+creference  <dig>  chiba et al.  <cit> 
+
+
+
+RESULTS
+itd assembler was evaluated on the cancer genome atlas   <dig> acute myeloid leukemia  patient cohort consisting of both leukemic and normal whole exome sequencing experiments, for which  <dig> flt3-itd mutations were reported but without supporting allele fraction information. we compared results of itd assembler to the tcga report and other available methods to assess its sensitivity . the tcga project consisted of whole exome sequence in which most patients had 75 bp reads. the range of detection for itd assembler for 75 bp reads is 15– <dig> bases, and for 100 bp reads is 15–80 bp.
+
+as shown in table  <dig>  itd assembler detects  <dig> of  <dig> of the reported flt <dig> itds. of the  <dig> missed,  <dig> were longer than the read length allowed . this was superior to the recently published genomon  <cit> , the next best detector, which found  <dig> of the  <dig> reported, and pindel  <cit> , which found  <dig> of  <dig>  pindel version  <dig> .4q was run on this dataset with default parameters, whereas the data release version was used for comparisons with genomon.
+
+comparing itd assembler and pindel , pindel found only half as many mutant alleles as itd assembler. furthermore, in the cases where itd assembler and pindel reported the same itds, higher mutational allele fractions were found by itd assembler.
+
+all three detectors found unique itds in flt <dig>  genomon-itdetector discovered  <dig> and pindel found 10; however,  <dig> of the  <dig> found by pindel and  <dig> of  <dig> found by genomon were out of the size range that itd assembler could discover. itd assembler identified a single patient exhibiting two distinct somatic flt3-itds with lengths 51 bp and 45 bp and similar allele fractions of  <dig>  and  <dig>  respectively only one of which, the 45 bp itd, was reported by tcga. pindel also found the additional itd in this patient. there is evidence that flt3-itd bi-allelic mutations in aml confer resistance toward ptk inhibitors and cytotoxic agents  <cit> , and could be clinically relevant.
+
+for itds detected by both itd assembler and pindel, the mutant allele fractions  were always higher in itd assembler output than with pindel. genomon did not report allele fractions, an important disadvantage. under the sequencing constraints of illumina paired-end reads, often the paired reads overlap and therefore both reads of the pair may harbor the itd and both may fail to map. thus the improvement in sensitivity in itd assembler comes, in part, from the fact that we use all unmapped reads. both pindel and genomon use unmapped reads only if the mate pair maps.
+
+itd assembler found somatic itds in several other cancer genes within the tcga aml cohort. one patient harbored a kit-itd involving exon  <dig> and  <dig> of its membrane domain. kit-itd mutation has a reported occurrence of approximately 7 % in aml, and was previously shown to be an activating oncogenic mutation  <cit> . consistent with the report of genomon, two somatic wt1-itds, were identified. overall, itd assembler discovered a total of  <dig> somatic itds, in  <dig> genes, in the tcga aml cohort. we also found  <dig> germline itd mutations in  <dig> genes.
+
+among these we identified a number of germline itd involving cancer driver genes, the most notable being the aml target gene cebpa, a transcription factor involved in myeloid differentiation and known to be lost in approximately 50 % of aml cases  <cit> . acsf <dig> is the gene with the highest minor allele frequency  of germline itd mutation. itd’s were also identified in aurka. aurka is aberrantly expressed in chemotherapy-resistant cd34/cd <dig> aml cells and thus may be a promising molecular target in aml  <cit> .
+
+we validated itds in two ways . as a visual check we verified that the target of the duplication was present in at least two copies in the assembled contig and that the duplicated sequence was found within an exon  second we sought support for itd expression using tcga rnaseq data, which was available for  <dig> of  <dig> aml patients. for each patient rna sequencing reads were aligned using blast to the patient’s assembled contigs containing putative itds. rna sequencing reads that aligned with greater than 97 % identity, crossed itd junctions and exhibited adequate coverage values were considered validating evidence for itd mutation. of the transcripts that were expressed with at least  <dig> reads, itds were validated in  <dig>  % of somatic and  <dig>  % of germline events.
+
+we have shown a novel method for discovery of itds in dna sequencing data, which is effective in both tumor and normal genomes. itd assembler attains a higher sensitivity than existing approaches, but is currently limited in length of itd to the length of the reads provided. we have two strategies to overcome this limitation. first as illumina reads increase in length our detection range will automatically increase. second we can potentially merge mate pairs before initiating our kmer analysis to artificially increase read lengths. both strategies are being investigated.
+
+computational complexity and optimization
+itd assembler is implemented in haskell, with some intermediate parts in c and python. it can run on a single core. while no inbuilt parallelization has been implemented in it, the bins can be run on separate cores in the assembly stage.
+
+for a read s, the binning and soft clip extraction make extensive use of a fast sorting routine on kmer spectrum of s to filter out reads without any kmer repeats in them in expected o time. the size of the adjacency matrix for each bin scales quadratically with the number of unique kmers of length d_kmer within the bounds set by the cov_cutoff parameters. increasing the value of d_kmer does reduce the number of unique kmers, however there is a length at which the number of unique kmers is subject to diminishing results, and estimating an optimized length d_kmer parameter in this context is open to further investigation. also, while increasing the value of d_kmer may be beneficial in terms of runtime and resource consumption, it reduces the partial detection sensitivity to length d_kmer.
+
+the matrix multiplication module from the gsl-cblas library is used to compute cycles from the adjacency matrix. therefore the de bruijn graph filtering stage takes time o where n is the number of unique kmers in the bin and k is the bin number. low complexity regions increase the noise in detecting true signals of detection sensitivity and is open to further investigations. the phrap assembly depends on underlying genomic complexity, where the time complexity is highest for assembling low complexity regions.
+
+to accommodate high detection sensitivity and concurrent runs of  <dig> tumor/normal pairs in the local compute environment with maximum of 45g of memory per node, it was necessary to do away with the increased memory footprint of the de bruijn graph construction at the cost of potentially increasing the run time. we refer to the version that does not use de bruijn graph assembly as itd assembler_light. in this version all other steps are the same as is described in section  <dig>  except that phrap is run on reads in each bin without the de bruijn graph based read filtering. the biggest performance bottleneck in the itd assembler pipeline is the phrap assembly of short reads.
+
+for values p_kmer =  <dig>  r_min =  <dig> and r_max =  <dig>  itd assember_light completes processing in approximately 5 h for samples with read length 75 bp and approximately  <dig>  days for read length 100 bp on nodes based on intel xeon e <dig> and amd opteron architecture for most of the samples. the binning step takes approximately  <dig>  h. for length  <dig> base pair reads and approximately 3 h for length 100 bp reads. for a sample that took 9 days to complete using itd_assembler_light, itd_assembler is able to finish the whole pipeline in 16 h and 15g of memory with parameters p_kmer =  <dig>  d_kmer =  <dig>  cov_cutoff_min =  <dig>  cov_cutoff_max =  <dig>  r_min =  <dig> and r_max =  <dig>  if the computation on each bin is parallelized across  <dig> cores, the pipeline can finish in 5 h given the same parameters.
+
+application of itd assembler on flt <dig> detection sensitivity
+itd assembler is executed on the  <dig> samples with flt <dig> somatic tandem duplications with parameters p_kmer =  <dig>  d_kmer =  <dig>  cov_cutoff_min =  <dig> ,cov_cutoff_max =  <dig> r_min =  <dig> and r_max =  <dig> .  <dig> out of  <dig> samples were detected to have an itd with these parameters . the minimum kmer coverage for all the kmers making the tandem duplication was above  <dig> for these  <dig> samples. a value of cov_cutoff_min =  <dig> translates to detecting any itd with alternate allele fractions greater than  <dig> , which is a lower bound for high quality assurance in the genomon paper as well  <cit> . id  <dig> is missing from this run of itdassembler but is detected by pindel and genomon with length different from the tcga length. it is to be noted that detecting tandem duplications in id  <dig> and  <dig> are beyond the intended detection range of itd assembler/assembler_light but are chance discoveries from itd assembler_light. both of these itd’s have supporting rnaseq data. decreasing the cov_cutoff_min =  <dig> detects two more tandem duplications . of all the missing tandem duplications at the end of this run, there is only one which is detected by both pindel and genomon, i.e. id  <dig>  this itd has one constituent kmer with kmer coverage of  <dig> which is below the threshold set up cov_cutoff_min. another run on the missing samples with lower cov_cutoff_min parameters failed to add to the existing set of itd’s. changing the d_kmer value to  <dig> and cov_cutoff_min value to  <dig> made itdassembler run for more than two days and was killed at that stage.
+
+we observe that while running the de bruijn graph optimization makes hard to assemble bins tractable by removing reads which consist entirely of kmers which are highly repetitive, and reads which have mapped to regions which lie below the threshold of alternate allele frequency requirements, in general, for most bins itd assembler_light version is faster than using the itd assembler version. we observe that the resource requirements for larger bins both in terms of time and memory are negligible, and the optimization is only necessary for lower length bins. in our experience with the tcga dataset, on samples with read length  <dig>  all bins larger than  <dig> finished in less than three hours, including the preprocessing and binning steps. in conclusion, we add that while itd assembler_light can also detect itd’s with extremely low variant allele coverage, itd assembler is also extremely sensitive in detecting reasonably strong signals  of tandem duplications or partial duplications, with limited computational resources.
+
+CONCLUSIONS
+itd assembler is a highly sensitive algorithm for identification of  tandem duplication events from massively parallel sequencing data. itd assembler is scalable to run on exome capture sequencing data, and sensitively detects partial, large and complex tandem duplications either adjoining or separated by short nucleotide distances. the presence of clinically actionable itd mutations in aml is known; however, the extent of other such clinically relevant itds across cancer and mendelian disease remains an open question, requiring execution of the itd assembler algorithm on additional data sets for further investigation. with the length of reads increasing each year, the limitations on the range of itds discovered can be easily overcome. use of overlapping paired end reads in fragments can also be leveraged to improve upon the range while extracting signatures of tandem duplications from mate pairs where both of them are unmapped. with highly specialized detection capabilities in the range in which it can function, itd assembler can be combined with preexisting tools like pindel or genomon to get a far more comprehensive picture of the genome.
+
+availability and requirements
+ • project name: itd assembler
+
+ •project home page:https://sourceforge.net/projects/itdassembler/
+
+ • operating system: linux
+
+ • programming language: haskell, python and c.
+
+ • other requirements: python  <dig> +, samtools, bamtools, blastn, intersectbed, phrap, ghc  <dig> .2+
+
+ • license: gnu gpl
+
+additional file
+additonal file 1: supplementary file contain itd calling results using itd assembler on the tcga aml dataset. 
+
+
+
+abbreviations
+bambinary alignment/map
+
+genomongenomon-itdetector
+
+itdinternal tandem duplication
+
+olcoverlap-layout-consensus
+
+tcgathe cancer genome atlas
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+dw conceived and guided the project; nr developed, implemented and refined the core algorithms; oh designed and implemented the qaqc filters including the validation pipeline and germline/somatic assessment heuristics. oh, nr, jl and lx executed the algorithm and analyzed the results; oh, nr and dw wrote the manuscript. sp, mk and rg provided comments and support. all authors read and approved the final manuscript.
+

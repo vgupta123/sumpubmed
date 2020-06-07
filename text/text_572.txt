@@ -1,0 +1,130 @@
+BACKGROUND
+nucleic acid sequencing throughput has grown exponentially for the past ten years, and is expected to continue to shatter moore’s law  <cit> . though the highly anticipated onslaught of inexpensive sequencing empowers exciting new biological studies, it also presents a critical problem: the skyrocketing computational costs of sequence analysis  <cit> . computers may become the bottleneck of genomics research if these growing processing demands are not mitigated by improvements in software algorithms, especially in light of the sequencing demands of personalized medicine.
+
+much intellectual effort has been invested in minimizing the time required to align a single read against an indexed database. when performed sequentially, each sequence in the input is processed individually, such that the sum of the alignment times of the input sequences is the total running time. today’s fastest and most widely used aligners, such as bowtie  <cit> , bwa  <cit> , maq  <cit> , razers  <cit> , and blast  <cit> , process input reads sequentially. these aligners can typically be configured to be consistent and guarantee that identical copies of an input sequence will produce identical alignment results. therefore, given a set of input reads with ample redundancy, we envisioned that alignment time could be reduced without compromising accuracy by distilling the unique set of sequences and aligning them using a sequential alignment tool.
+
+harnessing redundancy in sequence alignment input is not a new concept. blast + gains a performance benefit by saving alignments within batches  <cit> . cloudburst and cloudaligner use mapreduce, and feature a shuffle step wherein seed sequences in the query and database are brought together and combined  <cit> . seal also uses mapreduce; it effectively parallelizes bwa, and can remove duplicate reads by comparing alignment position, after aligning all of them  <cit> . similarly, slidesort sorts together sequences with common substrings  <cit> , and mrsfast uses a sophisticated blocking map to identify unique seeds before performing a direct map-to-map comparison  <cit> . finally, fulcrum performs hashing on seed sequences using mapreduce to conserve computation time in genome assembly  <cit> . while all of these are excellent tools in their own application spaces, sequential aligners such as bowtie and bwa enjoy extensive support, remain popular for many applications, and can benefit from the same approach. furthermore, decoupling the process of compressing input reads from the alignment kernel itself could be productive, as improvements to both algorithms can proceed independently. to date, no application exists that performs streaming read compression in a generalized way.
+
+methods
+we explored the nature of read redundancy across thirteen publicly available next-generation nucleotide sequencing datasets. in a series of experiments we measured the contributions of the application , read length, and sequencing depth to overall read redundancy, measured in the percentage of unique reads. using these observations, we wrote the streaming read compression algorithm oculus and constructed a model to determine the value of streaming read compression for a given dataset. finally, we benchmarked oculus on full sequencing datasets.
+
+sequence data profiling
+we evaluated thirteen publicly available datasets that were representative of the major applications of high-throughput sequencing, identified here by their ncbi sequence read archive  accession numbers. there were five rna-seq datasets , and srr <dig>  srr <dig>  srr <dig>  and srr <dig> from the idea challenge), three genome datasets , three exome sequencing datasets , and finally two chip-seq datasets: ). the chip-seq data was downloaded from the encode project  <cit> , hosted on the ucsc genome browser. illumina, inc. carried out the idea dataset sequencing, first used by sun et al.  <cit> . additional run metadata can be found in additional file 1: table s <dig> 
+
+sequencing type
+the sequencing datasets we selected varied widely in their composition. we compared read redundancy between sequencing types by standardizing the number of reads per dataset to  <dig> million with random subsetting, and read length to  <dig> bases with 3’ end trimming . rna-seq had relatively redundant reads; only 43% to 57% of each single-end dataset was unique . in contrast, exome and genome sequencing had very little read redundancy. the two chip-seq datasets had disparate content, varying greatly in their % unique reads – without delving into the specifics of those samples, we believe this may reflect the wide variety of chip-seq applications. as expected, paired-end data compressed less well than single-end, since paired-end compression requires identity on both reads.
+
+depth of coverage and read length
+given some fixed input dna from which fragments are sampled, each incremental read will be more likely to duplicate previous reads. in particular, rna-seq reads may disproportionately reflect highly expressed genes, suggesting that higher sequencing coverage could have a nonlinear effect on read redundancy  <cit> . therefore, we measured the impact of coverage depth/sequencing run size  and read length on the unique read percentage of each dataset, treating reads individually  or as pairs  . we fixed the read length for rna-seq runs and evaluated % unique reads for a series of random fractions of the original datasets. as predicted, larger sequencing runs corresponded logarithmically to a lower unique fraction of the datasets . the unique read fraction varied between 56-69% for  <dig> million reads, 32-49% for  <dig> million reads, and 28% for  <dig> million reads in rna-seq dataset # <dig>  the differences between datasets likely relates to sample biology and preparation. next, we fixed coverage depth and evaluated the percentage of unique reads for a series of read lengths  . the impact of read length on uniqueness appeared to be exponential in one case  and linear in the rest . it’s interesting to note that some rna-seq algorithms, such as tophat  <cit> , dice unmapped reads into segments and align each piece individually. this might entail a ~3-fold alignment speedup for rna-seq dataset # <dig> by use of  <dig> base segments, if further communication between a streaming read compressor such as oculus and tophat’s core algorithm could be engineered.
+
+implementation
+the overall architecture of oculus is shown in figure  <dig>  oculus reads fasta or fastq input files, processes sequences into a compressed form, and compares them to a map containing all sequences it has seen before; new sequences are passed into the aligner as fasta, while previously observed sequences increment counts in the map. at the reconstitution step, sequences in the sam output file are then compared back against the map and re-printed as many times as they appeared in the input, correcting for alignment orientation. paired-end sequences are handled by concatenating the two sequences to ensure the pair is unique. oculus can wrap any aligner capable of producing sam-formatted output.
+
+by design, oculus sacrifices fastq quality scores, read names beyond the first instance of the sequence, and the original order of the reads in the output. optionally, users can direct oculus to restore the original read names and quality scores by writing them to an intermediate file, sorting it, and reattaching them during the reconstitution step. this option incurs additional memory overhead, and additional time to sort the intermediate file.
+
+data structures
+oculus uses hashmap data structures to store sequences in memory. users can either compile in standard library  hashmaps, or google-sparsehash maps, which are faster and require significantly less memory   <cit> .
+
+optionally, users can direct oculus at runtime to store unique reads in a separate hashset, reducing the burden on the hashmap to only redundant sequences. the effect of this is to reduce lookup times in the reconstitution step and total memory consumption, at the cost of more operations in the compression step. hashsets are expected to be beneficial for lower redundancy input.
+
+oculus uses a modified version of murmurhash <dig> to hash binary sequence data  <cit> . it has a low incidence of collision for binary data, and was recommended for use with google-sparsehash by its developer . to reduce collisions, the hash algorithm operates only on the sequence field of the compressed sequence objects.
+
+binary compression
+instead of storing sequences in memory as ascii characters, oculus uses compressed sequence objects of our own design  . dna sequences are dynamically compressed into  <dig> or  <dig> bits per base, depending on the presence of n nucleotides. optionally, a 2-bit encoding can be forced if the user wishes for n’s to be evaluated as a’s. each cseq has three fields: a representation bit indicating the nucleotide encoding, its size in memory, and a variable-length compressed sequence. storing the size is necessary because null-termination is obviated by the possibility of null bytes in the sequence field.
+
+the most obvious benefit of using cseqs is an approximate four-fold reduction in memory use. however, two engineering benefits also arise for cseq string comparison, which help efficiently resolve map collisions. sequences with different lengths or representations can be differentiated by comparing the first byte in constant time . moreover, by comparing nucleotides in blocks instead of individually, comparison time is reduced four-fold. memory for sequences is allocated in large chunks , which reduces overhead greatly.
+
+reverse complements
+lastly, oculus can be directed to compress together reverse complements in single-end data, or reversed read order in forward-reverse oriented paired-end data, under the presumption that they should align to the same place in the database. this improves compression and therefore reduces aligner runtime. using reverse complements is optional because bwa and bowtie both use left-end seed sequences, so the orientation of the read can affect its alignment .
+
+runtime model
+we developed a model to predict the effectiveness of oculus for any given data set. given ni input reads that compress to nc sequences, and assuming sa and so are the speeds of the aligner and oculus, in reads/unit time, the following equations give the expected benefit of using oculus as a fraction of the aligner’s run time.
+
+  aligner run time=ni/saoculus run time=ni/so+nc/sarun time ratio=oculus/aligner=sa/so+nc/ni 
+
+the aligner’s run time is simply the total number of input reads divided by the average alignment speed in reads per unit time of the aligner. in the second case, since oculus passes some fraction nc of na into the aligner, the aligner only has to do nc/sa work. however, there’s also an overhead for oculus on the order of the total number of input reads. the fractional benefit of using oculus is therefore related only to the compression achieved and oculus’s speed relative to the aligner it’s wrapping. we therefore derived processing rates in reads per second for oculus and each aligner, for both single-end and paired-end data, using experimental results for the  <dig> and 51-mer datasets. table  <dig> indicates the calculated ratio of the speed of the aligners to oculus. based on these parameters we predict that oculus will have a runtime benefit for sequence data with greater than 10% redundant reads, and that benefits would scale linearly with the unique read fraction. this model discounts non-linear factors such as hash collisions, read length, percent successful alignment, and potentially, alignment location, and disk i/o will produce noise, but it is an effective rule of thumb.
+
+sa is the aligner’s speed, and so is oculus's speed. since speeds are measured in reads aligned per second, these values indicate that oculus runs faster than the aligners, and relatively more fast for paired-end data than single-end data. as expected, bowtie was measured to be faster than bwa, particularly for single-end data. both aligners were run with default options.
+
+benchmarking
+we compared the performance of oculus with bwa  and bowtie  <dig>  by themselves. all alignment was performed against the reference human genome grch37/hg <dig> 
+
+every benchmarking test was run on the flux supercomputing cluster maintained by the center for advanced computing at the university of michigan, using single cpu cores of  <dig>  ghz intel x <dig> processors, with  <dig> gb of  <dig> mhz ddr <dig> memory, and distributed access disks. to reduce noise in runtime measurement from disk i/o, each benchmark test was run three times, and the average runtime is presented here. memory consumption was much less noisy, so similar averaging was unnecessary in reporting memory use. both aligners ran with entirely default options, and oculus used only the reverse complement storage option, “--rc”.
+
+to test consistency, we ran bowtie using “-m 1” to eliminate multi-mapping reads, for which bowtie reports one random alignment by default. we extracted alignment positions, sorted by read sequence , and counted and classified alignment differences. bwa has no such mono-mapping option, so we did not test oculus’s wrapping of bwa for consistency .
+
+RESULTS
+compression and performance
+oculus yielded performance benefits that strongly correlated with the unique read fraction of each dataset . notably, the single-end rna-seq datasets aligned in  <dig> % as much time on average, i.e., they ran  <dig>  times as fast in oculus compared with bowtie and bwa. the paired-end datasets compressed less well than their single-end counterparts; on average, the paired-end rna-seq datasets aligned  <dig> x as fast. chip-seq dataset # <dig> received the greatest performance benefit: its single-end bowtie alignment ran  <dig> x as fast. however, our genome and exome datasets, and chip-seq dataset # <dig>  were generally non-redundant and oculus did not greatly outperform either aligner. this was consistent with our expectations - if reads are not redundant, they cannot be compressed, and the aligner will receive nearly the complete set of input reads. since compressing and decompressing incurs a small time overhead, it follows that a nearly completely unique dataset might run more slowly.
+
+though bwa was much slower than bowtie for single-end data, and somewhat slower for paired-end data, oculus produced similar fractional speed improvements for the two aligners. additionally, for the datasets tested, oculus’s hashset option did not yield a significant improvement. for sequencing run information and exact cpu run times, see additional file 1: table s <dig> 
+
+consistency
+oculus maintained high fidelity to original alignments for every dataset. defining accuracy as the percentage of input reads that oculus mapped to exactly the same location as the aligners, on average oculus was > <dig> % accurate, and in the worst case was  <dig> % accurate. for individual dataset accuracy, see additional file 1: table s <dig> 
+
+since they change the seed sequence used in alignment, the vast majority of the differences  produced were for reads that oculus either reversed the orientation of , or order of . mostly these were previously unaligned reads that aligned and vice versa, but in some cases, an unambiguously mapped read actually changed alignment positions . though initially surprising, this can be explained by mismatches in seed sequences. bowtie is less permissive of mismatches in the seed than at the end of a read under the assumption that read quality tends to be better toward 5’ end. of two closely homologous regions of the genome, one may count as the best hit in the forward orientation, and the other in reverse orientation. for example:
+
+cagt - read
+
+catt – genome position 1
+
+ccgt – genome position 2
+
+in this case, if ca is the seed, position  <dig> would be the optimal alignment and the third base would count as a g-t mismatch. however, if the reverse-complement were aligned, and the seed proceeded from the opposite direction, position  <dig> would be optimal and the third base would be recorded as a c-a mismatch.
+
+memory use
+oculus very consistently used  +  <dig> bytes of memory per map entry. this 20-byte overhead comes from the forward and reverse count integers , the hash of the sequence , a pointer to the sequence , the size field , and some heap memory structure overhead. although these sum to  <dig> bytes, hash values are not stored multiple times for hash collisions, and pointer memory use varies by os architecture, often using less than  <dig>  this 20-byte overhead is halved for paired-end map entries, because each pair is stored together. using the hashset option reduced memory use by about a third, by mitigating some of this overhead for unique reads.
+
+total memory use is therefore highly dependent on the quantity and redundancy of input sequence, but in a worst-case scenario ,  <dig> million single-end 80mers will use about  <dig>  gb of memory, on top of memory used by the aligner’s database. redundancy translates linearly to reduction in memory use – if only half of those reads were unique,  <dig>  gb would be required instead.
+
+discussion
+our benchmarking tests suggest oculus will generally perform very well with rna-seq data and on a case-by-case basis in other applications, particularly those with low complexity libraries. the likely source of benefit to rna-seq arises from highly expressed genes that are sequenced at great depth and generate multitudes of duplicate reads.
+
+shorter read length and larger datasets both correlated with higher redundancy in sequencing runs. the hidden variable of actual biological redundancy remains at large , but those two metrics provide good insight into the expected value of streaming read compression for a given sequencing application. we noted the added value oculus provides for rna-seq applications that segment reads , but oculus may also yield benefit to customized bioinformatics analyses that take similar approaches. also of note is that for highly-sensitive but slow aligners such as blat  <cit>  and smith-waterman  <cit> , oculus’s relative runtime will be insignificant , so streaming read alignment will be of greater use to applications that require such sensitivity. perhaps most importantly, as sequencing throughput increases so too will read redundancy and the marginal benefit of compressing input reads, though this will be mitigated by longer read lengths and paired-end reads.
+
+to be effective, oculus requires read redundancy and an aligner that does not already exploit that redundancy. to be consistent, oculus requires the aligner to ignore quality score and use parameters that guarantee deterministic behavior. by default, bowtie will report one alignment at random for ambiguously mapping reads, and oculus by definition cannot produce multiple alignments for a single read sequence. the exception to this is if the aligner is configured to report multiple alignments per read, either on single or multiple sam lines, in which case oculus will reconstitute the reads aligning to each location.
+
+since both bowtie and bwa use left-end seeds, it makes sense that oculus may report different alignments for reverse-complemented single-end reads. however, we were surprised to find alignment differences for paired-end reads with reversed order. read order shouldn’t matter in paired-end alignment: since the read orientation remains the same, so should the seeds. developers who wish to incorporate streaming read compression into their aligners may be interested in exploring this phenomenon.
+
+another surprising result was that oculus + bowtie actually outperformed compression for the second chip-seq data set . stranger still, the runtime data for that dataset was not noisy – each of the three tests ran in < 28% of the original time. it is possible that oculus may have compressed a disproportionately large number of slow-aligning reads – reads that take longer to align to the human genome. better understanding this phenomenon may be a key to further alignment algorithm improvements.
+
+though oculus provides immediate benefit to rna-seq alignment, further performance gains may be possible by harnessing the idea of streaming read compression. although implemented here as a customizable “attachment” to a sequential aligner, the streaming compression algorithm could be integrated directly into alignment kernels. one obvious benefit of this would be the ability to store paired-end reads individually  thereby leveraging additional redundancy . a more nuanced logical continuation of this idea would be for aligners to use cache objects that retain in memory the alignments of the mostly commonly occurring reads. if present, a skew toward very common reads away from reads with few copies could create the perfect conditions for caching. the combinatorics of sequence length suggests an even greater benefit in storing and reusing alignments of common seed sequences, either in a complete object or a cache.
+
+there are three limitations of oculus’s current implementation of streaming read compression: fastq quality scores are lost, read names are lost beyond the first instance of the sequence, and the order of the reads in the output will not be consistent with normal aligner output. quality scores and read names can be restored to the final output at the cost of computation time and memory, which adds value for downstream analyses such as snp calling. however, the alignment itself is still performed without quality scores, which can alter alignment results. in cases where little faith is placed in the read quality scores this may be acceptable, but to mitigate this loss otherwise, we suggest the use of read filtering or trimming as a preprocessing step.
+
+CONCLUSIONS
+oculus provides a demonstrable speed improvement in aligning redundant data, with high fidelity and low memory cost. further, streaming read compression of redundant reads is generally useful; aligning the unique set of reads is faster than the full set since the overhead of compression is sufficiently low. we expect streaming read compression will play an important role in rna-seq alignment and potentially other sequencing applications in the future as data grows and algorithms improve.
+
+availability and requirements
+project name: oculus
+
+project home page:http://code.google.com/p/oculus-bio
+
+operating system: platform independent
+
+programming language: c++
+
+other requirements: perl version  <dig> or higher , g++ version  <dig> . <dig> or higher , bowtie or bwa , or another sam-compatible alignment algorithm
+
+license: gnu gpl v3
+
+abbreviations
+dna: deoxyribonucleic acid; bwa: burroughs-wheeler aligner; rna-seq: ribonucleic acid sequencing; chip-seq: chromatin immunoprecipitation sequencing; sam: sequence alignment map; maq: mapping and assembly with quality; blast: basic local alignment search tool; stl: standard library; ascii: american standard code for information interchange; i/o: input/output; cpu: central processing unit; ghz/mhz: gigahertz/megahertz; ddr3: double data rate type 3; os: operating system; gb/mb: gigabyte/megabyte; pcr: polymerase chain reaction; blat: blast-like alignment tool; gpl: gnu public license; gnu: gnu’s not unix.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+bav provided the original idea, wrote the algorithm, performed the benchmarking, modeling, and data interpretation, and drafted the manuscript. mki contributed critical feedback on the manuscript, suggestions for datasets, and the reverse complement idea. amc contributed critical feedback on the manuscript and the project, and provided the computational resources necessary to carry out the work. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+table s <dig>  oculus performance statistics. detailed benchmarking data used in generating runtime figures.
+
+click here for file
+
+ acknowledgements
+we would like to thank terrence barrette for supporting the lab’s infrastructure, jeremy hallum and cac for supporting flux, illumina for referring us to the idea data’s reference, craig silverstein for developing google sparse-hash and his helpful comments on hashing, austin appleby for developing murmurhash, catherine grasso and o. alejandro balbin for their comments on the manuscript, and karen giles and christine betts for their assistance with the manuscript submission.
+
+funding
+amc is supported by the doris duke charitable foundation clinical scientist award and is a howard hughes medical institute investigator, an american cancer society research professor and alfred a. taubman scholar. mki is supported by a dod breast cancer predoctoral research grant . bav is supported by the national science foundation and the program in biomedical sciences at the university of michigan. this material is based upon work supported by the national science foundation under grant no.  <dig> 

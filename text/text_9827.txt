@@ -1,0 +1,110 @@
+BACKGROUND
+in de novo genome assembly , the result is usually a set of strings called scaffolds. these are dna strings containing runs of ns denoting gap regions of estimated length. the parts separated by n-runs are contigs. a typical measure to assess how well the assembly has succeeded is n <dig> measure, which equals the length of the scaffold  overlapping the midpoint of the length-order concatenation of scaffolds . if there is a reference genome available , one can align the scaffolds to reason about the accuracy. with contig assemblies one can report a normalized n <dig> value that takes into account only the parts of the assembly that can be aligned to the reference using standard local alignment tools. with scaffold assemblies, normalization is more complex, as local alignment results for the contigs need also to be chained to form global alignments for the scaffolds. this chaining is typically done using heuristic approaches. only very recently more attention has been paid for this problem: in
+ <cit>  they build multiple alignment for the scaffolds and reference, and represent it as an adjacency graph where there are edges for representing aligned contigs and for adjacencies proposed by scaffolds . then one can look at maximal paths that alternate between these two types to form scaffold paths. all such maximal scaffold paths can be extracted and used in the computation of normalized n <dig> value . while this is a diligent approach given an adjacency graph, the overall approach is highly dependent on heuristics to compute the multiple alignment, which is a very challenging computational problem to be solved exactly. this is especially true now that the multiple alignment tool used needs to cope with rearrangements in order to be able to align the partly incorrect scaffolds correctly. although there exists effective tools  even for this hardest instance of multiple alignment, the question is if there is an alternative approach that can completely avoid hard computational subproblems.
+
+we propose a much simpler but still rigorous approach to compute normalized n <dig> scaffold assembly metric that combines n <dig> with correctness measure; in principle, assembly is split into as many parts as necessary to align each part to the reference. for example, let reference be gtaaggcgaggctgagagt and let the assembly consist of two scaffolds ctgnnngt and agagtannnngagg, with n <dig> being  <dig>  if we split the assembly into ctgnnngt, aga, and gtannnngagg, then each piece aligns perfectly and the normalized n <dig> is  <dig>  we show that this process can be modeled by three well-defined subproblems, each of which has an efficient and exact algorithmic solution.
+
+in more detail, one needs to allow mismatches and indels in the alignment so that only the real structural errors in the assembly are measured. moreover, the gaps between contigs in a scaffold may not be accurate due to variation in insert sizes of the mate pair reads used for the scaffold assembly. taking these aspects into account, it would be easy to construct a dynamic programming recurrence to find the best scoring alignment for a scaffold, allowing gaps  to vary within given thresholds. however, the running time would be infeasible for any practical use; one iteration would take at least o time, where m is the total length of scaffolds and n the length of the reference.
+
+we propose a practical scheme of computing an approximation of the normalized n <dig> metric using the common seed-based strategy: first compute all maximal local approximate matches between scaffolds and reference, then chain those local alignments that retain the order both in reference and in each scaffold. this approach is called co-linear chaining <cit> . as it was originally developed for rna-dna alignment, there was no need for restricting gaps in the chains, as introns can be almost arbitrary long. for our purposes, dna-dna alignment, it makes sense to restrict the length of the gaps between consecutive local alignments, as gaps should not be much longer than the insert size of mate pair reads. finally, this alignment is repeated extracting the largest correctly aligning part from each scaffold in each step. we note that our approach is rigorous in the sense that we can avoid heuristics in each of the three subproblems considered .
+
+in what follows, we assume that local alignments are given, and first concentrate on modifying co-linear chaining for the case of restricted gaps. then we proceed in explaining our implementation of the normalized n <dig> computation incorporating the local alignment computation with gap-restricted co-linear chaining. we then give our results on an experiment demonstrating how normalized n <dig> can characterize good and bad scaffold assemblies. discussion follows on other possible uses and variations of the method proposed.
+
+methods
+let us assume that all local alignments between scaffold and reference genome have been computed, and we have a set of tuples v = {} such that t matches p, where t is the genome and p the scaffold. in co-linear chaining the goal is to find a sequence of tuples s = s1s2⋯sp ∈ vp such that sj.y > sj− <dig> y, sj.d > sj− <dig> d, for all  <dig> ≤ j ≤ p, and |{i| i ∈  for some  <dig> ≤ j ≤ p}| is maximized. that is, find tuples preserving order in both t and p such that the resulting ordered coverage of p is maximized. we review an efficient solution given in
+ <cit>  and extend it for our purposes. first, sort tuples in v  by the coordinate y into sequence v1v2⋯vn. then, fill a table c such that c gives the maximum ordered coverage of p over the choice of any subset of tuples from {v1v <dig> …vj}. hence maxjc gives the total maximum ordered coverage of p. then one can derive the following formulae for cj <cit>  depending on the case:  either the previous tuple
+vj′ does not overlap vj in p; or  the previous tuple
+vj′ overlaps vj in p. for  it holds 
+
+  ca=maxj′:vj′.d<vj.cc+. 
+
+for  it holds 
+
+  cb=maxj′:vj.c≤vj′.d≤vj.dc+. 
+
+then the final value is c
+ = max. now we can modify the formulae taking the invariant values out from the maximizations to obtain range maximum queries. these can be solved using a search tree
+t that supports in o time operations insert to add value v to the tree with key i ); delete for deleting node with key i; and v = max to return the maximum value v from nodes {i} that belong to the interval l ≤ i ≤ r. since there are two different maximizations, we need to maintain two different search trees. notice that applying the recurrence directly would yield a trivial o time algorithm, whereas the use of invariant and search tree gives o time. the resulting pseudocode  is given below.
+
+algorithm colinearchaining
+
+
+t.insert;
+i.insert;
+
+ for j← <dig> to n do
+
+
+ca←+t.max;
+
+
+cb←vj.d+i.max;
+
+ c←max;
+
+
+t.insert;
+
+
+i.insert;
+
+ return maxjc;
+
+the alignment given by applying the above algorithm allows arbitrary long gaps, which is not a desirable feature. the gaps between consecutive contigs in scaffolds are restricted by the mate pair insert size, which also tells that in a correct alignment to the genome the gaps should not deviate much from this value. it is easy to modify co-linear chaining to restrict gaps: replacing
+t.max with
+t.max at line  in the pseudocode restricts the gap in the scaffold by maxgap. to obtain analogous effect simultaneously in the reference genome, is a bit more tricky. let us first describe a method that works in the special case that vj.y−vj.x are equal for all j and then consider the modifications required to handle the general case. for the special case, one can deploy
+t.delete() as follows: at step j of the algorithm, maintain the invariant that
+t only contains all tuples
+vj′ having
+vj′.y≥vj.x−maxgap and j′ < j. this is accomplished by adding the following code between lines  and  and initializing j′ = 1: 
+
+ whilevj.x−maxgap≤vj′.ydo
+
+
+t.delete; j′←j′ + 1
+
+ as keys to ensure uniqueness.) the correctness for the special case follows as vj− <dig> x ≤ vj.x for all j >  <dig>  and one can thus delete values incrementally so that the invariant is satisfied. the method fails in the general case since we can have vj− <dig> x > vj.x and tuples with y-coordinate between  are deleted. to overcome this, one can modify the algorithm as follows. duplicate tuples and use x-coordinate for one copy and y-coordinate for the other as the sorting key. now each tuple has left and right occurrence in sorted v . apply the above algorithm, but do deletions only on left occurrences. in addition, on left occurrences, compute c with lines 3- <dig> in the algorithm above, add the pair  in a list of active tuplesp instead of applying lines 6- <dig> above. on right occurrences, update c again but before lines 6- <dig> above, take the maximum of that value and the one stored for active tuple vj in
+p. then remove vj from
+p and recompute c for all active tuples
+vj′ in
+p choosing as c the maximum of its previous value and the value computed applying lines 3- <dig> in the algorithm above. the correctness now follows from the facts that  when vj is added to the active tuples
+p, c is the maximum value without overlapping tuples
+vj′ taken into account, and  all the overlapping tuples
+vj′ with
+vj.x≤vj′.y<vj.y have their right occurrence before that of vj and hence trigger the update of active tuple .
+
+RESULTS
+we used swift <cit>  for producing local alignments: the program takes as parameters the minimum match length  and the maximum error level  as a percentage determining that at most maxerror × l edit errors can be in a match of length l ≥ minlen. it then finds all maximal local alignments satisfying the parameter constraints. the process was distributed so that scaffolds were partitioned into equal size chunks and each chunk allocated to a different cluster node.
+
+the rest of the process  was executed on a single machine. to compute the normalized n <dig> value, the process was hence to apply co-linear chaining iteratively, always extracting the best alignment and splitting the scaffold accordingly. the process was repeated until all pieces  found their matches. the n <dig> of the pieces obtained this way is then called the normalized n <dig>  reverse complements were taken account appropriately; scaffolds were aligned to both strands and only contig alignments with the same orientation were combined to form a scaffold alignment.
+
+we have already used normalized n <dig> in
+ <cit>  to compare different scaffolders. we report here an experiment that gives some more insight to the normalized n <dig> measure: we created a varying number of random intra-scaffold contig swaps to an assembly mip-elegans in
+ <cit>  and computed normalized n <dig> for each variant. this gives a sampling between good assembly and completely random assembly such that scaffold n <dig> stays the same in all versions, but accuracy of the assembly should drop. one can see from table
+ <dig> that normalized n <dig> indeed reflects this expected behaviour. the percentages in table
+ <dig> give the amount of contigs translocated. coverage values are computed after the first iteration of co-linear chaining. the reference genome is caenorhabditis elegans of length  <dig>  mbp. the assembly was produced by the mip scaffolder of
+ <cit>  and has n <dig> value  <dig> 
+
+for the experiment we ran the validate_distributed.sh script of our tool with parameters maxerror  <dig> , minlen  <dig>  maxgap  <dig> and numjobs  <dig>  here the two first parameters are the ones for swift explained earlier. third is used for restricting gaps in co-linear chaining, and the last is for distributing the heaviest part of the computation . the  <dig> swift jobs were distributed on  <dig> machines taking overall  <dig> minutes for one run. the rest of the computation took  <dig> minutes on a single machine.
+
+discussion
+the proposed method should also work for validating an rna assembly against a dna reference, by just setting the maximum gap length to the maximum possible intron length. also one could use it for whole genome comparison between two species, by considering how many pieces one genome needs to be partitioned in order to align to the other. such measure is not very accurate as it does not model a sequence of evolutionary events to explain the transformation, like the genome rearrangement distances, but the approach gives the number of breakpoints which can be used as a lower-bound. however, much more elaborate tools for that purpose have been developed
+ <cit> .
+
+we stress that our approach has also some conceptual value in avoiding unnecessary heuristics. the three main steps  finding maximal local alignments,  co-linear chaining, and  splitting the scaffolds, have each an algorithmically correct solution. for  and  one can refer to
+ <cit> , as well as for the gap-restricted case covered in this paper. for  one can refer to the folk theorem that greedy splitting of a string into maximal aligning pieces is optimal strategy if one wants to minimize the number of aligning pieces; this extends to the case of extracting aligning pieces from scaffolds greedily. it is interesting that actually with the gap-restricted co-linear chaining, this folk theorem does not hold anymore, see figure
+ <dig>  this leaves the open question whether there is an efficiently computable optimal strategy for splitting in this special case.
+
+finally, the approach in
+ <cit>  is especially designed for evaluations where the reference consists of two haplotypes. our approach is straightforward to modify for this case: the two haplotypes can be concatenated and used as the reference sequence to our program. this way the scaffolds will be split to parts that match one of the haplotypes only and the evaluation does not favor assemblies whose contigs or scaffolds alternate between haplotypes. on the other hand, obtaining assemblies that would separate the two haplotypes is quite unlikely with just short read sequencing data. it is also as easy to modify our approach for the case where haplotypes are allowed to mix: assuming that the pair-wise alignment of haplotypes is known , one can do the first step of our approach  separately for each haplotype, then project all the local alignment results to one haplotype using the known pair-wise alignment. after this the chaining allows haplotypes to mix.
+
+CONCLUSIONS
+we proposed and implemented a comprehensive and efficient approach to compute a metric that summarizes scaffold assembly correctness and length. our implementation can be downloaded from
+http://www.cs.helsinki.fi/group/scaffold/normalizedn50/.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+vm and ls developed the gap-restricted version of co-linear chaining and it was implemented by vm. all authors contributed to the development of the normalized n <dig> framework and it was implemented and experimented by jy. all authors contributed to the writing. all authors read and approved the final manuscript.
+

@@ -1,0 +1,184 @@
+BACKGROUND
+hidden markov models  are a widely accepted modeling tool  <cit>  used in various domains, such as speech recognition  <cit>  and bioinformatics  <cit> . an hmm can be described as a stochastic finite state machine where each transition between hidden states ends with a symbol emission. the hmm can be represented as a directed graph with n states where each state can emit either a discrete character or a continuous value drawn from a probability density function .
+
+we are interested in a distributed hmm analysis of the channel current blockade signal caused by a single dna hairpin molecule held in a nanopore detector  <cit> . the molecules examined frequently produce toggles with stationary statistical profiles for thousands of milliseconds. with a sampling rate of  <dig> μs, processing even a modest blockade signal of  <dig> ms duration  becomes problematic, mostly because of the size of the dynamic programming tables required in the conventional implementations of the hmm's baum-welch and viterbi decoding algorithms. since we are also trying to model durations  <cit>  and spike phenomena  <cit> , by increasing the number of hmm states, conventional hmm implementations are found to be prohibitively expensive in terms of memory use.
+
+the baum-welch algorithm is an expectation maximization  algorithm invented by leonard e. baum and lloyd r. welch, and first appears in  <cit> . a later refinement, hirschberg's algorithm for an hmm  <cit> , reduces the memory footprint by recursively halving the pairwise alignment dynamic programming table for sequences of comparable size. in our application domain, the length of the observed emission sequence  is prohibitively long compared to the number of hmm states. further, baum-welch requires multiple paths, instead of the most likely one, making this strategy less than optimal.
+
+the checkpointing algorithm  <cit>  implements the baum-welch algorithm in o memory and in o) processor time, where t is the length of the observed sequence, qmax is the maximum hmm node out-degree, e is the number of free emission parameters and q is the number of free transition parameters. it divides the input sequence into t blocks of t symbols each, and, during the forward pass, retains the first column of the forward probability table for each block. when the reverse sweep starts, the forward values for each block are sequentially re-evaluated, beginning with their corresponding checkpoints, to update the parameter estimates.
+
+further refinement to the algorithm, as described in  <cit>  and amended here, has rendered the memory demands independent of the observed sequence length, with o) memory usage and o) running time, where d is the dimensionality of a vector that stores statistics on the emission pdf parameter estimates. performance of the various algorithms is summarized in table  <dig>  in this work, we also present a modification of one of the key hmm algorithms, the viterbi algorithm, improving the memory profile without affecting the execution time.
+
+methods and 
+RESULTS
+hmm definition, em learning and viterbi decoding
+the following parameters describe the conventional hmm implementation according to  <cit> :
+
+• a set of states s = {s <dig> ..., sn} with qt being the state visited at time t,
+
+• a set of pdfs b = {b <dig> ..., bn}, describing the emission probabilities bj = p for  <dig> ≤ j ≤ n, where ot is the observation at time-point t from the sequence of observations o = {o <dig> ..., ot},
+
+• the state-transition probability matrix a = {ai, j} for  <dig> ≤ i, j ≤ n, where ai, j = p,
+
+• the initial state distribution vector Π = {π <dig> ..., πn}.
+
+a set of parameters λ =  completely specifies an hmm. here we describe the hmm parameter update rules for the em learning algorithm rigorously derived in  <cit> . the viterbi algorithm, as shown in table  <dig>  is a dynamic programming algorithm that runs an hmm to find the most likely sequence of hidden states, called the viterbi path, that result in an observed sequence. when training the hmm using the baum-welch algorithm , first we need to find the expected probabilities of being at a certain state at a certain time-point using the forward-backward procedure as shown in table  <dig>  the forward, backward, and viterbi algorithms take o time to execute.
+
+let us define ξt as the probability of being in state i at time t, and state j at time t +  <dig>  given the model and the observation sequence
+
+  ξt=p=αtai,jbjβt+1p, 
+
+and γt as the probability of being in state i at time t, given the observation sequence and the model
+
+  γt=p=αtβt∑i=1nαtβt=∑j=1nξt. 
+
+the hmm maximization step using these probabilities is shown in table  <dig>  the conventional em procedure for hmm  <cit>  takes o memory and o) processor time. an hmm containing empty internal states  and hierarchical hmm  could be converted into canonical hmm form through stack transformation as discussed in  <cit> .
+
+forward sweep strategy explained
+ p = α <dig> × a <dig>  × b <dig> × β <dig>  p = α <dig> × a <dig>  × b <dig> × β <dig>  
+
+in particular, to estimate the probability of transition  <dig> →  <dig> at time interval 1– <dig> we calculate the sum of probabilities of all possible paths that lead to state  <dig> at time-point  <dig> ). then we multiply this probability of being in state  <dig> by the transition a <dig>  and emission b <dig> probabilities.
+
+further multiplication by the sum of probabilities of all possible paths from state  <dig> at time  <dig> until the end of the emission sequence ), is the expected probability of transition use. the sum of these estimates at time-points 1– <dig> and 2– <dig> is equivalent to the transition probability estimate in table  <dig> .
+
+according to  <cit>  ti, j is the weighted sum of probabilities of all possible state paths that emit subsequence o <dig> ..., ot and finish in state m, taking an i → j transition at least once where the weight of each state path is the number of i → j transitions taken. processing of the entire ti, j recurrence takes memory proportional to o and processor time o. initially we have ti, j =  <dig> since no transitions have been made. after initialization, we perform the following recurrence operations:
+
+  ti,j=αt−1ai,mbmδ 
+
+  +∑n=1nti,jan,mbm, 
+
+where δ={ <dig> ifm=j <dig> otherwise. following equation , at a certain time-point t we need to score the evidence supporting transition between nodes i and j, which is the sum of probabilities of all possible state paths that emit subsequence o <dig> ..., ot- <dig> and finish in state i ), multiplied by transition ai, j and emission bj probabilities upon arrival to ot. we extend weighted paths containing evidence of i → j transitions made at previous time-points  <dig> ..., t -  <dig> further down the trellis in subequation . finally, by the end of the recurrence we marginalize the final state m out of probability ti, j to get a weighted sum of state paths taking transition i → j at various time-points that is equivalent to the numerator in the transition probability estimate shown in table  <dig>  thus, we estimate transition utilization using:
+
+ ti,jend=∑m=1nti,j,ai,j=ti,jend∑j∈outti,jend, 
+
+where out is the set of nodes connected by edges from si.
+
+according to  <cit>  ei is the weighted sum of probabilities of all possible state paths that emit subsequence o <dig> ..., ot and finish in state m, for which state i emits observation γ at least once where the weight of each state path is the number of γ emissions that it makes from state i.
+
+the following algorithm updates parameters for the set of discrete symbol probability distributions.
+
+initialization step ei = α <dig> δ  δ . after initialization we make the recurrence steps, where we correct the emission recurrence presented in  <cit>  :
+
+  ei=αtδδ 
+
+  =∑n=1neian,mbm. 
+
+finally, by the end of the recurrence we marginalize the final state m out of ei and estimate the emission parameters through normalization
+
+ eiend=∑m=1nei,b^j=ejend∑γ=1dejend. 
+
+the algorithm for discrete emission parameters estimate b = {b <dig> ..., bn } takes in o memory and o time. as discussed  the forward sweep takes o time, where only the values of αt- <dig> for  <dig> ≤ i ≤ n are needed to evaluate αt, thus reducing the memory requirement to o for the forward algorithm. computing ei takes o previous probabilities of ei for  <dig> ≤ m ≤ n,  <dig> ≤ i ≤ e, 1≤ γ ≤ d. recurrent updating of each ei probability elements takes o summations, totalling o.
+
+theorem  <dig> ei is the weighted sum of probabilities of all possible state paths that emit subsequence o <dig> ..., ot and finish in state m, for which state i emits observation γ at least once.
+
+proof
+initialization the only chance for a path at a time-point  <dig> to emit symbol γ at least once from state i and finish in state m is α <dig> in case i = m and γ = o <dig>  therefore, initialization conditions satisfy definition of ei.
+
+induction suppose ei represents correct weighted sum of probabilities of all possible state paths that emit subsequence o <dig> ..., ot- <dig> and finish in state m, for which state i emits observation γ at least once. we need to prove the above holds for time-point t. following equation  in recurrence part  we score the evidence of symbol ot emission from state i at time-point t, which will be further propagated down the trellis in recurrence part . chances of such event is αt, i.e. sum of probabilities of all possible state paths finishing in state m at time-point t under conditions i = m and γ = ot. the second part of the recurrence  extends the weighted paths containing evidence of γ symbol emission from state i at previous time-points  <dig> ..., t -  <dig> and finishing in state n further down the trellis through available transitions an, m. thus the definition of ei holds true for the time-point t.
+
+at the end of recurrence we marginalize the final state m out of probability ei to get the weighted sum of all state paths making observation γ in state i at various time-points equivalent to the numerator of the discrete emission parameter estimate in table  <dig>  which is a weighted sum of all possible paths that score emissions evidence at certain time-points. by normalizing these scores we estimate the emission parameters.
+
+the forward sweep strategy was originally formulated in  <cit>  for hmms with silent start/end states, and automatically handles the prior probabilities estimates for the states as standard transitions connecting start with other non-silent states. the prior transition estimates astart, i are naturally involved within recurrent updates of ti, j, which takes an additional o memory if all n non-silent states have non-zero priors with time cost o. in order to compute the prior estimates in the conventional hmm formulation we need to know the backward probability at time-point  <dig>  which requires calculation of the entire backward table. therefore, in the next section we present a linear memory baum-welch algorithm modification built around a backward sweep with scaling, which only involves calculation of α <dig> for  <dig> ≤ i ≤ n to estimate priors in o time and o memory.
+
+linear memory baum-welch using a backward sweep with scaling
+the objective of the algorithm presented in this section is equivalent to that discussed previously  based on forward probabilities of state occupation. however, by using the backward probabilities of state occupation we are able to estimate initial hmm state probabilities much more quickly. in the description that follows we introduce a new set of probabilities:
+
+ei – the weighted sum of probabilities of all possible state paths that emit subsequence ot,..., ot and finish in state m, for which state i emits observation γ at least once, where the weight of each state path is the number of γ emissions that it makes from state i.
+
+ti, j – the weighted sum of probabilities of all possible state paths that emit subsequence ot,..., ot and finish in state m, taking i → j transition at least once, where the weight of each state path is the number of i → j transitions that it takes.
+
+all calculations are based on backward probability βt, but there is inevitably insufficient precision to directly represent these values for significantly long emission sequences. therefore we scale the backward probability during the recursion.
+
+the linear memory baum-welch implementation is shown in figure  <dig>  where e is a set of nodes with free emission parameters and t is a set of nodes with free emanating transitions. scaling relationships used at every iteration are rigorously proven . an alternative to scaling is relation  presented in  <cit>  showing how to efficiently add log probabilities
+
+  log⁡=log⁡p0+log⁡. 
+
+the scoring functions used for the emissions updates are shown in table  <dig>  with discrete emission we sum all the backward probabilities of state occupation given discrete symbol emission at certain time-points and later we normalize these counts in . in the case of a normally distributed continuous pdf we sum emissions and emission deviation from state i mean squared. these sums are scaled by probability of state occupation. we use these counts to estimate the emission mean  and variance  for a given state.
+
+parameters update
+we estimate the initial probability according to equations presented in table  <dig>  where d <dig> is defined in appendix a
+
+ π^i=α1β˜i∑i=1nα1β˜i=α1d1β1∑i=1nα1d1β1=α1β1∑i=1nα1β <dig>  
+
+the emissions estimate for the discrete case are
+
+  b^j=e˜jend∑γ=1de˜jend=d1ejendd1∑γ=1dejend=ejend∑γ=1dejend. 
+
+for normally distributed continuous observation pdf
+
+  b^j→μ=e˜jende˜jend=d1ejendd1ejend=ejendejend, 
+
+  b^j→σ2=e˜jende˜jend=d1ejendd1ejend=ejendejend. 
+
+the transition estimate is calculated as following
+
+ ai,j=t˜i,jend∑j∈outt˜i,jend=d1ti,jendd1∑j∈outti,jend=ti,jend∑j∈outti,jend for i∈t. 
+
+viterbi decoding in linear memory
+in this section we describe results when using a "linear memory" modification of the original viterbi algorithm that was introduced in  <cit>  by andrew j. viterbi. as mentioned previously, the viterbi algorithm is a dynamic programming algorithm for finding the most likely sequence of hidden states, called the "viterbi path", corresponding to the sequence of observed events in the context of an hmm. viterbi checkpointing implementation introduced in  <cit>  divides input sequence into t blocks of t symbols each and during the first viterbi pass keeps only the first column of the d table for each block. the reconstruction of the most probable state path starts with the last block, where we use the last checkpointing column to initialize recovery of the last t states of the most likely state path and so on, until the entire sequence decoding is reconstructed. the algorithm requires memory space proportional to o and takes computational time o twice as much as conventional implementation would take because of multiple sweeps. additional computations could be easily justified by the lower memory use, which in practice leads to substantial speedup.
+
+only two columns are needed for the δ array that stores maximum probability scores for a state at a given time-point for the algorithm to run . we replace the array, needed to store the dynamic programming backtrack pointers, by a linked list. our approximately linear memory implementation follows the observation that the backtrack paths typically converge to the most likely state path and travel all together to the beginning of the decoding table. although the approximate linearity depends on model structure and emission sequence decoded, and is not guaranteed, this behavior is typical for the hmm topologies we use. the possibility of using o) space  has only been rigorously proven for simple symmetric two-state hmm  <cit> .
+
+the modified viterbi algorithm is shown in figure  <dig>  it runs in the same o time as a conventional viterbi decoder, but takes the amount of memory o as has been demonstrated by our simulations .
+
+this approach has proven to be useful in decoding the explicit duration hidden markov model  topology introduced in  <cit> , as can be seen in figure  <dig>  although this implementation closely follows the originally proposed non-parametric duration density  <cit>  design, the advantage is that we no longer have to use highly modified forward-backward and viterbi algorithms  <cit> . this topology directly corresponds to the generalized hidden markov model  used in genscan  <cit> , one of the most accurate gene structure prediction tools. the potential for a very large number of nodes in our proposed topology is compensated by introducing the linear memory viterbi and baum-welch implementations with unaltered running time o, where m is the maximum duration of an aggregate state and s is the number of aggregate states. an example of backtracking path compression for such a topology with discrete emissions can be seen in figure  <dig>  where the most likely trail of states quickly combines with all the alternative trails. another interesting topology used by our laboratory for "spike" detection is shown in figure  <dig>  where the spikes are modelled as a mixture of two trajectories interconnected with an underlying set of ionic flow blockade states. the viterbi decoding trail for this topology, detecting two sequential spikes in samples from the real continuous ionic flow blockade, is shown in figure  <dig>  again, the backtracks quickly converge to the most likely state sequence.
+
+our particular implementation relies on the java garbage collector , which periodically deletes all the linked list nodes allocated in the heap that are no longer referenced by the active program stack as shaded in light gray color in figures  <dig> and  <dig>  on multiple core machines the gc could run concurrently with the main computational thread thus not obstructing execution of the method. in the lower level languages  "smart pointers" could be used to deallocate unused links when their reference count drops to zero, which is in some ways even more efficient than java's garbage collection.
+
+computational performance
+we conducted experiments on the hmm topologies mentioned above  with both artificial and real data sets, and evaluated performance of the various implementations of the viterbi and em learning algorithms. we describe the performance of the java virtual machive  after the hotspot java byte code optimizer burns-in, i.e. after it optimizes both memory use and execution time within em cycles. the linear memory, checkpointing and conventional algorithm implementations are thereby streamlined to avoid an unfair comparison due to obvious performance bottlenecks.
+
+for the dhmm topology shown in figure  <dig> we have chosen to systematically alter the size of two aggregate states from  <dig> to  <dig> when learning on an artificially generated sequence of  <dig>  discrete symbols to see how the number of free learning parameters affects the performance of the em learning algorithms. in subfigures  <dig> –  <dig> we see that the running time of the linear implementation grows dramatically compared to conventional and checkpointing implementations, making it a very slow alternative for such a scenario. although the linear implementation memory profile is low, as expected, for high values of d, the checkpointing algorithm claims the least memory. this is because the table sizes in the linear memory em implementation grow quickly as the number of states and transitions in the model increases. garbage collection for large d is the lowest for the checkpointing em compared to other implementations.
+
+in experiments on em learning on a spike detection hmm topology, shown in figure  <dig>  we have systematically varied the ionic flow duration from  <dig>  ms to  <dig>  ms. although in subfigures  <dig> –  <dig> duration of the time cycle of the linear memory implementation is not so inflated in this situation, it is still many times higher than for conventional and checkpointing algorithms. please note that conventional and checkpointing algorithms spend almost identical time per cycle. the conventional implementation still takes the largest amount of memory and once again checkpointing takes less memory compared to the linear memory implementation in the case of long signal duration. garbage collection in the case of the conventional implementation starts taking a substantial fraction of the cpu time for maximum signal duration, which advocates against using the conventional implementation for the analysis of long signals.
+
+theoretically, for the linear memory algorithm to run faster than checkpointing alternative the following condition should hold true 2tnqmax + t  > tnqmax which reduces to the condition, unrealistic for any practical model  <dig> > q + ed. thus, the linear memory algorithm will always run slower than checkpointing. the memory condition for the linear memory em algorithm implementation to run in less space is 2nt > n, which reduces to 2t > q + ed condition – quite realistic for sufficiently large values of t. the memory advantage is the key attribute since efforts are underway  to perform segmented linear hmm processing on a distributed platform, where the speed deficiency is offset by m-fold speedup when using m nodes.
+
+in both test scenarios shown in figure  <dig> we see that conventional implementation of baum-welch aggressively claims very large amounts of heap space, even for modestly sized problems , where both modified em algorithm implementations have a very compact memory signature. an hmm algorithm implemented based on forward sweep strategy with silent start/end states runs slower and takes more memory compared to the proposed backward sweep strategy in case of dhmm topology. this is because prior probabilities of the states are estimated as regular transitions from the start state, thus substantially increasing ti, j table size and time required for a recurrent step.
+
+in tables  <dig> and  <dig> we list the ratio of memory used by the linked list nodes referenced from the active program stack to the sequence length t. as could be seen, it quickly becomes proportional to  <dig>  in both spike detection and the explicit dhmm topologies as the decoded sequence length grows.
+
+discussion and 
+CONCLUSIONS
+we have discussed implementation of baum-welch and viterbi algorithms in linear memory. we successfully used these implementations in analysis of nanopore blockade signals with very large sample sizes  where the main limitation becomes processing time rather than memory overflow. we are currently working on efficient distributed implementations of the linear memory algorithms to facilitate quicker, potentially "real-time" applications.
+
+in both of the test scenarios considered, the linear memory modification of the em algorithm takes significantly more time to execute compared to conventional and checkpointing implementations. despite being the fastest in many realistic scenarios, the conventional implementation of the em learning algorithm suffers from substantial memory use. the checkpointing algorithm alleviates both of these extremes, sometimes running even faster than the conventional algorithm due to lower memory management overhead. the checkpointing algorithm seems to provide an excellent tradeoff between memory use and speed. we are trying to understand if the running time of our linear memory em algorithm implementation can be constrained in a way similar to the checkpointing algorithm. a demo program featuring the canonical, checkpointing and linear memory implementations of the em learning and the viterbi decoding algorithms is available on our web site .
+
+availability & requirements
+university of new orleans bioinformatics group: 
+
+authors' contributions
+ac conceptualized the project, implemented and tested the baum-welch and viterbi linear memory procedures. sw–h suggested focus on linear memory algorithms and outlined the idea for the viterbi linear memory. sw–h helped with writing up the manuscript and provided many valuable suggestions throughout the study. all authors read and approved the final manuscript.
+
+appendices
+appendix a – proofs of scaling relationships
+the scaling steps in figure  <dig> need additional rigorous justification. our proofs are partially inspired by recurrences presented in  <cit>  with further clarifications.
+
+theorem  <dig> β˜t = dt β¯t
+
+proof let us define dt=1∑i=1nβt,dt=1∑i=1nβt,β˜t=dtβt,
+
+ β¯t=∑j=1nam,jbjβ˜t+1=dt+1∑j=1nam,jbjβt+1=dt+1βt,dt=1∑i=1nβ¯t=1dt+1∑i=1nβt,β˜t=dtβ¯t=dtdt+1βt=1dt+1∑i=1nβtdt+1βt=dtβt. 
+
+here we observe useful relationships dt = dt dt +  <dig> and β¯t = dt + 1βt necessary in follow-up proves.   □
+
+theorem  <dig> t˜i, j = dt t¯i, j
+
+proof let us define t˜i, j = dtti, j,
+
+ t˜i,j=dtt¯i,j=dt=dt=dtdt+1=dtdt+1ti,j=dtti,j. 
+
+theorem  <dig> e˜i = dt e¯i
+
+proof let us define e˜i = dtei,
+
+ e˜i=dte¯i=dt=dt=dtdt+1=dtdt+1ei=dtei. 
+
+supplementary material
+additional file 1
+supplementary materials. contains previously derived recurrences for linear memory hmm implementation with forward sweep and empty start/end states along with corrected recurrences.
+
+click here for file
+
+ acknowledgements
+authors are grateful for numerous constructive suggestions made by anonymous reviewers.

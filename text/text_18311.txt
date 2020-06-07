@@ -1,0 +1,132 @@
+BACKGROUND
+protein identification is one of the most important goals of drug discovery research and in proteomics. nowadays, the leading technique to identify a protein or a peptide is the tandem mass spectrometry . the basic idea of the identification of a peptide using tandem mass spectrometry is simple: a peptide is ionized and broken, at the peptide bond, in charge fragments . the mass/charge ratio of the resulted fragments are visualized in a graphic called tandem mass spectrum or ms/ms spectrum . a ms/ms spectrum contains: the mass of the whole peptide, and a pattern of fragments that can be associated to a given sequence. each fragment is characterized by mass/charge ratio and intensity: we refer to this pair as peak. a good quality spectrum should contain the complete series of y-ions , and the complete series of the b-ions  . in this case it is very easy to reconstruct the amino acidic sequence for the peptide, since it is sufficient to compute the mass differences between two adjacent peaks in each of the two series. unfortunately, in practice, many factors contribute to complicate the problem. indeed, many b-ion or y-ion peaks might be absent from the spectrum, or it might be an imperfect fragmentation that causes a different types of ions, or the sample might be contaminated, or it might be present post-translational modifications or many other type of peaks might unexpected appear in the spectrum. there are three different computational approaches motivated by peptide sequencing: the peptide identification searching in a database, the de novo peptide sequencing, and the peptide sequence tag. the first method finds the best matching peptide from a sequence database using a scoring function based on the likelihood that an identified peptide is actually the peptide of the spectrum  <cit> . this method is the mostly used but it is able only to identify peptide stored in a database. on the contrary the de novo method allows to identify a peptide using only the spectrum without any other previous knowledge and hence even if the peptide is not in a database. many algorithms using this approach have been developed  <cit>  having different time complexity, but the accuracy of them depends on the quality of the input spectrum: usually these algorithms cannot find the complete sequence due to missing peaks and hence the applicability of them is limited in practice. the peptide sequence tag approach combines the two previous methods: first the de novo method is applied to find a partial solution, so called sequence tag, and then a database search is applied to identify the complete sequence. the idea of using peptide sequence tags is not novel  <cit>  and it is recently re-proposed to increase the speed of the database searching  <cit>  or to find post-translation modifications  <cit> . most of these algorithms are using a previous developed de novo approach and their time complexity to find the optimal solution according to any scoring function is at least o, where n is the number of the mass spectrum peaks. a simple scoring function can be defined as the sum of the correspondent mass peak abundances found in the spectrum  <cit>  or it can be based on the ion-type, favouring the b and y ions over the other types  <cit> . in this paper we propose a parallel algorithm to determine all the peptide sequence tags longer than an input number of amino acids or all those scoring more than an input number, according to any scoring function. the parallel approach is motivated by demand of efficiency, since the interpretation of mass spectra is a high throughput process. the algorithm is work-efficient running in o time on a concurrent-read, exclusive-write  pram  <cit>  with log n processors, and it is a variation of the algorithm proposed in  <cit>  to find peptide sequence tags. we simulate the parallelism by an implementation in java on threads using barriers for synchronization. our tests on  <dig> spectra in the open proteomics database shown that our algorithm is efficient and effective since achieves comparable results to other approaches.
+
+methods
+let an experimental spectrum be given related to an unknown peptide p of mass mp. a peptide sequence tag is a short string of amino acid mass differences deduced from the fragment spectrum. let any scoring function and any number δ be given. our task is to determine all the sequence tags scoring at least δ. if the score reduces to count the length of the string, the output consists in the sequence tags of lengths at least δ. we refer to this problem as the peptide sequence tag problem.
+
+although a spectrum may contain a few different types of ions, for simplicity, we consider b-ions and y-ions only. therefore we assume m = {m <dig>  m <dig> …,mn} to represent a spectrum where the real numbers mi correspond to the m/z ratios of the peaks in the spectrum augmented with the numbers  <dig>   <dig>  mp− <dig>  and mp+ <dig> that represent the “empty” b-ion, the “empty” y-ion, the weightiest b-ion, and the weightiest y-ion, respectively. let us denote the set of the masses of the twenty amino acids by a. the peptide sequence tag problem can be reformulated in terms of paths in a graph. we build a labelled directed acyclic graph g =  such that
+
+■ every node νi is associated to a mi ∈ m ;
+
+■  ∈ e if and only if  ∈ a .
+
+the peptide sequence tag problem consists in determining any path between two nodes in the graph g with score greater than δ. the introduction of any scoring function corresponds to assign weights to the edges of the graph: the score of a path is the sum of the scores of the edges on the path.
+
+the algorithm
+the elements of a and m are stored in two sorted arrays in the shared global memory of the pram. we divide m into groups of log n consecutive elements, and we assign a “responsible” processor to each mass in each group so that the ith processor is responsible for the ith mass inside the group. we divide the algorithm in three procedures:
+
+■ pre-computation procedure
+
+■ propagation procedure
+
+■ determination procedure.
+
+we repeat each procedure for every group of log n elements, from the first one to the last one, and in reverse order. the procedures presented in this section are crew since they require concurrent access to a and m in reading, but only exclusive access to the global memory in writing. in order to simplify the description that follows we give value one to the weight of each edge. this assumption corresponds to determine the longest feasible path for the de novo peptide sequencing problem or feasible paths longer than any given value as solutions for the peptide sequencing tag problem. in the next paragraph we describe the three procedures.
+
+pre-computation procedure
+the first procedure consists in building the graph. considering each group of log n masses, we associate a node to each mass, and so the ith processor is responsible for the ith node νi in the group. processor i, for each element in a, checks if there exists a node νj in m that differs from it to the mass of the element in a. in this case we put an edge between νi and νj in the graph. we store this edge in two different adjacency lists, the so called predecessor  and successor  list:
+
+ predi=j,⇔m−m=a,succi=j,⇔m−m=a. 
+
+note that any node can have at most twenty predecessors or successors, or none. since m is a sorted array, using a binary search algorithm to determine the predecessors and successors, the pre-computation takes o time for each group and hence o totally.
+
+propagation procedure
+the second procedure of the algorithm permits, for each node, to compute the maximum length path passing through it. this goal is reached by iterating the search of the predecessor  of every node using the pointer jumping technique  <cit>  in every group. in order to handle the propagation, processor i stores and updates the current predecessor in the start_path pointer:
+
+start_path = h ∈ { <dig>  …, n} ⇔ at least one path from νi to νh exists.
+
+note that all the predecessors of νi belong to the νi's group or to any group that precedes it, being m sorted. hence all the start_path pointers of the predecessors of νi are known, when νi's group is processed, due to the order in which groups are handled. the same is done to update the current successor in end_path. we also calculate the distances ds and de from any node νi to the νh node pointed by start_path and end_path pointers. at the end of the propagation procedure these two pointers, related to each node νi, will point to the termini nodes of the longer path passing through νi. algorithm “propagation”  describes only the computation of ds and start_path for any group, while de and end_path can be obtained by replacing pred and start_path with succ and end_path, respectively. at first, for each node i, we initialize the start_path pointer:
+
+a) if i has only one predecessor j, then start_path = j and ds =  <dig> ;
+
+b) otherwise, start_path = i and ds =  <dig> .
+
+then, for each node i, we repeat the following steps until there are no changes in any start_path of the group :
+
+a) if start_path points to a node different from i and different from start_path], then we assign ds = ds + ds] as the new distance of the node, and start_path = start_path] for the pointer ;
+
+b) otherwise, if i has all the predecessors with start_path pointers pointing to themselves or predecessors with start_path pointing to the same node j, then we assign start_path = j. ds becomes the maximum distance ds of predecessors pointing to j, plus  <dig> ;
+
+c) otherwise, if all the predecessors of i have the start_path pointers cycling on themselves or start_path pointing to a node without predecessors, we consider the predecessor j having the maximum ds distance and we assign start_path = j and ds =  <dig> + ds ;
+
+d) otherwise, the node waits for some changes in the start_path pointers of its predecessors.
+
+at the end of the propagation procedures, each node i knows the maximum distance ds + de of a path passing through it, the starting node start_path, and the ending node end_path of this path. the computational complexity of this procedure is o time for each group. indeed, in the worst condition only one node at time is unlocked and it can upload the start_path. at the beginning, we have a set of pointer trees. we are interested in the sum of their heights. this sum is obviously less than log n. pointer jumping and merging operations decrease the total height since a tree of height h is transformed into a star by applying pointer jumping in o) steps, and the root of a star “hooks” to the parent of any of the root's predecessor in g. therefore, in the worst case, if hmax is the maximum height of the initial set of, say k, pointer trees, all these trees degenerate into stars in o) time, and finally they are merged in a list ranking of roots, and the algorithm stops in o time. since hmax, k ≤ log n in every group, and we apply algorithm “propagation” to all the n/log n groups, the time complexity is o.
+
+determination procedure
+this procedure allows to retrieve the solutions of the peptide sequence tag problem. some change to the procedure permits to compute all the feasible paths of maximum length or all the feasible paths with length more than δ. we describe the latter case. at the end of the previous section, each node i having ds + de > δ belongs to a solution of the peptide sequence tag problem. moreover the set of the nodes i such that start_path = i and de > δ are the starting nodes of any solution. in order to print all the solutions we can use a sequential procedure, taking at most o, where s is the number of the possible sequence tags. indeed, beginning from each starting node i we print all the possible solutions visiting only the successors j such that ds+1+de > δ, and so forth for the successors of these nodes.
+
+RESULTS
+in order to understand the performance of our algorithm and to compare it with other existing software, we simulated the processes by using the multithreading in java, addressing the synchronization by means of barriers. we tested our program on a four  <dig> ghz dual-core intel processors 8gb ram machine.
+
+our first dataset consists in  <dig> annotated escherichia coli ion trap tandem mass spectra from the open proteomics database   <cit>  with different xcorr , and our second dataset consists of the  <dig> spectra of  <cit> . we tested the program over all these spectra after running a data pre-processing to remove tiny noise peaks as in mascot .
+
+for the first dataset, the algorithm looks for peptide sequence tags of maximum length. we evaluated the percentage of cases when the algorithm finds at least one correct sequence tag at different lengths k. we obtained the following percentage:
+
+■  <dig> %, for k = 3;
+
+■  <dig> %, for k = 4;
+
+■  <dig> %, for k = 3;
+
+■  <dig> %, for k =  <dig> 
+
+the average running time required to generate the sequence tags is  <dig>  seconds. we compared our program with the public available program pepnovo on the same dataset of  <dig> spectra as in  <cit> . we evaluated the occurrence of at least one correct sequence tag in the generated sequence tag of maximum length found by our algorithm. since in general the generated sequence tag is not unique, we used the scoring function defined in  <cit>  to assign a score to the sequences. we evaluated the percentage of cases where any correct tag is contained in the highest scoring solution at different lengths. additionally, we reported on the occurrence of any correct tag in the set of size three of the top scoring solutions. the results are listed in table  <dig>  we note that, since the percentages grow substantially if we consider the occurrence of correct sequence tags in the generated maximum length sequence tags, selectivity of the scoring function is low. therefore better results could be obtained by using a different scoring function.
+
+comparison of five tag generating methods on  <dig> spectra: for each tag length, algorithm and number of solution tags, the table displays the proportion of test spectra with least one correct tag.
+
+pepnovo tag
+local tag +
+guten tag
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+pepnovo tag
+local tag +
+guten tag
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+pepnovo tag
+local tag +
+guten tag
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+pepnovo tag
+local tag +
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+the average running time required to generate the sequence tags is  <dig>  seconds.
+
+CONCLUSIONS
+the problem of identifying modified or variant peptide sequences is a challenging one, especially when the spectrum for unmodified sequence is not present as a standard for comparison. by joining the best partial sequences of the de novo interpretation and the database search algorithms, sequence tag can increase the speed and the effectiveness of the identification, and the discovery of unknown modifications, sequence variations and possibly alternate splice sites in proteins. here, we have proposed a new work-efficient parallel algorithm to find peptide sequence tags. our tests shown that our algorithm is efficient and accurate since achieves comparable results to other methods. therefore, at least in theory, the proposed algorithm could be used to identify post-translational modifications, comparing the homology of the sequence tags found with the sequences in the biological database.
+
+list of abbreviations used
+crew – concurrent read, exclusive write
+
+ms/ms – tandem mass 
+
+opd – open proteomics database
+
+pram – parallel random access memory
+
+ram – random access memory
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+sb participated in the design of the algorithm, in the coordination and analysis of the tests and in revising the content of the paper. el conceived of the initial idea to use the parallelism in this context and supervised all the phases of the developed work. em carried out the design of the algorithm and its implementation, participated in testing the program and analysis of the experimental results and drafted the manuscript. ms carried out the testing and debugging of the program, participated in the analysis of the experimental results, and helped in revising the paper. all authors read and approved the final manuscript.
+

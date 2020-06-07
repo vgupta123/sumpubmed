@@ -1,0 +1,112 @@
+BACKGROUND
+genome-wide association studies have identified hundreds of dna variants associated to complex traits including disease in human alone
+ <cit> . to understand how these variants affect disease risk, genotype and organismal phenotype data are integrated with intermediate molecular phenotypes to reconstruct disease networks
+ <cit> . a first step in this procedure is to identify dna variants that underpin variations in expression levels  of transcripts
+ <cit> , proteins
+ <cit>  or metabolites
+ <cit> . as modern technologies routinely produce genotype and expression data for a million or more single-nucleotide polymorphisms  and ten-thousands of molecular abundance traits in a single experiment, often repeated across multiple cell or tissue types, the number of statistical tests to be performed when testing each snp for association to each trait is huge. furthermore, multiple testing correction requires all tests to be repeated several times on permuted data to generate an empirical null distribution. despite being trivially parallelisable, the computational burden of testing snp-trait associations one-by-one quickly becomes prohibitive.
+
+recently a new approach  was developed which uses the fact that the test statistics for the additive linear regression and anova models can be expressed as multiplications between rescaled genotype and expression data matrices, thereby realising a dramatic speed-up compared to traditional qtl-mapping algorithms
+ <cit> . a limitation of these models is their assumption that the expression data is always normally distributed within each genotype group. for this reason, qtl and eqtl studies have frequently used non-parametric methods which are more robust against variations in the underlying genetic model and trait distribution
+ <cit> . in particular, the non-parametric kruskal-wallis one-way analysis of variance
+ <cit>  does not assume normal distributions and reports small p-values if the median of at least one genotype group is significantly different from the others
+ <cit> .
+
+here we report a matrix-based algorithm , implemented in matlab, python and r, to simultaneously calculate the kruskal-wallis test statistics for several millions of snp-trait pairs at once that is more than ten thousand times faster than calculating them one-by-one on a human test dataset with more than  <dig>  snps and  <dig>  expression traits. additional benefits of krux include the explicit handling of missing values in both genotype and expression data and the support of genetic markers with any number of alleles, including variable allele numbers within a single dataset.
+
+implementation
+input data
+krux takes as input genotype values of m genetic markers and expression levels of n transcripts, proteins or metabolites in k individuals, organised in an m × k genotype matrix g and n × k expression data matrix d. genetic markers take values  <dig> ,…,ℓ, where ℓ is the maximum number of alleles , while molecular traits take continuous values. we use built-in functions of matlab, python and r to convert the expression data matrix d to a matrix r of data ranks, ranked independently over each row . krux assumes that the input expression data has been adjusted for covariates if it is necessary to do so
+ <cit>  and all data quality control has been performed.
+
+calculation of the kruskal-wallis test statistic by matrix multiplication
+the genotype matrix g is first converted to sparse logical index matrices i
+i
+ of the same size, where i
+i
+ =  <dig> if g = i and  <dig> otherwise . next observe that the 1 × m vector n
+i
+ with entries
+ni=∑k=1kii and n × m matrices s
+i
+ with entries
+
+  si=∑k=1krii=r·iit, 
+
+are respectively the number of individuals and the sum of ranks for the nth trait in the ith genotype group of the mth marker. we can then calculate an n × m matrix s with entries
+
+  s=12k∑i=0ℓsi2ni- <dig>  
+
+using efficient vectorised operations. if none of the rows in d contain ties, then each entry s equals the kruskal-wallis test statistic for testing trait n against marker m <cit> . for markers with less than the maximum of ℓ genotype values, 0/ <dig> division will result in nan columns in the intermediate matrices with entries s
+i
+2/n
+i
+ for the empty genotype groups. by replacing all nan’s by zeros before making the sum in eq. , the corresponding entries in s will be the correct statistics for a test with fewer than ℓ degrees of freedom. thus we need ℓ +  <dig> matrix multiplications and the associated element-wise operations to calculate the test statistic values for all marker-trait combinations.
+
+p-value calculation and empirical fdr correction
+krux takes as input a p-value threshold p
+c
+, calculates the corresponding test statistic thresholds for d degrees of freedom , and identifies the entries in s which exceed the appropriate threshold value. for these entries only a p-value is calculated using the χ <dig> distribution. empirical false-discovery rate  values are computed by repeating the p-value calculation  multiple times on data where the columns of the expression data ranks are randomly permuted. the fdr value for any value p ≤ p
+c
+ is defined as the ratio of the average number of associations with p′ ≤ p in the randomised data to the number of associations with p′ ≤ p in the real data.
+
+handling missing values
+when data values are missing for some marker or trait, all test statistics for that marker or trait need to be adjusted for a smaller number of observations. for the expression data, missing values are easily handled since the ranking algorithms will give nan’s the highest rank. by setting the entries corresponding to missing values in d to zero in r, eq.  still produces the correct sums of ranks, while the matrix multiplication
+
+ z·iit=∑k=1kzii=ni, 
+
+where z is the n × k matrix with z =  <dig> whenever d = nan and  <dig> otherwise, produces the corrected number of individuals in the ith group of the mth marker for the nth trait. replacing the constant k in eq.  by a n × m matrix k where k is the number of non-missing samples for trait n and performing element-wise division and substraction operations then gives the correct test statistic for all pairs.
+
+handling missing genotype data is less easy because the expression ranks that need to be adjusted are specific to each marker-trait combination . krux uses the fact that missing genotype values are generally due to sample quality and therefore patterns of missing values are often repeated among markers. for each unique missing value pattern, a new genotype matrix for all markers with that pattern and a new expression data matrix with the corresponding samples removed are constructed to calculate the test statistics for all affected marker gene combinations. missing genotype data increases the computational cost of the algorithm considerably and it is recommended to limit the number of missing values by only considering markers with a sufficiently high call rate.
+
+handling tied data
+in the presence of tied observations, the statistic in eq.  needs to be divided by a factor
+1-∑tk3-k, where the summation is over all groups of ties and t = t3 - t for each group of ties, with t the number of tied data in the group
+ <cit> . the factor t is automatically computed for each trait during the ranking step and the matrix s is therefore easily corrected using element-wise matrix operations . whereas ties are usually rare in standard gene expression datasets, the ability to handle tied data expands the scope of krux to count-based, discretised or qualitative data types.
+
+data slicing
+since krux needs to create intermediate matrices of size n × m, where n is the number of traits and m the number of markers, which do not usually fit into memory for large datasets, krux supports the use of data ‘slices’ to divide the complete data into manageable chunks. in typical applications, the number of markers is one or two orders of magnitude larger than the number of traits. therefore the default behaviour of krux is to keep the expression data as a single matrix and simultaneously test all traits against subsets of markers. the user can provide either a slice size and krux will process marker blocks of this size serially, or a slice size and initial marker and krux will process a single slice starting from that marker. the latter option allows trivial parallelisation across multiple processors.
+
+RESULTS
+validation data
+to test krux we provide example analysis scripts and a small anonymised dataset of  <dig>  randomly selected genes and markers from  <dig> randomly selected yeast segregants
+ <cit> . here we describe an application of krux on a human dataset of  <dig>  genes and  <dig>  snp markers measured in  <dig> whole blood samples from the stockholm atherosclerosis gene expression  study
+ <cit> . all snps in the dataset had minor allele frequency greater than 5%, no missing values and probability to be in hardy-weinberg equilibrium greater than 10- <dig> 
+
+krux is exact and fast
+we first confirmed that krux produces the same results as testing marker-trait combinations one-by-one using the built-in kruskal-wallis functions to verify the correctness of our implementations. to test the performance of krux we divided the genotype data into slices of variable size and extrapolated the total run time from running a single genotype data slice against all expression traits and multiplying by the number of slices needed to cover the entire set of  <dig>  snps. the total run time rapidly decreases until a genotype slice contains about  <dig>  snps and stays almost constant thereafter. on a laptop with  <dig> gb ram, the limit is reached at around  <dig>  snps per slice after which run time sharply increases again due to memory limitations . we therefore recommend a genotype slice size of around  <dig>  markers, resulting for this dataset in around  <dig> separate jobs, which will take around  <dig>  seconds  when run serially on a single processor. by comparison, the total extrapolated run time when computing all  <dig>  ×  <dig>  associations one-by-one using the built-in kruskal-wallis function on the same hardware as in figure
+ <dig> are respectively  <dig>  ·  <dig>  and  <dig>  ·  <dig>  seconds such that krux is respectively  <dig>  and  <dig>  times faster on this particular dataset. on the same dataset and hardware, the comparatively simpler matrix operations for the parametric tests in matrix-eqtl took respectively  <dig> minutes  and  <dig>  minutes .
+
+the kruskal-wallis test is more conservative than corresponding parametric tests
+next we compared the output of krux and matrix-eqtl’s parametric anova and linear model  methods. the kruskal-wallis test is more conservative than the anova and linear methods, i.e. it has a higher nominal p-value for almost all marker-trait combinations . since random data will be subjected to the same biases, nominal p-values cannot be directly compared to assess significance. we therefore performed empirical fdr correction for multiple testing using three randomly permuted datasets . surprisingly, after fdr correction only a limited number of associations remained for anova even at an fdr threshold of 30%, whereas the number of associations detected by krux and the linear method was comparable ). detailed analysis showed that this is due to pairing of snps with rare homozygous minor alleles  to genes with outlier expression levels, resulting in extremely low p-values for the anova method in real as well as randomised data . to reduce the incidence of chance associations between singleton genotype groups and outlying expression values in the anova method we repeated the empirical fdr correction, this time keeping only marker-trait combinations within 1mbp of each other . at an fdr threshold of 10% the number of significant cis-eqtl-gene pairs is indeed comparable between the three methods, with a large proportion of pairs detected by all three of them ).
+
+the kruskal-wallis test is more robust and detects more non-linear associations
+we classified eqtl-gene pairs as "skewed group sizes" , non-skewed "non-linear"  and non-skewed "other" . cis-associations identified exclusively by the kruskal-wallis test are more often non-linear and the overall distribution of eqtl-types is more similar to associations identified by all three methods, compared to the anova and linear methods ). of the  <dig> associations exclusively identified using the parametric anova method,  <dig>  had skewed group sizes, including  <dig>  with a singleton genotype group ). the associations exclusively identified by the linear method also contained a much higher proportion of snps with skewed group sizes than the corresponding krux associations  and, as expected, a reduced number of non-linear associations ).
+ <dig> 
+
+CONCLUSIONS
+we have developed krux, a software tool that uses matrix multiplications to simultaneously calculate the kruskal-wallis test statistics for millions of marker-trait combinations in a single operation, thereby realising a dramatic speed-up compared to calculating the test statistics one-by-one. the availability of a fast method to identify eqtl associations using a non-parametric test allowed us to assess in more detail how differences in model assumptions compared to parametric methods lead to differences in identified eqtls. our results on a typical human dataset indicate that the the parametric anova method is highly sensitive to the presence of outlying gene expression values and snps with singleton genotype groups. we caution against its use without prior filtering of such outliers. linear models reported the highest number of eqtl associations after empirical fdr correction. these are understandably biased towards additive linear associations and were also sensitive to the presence of skewed genotype group sizes, albeit to a much lesser extent than the parametric anova method. the kruskal-wallis test on the other hand is robust against data outliers and heterogeneous genotype group sizes and detects a higher proportion of non-linear associations, but it is more conservative for calling additive linear associations than linear models, even after fdr correction.
+
+in summary, krux enables the use of non-parametric methods for massive eqtl mapping without the need for a high-performance computing infrastructure.
+
+availability and requirements
+• project name: krux
+
+• project home page:http://krux.googlecode.com
+
+• operating systems: platform independent
+
+• programming language: matlab, r, python
+
+• other requirements: none
+
+• license: gnu gpl v3
+
+• any restrictions to use by non-academics: none
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+jq designed and implemented the algorithm and analysed the data; hfa analysed the data; jb provided validation data and co-supervised the project; tm designed and implemented the algorithm, analysed the data, supervised the project and drafted the manuscript. all authors read and approved the final manuscript.
+

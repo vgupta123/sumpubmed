@@ -1,0 +1,189 @@
+BACKGROUND
+as high-throughput sequencing has become more and more accessible, bottlenecks in comparative genetics now generally do not occur at the stage of generation of new sequences, but rather at the stage of downstream analyses that require large computational resources. one of the first steps required for phylogenetic analyses of genome-scale nucleotide or amino acid sequence datasets is determining an orthologous set of genes across multiple species. orthologs are defined as genes derived from a common ancestral gene that have diverged from one another by a series of speciation events, in contrast to paralogs, which diverge following gene duplication events  <cit> . there are numerous orthology prediction tools, but most if not all tools share the common initial step of calculating similarity scores using blast  <cit>  or blast-like algorithms within the sequence dataset. as previously described  <cit> , these tools can be categorized as tree-building-based tools and non-tree-building tools. tree-building-based tools infer orthology according to the reconstructed phylogeny of a subset of genes showing high similarity among them, e.g., orthology analysis using mcmc  <cit> , orthologid  <cit> , and poff  <cit> , while non-tree-building tools infer orthology directly from the similarity scores, e.g., orthomcl  <cit> , hamstr  <cit> , inparanoid  <cit> , oma-gethogs  <cit> , and bidirectional best hit   <cit> .
+
+in general, non-tree-building tools have the advantage of being computationally less demanding i.e. they require fewer cpu  hours and less memory. particularly in prokaryotes, bbh, the simplest of all non-tree-building methods, can generate reliable results  <cit> , but in plants and animals where gene duplication is more common  <cit> , bbh and other non-tree-building tools can be less accurate  <cit>  due to the presence of multiple genes that are similar to the gene of interest. tree-building-based tools, on the other hand, are considered more accurate since they are both less sensitive to the effects of sometimes-misleading similarity scores  <cit>  and more consistent with the phylogenetic definition of orthology. at the same time, tree-building-based tools are more computationally demanding. one approach to reduce the computational demand of a tree-building-based tool is to reduce the amount of data handled at one time.
+
+here we describe orthored  , a tree-building-based orthology prediction tool designed to be executed on desktop computers with accuracy comparable to other published tree-building-based tools. the computational requirement is minimized by 1) generating a reduced dataset only for each gene of interest, and 2) limiting the number of genes that enter the tree-building step.fig.  <dig> orthored overview. to determine the orthology of the gene of interest, gene of interest is used as a query for a blastp search against the dataset . the blastp hits are screened to generate a reduced dataset . all-v-all blastp is conducted on the reduced dataset  to generate pairwise similarity matrix used by mcl to separate the reduced dataset into clusters . most likely phylogeny is reconstructed for the members within the cluster of interest  and long branches are subsequently removed from the tree . finally, all members of the clade that share the most recent gene duplication event are returned as predicted orthologs 
+
+
+
+
+to test the accuracy of orthored, outputs of orthored were compared with those from two other automated ortholog prediction tools, using three datasets representing fruit flies, plants, and bacteria. the effects of changing parameter settings on the three most time-consuming processes  were also assessed to determine the optimal balance between speed and accuracy. in addition, the runtime for each of these parameter adjustments was measured to assess the impact of these adjustments not only on the output but also on the speed of the analysis.
+
+implementation
+orthored overview
+the framework of orthored is a basic perl script that utilizes published and/or commonly used bioinformatic tools. the program only requires an initial gene dataset  with all genes labeled with their species and a unique id, but information about isoforms  and the outgroup species within the dataset can also be provided.
+
+from within the initial dataset, orthored searches for orthologs for each gene of interest at a time  rather than grouping all genes into orthologous sets at once , as seen for example in orthologid  <cit>  or orthomcl  <cit>  . gene sequence of interest is provided as a single query file in fasta format. all following steps are conducted only within the reduced dataset generated according to the initial one-against-all comparison. this feature of reducing the dataset for the downstream analysis is similar to the pipeline used for building the phylogeny repository phylomedb  <cit> . however, the purpose of this step is different in the two pipelines: the pipeline for phylomedb performs this process on a selected subset of species within the dataset to define the phylogenetic scope and calibrate itself for the downstream analysis. orthored uses all species within the dataset and directly uses the outcome for orthology predictions.
+
+breaking down the enormous task of predicting all orthologies within the initial dataset to a single gene at a time allows orthored to be executed on a desktop computer and, more importantly, this allows the flexibility of predicting orthology for any subset of genes within the dataset that are particularly interesting to the user without analyzing the entire dataset.
+
+by default, orthored conducts blastp searches by using ncbi blast v <dig>   <cit>  with parameter settings optimized for orthology predictions with soft masking and smith-waterman final alignment   <cit> . alternatively, similarity searches can be conducted using ab blast v <dig>   <cit>  or swipe v <dig> . <dig>  <cit> . the default parameters for ab blastp are optimized for less sensitive but faster searches  according to  <cit> . ab blast is implemented as an alternative method because ab blast, compared to ncbi blast, generally allows the user more flexibility in setting search parameters. . swipe is also implemented as another alternative for potentially faster and more accurate similarity search option .
+
+the genes with e-values better than the minimum threshold  in comparisons with the gene of interest  are screened further . by default, a given hit is retained if it meets the minimum level of sequence similarity, which is calculated based on alignment length and % sequence identity  <cit> . alternatively, hits can also be screened based on a user-defined minimum threshold for alignment length and/or % identity.
+
+then, more importantly, an additional parameter, n, is set to limit the number of genes per species passed on to the next step. although the similarity score between a particular gene and the gene of interest is generally correlated with likelihood that it is an ortholog, that particular ortholog may not show the highest similarity or have the best e-value within the genome of another species  <cit> . on the other hand, similarity scores and phylogenetic relatedness should broadly correlate  <cit> . thus, it is unlikely that a given genome will have a large number of non-orthologous genes  that show higher similarities to the gene of interest than the ortholog. therefore, a parameter is implemented that will keep only a number of gene sequences up to n  best hits per species in terms of blast e-values . this permits screening of sequences that should be analyzed further as potential orthologs. the optimal n is gene-specific, but in practice a single n is set for each query file. a query file can contain one or many genes, each with potentially different optimal n. tests for optimizing n for queries with multiple genes are presented in results and strategies further discussed in the discussion. when isoform information for genes is available, only one isoform with the best e-value is kept as a representative of the gene.
+
+next, an all-against-all blastp search with the same parameter settings as the initial similarity search is conducted on the reduced dataset to generate a pairwise similarity score matrix . for any pair within the reduced dataset without a significant level of similarity , a very large value  is set in order to ensure that all pairs will have a value assigned.
+
+because n  is a fixed threshold applied to all species in the dataset, it is possible for genes that are highly unlikely to be orthologous to be present in the reduced dataset. the genes in the reduced dataset are therefore separated into clusters using mcl v14– <dig>  <cit>  to remove such outliers based on the pairwise similarity score matrix generated in the previous step . that being said, because a gene tree is a more accurate criterion for ortholog prediction than similarity scores, the inflation rate of mcl, the parameter that determines the inclusiveness of clusters, by default is set to be the least stringent  to minimize the risk of erroneously removing orthologs at this step.
+
+to prepare for tree-building , a multiple sequence alignment  is generated with all genes in the cluster of interest using mafft v <dig>   <cit>  with the accuracy-oriented parameter setting  by default. however, the speed-oriented parameter setting  is used instead when  <dig> or more sequences are aligned as recommended by mafft. the quality of the msa is ensured by limiting the sequences given to mafft to a small number  of highly similar sequences, which also ensures a quick sequence alignment. based on this msa, the most likely gene tree is reconstructed using raxml v <dig> . <dig>  <cit> . to generate the gene tree as quickly as possible, the topology of the tree is determined first , and the optimal branch lengths are estimated subsequently . the tree is then rooted by a gene of a user-defined outgroup. when multiple genes of an outgroup are present in the tree, then it is rooted using the outgroup gene that results in a sub-tree that includes the gene of interest, but no outgroup gene, and with the largest number of ingroup species . the most distant outgroup gene based on branch length is selected upon a tie. in the highly unlikely event that the two or more outgroup genes are equally distant from the gene of interest, it is selected based on alphanumeric order. when an outgroup is not provided or no outgroup gene is present in the gene tree , the tree is rooted at midpoint. because midpoint rooting may not orient the tree such that the orthologs of the gene of interest form a single clade, it is recommended to use an outgroup for better accuracy.
+
+next, any long external and internal branches  in the generated tree are cut  because the accuracy of the positioning of these long branches can be difficult to assess for both internal  <cit>  and external  <cit>  branches, a difficulty described in other ortholog identification pipelines  <cit> .
+
+finally, the orthologous set of genes for the gene of interest is determined by implementing a part of “diagnostics generator module” of orthologid  <cit>  . this final step determines whether each node in the gene tree is a speciation event or a gene duplication event. traversing the tree from root to tip, at each node it is tested to determine if there is an overlap in the species represented by the genes in each of the sister clades under the node. if any overlap is present, the node is considered a gene duplication event, unless all genes under the node are representing a single species, in which case, the entire clade defined by this node is treated as a single gene with multiple isoforms. this approach accounts for datasets where isoforms are included without being labeled as such. when a given node is determined to be a gene duplication event, all of its ancestral nodes previously determined as speciation events are overwritten as gene duplication events. once the status of all nodes is determined, all members of the daughter clade of the most recent gene duplication event experienced by the gene of interest that includes the gene of interest is returned as a set of predicted orthologs. only the members of this clade are returned as orthologs while others in the tree are discarded. when isoform information for genes is available, all other isoforms of the predicted orthologs within the original dataset are reintroduced as predicted orthologs as well.
+
+experimental datasets
+three datasets  were generated in order to assess the outputs and runtimes of orthored under different parameter settings . all species included in fly were within the genus drosophila except for the outgroup, lutzomyia longipalpis. sequences for fly were obtained from orthodb  <cit>  and included all amino acid sequences from  <dig> closely related species. all species included in plant were within rosids, a clade within angiosperms. vitis vinifera, the most early-divergent among the  <dig> species according to apg iii  <cit> , was selected as the outgroup. sequences for plant were obtained from phytozome v <dig>   <cit>  and included all coding sequences  from  <dig> species. all species included in actino were within phylum actinobacteria. eggerthella lenta was selected as the outgroup  <cit> . sequences for actino were obtained from img  <cit>  and included all cdss from  <dig> species selected according to sen et al.  <cit> .table  <dig> dataset information
+
+drosophila ananassae, d. erecta, d. grimshawi, d. melanogaster, d. mojavensis, d. persimilis, d. pseudoobscur, d. sechellia, d. simulans, d. virilis, d. willistoni, d. yakuba, lutzomyia longipalpis
+arabidopsis thaliana, cucumis sativus, fragaria vesca, glycine max, mallus domestica, manihot esculenta, medicago truncatula, phaseolus vulgaris, populus trichocarpa, prunus persica, vitis vinifera
+lutzomyia longipalpis
+vitis vinifera
+eggerthella lenta
+
+
+
+these three dataset differ significantly in their overall composition. orthology prediction was expected to be most straightforward for fly, containing only closely related species. fly was designed to test 1) how consistent the output of orthored is as compared to other ortholog prediction tools and 2) how changing parameter settings for msa building affects the output of orthored. plant, while having similar number of species as fly, had two aspects that should make orthology prediction more complex than in fly: first, the species included were much more distantly related from each other than in fly, ranging across seven orders. secondly, plant genomes are known for high levels of gene duplication  <cit> . plant was designed to test 1) how consistent the output of orthored is as compared to other ortholog prediction tools and 2) how changing parameter settings for blast and n each affects the output of orthored. actino includes more than six times as many species as fly or plant, and was designed to test the impact on the runtime of orthored of a substantially larger number of species.
+
+all nucleotide sequences of plant and actino were translated into amino acid sequences using a custom perl script. a small fraction of the nucleotide sequences originally collected for the plant and actino datasets  could not be translated reliably due to ambiguous reading frames or premature stop codons. these sequences were removed from the analyses.
+
+comparison of orthored runtime and outputs
+orthored can be executed under different conditions by adjusting parameter settings for each step. in general, adjustments to improve accuracy will have the tradeoff of reduced speed of orthology prediction. therefore, for efficient orthology prediction, the parameters need to be set to achieve the maximum speed possible without a significant loss of accuracy. the three most time-consuming steps in orthored  in the order they appear in orthored are  the initial similarity search,  the generation of the msa , and  the tree-building step. therefore, for each dataset, orthored was executed multiple times using different parameter settings for similarity search , mafft, and n to compare the outputs and runtimes to assess the impact of each adjustment.
+
+the outputs for orthored were also compared with that of two other published orthology prediction tool: orthologid  <cit>  and orthodb  <cit> . these two tools were chosen based on their degree of similarity to orthored. orthologid is a tree-building-based all-at-once approach tool that shares the common final orthology determination step with orthored. on the other hand, orthodb is an example of non-tree-building all-at-once approach tools which also include orthomcl  <cit>  and hamstr  <cit> . orthologid and orthodb thus represent very different orthology prediction methods. for each dataset, only one output generated under the default parameter settings was used for orthologid and orthodb.
+
+for the fly dataset, orthologs were predicted for all drosophila melanogaster genes  under four different conditions: red_s.aln with the default conditions of orthored , red_f.aln for speed-oriented sequence alignment, oid , and odb  . orthodb provided predicted orthology for all genes on their website  <cit> .table  <dig> parameter settings for each orthored execution on each dataset
+
+*n: maximum number of genes per species passed on after the initial similarity search
+
+
+
+
+for plant, orthologs were predicted for all arabidopsis thaliana genes  under nine different conditions: red_n <dig> through red_n <dig> with speed-oriented mafft setting and n ranging from  <dig> to 10; red_ab and red_sw using ab blast or swipe instead of ncbi blast; and oid  . isoform information was available for each a. thaliana cds . for a gene with multiple isoforms, orthored predicted orthology for all isoforms, and the union of the predicted sets of all isoforms was considered the predicted set of orthologs for one gene. orthologid used the longest isoform as a representative to predict orthology for the gene.
+
+for actino, orthologs were predicted for all streptomyces coelicolor genes  under a single condition: red_n <dig> .
+
+for a single gene of interest, the similarity between the outputs under two different conditions was assessed by the % identity of the two sets of predicted orthologs, calculated as the number of genes in the intersection over the number of genes in the union. orthored uses an outgroup to root the gene tree  making it unsuitable for predicting orthologs of the outgroup. therefore, any genes of the selected outgroup were removed from the output comparison. the overall similarity of outputs between different conditions was assessed based on the average % identity of all genes tested, or % genes with % identity above a threshold .
+
+because the runtime on a computing cluster is highly dependent on how heavily the cluster is used, the runtime can be inconsistent from one instance to another. therefore, for each execution of orthored in the output comparison, an independent test of orthored was conducted in parallel with identical parameter settings to measure the runtime. for this,  <dig> d. melanogaster, a. thaliana, or s. coelicolor genes were randomly selected without replacement for each dataset. for each gene, the runtime was measured as total cpu time, using the unix time command. total cpu time was calculated as the sum of user and system cpu time. this runtime test was conducted on a mac pro with os x el capitan v <dig> . <dig> operating system, with  <dig> ghz 6-core intel xeon processor. each runtime test was allocated  <dig> cores for processing.
+
+testing orthology predictions for optimal n for each dataset
+for each of the conditions for orthology prediction tested in fly, plant and actino, the total number of orthologs predicted was counted and the distribution of predicted orthologs according to the initial blastp  e-values  per species  was calculated. for example, a predicted ortholog was ranked  <dig> when this gene had the best e-value within the genome, whereas if there were three other genes with better e-values the ortholog was ranked  <dig>  ncbi blastp e-values generated by step  <dig> of orthored were used for ranking outputs of oid and odb. along with the ranking distribution, the total number of predicted orthologs was also counted.
+
+merging of predicted orthologous groups
+because orthored predicts orthology for each gene of interest independently, predicted orthologous groups are not mutually exclusive. thus, upon predicting orthologies of multiple genes within the dataset, it is possible that a given gene may be predicted as an ortholog of more than one gene of interest.
+
+to assess the degree of overlap across orthologous groups predicted in each dataset, predicted orthologous groups for red_s.aln on fly, red_n <dig> on plant, and red_n <dig> on actino were each merged into non-overlapping groups. we then measured the fraction of merged groups that were identical to at least one of the predicted orthologous groups, and measured the fraction of genes of interest that were within such merged groups.
+
+RESULTS
+comparison of outputs across different conditions
+for the  <dig>  genes of interest tested from the fly dataset, red_s.aln, red_f.aln, oid, and odb predicted a total of  <dig> ,  <dig>   <dig> , and  <dig>  orthologs respectively . outputs of red_s.aln and red_f.aln were  <dig> % identical on average, and  <dig> % of the genes had 100% output identity . outputs of red_s.aln and oid were  <dig> % identical on average and  <dig> % of the genes had 100% output identity . outputs of oid and odb were  <dig> % identical on average and  <dig> % of the genes had 100% output identity . red_s.aln, generated output with 100% identity to either oid or odb for  <dig> % of the genes tested, and with > = 90% identity for  <dig> % of the genes tested .table  <dig> total count of predicted orthologs and distribution of predicted orthologs at each e-value rank under different conditions of ortholog prediction
+
+
+
+fig.  <dig> output comparison between orthored, orthologid, and orthodb. the overall similarities of the outputs in two datasets  generated under different conditions are compared based on the fraction of genes of interest with % identity above a threshold. red_s.aln and red_n <dig>  used orthored, oid  used orthologid, and odb  used orthodb to generate the output
+
+
+
+
+for plant, outputs of red_n5– <dig> became more similar to one another as n was increased: average % identity between red_n <dig> and red_n <dig> was  <dig> % but this steadily increased up to  <dig> % between red_n <dig> and red_n <dig> . the outputs of red_n5– <dig> also became more similar to oid as n increased: average % identity was  <dig> % for red_n <dig> and this steadily increased up to  <dig> % for red_n <dig>  in general, however, the outputs were less similar between orthored and orthologid in plant than in fly.
+
+between the three conditions with different similarity searches, the average % identity was  <dig> % between red_n <dig>  and red_ab ,  <dig> % between red_n <dig> and red_sw , and  <dig> % between red_ab and red_sw . in respect to oid the average % identity for red_n <dig>  red_ab, and red_sw was  <dig> %,  <dig> %, and  <dig> % respectively.
+
+comparison of runtimes across different conditions
+the minimum and median total cpu times were <1 min and <15 min, respectively, under all conditions tested . the maximum time  varied from one condition to another but was <150 min in fly, <210 min in plant, and <790 min in actino. although wall-clock time  varied depending on the overall computer usage, the median wall-clock real time was always <12 min.fig.  <dig> total cpu time for each condition of orthored. each box indicates the total cpu time incurred by different conditions of orthored. the line in the box indicates the median, upper and the lower ends of the box indicate the upper and the lower quartiles. the minimum runtime is indicated by the lowest point on the line extended below the box . the maximum runtime is not indicated
+
+
+
+
+different aligning parameters to msa generation  generated nearly identical results with < <dig>  min difference at minimum, lower quartile, median, and upper quartile. median time of red_ab and red_sw were each  <dig> % and  <dig> % shorter than red_n <dig> with the same n. among the conditions that differed in n , the total cpu time steadily increased as n increased: for each addition of n, the median total cpu time increased between  <dig> – <dig> %, and between red_n <dig> and red_n <dig> the median time increased by  <dig> %.
+
+distribution of orthologs at each e-value rank under different thresholds of n
+for fly,  <dig> % of the predicted orthologs had e-values that were ranked between  <dig> – and  <dig>  by both red_s.aln and red_f.aln, and only  <dig> % of the predicted orthologs were ranked  <dig> . the fraction of orthologs predicted under oid and odb ranked between  <dig> and  <dig> were  <dig> % and  <dig> % respectively .
+
+for plant, red_n <dig> through red_n <dig> showed that the total number of genes identified steadily increased as n was increased. on the other hand, fractions of orthologs represented by the lowest rank steadily decreased from  <dig> % at rank  <dig> for red_n <dig> to  <dig> % at rank  <dig> for red_n <dig>  in both cases, the rate of change became smaller as n increased. for instance, the lowest rank representation dropped from  <dig> % to  <dig> % between red_n <dig> and red_n <dig>  but only reached  <dig> % at red_n <dig> .  <dig> % of the orthologs predicted by oid was ranked  <dig> or lower .
+
+for actino,  <dig> % of the predicted orthologs were ranked  <dig>  and  <dig> % of the predicted orthologs were ranked between  <dig> and  <dig> .
+
+degree of overlap among orthologous groups
+the degree of overlap among the predicted orthologous groups generally correlated with the expected difficulty of orthology prediction: fly, with only closely-related species, had the highest fraction of genes belonging to merged groups that were identical to at least one orthologous group ; actino, with a larger number of more distantly related taxa, showed a lower fraction ; and plant, with distantly-related taxa with known high degree of gene/genome duplications, showed the lowest  . over 90% of the non-overlapping merged groups were identical to at least one orthologous group in all conditions even in red_n <dig> on plant.table  <dig> the degree of overlap among the predicted orthologous groups under each condition
+
+
+1fraction of merged groups that are identical to at least one orthologous group predicted from one gene of interest
+
+
+2fraction of genes of interest that belonged to the merged groups in c
+
+
+
+
+discussion
+orthored generates output comparable to published tools.
+the accuracy of results of any orthology prediction tool ideally would be assessed based on the degree of similarity to the “correct answer” i.e. the true phylogenetic trees for the genes of interest. since the true trees are unknown, we assessed the accuracy of orthored based on the degree of similarity of results to two other commonly used orthology prediction tools, orthodb and orthologid.
+
+orthodb was less stringent than orthologid or orthored , predicting >40% more genes as orthologs than the other two tools tested. the higher average % output identity and fraction of outputs with > = 90% identity indicated that the output of orthored was more similar to that of orthologid than to that of orthodb. moreover, while outputs of orthologid and orthodb had a higher fraction of identical output by  <dig> %, outputs of orthored and orthodb had a higher average % identity by  <dig> %. furthermore, orthored and orthologid generated the most similar pair of outputs. these results indicated that 1) orthored generates results of high similarity to orthologid, and 2) when orthored predicts a given gene as an ortholog but orthologid does not, these genes are usually predicted as orthologs by orthodb.
+
+the highest average % identity of outputs by orthored and orthologid in the plant was  <dig> %, which was substantially lower than  <dig> % in the fly. these findings reflect the substantial difference in the compositions of the two datasets: while fly only included species from the same genus except for the outgroup, plant included species from across seven orders. with greater degree of divergence among the included species, it is expected that different orthology prediction tools will become less consistent. furthermore, plants are particularly known for their high rate of gene duplication  <cit> , which leads to gene families with relatively high sequence similarity among the members, and makes orthology prediction more difficult. this phenomenon was indicated in our tests by a relatively large fraction of predicted orthologs with a low e-value ranking .
+
+optimization of n
+optimization of the value of n requires balancing loss of efficiency  with the risk of false negatives in orthology prediction . as found in the outputs of red_n5– <dig> on plant, lower n resulted in fewer discoveries of orthologs along with lower similarity to oid suggesting lower accuracy. on the other hand, increasing n resulted in increased runtime, and can result in less accurate msa, which leads to less accurate orthology prediction.
+
+we would expect that the exclusion of true orthologs by reducing the value of n could lead to false negatives. at the same time, reducing the value of n could also alter the topology of the resulting tree, which might lead to false positives. to address the impact of false positives relative to the impact of false negatives due to lowering the value of n, we counted the number of false positives/negative orthologous gene predictions of red_n5– <dig> against oid on plant. we found that, as n decreases, the number of false negatives increased whereas false positives decreased . thus the primary risk of lowering the value of n is false negatives rather than false positives.
+
+in the cases of red_s.aln in the fly, red_n <dig> in the plant, and red_n <dig> in the actino, the lowest rank only represented <1%. since it is unlikely that further increasing n will result in a major improvement in finding otherwise missed orthologs  <dig>   <dig>  and  <dig> would be the optimal settings for n in the fly, the plant, and the actino respectively.
+
+the difference in optimal n among the different datasets was consistent with the different degrees of prevalence of gene duplications among the organisms included in the dataset. actino with bacterial species had the optimal n of  <dig> and >92% of the predicted orthologs ranked  <dig>  and fly with only closely related species also had the optimal n of  <dig> and >93% of the predicted orthologs ranked  <dig>  on the other hand, plant, the dataset with the highest expected degree of gene duplication  <cit> , had the largest optimum n.
+
+impact of adjusting blastp, msa, and n on accuracy and time
+the similarity search parameters  can have a significant effect on runtime particularly on larger datasets. in orthored, similarity search is implemented as the initial preliminary screening, and as the basis for mcl clustering. in theory, neither of these processes is particularly sensitive to the absolute values of the similarity searches, and our results confirmed this. we found that the average % identity of red_n <dig>  red_ab, and red_sw with respect to orthologid ranged only by  <dig> % . considering the  <dig> % shorter runtime of red_sw compared to red_n <dig>  the advantage of using swipe as the similarity search tool becomes more significant as the dataset becomes larger.
+
+on the other hand, adjustments on the mafft parameters only had a marginal effect, as shown by the observation that red_s.aln and red_f.aln had very similar outputs and runtimes. the output of red_f.aln was slightly  more similar to both oid and odb than red_s.aln, but this might occur because orthologid uses speed-oriented mafft for aligning over  <dig> sequences at once. in any case, since the accuracy-oriented parameter setting is only recommended with < <dig> sequences, it is unlikely that using speed-oriented parameter settings of red_f.aln in all cases will be preferred over red_s.aln under any scenario.
+
+overlap between orthologous groups
+typically, the orthologous groups predicted by a single execution of an all-at-once approach tool are mutually exclusive. on the other hand, running orthored on large numbers of genes within a dataset can result in non-mutually exclusive orthologous groups as we see based on the fact that the number of non-overlapping merged groups is substantially fewer than the number of orthologous groups predicted by orthored . this difference however does not necessarily reflect a difference in the quality of orthology predictions between an all-at-once approach and a one-at-a-time approach.
+
+the fact that a given gene can be found in multiple orthologous groups by searching from a different gene of interest as a starting point by orthored indicates that the phylogenetic signal is not sufficiently strong to eliminate all but one possibility. in such a case, separating all genes into mutually exclusive orthologous groups by all-at-once approach tools could give the false sense of confidence in its prediction.
+
+future directions
+we found that while the median cpu time for red_n <dig> for the 100-species containing actino was only marginally longer than red_n <dig> for plant, containing  <dig> species, the upper quartile was longer in red_n <dig>  reaching >70 min. this suggests that as the number of species included in the dataset is increased, the time becomes longer. one way to maintain the efficiency of orthored would be to incorporate additional screening methods to reduce the number of sequences entering into the tree-building step. for example, hmmer  <cit>  could be implemented between steps  <dig> and  <dig> as it is used in  <cit>  to generate a gene family profile. hmmer, given a msa and a dataset, will first make a hidden markov model  based on the msa, and then searches for sequences within the dataset that fit the hmm. currently, the parameter for mcl we use is as relaxed as possible to minimize the risk of false negatives. implementation of hmmer after mcl should allow for a more stringent parameter setting for mcl, giving a smaller cluster of interest and subsequently rescuing some genes based on the hmm. however it must be noted that hmmer searches are most effective at detecting sequences with conserved regions such as functional domains. so upon the implementation of hmmer into orthored, the risk of false negatives and the benefit of increased speed need to be balanced.
+
+CONCLUSIONS
+without requiring a high-performance computing cluster, orthored was able to generate results comparable to other published orthology prediction tools with animal , plant , and bacterial  datasets that ranged in species relatedness, prevalence of gene duplication, and number of species.
+
+collecting orthologs is a step required in phylogenetic analyses of gene sequences. a strategy commonly employed in functional genetics is to apply orthology prediction in silico to identify candidates for functionally equivalent genes followed by in vivo confirmation . high-throughput sequencing has already become widely available, and genetic manipulation methods  even for non-model organisms, are being established rapidly. as such, there is now an increasing need for identifying orthologs and/or functional equivalents across the spectrum of organisms.
+
+many of the automated orthology prediction tools currently available are designed to analyze the entire dataset at once. while such tools are powerful and useful for orthology predictions, for example, of an entire genome/transcriptome, large-scale analysis has some limitations for studying a more focused subset of the genome: time is spent predicting orthologies of genes that are not a part of the subset of interest. because orthology prediction is dataset-specific, loss in time can be exacerbated each time any sequence included in the dataset is updated, requiring the orthology predictions to be repeated.
+
+in addition to accuracy as an orthology prediction tool, orthored offers flexibility: depending on the specific experimental design, orthored can be executed on a single gene of interest, on a subset of genes in a genome, or on all the genes in the genome. this flexibility allowing the user to only analyze the genes of interest, in turn, reducing the time for analysis. moreover, since orthored does not require an often costly high-performance computing cluster, orthology predictions for focused portions of high-throughput sequencing data are accessible to a wide range of researchers.
+
+additional files
+
+additional file 1: table s <dig>  list of genomes used for each dataset. 
+
+ 
+additional file 2: table s <dig>  number of false positive and negative gene predictions of each condition against oid on plant. 
+
+ 
+
+
+abbreviations
+bbhbidirectional best hit
+
+cdscoding sequences
+
+cpucentral processing unit
+
+hmmhidden markov model
+
+msamultiple sequence alignment
+
+odborthodb
+
+oidorthologid
+
+electronic supplementary material
+
+the online version of this article  contains supplementary material, which is available to authorized users.
+

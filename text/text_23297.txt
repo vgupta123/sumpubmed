@@ -1,0 +1,146 @@
+BACKGROUND
+as the high-throughput sequencing technology develops, using rna-seq data to estimate gene expression and isoform expression becomes an important task. there have been some different methods to estimate expression level from rna-seq data. mortazavi et al. used a concept called rpkm to measure the gene expression
+ <cit> , which had been widely used when alternative splicing is not considered. jiang & wong developed a method to estimate the abundance of transcripts of alternative spliced genes
+ <cit> . this can be called isoform expression estimation. as it is now known that most human genes can have alternative splicing, estimating isoform expression is becoming a key question in rna-seq study. the main idea of jiang and wong’s method is to model the sequencing procedure as a random sampling process, and to infer the best estimation of isoform expression by maximizing a likelihood function. however, the method is based on the assumption that reads are uniformly sampled from all transcripts, while many experiments have shown that the distribution of real sequencing reads is not uniform. instead, read distribution usually has some position-related biases and context-related biases. based on such observations, people developed some new methods to deal with different types of biases
+ <cit> . in our experiments, we observed that position-related biases are a major cause of non-uniform distribution and has the most significant influence on expression estimation. we have developed a method to deal with such position-related biases using nonparametric models
+ <cit> . the nonparametric nature of the model allows the method to be capable for describing different types of read distributions. experiments on both simulated data and real data showed that the method can calibrate non-uniform distribution well and outperforms other methods
+ <cit> . however, the method was implemented with a set of experimental codes that cannot be scaled up for applications on large rna-seq data and this hindered the availability of the method for public use. in this paper, we developed a software nurd as an efficient implementation of the method under c++ using a binary interval search algorithm. the software can handle large-scale data and have shown advantages in both memory use and running time comparing to some other popular software.
+
+implementation
+brief introduction to wu et al’s method
+wu et al’s method is based on the original method by jiang & wong
+ <cit> . the original method assumes that the reads are uniformly sampled from the whole transcripts and models the reads count on a specific exon as a poisson random variable with parameter
+λj=ljw∑i=1maijθi. here, m is the number of isoforms of the specific gene, θi is the expression level of the i-th isoform, w is the total reads count in this sample, lj is the length of the j-th exon and  is a matrix that indicates the gene structure, with aij =  <dig> or  <dig> indicating that exon j is included or excluded in isoform i. thus the likelihood function of isoform expression based on the observation of j-th exon is
+lΘ|xj=e−λjλjxjxj!. assuming that exons are independent, we can get the joint log likelihood function of the whole gene as:
+
+  loglΘ|x <dig> x <dig> ...,xn=−w∑j=1n∑i=1mljaijθi+∑j=1nxjlogljw∑i=1maijθi−∑j=1nlogxj! 
+
+the setting of aij =  <dig> for all exons of an isoform implies that reads are distributed uniformly across the whole isoform. to compensate for non-uniform distribution, wu et al’s method takes nonparametric models of read distribution across an isoform
+ <cit> . it can deal with different kinds of read distribution. the nonparametric read models used include a global bias curve  for all genes and a local bias curve  for each gene. the gbc is used to capture the general trend of non-uniform read distribution with regard to the relative position in a gene, shared by all genes in the dataset, and lbc reflects the distribution pattern specific to each gene. methods for estimating the gbc and lbc curves are described in
+ <cit> . based on gbc curve and lbc curves, we get two corrected gene structure matrices: ij and ij, short for global bias matrix and local bias matrix respectively. the corrected structure matrices are weighted indicator matrices, instead of the 0– <dig> indicator matrices . weights in these two matrices reflect the bias tendency of corresponding exons in this gene. we mix these two matrices as the bias-corrected gene structure which is denoted as :
+
+  bij=gbmijα+lbmij1−α 
+
+where α is a weight parameter indicating the relative importance of ij matrix verse the ij matrix in the final gene structure matrix.
+
+by replacing the 0– <dig> indicator gene structure matrix  with the weighted gene structure matrix , we re-define the log-likelihood function as:
+
+  loglΘ|x <dig> x <dig> ...,xn=−w∑j=1n∑i=1mljbijθi+∑j=1nxjlogljw∑i=1mbijθi−∑j=1nlogxj! 
+
+further, we can get the gradient of this log-likelihood function by taking derivates for each θi:
+
+  ∂loglΘ|x <dig> x <dig> ...,xn∂θi=−w∑j=1nljbij+∑j=1nxjbij∑i=1mbijθi 
+
+the isoform expression levels can be estimated by maximizing this log-likelihood function. the log-likelihood function has been proved concave in previous work
+ <cit>  and global optimum can be found by proper optimization algorithm.
+
+procedures of nurd
+the input data of our nurd are the read-mapping file and gene annotation file. the output is isoform expression of each gene. figure 
+ <dig> shows the detailed flowchart of the algorithm.
+
+using nurd to estimate isoform expression typically involves the following five steps.
+
+ <dig> read-mapping. this procedure is not a part of our algorithm, but is a preparation step for it. there have been many read-mapping tools published, such as bowtie
+ <cit>  or tophat
+ <cit> . the current implementation of nurd requires that the reads mapping file be in the sam format.
+
+ <dig> gene annotation. gene annotation file can be downloaded from a database or assembled by another software such as cufflinks
+ <cit> . the current implementation of nurd requires that the gene annotation file be in the gtf format or refflat format. we extract the basic information of all genes from the gene annotation file, including gene names, number of isoforms and isoform names, number of exons of each gene, length of each exon, and gene structure. gene structure information tells which exons are contained by each isoform.
+
+ <dig> reads counts. using reads mapping file and gene annotation file, nurd gets read counts for all exons of all genes in the annotation file.
+
+ <dig> log-likelihood function. based on the information we get in step  <dig> and step  <dig>  nurd calculates the gbc of the whole data, lbc for each gene and the bias-corrected gene structure matrix, and furthermore get the corrected log-likelihood function.
+
+ <dig> expression estimation. after the log-likelihood functions are calculated, the major task for nurd is to infer the best expression estimations that maximize the log-likelihood functions. the optimization algorithm we use here is the binary search algorithm, which is very effective and widely used in dealing with search problem
+ <cit> .
+
+implementation of the nurd software
+the key step for the efficient implementation of the method is the optimization of the log-likelihood functions for all genes and isoforms. we use the binary interval search technique for the optimization.
+
+binary search for single-isoform genes
+first, we will illustrate how to use the binary interval search technique to optimize the log-likelihood function if one gene has only one isoform.
+
+the log-likelihood function has been proved to be concave in our previous work
+ <cit> , so the optimization problem can be transformed to finding the point where the gradient function is equal to zero. since the objective function is concave and the gene has only one isoform, the corresponding gradient function is a univariate monotone function, in which situation binary interval search can be used. obviously, the log-likelihood function is a real number function and the search space is a real number interval, so the objective of the algorithm is to find a very short interval to cover the optimum point. we initialize the search algorithm with a large enough interval and after each step of binary search algorithm, the length of the interval will shrink to half of the previous interval’s length. as the algorithm goes on, the length of interval will exponentially decrease. as a result, given the precision limit ϵ which is a small real number, the running time complexity of finding the interval covering the optimum point with the gradient equal to zero is o) .
+
+gradient ascending algorithm
+ <cit>  is another technique that is widely used in optimization problem. the binary search algorithm has advantages over the gradient ascending algorithm: binary search algorithm guarantees to converge to the optimum point in o), which is really a short time and is fixed given the precision ϵ, while time complexity of gradient ascending algorithm usually depends on step length and the shape of the optimized function. if the step size is not proper, it can be sometime difficult for gradient ascending algorithms to converge. binary search algorithm doesn’t need to find the proper step size. in some kind of gradient ascending algorithm, there need be another procedure called line search for finding a proper step size.
+
+a limitation of binary search compared with gradient ascending algorithm is that the binary search is not as general as the latter for it requires the optimized function to be concave. this is not a problem for the problem in nurd as the log-likelihood function in nurd has been proved concave.
+
+coordinate binary search for multi-isoform genes
+because binary search is a 1-dimension search technique, it can only handle the optimization problem of univariate functions. when estimating the expressions of multi-isoform genes, the objective function will be a multivariate function and we need to use coordinate binary search technique. the strategy of coordinate binary algorithm is described in the following pseudo code:
+
+in the innermost loop, we hold all the expressions of isoforms fixed except for some θi and the log-likelihood function degenerates to a 1-dimension function. in each step of innermost loop, we maximize the log-likelihood with respect to θi, given the expressions of other isoforms. because the log-likelihood function is concave, the 1-dimension objective function is also concave, in which case binary search is suitable.
+
+the pseudo code clearly shows that after each step of the innermost loop, the log-likelihood function will ascend in some degree. as the log-likelihood function is concave, the global optimum will be found after a number of iterations.
+
+the coordinate optimization in 2-dimension case is illustrated in figure 
+ <dig> 
+
+usage of the software
+nurd is implemented in c++ and the runtime environment is the linux systems. the source code is available for free for academic use at http://bioinfo.au.tsinghua.edu.cn/software/nurd/. after getting the source code, one can compile it and get the executable file by simply using make command. the software can be efficiently executed with command line inputs. the acceptable gene annotation file format is gtf and refflat. the acceptable read mapping file is sam. short reads should be mapped to genome reference.
+
+the current implementation has not taken the characteristic of paired-end sequencing into consideration, which means nurd regards paired reads as two independent single end reads.
+
+RESULTS
+in this section, we will mainly focus on the performance of the nurd implementation in terms of accuracy of estimation, computing speed and memory requirement by comparing it with other three published isoform expression estimation related tools. cufflinks
+ <cit>  is a widely used tool in rna-seq data analysis. it can be used to estimate isoform level expression and assemble the new transcripts based on the rna-seq reads. in this manuscript, we will only consider the expression estimation function of cufflinks for the consideration of fairness of the comparison between different tools. cufflinks offers an option –g to estimate expression without assembling the transcripts. cufflinks can also do bias correction if option –b is specified. rsem
+ <cit>  is another published expression estimation related tool. rsem is based on a generative model and estimate transcripts’ expression by em algorithm. when running experiments on rsem, we will only consider the time and space complexity of parsing reads mapping file and em algorithm, i.e. the sub-tools named rsem-parse-alignments and rsem-run-em of rsem, which are the most important parts of this tool when estimating the isoforms’ expression. furthermore, we don’t specify the option of --calc-ci and no confidence interval is estimated. express
+ <cit>  is a recently published tool to estimate isoform level expression with rna-seq data. it’s based on online em algorithm, which processes data one fragment at a time.
+
+comparing the estimation accuracy on simulated data
+a systematic comparison with existing methods on the accuracy of estimating isoform expression has been conducted in wu et al.
+ <cit>  that presented the non-parametric method for correcting non-uniform read distribution. significant advantages over the compared methods have been observed. however, some available tools have been updated since then and some of them also have taken non-uniform distriubion into consideration. therefore, we further conducted experiments to compare the estimation accuracy of nurd with other recently proposed or updated tools on a set of simulated datasets. the simulations were done with the software flux simulator
+ <cit>  and the simulated datasets are short read sequences in fastq format. we simulated different sequencing depths, with single-end reads of the length 75 bp sampled from genes of the human genome. both reference and annotation are from ucsc’s human database . we choose all genes on chromosome  <dig> to generate the simulated data. nurd and cufflinks require the reads be mapped to genome reference, while rsem and express require the reads be mapped to transcriptome reference. therefore we mapped the reads to both the reference genome and transcriptome.
+
+the measurement of accuracy we use is major isoform recovery rate 
+ <cit> . mirr is defined as the percentage of genes whose major isoforms are correctly identified and it’s a robust measurement of the accuracy of some estimated result. higher mirr indicates the higher accuracy of estimation. to simplify the comparison, we only focus on the genes on chromosome  <dig> annotated with two alternative isoforms. we also filter out the genes that share some common exon regions with other genes. there are  <dig> genes used in total to compare the mirr of the different tools. the true expression levels in the simulation data can be found in profile  file generated by the flux simulator.
+
+the sequencing depth is defined as the total number of reads generated by software flux simulator. the sequencing depths of our simulating experiments range from  <dig>  million reads to  <dig> million reads sampled from chromosome  <dig>  which covers the typical sequencing depths in current rna-seq research.
+
+figure 
+ <dig> summaries the accuracies of the compared tools on the simulated data. we can see that the accuracy of rsem, nurd and cufflinks are very close with each other. all of them perform better when the sequencing is deeper. express does not perform well using the default parameters. by specifying express’s option –b with  <dig> or  <dig>  which will cause the additional batch em rounds, the accuracy becomes closer to those of the other methods at moderate sequencing depths, but the performance degrades when the sequencing depth is higher. also using the –b  <dig> or  <dig> option causes the running time to rise to about ten or twenty times of that with the default option . although there’s a significant improvement by specifying the –b  <dig> option when compared with the accuracy with default option, the further improvement by specifying the –b  <dig> option is small.
+
+express: results with the default parameters.
+
+express*: results by specifying option –b with  <dig> 
+
+express**: results by specifying option –b with  <dig> 
+
+comparing running time and memory usage on real data
+to compare the running time and memory usage of different tools, we conduct some experiments on three real datasets with different sequencing depths. the first data set is an early rna-seq data set published by marioni et al.
+ <cit>  . we refer it as the marioni data for short. it contains the least and shortest reads among the three datasets. there are about  <dig>  m single-end reads of 36 bp length. the second data set is referred as the yale data , which was submitted by yale center for genomic analysis,  <dig>  we call this data as yale data for short. it represents a moderate scale of current rna-seq data. there are about 39 m single-end reads of 74 bp. the largest data set is an encode data with about 213 m paired-end reads of 76 bp . this data was granted by gingeras, cshl,  <dig>  we call this data as encode data for short.
+
+both cufflinks and rsem support multi-threads computation, while nurd does not support in current version of implementation. so we will only consider the single-thread computational mode in our experiments. express will automatically compute in multi-thread mode and the its running time is somehow incomparable with the other three tools. if the computer has only one core, the express’s running time may be longer than the experiments in this manuscript. all the experiments are conducted on an 8-core  <dig> ghz linux server with a 32gb ram.
+
+table 
+ <dig> summarizes the running time and memory usage of the compared software on the three datasets. we can see the advantages of nurd over the other three tools on both running time and memory usage are significant. this is partially because that the other three tools are all based on the em algorithm, which usually requires a number of iterations between e-step and m-step. each m-step alone needs to solve an optimization problem whose complexity can be comparable with the optimization problem in nurd. besides, both cufflinks and express estimate the confidence interval of isoform expression along with point estimation. cufflinks adopts importance sampling from posterior distribution to do confidence interval estimation, which is usually very time-consuming.
+
+the main reason that nurd consume much less memory than the other three tools is that nurd estimate isoform expression based on the read counts in each exon of each gene. read counts compress the information of large mapping file into a small space which is only slightly larger than the corresponding annotation information. the computation based on read counts usually can save a lot of running time and consumed memory. the procedure of nurd mainly consists of following three steps: parsing the annotation file, parsing the read-mapping file and expression estimation. the running time and memory usage of the first and last steps roughly scales linearly with the annotation file size, while the time spent on the second step scales linearly only with the number of reads. the memory usage in expression estimation will not increase as the reads number grows, because nurd is based on read counting in exons and the memory usage only scales linearly with the annotation file size. typically, the total time will increase roughly as a linearly function of the number of reads since rna-seq produce more and more short reads and the time spent on reads parsing will dominant the total running time.
+
+CONCLUSIONS
+we developed an efficient and robust implementation of wu et al’s algorithm. it takes the nonparametric read distributions into consideration to improve the accuracy of isoform expression estimation. experiments on simulated and real datasets have shown that nurd performs one of the best among the compared tools in terms estimation accuracy, and has significant advantage on computational performance. if one wants to get expression estimating from rna-seq data both accurately and quickly, nurd could be a competitive alternative.
+
+availability and requirements
+project name: nurd
+
+project home page:http://bioinfo.au.tsinghua.edu.cn/software/nurd/.
+
+operating system: linux
+
+programming language: c++
+
+license: freeware
+
+any restrictions to use by non-academics: none
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+xz designed the work. xm wrote the software and conducted the experiments. xm and xz analyzed the results and wrote the manuscript. both authors read and approved the final manuscript.
+
+authors’ information
+xm, graduate student of department of automation, tsinghua university, beijing  <dig>  china. xz, ph.d., professor of pattern recognition and bioinformatics. director of bioinformatics division, tnlist. deputy director of moe key laboratory of bioinformatics. department of automation, tsinghua university, beijing  <dig>  china.
+

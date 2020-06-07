@@ -1,0 +1,137 @@
+BACKGROUND
+a rapid increase in data generation by recent high-throughput acquisition technologies for genomics, transcriptomics and metabolomics raises new challenges in data handling and analysis. data warehouses containing petabytes-worth of biological data are increasingly common  <cit> . at this scale, routine tasks of data management such as storage, backup, transfer and synchronization of files become increasingly problematic.
+
+for example, a typical next-generation sequencer, such as the illumina genome analyzer ii system, produces approximately  <dig> terabyte of data per single ten-day-long run, which must be moved from the capture workstation to the analysis resource  <cit> . other systems have similar data yields. the transfer of one terabyte over a gigabit ethernet network connection takes more than two hours. a more typical connection of 10- <dig> mbit, like ones between geographically distant universities, requires between one and ten days to complete the transfer, assuming there is no other use of the network.
+
+a common usage pattern is to replicate file collections at multiple locations for mirroring and backups, therefore files are moved around to keep copies synchronised. a number of techniques exist for performing file synchronization in a smart manner, avoiding transfers whenever the files are proven to be identical on both ends  <cit> .
+
+with these methods, file similarity is tested by calculating a hash value over the full file using a particular algorithm. this hash value is a number, typically sized between  <dig> and  <dig> bits, such that the chances of obtaining the same hash value for two distinct files - the situation referred to as a collision - are negligibly small, on the order of 2- <dig> to 2- <dig>  this way, hash values act like a fingerprinting technique, which allows to compare files at two sites without actually transferring them.
+
+however, with data volumes exceeding terabytes, even scanning the files to compute conventional hashes or fingerprints is already expensive. indeed, the time required to scan a terabyte of data is about  <dig> minutes even for a modern high-speed 6gbps drive. the situation is made worse by the fact that in many data centers disks are a shared resource. consequently, a file synchronization method that is based on full file access can be intolerably slow for this setting.
+
+there are ways of alleviating the problem by storing the precomputed hashes together with data files or tracking file changes on a system level. however, as of today, not many public data warehouses do it consistently. moreover, biological data sets are often gathered by independent authorities, such as array express  <cit>  and the ncbi gene expression omnibus   <cit> . as a result, these collections may contain a number of files with equal content that bear different filenames, or, contrarily, have equal filenames, but differ in content. if file fingerprinting is not supported by download servers, then any third party willing to download a consistent union of all the files has no other choice but to download all the files every time, even if many of them later turn out to be duplicates.
+
+as a solution, we offer a new hashing algorithm, probabilistic fast file fingerprinting , that computes file fingerprints by sampling only a few bytes from the file in a pseudorandom fashion. this makes on-demand hashing tractable. most importantly, it can be applied over the network to quickly obtain hashes of files stored in remote third-party warehouses.
+
+although our approach might seem unorthodox, we demonstrate in the following sections that due to inherent variability in large-scale biological data, the risk of false positives due to sampling is negligible. in addition, we measure the performance of our approach on several storage and data access technologies. we discover that the performance gains due to sampling can vary considerably depending on the underlying technology. while pfff outperforms conventional hashing for most file sizes, when used via web and on flash storage, for hashing over the nfs network protocol, the benefits surface only with strict variability thresholds or at very large file sizes.
+
+methods
+standard file fingerprinting algorithms
+hashing is a common method to speed up file comparison. a hash function compresses files into short digests  that are much easier to compare. if two fingerprints are different, the corresponding files are different, and whenever the fingerprints are the same, the files are the same, except for a negligibly small probability of a collision, i.e., two different files having the same fingerprint.
+
+hash functions can be divided into two classes: deterministic and probabilistic. a deterministic hash function is simply a fixed algorithm f that maps a file to its fingerprint:
+
+ f:m→{ <dig> }ℓ, 
+
+where m  is the space of all possible files of interest and ℓ is the length of the hash. examples are the well-known md <dig>  <cit>  or sha- <dig>  <cit>  algorithms. as the number of possible fingerprints is finite and the number of possible files is, in principle, infinite, there may exist infinitely many files with colliding fingerprints. thus there is no formal guarantee that for any given pair of files deterministic hashes would only collide with a negligible probability. still, finding collisions for cryptographic hash functions such as sha- <dig> is believed to be extremely difficult, and hence the probability of accidental collisions is negligible for all practical purposes  <cit> .
+
+a probabilistic hashing scheme is not a single hash function but rather a family of functions
+
+ f={fk:m→{ <dig> }ℓ|k∈k}, 
+
+where k  is the key space. such a function family is useful in file fingerprinting if for any two fixed files x <dig> x2∈m, and a randomly selected key k, the probability of a collision is bounded by a small number εc:
+
+ pr≤εc. 
+
+function families that satisfy this condition are usually referred to as εc-almost universal. efficient algorithms for such universal hash functions have been known for decades. see  <cit>  for further details.
+
+inherent variability of biological data
+due to long research history, standard file fingerprinting methods have reached perfection and it is extremely difficult to outperform them if no additional assumptions can be made about the data. however, biological data collections are quite specific. in particular, the situation when two large data files meaningfully differ in only a few bits is very unlikely in practice. empirical examination of large repositories of biological data confirms that whenever two differently named files coincide in more than 20% of bytes, they are either misformattings of the same data, or may be treated as equivalent for the purposes of most large-scale analyses. for compressed data files the similarity bound is as large as 90%. see results for further details.
+
+this observation can be postulated as the δ-variability assumption. assume that each file is represented as a sequence of blocks, e.g. bytes. then a data collection satisfies δ-variability assumption if any two distinct files of the same length x =  and y =  differ at least in δ-fraction of the blocks:
+
+ |{i:xi≠yi}|≥δm. 
+
+new file fingerprinting method
+explicit use of data variability is the key to more efficient hashing. let x and y be two files of length m satisfying the δ-variability assumption. now, if we sample uniformly with replacement ℓ indices i <dig>  . . . , iℓ ∈ { <dig> , . . . , m}, then the probability that all the corresponding blocks in two files coincide  is bounded from above:
+
+ εs=pr≤ℓ. 
+
+more generally, for any collection of n distinct files that satisfies the δ-variability assumption, the probability that a sample of ℓ blocks coincides for at least one pair of files is bounded by:
+
+ εfail=pr≤ <dig> nεs. 
+
+for instance, if the variability threshold is δ =  <dig>  and we sample  <dig> random blocks, a sampling collision for a single pair of files may emerge with probability εs ≤ 2- <dig>  for a set of  <dig> files, some collision occurs with probability εfail ≤  <dig> · 10- <dig>  which is comparable to the probability of a hardware failure.
+
+in general, any desired upper bound for collision probability εfail can be achieved with
+
+  ℓ≥log+2logn-log 
+
+samples. observe that ℓ does not depend on the file size. also note that ℓ scales logarithmically with 1/εfail and n, which means that improvements to the desired failure probability εfail and the number of files n only moderately increase the required sample size.
+
+samples x ^=xi <dig> ..xiℓ and ŷ=yi <dig> ..yiℓ do not have to be compared directly. instead, we can further compress them by some universal hashing scheme f={fk} and compare fk and fk. as a result, the probability of collisions increases, because with some probability fk=fk even if x ^≠ŷ. however, if f  is εc-almost universal, this probability is bounded by εc and consequently the overall probability of a single collision is only marginally increased:
+
+ pr≤εs+εc. 
+
+finally, note that all random bits needed to generate indices i <dig>  . . . , iℓ and the key k can be replaced with the output of a pseudorandom number generator. in practice, any sufficiently complex pseudorandom generator will be adequate. we choose to use the fast and currently widely popular mersenne twister algorithm  <cit>  in our implementation.
+
+RESULTS
+variability in biological data
+the cornerstone of our new hashing algorithm is the assumption that any two files in a biological data collection can either be treated as identical or necessarily differ in at least a δ-fraction of places. to study to what extent this variability assumption holds for biological data, we tested several kinds of common biological datasets, including both dna sequence and tabular numeric data, both in compressed and uncompressed forms .
+
+δ
+measurements of δ-variability in several biological datasets. exact description of the experiment is available in the supplementary material online  <cit> .
+
+for each dataset we found the byte-wise most similar pair of files, ignoring misnamings and differences in file sizes. the reported δ is the variability metric for this best pair . exact details of this experiment as well as the data files are provided in the supplementary text online  <cit> .
+
+from the results we see that for most datasets, δ is at least  <dig> , and for the majority of compressed datasets δ is at least  <dig> . there seem to be some notable exceptions, however: the e61/fa, gpl570/cel, gpl570/cel.gz, bioc <dig> /bsgenome/u datasets have at least a single pair of highly similar files. to better understand the implications of this result we examined the corresponding pairs manually . manual examination showed that for the non-dna data used in our experiments, all cases of similar file pairs are instances of misformattings of the same raw data, which are irrelevant from the point of view of data analysis. in the case of dna data, there were examples of a few pairs of dna sequences which, when unpacked, are highly similar, as they correspond to different haplotypes or genome assemblies of the same organism.
+
+the table lists the suspiciously similar pairs of files from the studied datasets.
+
+those observations largely confirm the assumption of the wide applicability of pfff hashing in the context of biological data. care should be taken in the case of datasets containing uncompressed genome sequences with minor variations, when those variations are key to the analysis. in such situations it makes more sense to rely on consistent file naming, conventional hashing, or, best of all, compressed representation of the variations. as we can see in table  <dig> even plain gzip compression is sufficient to ensure high δ-variability. based on our measurements, we suggest δ =  <dig>  as a reasonable choice for datasets consisting of compressed files and δ =  <dig>  as a safe choice for general-purpose pfff-hashing. substituting εfail = 2- <dig> and n =  <dig> into equation  we obtain that for δ =  <dig> , a sample size of just ℓ =  <dig> blocks guarantees negligible probability of collisions. for δ =  <dig>  the guarantees are satisfied by ℓ =  <dig> 
+
+algorithm performance
+to compare pfff to conventional hashing we compared the runtime of our algorithm to the  popular md <dig> hashing algorithm in a variety of settings: hashing over http and nfs network protocols, hashing on a local ssd  drive and on a portable usb hard disk. we should note that the choice of md <dig> as the baseline is fairly arbitrary, as the hashing time is heavily dominated by i/o rather than actual hash value calculations.
+
+in our experiments we considered the values of ℓ =  <dig> and ℓ =  <dig>  corresponding to the two common situations highlighted in the previous section. results are presented in figure  <dig> and in the supplementary text  <cit> . several interesting remarks are in order.
+
+performance of hashing via network
+as one might expect, use of pfff over http outperforms conventional md <dig> hashing for any file size . the reason lies in the fact that http protocol supports range queries  <cit> . this allows the client to make a single request demanding specifically those bytes which are necessary to compute the pfff hash. this is much more efficient than a complete file download performed in the case of conventional hashing.
+
+another network protocol, nfs, however, demonstrates a different result. contrary to http, in case of nfs each of the samples has to be queried using a separate request. as a result, network latency starts dominating the processing time and in the case of ℓ =  <dig>  pfff hashing is actually slower than straightforward file scan for file sizes up to about 500mb . of course, as file size grows larger, the timing of md <dig> hashing continues to increase linearly while pfff time stays constant, but for practical purposes of contemporary data analysis we must conclude that pfff is not useful over nfs, not at least with the "safe" ℓ =  <dig> setting.
+
+performance on rotational and solid-state media
+random access to data on hard disk  and solid-state  drives does not come for free, as we can observe in the two rightmost panels of figure  <dig>  for file sizes up to about 10mb, timings of 325-sample pfff are no better than that of a complete file scan. for larger files, pfff becomes beneficial, but the situations in the case of ssd and hdd storage differ slightly. for ssd storage, the timing characteristic of pfff flattens out fairly quickly . for a rotational hard drive, however, timing continues to grow slowly with file size until for ℓ =  <dig> it plateaus somewhere around  <dig>  seconds for file sizes of 200mb or larger.
+
+the main reason for this effect lies in the operation of a rotational drive. on such drives, data is accessed via continuously rotating magnetic heads reading data off tracks. for smaller files, multiple pfff samples can often happen to be located on the same track and thus read within a single revolution of the disk. as file size becomes large enough, however, each byte request will typically require a track switch followed by a seek operation. such an operation requires, on average, half a revolution. as the time per revolution for a 5400rpm drive is approximately 11ms, randomly accessing  <dig> samples requires about  <dig>  seconds. our actual measured time is just slightly larger as it also includes file system access and usb communication overhead.
+
+in general, assuming that a typical rotational hard drive can read as much as  <dig> m of data in a single revolution, we can estimate that for sufficiently large files, an ℓ-sample pfff hash computation requires approximately as much time as a full scan of a  <dig> ℓ-megabyte file.
+
+note that we observe the same effect in our http experiment for ℓ =  <dig>  due to the fact that the http server was also using a hdd backend.
+
+this observation limits the usefulness of pfff for rotational media to some extent. the situation may be alleviated by using a small number of large blocks instead of a large number of single bytes in pfff hashing. in fact, our measurements confirm that among all the files in our datasets except for uncompressed haplotype variations, no two distinct files  share even a single common block of size  <dig> m, which means that δ for such a large block size is close to  <dig> 
+
+application in duplicate detection
+an interesting alternative application for pfff is fast detection of unwanted duplicates or format errors in large scientific data warehouses. intuitively, if two distinct files yield the same pfff hash value then they are either identical or highly similar and thus deserve further investigation.
+
+more formally, we can regard duplicate detection as a classical statistical hypothesis testing problem, where the null hypothesis states that all the n files in a data warehouse satisfy the δ-variability condition. we can now fix εfail =  <dig>  , compute the corresponding ℓ value using equation  and apply pfff with this value of ℓ to all files in the warehouse. any hash collisions can now be regarded as evidence, rejecting the null hypothesis.
+
+to provide a more specific example, consider the gpl570/cel.gz dataset from the geo warehouse, listed in table  <dig>  considering that it consists of gzip-compressed files we can postulate a true δ-variability between meaningfully distinct files of at least  <dig> . substituting δ =  <dig> , n =  <dig>  εfail =  <dig>  into equation  we obtain ℓ ≈  <dig>  having applied pfff with ℓ =  <dig> on the files of the dataset we discovered  <dig> groups of equal or equivalent files, the largest of them comprising  <dig> files. the total volume of redundant files was more than  <dig> gigabytes, unnecessarily hogging more than 16% of the dataset space!
+
+implementation details
+the implementation of our algorithm is available as an open-source tool pfff available for download at http://biit.cs.ut.ee/pfff. besides the basic probabilistic hash function, the tool provides several additional convenience features, such as the ability to include file headers and file size in the hash. the whole package is available under the open source bsd license, both as as stand alone tool and a c library.
+
+discussion
+the main requisite for pfff is that the data to be analysed must satisfy the variability assumption. biological data sets are likely to satisfy this requirement for two reasons. first, there is inherent variability in the biological systems - no two cells are identical. secondly, even if the measurements are taken from the same cell at the same time point, the complicated measurement procedures result in sufficient amount of measurement errors. it is highly unlikely to obtain exactly the same results in two different experiments. nonetheless, situations are possible, where the level of variability is rather low. for instance, raw sequencing data of individuals has low variance, as only 2-5% of base pairs differ from the reference sequence. in such cases, it is normally more advantageous to store and transfer differences  to save the storage space and network load. such compression increases variability and enables the application of pfff. other file compression techniques  have roughly the same effect, as they remove repeating patterns that are shared over files.
+
+in addition, pfff's reliability may be boosted to near certainty for all practical purposes by including into the fingerprint the size of the file and the first megabyte or so of data. indeed, in most file formats the header usually contains most of the important identifying information.
+
+in our experiments we discovered that despite the theoretical guarantees of constant runtime for pfff, several practical aspects, such as network latency, rotational operation of hard disks and sequential access optimizations implemented on the operating system level , may limit the advantages of the approach over conventional hashing. we observed that the benefits of pfff hashing are strongest when data must be accessed over http or when ssd storage is involved. in other contexts, application of pfff requires further assumptions in order to provide significant advantages.
+
+in particular, for very large files  pfff is nearly always meaningful. alternatively, higher δ-variability in the data allows to reduce the ℓ parameter, drastically reducing the number of requests. as we noted, δ =  <dig>  and the corresponding ℓ =  <dig> are meaningful settings for collections of compressed files.
+
+higher δ-variability can also often be assumed by increasing block size. moreover, for rotational storage, meaningful block sizes are anyway on the order  <dig>  megabytes, as this is the the chunk of data read by the disk during a single revolution.
+
+finally, note that the need for our method would be greatly diminished if the prominent warehouses agreed on publishing deterministic hashes together with the data files. unfortunately, it may still take a few years before such agreement emerges. after that, the pfff hash could still provide a useful fallback mechanism.
+
+CONCLUSIONS
+we have proposed a specially tailored method for fingerprinting biological data files, which can significantly reduce consumption of critical resources in several common usage patterns of big data analysis workflows. our pfff algorithm allows for rapid checking of equivalence of large files acquired from biological samples with little computational overhead, thus possibly reducing the number of files read and transferred between and within data centers.
+
+the application of pfff is not limited to biological data. indeed, probabilistic fingerprinting applies to any data with high variability. this includes, in particular, data that contains noisy measurements, such as scientific data in astronomy or particle physics, as well as sound and video files.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+pp conceived the idea of the approach and drafted the manuscript. sl developed the idea theoretically and helped draft the manuscript. kt developed the idea theoretically, implemented the algorithm, performed experiments, prepared figures and supplementaries, and wrote the final manuscript. gs and jv participated in the coordination of the study and helped draft the manuscript. all authors read and approved the final manuscript.
+

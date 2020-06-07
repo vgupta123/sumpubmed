@@ -1,0 +1,205 @@
+BACKGROUND
+in their latest book that has attracted wide attention  <cit> , mayer-schonberger and cukier argued that we are transitioning from a hypothesis-driven small-data world—where data are purposely collected to validate a hypothesis—to a data-driven big-data world—where more scientific discoveries will be driven by the abundance of data collected for other purposes. the same trend is observed in healthcare and biomedical research. although randomized control trials with primary data collection will continue to be the gold standard, hypothesis generation and quality improvement based on the routinely collected patient records have demonstrated great potentials  <cit> .
+
+despite increasing awareness of their potential values in risk modeling, hospital data are still, to a large degree, under-exploited  <cit> . a major obstacle lies in the diversity and complexity of patient records. different medical specialties will collect disease-specific data—for example, suicide risk assessments have a different data format from white-blood-cell counts. hand picking features  for each analysis is clearly not efficient, and it also cannot guarantee that all important information in the existing data is included.
+
+in recent years, various risk indices or scores have been developed, competing to become the feature set for risk modeling  <cit> . these include comorbidity based elixhauser index  <cit> , charlson index  <cit>  and variants  <cit> , and physiology-driven tabak score  <cit> . however, as these indices were developed with a small number of target diseases, it is unknown how they can be generalized to other diseases. in literature, different features were still chosen in different studies  <cit> , which make it difficult to compare among different models.
+
+as pointed out by cukier  <cit> , one important advantage of big data is the ability to look into thousands of factors at the same time, even those seemingly “extrinsic” to the problem at hand . in other words, reducing a patient’s medical history into a small number of known “intrinsic” risk factors may be unnecessary, in some cases even wasting important information. with emerging machine learning techniques that can handle a huge number of independent variables , it suffices to maximally include information related to patient history in the database. but can such encoding of diverse patient information be compiled with minimal human involvement and be updated when new data are collected?
+
+in this article, we propose a disciplined framework that converts diverse patient information in an administrative database into a set of inputs suitable for machine-learning risk modeling. the core idea is to treat a patient’s medical history as a bank of signals recorded since the first patient encounter, with each signal corresponding to a particular clinical event. the signal concept provides a unifying format on which a set of generic filters can be applied to extract feature vectors. this is in contrast with what commonly understood as feature generation , where 1) data are often short-term and with a well-defined format , and 2) knowledge of specific medical conditions is often essential . in our framework, the definitions of the signals were specified through an entity schema for the whole administrative database—this is the only manual step in the framework. the separation of the schema construction step avoids repeated manual work for each medical condition, and allows organic grow of the feature sets and easy incorporation of domain knowledge.
+
+to evaluate the feature extraction framework, we considered the application of readmission prediction. readmission is common following hospitalization for common medical conditions  <cit> . there is a recognized need for cost-effective, targeted interventions to decrease avoidable readmissions  <cit> . a means of identifying patients at high-risk of readmission would be of great benefit, but prediction tools described to date have proved to perform relatively poorly  <cit> .
+
+methods
+ethics statement
+ethics approval was obtained from the hospital and research ethics committee at barwon health, with whom deakin university has reciprocal ethics authorization . written consent was obtained from the patients for their information to be stored in the hospital database and used for research.
+
+temporal feature extraction: framework description
+for various pieces of patient information, a simple dichotomy will affect how they are used in a big-data algorithm. that is, a piece of patient information is either constant  or temporally varying. the former group includes patient’s gender and other demographical information; the latter group includes time-stamped events such as hospitalizations, emergency visits, and abnormal lab tests. static information can be easily incorporated into a flat-data format that most statistical models expect. in contrast, temporal information is more difficult to handle. time-series models  or smoothing methods  work in simple analyses with a handful of variables, but break when used in a big-data setting with thousands of both discrete and continuous features.
+
+the temporal feature extraction consists of three steps: constructing an entity schema, generating event time series, and applying convolution filters .figure  <dig> 
+overview of the feature extraction framework.
+
+
+
+
+construction of the entity schema
+at the center of the framework we propose is the observation that most temporal information is stored in an administrative database as time-stamped database entities. an emergency visit, a hospitalization, or an abnormal blood test all has a time stamp. therefore, a patient history can be reconstructed by scanning an administrative database for time-stamped entities, which results in a set of event sequences, one for each entity type.
+
+for each administrative database, entities of interest can be identified and grouped into functionally similar groups, resulting in an entity schema . in practice, the schema can be built iteratively. one can start with a basic schema derived from existing meta-data  and keep adding more entities when richer features are needed. for example, the schema can include diagnoses encoded using international statistical classification of diseases , procedures encoded using australian classification of health interventions  <cit> , medications encoded using the anatomical therapeutic chemical classification  <cit> , comorbidities encoded using the elixhauser comorbidity index  <cit> , admissions encoded using diagnosis-related groups  <cit> . in defining the schema, the mapping from data to entities can be realized using sql snippets. as the result of the mapping, each instance of an entity will have a number of attributes, including the source record id  and the timestamp for the corresponding event.figure  <dig> 
+an example subsection of an entity schema. not all entities were used by the experiments in this paper.
+
+
+
+because the function of the schema is to define features for a prediction task, redundant information is allowed and should actually be encouraged. the modern predictive modeling techniques such as random forests can handle a large number of redundant independent variables, without running into the collinearity problem faced by traditional regression models. because of this tolerance to redundant entity definitions, the schema can be jointly constructed and improved by multiple users—for example both it staff and clinical nurses with inputs from medical specialists.
+
+note that contents in such an entity schema are primarily driven by the database, not by the risk modeling tasks. hence the resulted schema can be used for different risk models. this data-driven approach is in contrast with application-driven feature extraction in the small-data world, where a small number of data columns are first selected according to their relevance to the particular analytical task at hand.
+
+generation of personalized event time series
+once the entity schema is constructed, the database is scanned to look for entities and associated time stamps in the medical history of a person, in an automated fashion. we distinguish two types of temporal entities: point entities  and continuing entities which cover a duration . a pair  is defined as an event of that entity. the time dimension is first discretized using a minimum time unit, thus a continuing entity may correspond to multiple events through temporal discretization.
+
+discretization is also driven the need for efficient processing. for modeling of readmission risk, for example, dicretization by days is a convenient option that often suffices. then the time dimension becomes a sequence  <dig>   <dig>  … , t, where t is the maximum length of patient history of interest. given an entity i, a time series ei is constructed such that each value ei counts the number of occurrences of the entity during the time interval t.
+
+therefore each entity in the schema corresponds to an event sequence . this common representation of diverse temporal events forms the basis of the automated feature extraction to be presented in this article. this is akin to an “image” of clinical events.figure  <dig> 
+temporal data represent events in a patient history. assessment point  defines the timestamp from which future readmissions within a pre-defined period are predicted. events occurring before the ap were used to construct features. only aps after the first diagnosis of the disease under study were considered.
+
+
+
+aggregation with multi-resolution one-side filter bank
+as different events may affect patient risk at different paces, a set of filters of different bandwidths are applied to smooth an event time series. in the engineering discipline of signal processing, such multi-resolution analysis is an effective way to extract multiple underlying signal components of varying time scales . in our framework, such filters provide a principled way to aggregate events in time periods of interest, and at the same time, uncovering the smooth progression of diseases from multiple discrete event sequences. different from the traditional filter design, our filters are one-sided, i.e., only historical events are considered.
+
+a one-sided filter bank is a set of convolution kernels {ki, 1 ≤ i ≤ n} with different bandwidths σi. they are functions of  zeros everywhere except for a small interval defined by σi after the origin. for a time series of event counts, kernels are used to achieve aggregation and denoising. the simplest kernel is the uniform function : kit=1σi,0≤t≤σi <dig> otherwise. 
+
+alternatively, a one-sided gaussian kernel can be used to highlight the effect of recent events: kit=2πσi2e−t22σi <dig> t> <dig> otherwise. 
+
+for each evaluation point t, a set of features are extracted, one feature for each kernel: xit=∑h=0t−1kih−hi·eit−h, where 1 ≤ i ≤ n and hi ≥  <dig> denotes delay. the delay operator is equivalent to shifting the kernel backward. the effect is that only the history before the point t − hi is accounted for. by varying hi, the temporal progression of entities  is captured.
+
+in the end, a total of m × n temporal features are extracted per evaluation point, where m denotes the number of event time series and n denotes the size of the filter bank. in this study, uniform kernel was used as it gives intuitive interpretation of time interval in which a particular event occurs. the pairs , in months, were: , , , , , . that is, a filter bank of n =  <dig> elements and the history of 36 months before each evaluation point were considered.
+
+the number of event sequences m was controlled by using two heuristics. first, rare events of the same type were not considered separately but were grouped into an extra event. in our setting, an event was considered rare if it occurred less than  <dig> times in the database. second, a maximum dictionary size was imposed for each event type, that is, only the top  <dig>  most popular events of each type were considered. the rest was treated was rare events.
+
+features extracted through this method are termed auto-extracted features, reflecting that all feature-extraction steps after the initial schema creation are automated.
+
+overall system
+the overall system is shown in figure  <dig>  for each patient, datasets from different sources are input. the entity-to-event mapping followed by convolution with a filter bank produces a rich set of features that can be input to a machine learning system for diverse tasks - predicting readmissions, understanding factors, cohort clustering or visualization.
+
+comparison with elixhauser-comorbidities-based features: framework evaluation
+in the evaluation, a feature set was extracted from administrative data for a mega cohort consisting of four patient sub-cohorts: copd , diabetes, mental disorder, and pneumonia. the four cohorts were chosen due to their perceived burden in hospital readmission. for each sub-cohort, the feature set was applied to model the risk of readmission. for comparison, purposely-designed features  for each cohort were also applied in parallel. for the feature extraction framework to have practical values, the automatically extracted features need to demonstrate at least the same level of discriminative power with those handcrafted.
+
+data were extracted from electronic records of inpatient admissions and emergency department  visits at barwon health, a regional health service in australia. as the only tertiary hospital in greater geelong, a catchment area with more than  <dig>  residents, the hospital’s patient database provides a single point of access for information on patient hospitalizations, ed visits, and in-hospital medications. in hospital medications were aggregated in several levels, using the anatomical therapeutic chemical  hierarchy  <cit> . the four patient sub-cohorts are defined as follows:diabetes 
+
+copd 
+
+mental disorders 
+
+pneumonia 
+
+
+
+the risk-modeling task is the prediction of unplanned readmissions after an assessment point  within various prediction horizons . here unplanned readmission was defined to be readmissions following an emergency visit.  the ap can be the discharge date for a particular admission or a pre-defined date. only aps after the first diagnosis of the given disease were considered. thus, each ap defines a unit of analysis: data prior to the ap were used to derive the feature sets ; readmissions following the ap define the dependent variable.
+
+aps from each cohort were split into a derivation set and a validation set. to achieve the best estimate of performance generalization, the derivation and the validation sets were separated both in patients and in time. first, the patient’s events were divided by the validation point. patients whose aps occurred before the validation point formed the derivation cohort. their subsequent aps after the validation point were not considered. the other patients formed the validation cohort.
+
+the elixhauser comorbidities  <cit>  were used as a baseline feature set. these  <dig> comorbidities were chosen for their relevance in multiple patient groups and can be mapped from icd- <dig> codes using the algorithm in  <cit> . a recent meta-analysis  <cit>  shows that the elixhauser comorbidities have higher discriminative power compared with competing comorbidities. with that said, the elixhauser comorbidities depend solely on icd codes; other information in administrative data, such as medications, is not captured. in mapping icd codes to the elixhauser comorbidities, the codes from all hospitalizations within a period before the aps are considered. this compensates for the likelihood of miscoding certain conditions in administrative data. two periods prior to the prediction points were considered: 1 month and 3 years; they correspond to two baseline feature sets in table  <dig> table  <dig> 
+feature sets, baseline and auto-extracted
+
+
+
+feature set
+data used
+
+baseline 
+
+baseline 
+
+auto-extracted set mr
+
+auto-extracted set mr+ comorbidities
+
+
+from the database, following the entity-event mapping, two feature sets were constructed: set mr  and set mr + comorbidities. set mr was derived from all available historical clinical data including gps, insurances, admissions, emergency visits, icd, drg, procedure, medication, surgery codes and higher level categories for them . the second set  was the set mr augmented with the elixhauser comorbidities. both feature sets were complemented with basic socio-demographic features, such as age, gender, and postcodes .
+
+to compare the amount of information captured in the elixhauser comorbidities and the automatically extracted feature sets, a common prediction method was used on all feature sets. the method consists of logistic regression with elastic net regularization  <cit> , which is a widely accepted method for handling thousands of variables and producing robust prediction. features were normalized to the unit interval  <cit> , and then transformed using square root. the primary performance measure was auc  and its mann-whitney’s 95% confidence intervals.
+
+four features sets,  <dig> baseline and  <dig> auto-extracted feature sets, are summarized in table  <dig> 
+
+RESULTS
+ <dig>  features were automatically extracted from the dataset. the feature extraction step took less than five minutes on a standard desktop pc with  <dig> cores and 8 gb of memory . results reported in the main text are for the assessment points at the discharges following the first diagnosis of the diseases under study . results for assessments points at pre-defined times, as well as the discovered features, are presented in the additional file  <dig> 
+
+the numbers of analysis units for different cohorts were summarized in table  <dig>  basic characteristics of the cohorts are summarized in table  <dig> table  <dig> 
+definition of derivation and validation cohorts and the distribution of analysis units in the cohorts 
+
+
+derivation cohort
+validation cohort
+
+diabetes
+
+copd
+
+mental disorders
+
+pneumonia
+
+
+
+medical condition
+derivation cohort
+validation cohort
+
+diabetes
+
+copd
+
+mental disorders
+
+pneumonia
+
+
+table  <dig> shows results using the four feature sets on readmission in four diverse cohorts. readmission horizons of  <dig>   <dig>   <dig>   <dig>  and 12 months are considered.table  <dig> 
+performance  of predicting unplanned readmissions following the unplanned discharges
+
+
+baseline 
+period
+1 m
+3y
+mr 
+mr + comorbidities 
+
+copd
+
+diabetes
+
+mental disorders
+
+pneumonia
+auc stands for area under roc curve; feature sets are elixhauser comorbidities as baselines, automatically extracted features from medical records , and the combination of mr and comorbidities.
+
+
+
+on all cohorts, the automatically extracted features resulted in better prediction accuracy, measured in auc, indicating better capturing of the information in discharge diagnoses.
+
+discussion
+our results confirm that auto-extracted disease-agnostic features from hospital medical data can achieve better discriminative power than carefully crafted comorbidity lists.
+
+by generating features from administrative databases, many data mining and machine learning algorithms that expect flat-table features can now be applied for a broad range of risk modeling tasks—from readmission prediction to cancer survival prognosis. as data preparation often accounts for 60%-90% of time in data analysis  <cit> , our framework has potential in greatly reducing analytics cost in health care.
+
+the number of features generated is constrained by the size of the entity schema. as the entity schema has a tree structure, the number of entities in the schema is at most twice the number of the most granular entities. with a specific application, these features generated from the generic entities can be further processed if domain knowledge exists for guiding “pattern” generation. for example, knowledge about clinical domains was applied to drive temporal feature extraction  <cit> . 
+
+a slightly surprising result was that adding elixhauser comorbidities into the auto-extracted feature set did not increased predictive power. this may be due to that the elixhauser comorbidities were themselves mapped from icd- <dig> codes, and hence contained no additional information.
+
+the feature extraction step precedes the analysis task and is disease agnostic. therefore the auto-extracted features make it easier to model risk across different medical conditions—analyses with pooled data have become more common  <cit> . this advantage is demonstrated by our results on the aggregated mental disorder cohort. this disease-agnostic property is particularly valuable for diseases that are not yet sufficiently studied.
+
+it is difficult to validate the best readmission prediction performance reported in the literature. in the previously mentioned systematic review of  <dig> models  <cit> , only two models from  <cit>  had achieved an auc  higher than  <dig> , but on predicting “complicated care transitions” as defined by the authors, which are different from readmissions. in addition, we divided the derivation cohort and the validation cohort by time, in contrast to random partition in most previous studies. although models can be updated weekly or even more frequently, the update cannot capture future trends of the readmission rates, especially when we are predicting readmission in a longer term—for example—the next 3 years. the uncertainty of future readmission rates, we believe, should be accounted for by using a temporally non-overlapping validation set. this choice may lead to lower reported prediction accuracy, but it helps avoid unwarranted confidence towards our prediction model. actually in australia, the time-to-readmission has been steadily increasing  over the years due to service improvements , the prediction task we set for ourselves is more realistic, but also more challenging. in this sense, our automatically extracted features have predictive power better than the best feature sets crafted to predict readmission.
+
+in many fields, significant resources has been invested to develop standardized feature sets, as people believed that a small number of features form a necessary bridge between raw data and knowledge. in image processing, such standardized feature sets, called low level features , are critical in the complex task of image understanding and provide a task independent way to deal with the diversity, complexity and volume of data. in the big data world, limiting the number of features is no longer possible and no longer necessary, thanks to the emerging machine learning algorithms for extremely high dimension data. we believe that our automated feature sets are the equivalent of low level features in administrative data, but the size of the feature set can grow with the data. they provide a principled way to extract features in a disease and task invariant way, laying a crucial foundation for more complex tasks.
+
+the clinical implications of our framework lie in the renewed possibility of highly accurate prediction of individual risk, through exploiting all possible raw data available for a particular patient, especially when he or she has uncommon medical conditions. we have applied the techniques reported here in predicting suicidal behaviors, and the initial results were very encouraging. we are also in the process of applying auto-extracted features to help a health service tailor risk profiles of diabetes/copd patients, potentially resulting in better utilization of costly medical resources.
+
+one contribution of our framework in the big-data context is the notion of entity schema for time-stamped data. this enables parallel scanning of a database for temporal events. defining each event is a key-value pair of a time stamp and an entity allows a mapreduce scheme to be applied for scalability.
+
+for the simplicity of evaluation, only readmission modeling was considered. another common risk modeling task is for mortality prediction. as mortality information is not routinely collected in administrative databases, evaluation is more difficult. however, with a broadly defined entity schema, the same feature set for readmission prediction can also be applied to mortality prediction.
+
+risk estimation remains central to medical care. a paradigm shift, to consider thousands of factors is now open through electronic medical records. we proposed a framework for automated feature extraction, in a task and disease independent manner.
+
+CONCLUSIONS
+we proposed a framework that generates features for machine-learning risk modeling from administrative databases. the framework does not rely on a pre-existing data warehouse. it allows organic growth of the feature sets and easy incorporation of domain knowledge. the process is efficient and task-agnostic. the auto-extracted disease-agnostic features from the hospital databases achieve better discriminative power than carefully crafted comorbidity lists.
+
+additional file
+additional file 1: 
+additional results: prediction performance and top features.
+
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+tt, wl, dp, and sv conceived of the study. tt, wl, and sv designed the entity schema and the filter bank. rlk selected the comparison cohorts. wl performed the data extraction. tt carried out the experiment. tt, wl, rlk, sr, sg, and sv analyzed the results. dp and al participated in its design and coordination and helped to draft the manuscript. all authors read and approved the final manuscript.
+
+the authors would like to thank technical help from ross arblaster at barwon health. the study was not funded by any external funding.

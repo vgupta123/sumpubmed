@@ -1,0 +1,127 @@
+BACKGROUND
+the advances in sequencing technologies over the last decade have transformed biology into an information rich science and created the field of bioinformatics. in parallel to this, storage requirements have grown from storing a human genome reference sequence  <cit> , to handling the increasing volumes of variation data. earlier projects used dense genotyping technologies on individuals . more recently, large-scale resequencing of whole genomes and selected functional regions is taking place in the  <dig> genomes project for human  <cit>  and  <dig> genomes project for arabidopsis  <cit> . genome-wide association studies, such as that performed by the wellcome trust case control consortium   <cit> , are using the recent generation of genotyping chips and creating data sets on a new scale.
+
+there is a demand for databases designed to manage the growing amount of variation information. an infrastructure is necessary that facilitates data analysis and integration with existing genome annotation. storing dense variation data for many individuals in any naive manner requires a large amount of disk space, a requirement that is only likely to increase in coming years.
+
+public resources of variation data
+in parallel with advances in data production technology, the bioinformatics infrastructure required to manage, organise and analyse the data has also evolved. a number of databases were originally designed to capture variation data and organise it with respect to the genome assembly. ultimately the effort and expense required to maintain and continually update these resources over time were not available, and many of the previous public databases of variation data, such as those provided by the snp consortium  <cit>  and hgvbase  <cit> , have either changed their focus or stopped active development. indeed, the management of large-scale variation data is currently limited to only a few projects including ensembl  <cit> , the ucsc genome browser  <cit>  and dbsnp  <cit> . in addition, there are numerous highly curated and special purpose databases, including locus-specific databases  <cit>  and those dedicated to specific applications, such as seattlesnps which focuses on associations between snps and inflammatory response pathways  <cit> .
+
+the most comprehensive resource is dbsnp, which serves as both a publication and permanent archive for variation data. access to the data is provided visually, via a web interface, and also for bulk data download from an ftp site, allowing users to create a local copy of the data. the physical size of dbsnp  and its complex schema structure means that creating a local copy is generally a job for an experienced programmer with significant computational resources  <cit> .
+
+the ucsc genome browser provides access to the dbsnp data in the form of an annotation track. the data is made available after each dbsnp build is completed and is provided both visually through the browser interface and by data download. variation data mining is supported at ucsc through the use of tools such as the table browser  <cit> .
+
+ensembl
+ensembl is a comprehensive genome information system that provides variation data resources alongside many other interconnected components, including the ensembl genome browser at http://www.ensembl.org. ensembl is updated approximately five times each year with new genome assemblies and additional data as it becomes available. in release number  <dig>  ensembl fully supports over  <dig> genomes, of which  <dig> currently have variation data associated with them. in order to integrate variation data into the existing ensembl resources, a dedicated variation database and api is required to support the web site and other bioinformatics tools  <cit> .
+
+this report presents a detailed description of the ensembl variation database and application programming interface . as with the other ensembl databases, the variation database is based on an open source mysql database  <cit>  infrastructure. the variation database schema is presented in summary in figure  <dig> and the full schema is included as additional file 1: supplemental figure s <dig>  it is designed explicitly to deal with both large-scale, dense genotyping data and resequencing data covering thousands of individual genome sequences. the database provides all of the data visible on the ensembl web site, as well as the supporting data that is only available through the ensembl api. the api is one of the distinguishing features of ensembl and provides a programmatic interface to all ensembl data across all supported organisms. as a result, a script based on a given version of the api will work with all databases corresponding to that version and there is no need for species-specific programming. there is also a data-mining tool, biomart  <cit> , which is tightly integrated with the data resources.
+
+implementation
+the variation api
+the variation api is designed for optimal interaction with the database and provides a powerful and comprehensive interface to the variation data. it is written in object-oriented perl  <cit>  and follows the same general conventions as the wider ensembl api  <cit> .
+
+multiple retrieval methods are provided in each of the object adaptors, allowing the user to create, for example, single variation objects given a specific identifier, or sets of objects such as a list of all variation feature objects mapped within a particular gene. all object types and methods are fully documented in online pod documentation, which is also available in html format via the ensembl website http://www.ensembl.org/info/docs/pdoc/index.html, along with a series of tutorials introducing the user to the api http://www.ensembl.org/info/docs/api/index.html.
+
+the example code in figure  <dig> shows how the ensembl api can be used to retrieve sequence variation from a specific mouse strain and then, for each locus, print how the strain compares to the reference sequence. first, the api creates a slice  for the genomic region of interest. then, the get_all_allelefeatures_slice method is called to retrieve the alleles for this genomic slice. the example code classifies the genotype at each locus using a general algorithm, which could be used for both homozygous inbred genomes such as laboratory mouse strains or outbred heterozygous individuals. finally, the example code outputs the resulting variants and sequence for the non-reference individual.
+
+the db connection adaptor also supports the attachment of multiple variation databases supporting, for example, seamless integration of publicly available databases at ensembldb.ensembl.org and internal data which may be subject to access restrictions due to patient confidentially or other reasons. full details of the ensembl api conventions are available at http://www.ensembl.org/info/docs/api/index.html. the api is used by the ensembl website http://www.ensembl.org and can also be used for custom analysis, on any combination of the public databases or the user's own data.
+
+storage and retrieval of variation data
+database requirements and design considerations
+ensembl stores a variety of different data types including variants on the genome from external sources such as dbsnp and those resulting from ensembl's internal snp calling pipeline  <cit> . other data result from resequencing projects or dense genotyping projects that are based on affymetrix, illumina and other high-throughput genotyping platforms. in addition, the database provides the predicted consequences of each variant in the context of the evidence-based ensembl gene annotations and a representation of resequencing information that is compact and supports a visual presentation. the way the different data types are stored in the variation database is discussed below while a more in-depth explanation of the data itself can be found in chen et al  <cit> .
+
+variation data
+in ensembl, a sequence variant  is defined by its upstream and downstream flanking sequences along with at least one variant allele. the flanking sequence of each variant is aligned to one or more positions in the reference genome. to accurately reflect this relationship there exists in the schema two distinct table sets : the variation, flanking sequence and allele tables store the most basic information for each variant in the database independently of its position on an assembly, while the variation feature table contains mappings for each variant to the reference sequence. this division of data means that only the variation feature table needs to be updated when there is a new assembly released and the variation table remains consistent regardless of the assembly.
+
+mappings for each variant are imported directly from dbsnp or are generated by aligning the composite 5' flanking sequence, reference allele and 3' flanking sequence to the reference sequence using the ssaha <dig> alignment software  <cit> . after import or mapping, the size of the flanking sequence table can be greatly reduced by replacing raw sequences with a set of coordinates when the sequence exactly matches the reference sequence at its mapped location. as discussed below, the api seamlessly restores the flanking sequence not directly stored in the database with the appropriate sequence drawn from the associated ensembl core database.
+
+when a variant maps at least once, but no more than n times, these mappings are stored in the variation feature table . variants that fail to map to the genome, or map more than n times, are recorded in the failed variation table and no mappings will be stored in the variation feature table for the given variant. further quality control criteria are also applied: variants with alleles that do not match the reference sequence at the location of mapping are also moved to the failed variation table . a 'white list' of variants, such as those with clinical significance, will not be moved to the failed variation table even if they meet one of the above criteria. all supplementary data pertaining to variants in the failed variation table, including alleles and genotypes, are deleted from the database before release.
+
+ensembl also stores structural variants and copy number data. the location of these features is harder to define due to the uncertainly of their boundaries. for this reason, they are stored in a separate structural variation table which allows for start and end positions to be defined as a range between a minimum and maximum value.
+
+individuals and population genotypes: genotype compression
+large-scale and dense genotype data, such as that produced by the hapmap project, requires significant disk space to store in a naïve database implementation or as flat-file data  <cit> . in the initial implementation, ensembl kept all genotype data in a table designed to store single base pair genotypes using an approach that dedicated one row per genotype in the table. based on the more than  <dig>  billion human genotypes available in ensembl release  <dig> , this single table would currently be more than  <dig> gb in size. moreover, accessing the table to provide data for the ensembl web displays  <cit>  would require impractical database lookup times.
+
+to address this problem, a simple and efficient compression algorithm was created for storing an encoded representation of the genotype data. this compact structure, discussed below, reduces the size of the table to only  <dig> million entries, which require approximately  <dig> gb of disk space.
+
+each row in the compressed table stores genotypes from one individual in one fixed-size region of the genome . a binary field in the row stores a compressed string  consisting of a repeating triplet of elements: a distance in base pairs from the previous genotype followed by a pair of alleles. using distances rather than absolute chromosomal positions minimises the number of bytes required to store these integers. along with fields describing the position of the given region, methods in the api can decode the compressed string into a set of genotypes at any position in the genome.
+
+for example, a given row may have a start position of  <dig>  indicating the chromosomal position of the first genotype in this row. the unpacked genotypes field then may contain the following elements:  
+
+the first genotype has a position of  
+
+and alleles a and g. the second genotype has a position of  
+
+and alleles c and c, the third genotype similarly has a position of  <dig> and alleles g and t, the fourth position  <dig> and alleles a and a, and so on.
+
+in practice, since the first genotype in the set will always be at the chromosomal position specified in the row's position field, the  <dig> shown above is not explicitly stored, but is added by the api as part of the decoding process.
+
+in this way the database is optimised for the efficient access of all of the data in a particular genomic region, a decision made in part to enable optimal real-time display of the data in the ensembl genome browser.
+
+genotypes for other types of variants, including insertions, deletions, repeat features and larger structural variants are stored in a separate, uncompressed multiple base pair genotype table.
+
+population level data
+population-level data is also stored in the schema. specifically, the allele table stores observed population allele frequencies, while the population genotype table stores observed genotype frequencies. these frequencies are imported from dbsnp, and hence include reference populations from sources such as the hapmap project and those genotyped by perlegen.
+
+real-time calculation of linkage disequilibrium
+linkage disequilibrium  data provided through the ensembl web interface is calculated "on-the-fly" using a highly efficient c program. calculating ld data in such a manner negates the need for a large and unwieldy table containing millions of pairwise r <dig> and d' values. the program implements a version of the standard em algorithm for the estimation of pairwise haplotype frequencies from unphased genotype data, providing a similar level of accuracy to that seen in the popular haploview program  <cit> . ld data can be produced in this way via the api, or be visualised in the classic 'inverted triangle' display via the web interface .
+
+resequencing data
+as the cost of dna sequencing has reduced dramatically over the last decade, an increasing number of resequencing studies are being performed, generating many new variants  <cit> . although resequencing data in the form of sequencing reads is normally stored in the european nucleotide archive  http://www.ebi.ac.uk/embl/ or genbank http://www.ncbi.nlm.nih.gov/traces/, optimal representation of these data should take into account that the vast majority of the sequence will be the same as the reference assembly. thus the database stores only two components of the resequencing data, which allow the recreation of essentially all of the information:  alignment positions of the sequence reads, represented as coordinates with read coverage levels, and  differences between the alignments and the reference genome assembly, stored as variations. these differences may be single nucleotide polymorphisms, insertions and deletions or larger structural variations.
+
+phenotypic information
+the schema also allows for the storage of phenotypic information associated with particular variants, along with any relevant association data such as risk alleles and p-values, in the variation annotation table. multiple annotations may be linked with an individual variation object in the database for such situations as when alleles may have different disease associations. these phenotype data are fully indexed and searchable through the ensembl web interface.
+
+haplotypic and pseudo-autosomal regions
+the ensembl core database schema includes an explicit representation of haplotypic regions that appear, for example, in the mhc region of human chromosome  <dig>  this data structure allows for these regions  to be stored and managed as efficiently as possible. the variation database supports this data structure by allowing multiple haplotypic variation feature objects to correspond to one variation object, but correctly considers that each of the variation objects only map to a single place in the reference genome. importantly, this data structure supports the appropriate variations on the various haplotypes.
+
+consequences of variants
+the tight integration of the ensembl variation database and api with the other components of the ensembl architecture allows the derivation of novel and biologically relevant data. methods in the api allow the prediction of consequence types of variants on the transcripts to which they map by assessing the change that each variant allele causes in the reference sequence. these consequence types include, but are not limited to: non-synonymous amino acid changes in protein coding transcripts; stop codon gain or loss; frame shifts caused by insertions or deletions; variants located within splice sites or regulatory regions. from a variant's position with respect to a transcript, a consequence type is calculated and stored in the transcript variation table. in addition, ensembl is unique in providing an api method to predict consequence types for novel variant positions, given a genomic location and an allele.
+
+RESULTS
+the ensembl model consists of one variation database for each supported species with the associated genome sequence data and genome annotations, such as protein coding genes, available in the ensembl core databases . the variation databases vary in size depending on the amount of data available for a given species and range, for example in release  <dig>  from a size of  <dig> gb for human, to  <dig> mb for zebrafish.
+
+ensembl is designed to be used for data access in a variety of methods, serving the diverse requirements of the scientific community. the web interface caters to those who wish to view variation data in the context of the other genomic annotation offered by ensembl, and offers unique representations and visualisations of the data. for those wishing to extract large volumes of data, biomart can be used to filter and retrieve such data through a highly configurable interface. the variation api can be used in conjunction with the other ensembl apis to make queries across all the databases, offering programmatic access to the full range of data stored in ensembl's public databases. the large ensembl codebase can be incorporated into pipelines and custom software, as well as providing a comprehensive and expandable interface to a user's own data.
+
+the variation database schema and api are regularly updated to include new functionality and refinements of existing methods. these software updates are released in sync with the rest of ensembl and in conjunction with updates to the data content of variation databases. thus each release consists of new data, changes associated with new genome assemblies and annotation and the corresponding changes to the api. taken together these resources provide a comprehensive and unique solution for the management and analysis of variation data.
+
+the database and api described here share some functionality with the tools available for other genome browsers. for example, the ucsc genome browser stores variation data in tables that represent locations of variation, genotyped snps, etc  <cit> . these tables can be visualised as tracks on the ucsc genome browser  <cit>  or used by the ucsc table browser to create more complex queries across multiple data tables available at ucsc  <cit> . however, the full flexibility of analysis enabled by the variation api is unique to ensembl as are the federated queries that are available through the ensembl variation biomart  <cit> . moreover, the variation objects described here can be implemented with an identical interface by other projects. in this way the variation objects can serve as "common currency" for a consistent analysis across data available in a number of different physical locations each stored in databases with different schema and potentially different database platforms.
+
+the variation database and api are currently deployed in a number of projects beyond ensembl. for example, they provide a portion of the variation data infrastructure for the  <dig> genomes project  <cit>  and the gramene project  <cit> .
+
+future
+as the cost of sequencing technologies decreases and the sequencing of individual genomes from the  <dig> genomes project and other projects becomes more commonplace, it is likely that further development will be required in order to maintain optimal data storage efficiency while also being able to retrieve the data in a timely fashion. in addition, there will be additional developments in the api for new data queries such as retrieving summary information for variants across a number of individuals from the same population or to retrieve the sequence of a particular individual, breed or strain.
+
+although ensembl focuses on chordate species, the recently launched ensembl genomes project at the ebi will extend ensembl technology to the analysis of a wider variety of genomes  <cit> . these requirements will necessitate extension of the capabilities of the variation database and api to support specific characteristics of non-diploid genomes such as those found in plants and yeast.
+
+CONCLUSIONS
+ensembl's tools for variation and resequencing data are designed to solve the large-scale data analysis, storage and visualisation challenges presented by current and next generation genotyping and sequencing platforms. the platform is extensively tested and heavily used as the software library and database interface for the ensembl genome browser and other projects built with ensembl technology.
+
+availability and requirements
+project name: ensembl
+
+project homepage: http://www.ensembl.org.
+
+operating system: platform independent
+
+programming language: the ensembl api is written in perl with supporting c functions as described above.
+
+other requirements: the ensembl api requires bioperl  <dig> . <dig>  additional requirements apply to users wanting to install a full ensembl mirror site as described at http://www.ensembl.org/info/docs/webcode/index.html.
+
+license: all of the code described in this article is freely available under the terms of the ensembl software license found at http://www.ensembl.org/info/about/code_licence.html
+
+additional information and on-line tutorials
+the database schema is described here in http://cvs.sanger.ac.uk/cgi-bin/viewcvs.cgi/ensembl-variation/schema/. http://www.ensembl.org/info/docs/api/variation/index.htmlhttp://www.ensembl.org/info/docs/api/variation/variation_tutorial.html.
+
+authors' contributions
+the database schema was designed by as, eb, dr and wm with contributions from yc, pf and fc. the api was written by dr with contributions from as, wm and yc. yc, wm and dr have built the variation databases available at ensembl. pf, wm and fc wrote the paper with contributions from dr and input from all of the other authors. all authors have read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplemental figure s1: full variation database schema.
+
+click here for file
+
+ acknowledgements
+the authors acknowledge the following individuals and organisations: graham mcvicker for his early work on the variation database design and schema; solexa for access to resequencing data; guy coates, pete clapham and tim cutts for maintaining the ensembl computer systems; the other members of the greater ensembl group at the ebi and the wellcome trust sanger institute; and all of ensembl's users, especially those who have taken the time to contact us with suggestions and other helpful comments.
+
+the ensembl project is funded primarily by the wellcome trust. current and previous sources of additional funding for ensembl's variation resources include embl, the european union  and the uk medical research council.

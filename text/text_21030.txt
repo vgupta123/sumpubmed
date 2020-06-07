@@ -1,0 +1,149 @@
+BACKGROUND
+there are several areas in bioinformatics and biomedical research that benefit from identifying short sub-sequences among a  pool of reference sequences that are as unique as possible, i.e. the next most similar sub-sequence differs by a given number of mismatches or more. for example, in infection diagnostics, pathogen strains can be identified via padlock probes  <cit> , which are highly target sensitive oligonucleotides . however, the specificity of this approach depends on the probe design: since the process is prone to tolerating single mismatches, specificity is increased when using sequences that differ by more than a single mismatch from any other site. another example constitutes sequence incorporation detection  <cit> : genomes undergo change through various means, among these through sequences insertions , deletion, and point mutations. the phenotypic effects of these range between deleterious, neutral and beneficial to an individual’s fitness as in the case of mutations resulting in antibiotic resistance. genome alterations by direct sequence incorporation also play a functional role; a prime example is the clustered regularly interspaced short palindromic repeats  antiviral defense system of many prokaryotes. there already exists software that is able to find putative regions which could be a result of sequence insertions, e.g. crispr-finder  <cit>  and retrotector  <cit> , however, these rely heavily on a priori knowledge, often niche to the sequence type desired to be detected. alternatively, a generic method based on exact-matches would provide optimal sensitivity, but lacks specificity and will potentially report a number of false positives, in particular if the input sequences are raw sequence reads that contain errors, and/or if the strain or organism is different from the reference genome. a third example in which target design benefits from a stringent definition of uniqueness is the identification of crispr target sites for genome editing  <cit> . it has been shown that unintended off-target editing can be reduced by designing crispr guide-rna to comprise sequences that differ by more mismatches from any site in the rest of the genome  <cit> .
+
+mathematically, the problem of identifying a set of sequences or strings of length w that differ by at least k mismatches compared to any other sequence in a set, termed k-disjoint, is defined as follows: given two sets a and b containing sequences of length w, find all sequences x in a such that x is more than k mismatches away from any sequence y in b. this formulation of the problem essentially finds the so-called k-disjoint set of a and b. an alternative formulation is: given two integer values w and k as well as two strings p and t with lengths n and m, respectively, the k-disjoint problem consists of finding all positions i  which have the property that a w length substring of p beginning at i is at a hamming distance greater than k away from any w long substring of t. the complement of the k-disjoint is the k-intersection. the k-disjoint problem is closely related to the k-difference primer problem  <cit> .
+
+conceptually, k-disjoint is an extension of the exact-match problem, since for k =  <dig>  the k-disjoint problem collapses into identifying truly unique sequences, even if they only differ by one single letter. for this much simpler problem, common solutions include the analysis of k-mers, short sub-sequences of a fixed size k. there, simple lookup, hash-tables, or suffix arrays provide efficient solutions, with a number of implementations available, among them bloom filter based methods and suffix array based programs, such as jellyfish  <cit> , and tallymer  <cit> . the resulting counts and k-mer spectra can thus be used to estimate repeat content or heterozygosity in a genome or sequence reads  <cit> . in addition, exact-match methods can also serve as seed finders to guide sequence alignment programs , which are then able to extend sequence comparisons into regions in which mismatches occur. in principle, this approach allows for computing “inverse alignments”, i.e. to first perform alignments, and then exclude regions that show sequence similarity above a given threshold. however, since many sequence aligners typically include a dynamic repeat masking step when finding seeds for computational efficiency, these methods are not exhaustive in the sense of looking for evidence of absence , rather than evidence of presence , and do thus not guarantee that no false positives are found.
+
+here, we present microtaboo, a general, exhaustive, and efficient solution to the k-disjoint problem based on a mismatch matrix and a dictionary tree for fast lookup and search . the output of this method, all sequences that avoid “taboo”, can either be used directly, or serve to pre-filter data for software for specific tasks, such as crispr-finder or sms  <cit> . microtaboo is a generalization of the work done by mattisson et al.  <dig>  <cit> . briefly, the work done in mattison et al. was a rough and ad hoc solution to a niche problem concerning the identification of unique sequences common amongst coagulase negative staphylococci. here, we have generalized, refined, and optimized the algorithm and data workflow, as well as packaged the solution into a fully functional software package, microtaboo.
+
+implementation
+algorithm, architecture and workflow
+microtaboo requires the following inputs: i) two directories representing queries a and targets b, each containing one or more fasta files; ii) an integer value, w, indicating the sequence lengths to be found in a; iii) an integer value k representing the mismatch threshold; and iv) a parameter  specifying whether the results should present only the k-disjoint, the k-intersection, or both. microtaboo outputs a two column file for each fasta file in the query directory, containing sequences satisfying the input parameters, together with their sequence-relative positions.
+
+the underlying algorithm that powers mircotaboo involves several steps :fig.  <dig> data and process flowchart of microtaboo. the flowchart shows the main modules, data and processes involved in the internal algorithm of microtaboo. a and b  represent either a single or multiple fasta-files. for a user-specified given value of the sequence length w, all w-long substrings in b are converted into their respective n-code vectors, out of which a list of all such vectors in b is outputted. this list then is used to construct a dictree  which is fed into the filter engine module responsible for filtering the all w-long substrings in a  and providing an output file contacting either the k-disjoint set, k-intersection or both
+
+
+i) 
+n-coding first maps all sequences of size n onto unique numbers, and then pre-computes a mismatch matrix by calculating the number of mismatches between two n-sequences, allowing for fast look-up; n-coding converts all unique sequences of a fixed length, n, to a unique number . this enables us to represent a sequence of length w as a vector consisting of w/n elements, where n can take the value  <dig>   <dig>  or  <dig>  requiring w to be a multiple thereof. given that microtaboo works with a five letter dna alphabet which includes a canonical unknown base, to avoid excessive memory usage, which grows with o, n is limited to  <dig>  if w has multiple delimiters, microtaboo chooses the largest value for n. next, a mismatch matrix m is constructed, the elements m being the number of mismatches between two n-code sequences. both n-coding sequences and the mismatch matrix enable us to calculate mismatches between two sequences more efficiently, such that the mismatches between two w-long sequences can be calculated in w/n look-ups in the mismatch matrix.fig.  <dig> n-code conversion table and mismatch matrix. the n-code conversion table & the mismatch matrix for n =  <dig>   concept of n-coding with n =  <dig> and only using nucleotides . every unique sequence is assigned a unique number in lexicographical ascending order.  visualization of a mismatch matrix in n-code format where n =  <dig> and only using nucleotides . each cell in the matrix contains the hamming distances between the respective row and column element, i.e. the sequence or n-code value represented there. for example, the sequence “aaa” → <0 > and the sequence “aag” → <2 > are at a hamming distance of  <dig> away from each other as in the cells  and . meanwhile, the distance between sequence “aaa” and “ttt” is 3 → <63 > as in cell  and 
+
+
+
+
+ii) 
+fragmentation extracts all sequences of length w  in b, reverse complement strand included, and converts them into a list of vectors of length w/n using n-coding scheme. the output of this process is a list of n-coded sequences.
+
+iii) 
+partitioning divides the above list into sub-lists with respect to the first two elements of each vector, reducing comparisons. the output of this process is a hybrid dictionary-tree-list data structure, called here a dictree, which is then fed into the filter engine module . the dictree can be viewed as being an indexed list, where all w-long sequences  from the b fasta-files are stored and indexed with respect to their first two vector elements. for instance, all n-code vectors of the form < <dig>   <dig> … > would be placed into the sub-list with the address: < <dig>  3 > .
+
+iv) 
+filter engine search is the module that filters sequences in a against the dictree of b through their respective w/n vectors. that is, the filter engine sequentially extracts all w long substrings in a, n-codes these and searches the dictree of b for a match. thus, querying a vector of the same form for k =  <dig> in the dictree requires merely a comparison to the list with exact indices as an exact match to the query vector could theoretically only exist in that particular list address. for k >  <dig>  microtaboo looks into multiple lists until either the number of mismatches exceeds k, or all sub-lists that could contain a match has been searched in and not found. using the mismatch matrix, the addresses of all sub-lists that could possibly contain a sequence within k-mismatches of a given sequence in n-code format, x = {x
+1
+, x
+2
+, x
+3
+, x
+4
+, …}, is obtained in the following way:
+
+
+
+
+address 1 = i, such that: m ≤ k
+
+
+address 2 = j, such that: m ≤ k − m
+
+thus, only the lists in the dictree with addresses i and j that satisfies these conditions could possibly contain a sequence within k mismatch from the query sequence x.
+
+computational complexity of microtaboo
+there are two computationally intensive procedures involved when running microtaboo, namely, constructing the dictree, and searching the query organism in the dictree. to evaluate their respective complexities, we define the following: word length , n-code size , genome length of query organism  and genome length of “taboo” organism . construction of the dictree is done in two steps: extracting and converting all words of length w from the “taboo” organism to n-code format and inserting the n-code vectors into the dictree. the number of operations required to convert a single word into an n-code vector is:  <dig> wnc <dig> 
+
+
+where c <dig> is some constant. inserting the resulting n-code vector in the dictree takes a constant number of operations, denoted c <dig>  therefore, the amount of operations needed for populating the entire dictree with all encoded sequences of the “taboo” organism is:  <dig> wnc1+c2lb 
+
+
+the second computationally heavy procedure is searching the dictree for all words of length w in the query organism so as to filter out those that do not meet the criteria for the k-disjoint problem with specified parameters. assuming that sequences of n-long bases are equally frequent in the genome of the “taboo” organism will imply that each sub-list of the dictree will contain roughly l
+b/52n elements . the denominator,  comes from the fact that microtaboo uses a five letter dna alphabet and that we have  <dig> leafs in the dictree, each pointing to a sub-list with address i, j.
+
+
+since any w long sequence is first converted into a vector in n-code format, which takes wnc <dig> operations. this vector is then processed by the filter engine and pointed to the corresponding sublist which takes c <dig> operations. given that this sub-list contains l
+b/52n elements, in the worst case, an equal number of vector-to-vector comparisons will be made. each vector-to-vector comparison will consist of wn look-ups in the mismatch matrix. given that a look-up takes a constant number of operations c <dig>  the complete computational complexity for one word is  <dig> lbw52nnc3+wnc <dig> 
+
+
+the computational operation burden to filter a query organism against a “taboo” organism is:  <dig> lalbw52nnc3+wnc <dig> 
+
+
+combining the complexities for the search and the construction of the dictree gives:  <dig> la+lbwnc1+lbc2+c3lalbwn52n 
+
+
+in practice, la and lb are the dominating factors in terms of size. therefore, the term involving the product of these would be the determining factor, making the theoretical complexity:  <dig> olalbwn52n 
+
+
+however in practice, the denominator n52n gives a reduction in the number of computations needed resulting in vastly reduced runtimes, e.g. for any word that is divisible by  <dig>  n becomes  <dig> which makes the denominator be  <dig>  taking into account k mismatches, we have empirically determined that microtaboo scales in the following fashion: o.
+
+RESULTS
+infection diagnostics with padlock probes
+we identified padlock probe targets unique to escherichia coli o <dig> sakai  <cit> , under the condition that the targets are not present within k =  <dig> mismatches of any w = 30 bp long sequence in  <dig> other bacteria, including four other e. coli strains . we identified  <dig>  candidate regions not present in the  <dig> other strains, which could thus serve as potential targets to uniquely identify this strain .
+
+point-mutation detection
+we simulated a run which aimed at detecting substitution mutations between closely related strains, such as in gaining drug resistance, by randomly generating substitutions in three genomes of different sizes : the tobacco leaf curl japan virus  <cit>  , e. coli , saccharomyces cerevisiae  <cit>  , and candida albicans  <cit>  . we randomly selected  <dig> positions per chromosome in each organism and altered the bases accordingly: a<>g and c<>t. with k =  <dig> and w =  <dig>  microtaboo successfully recovered all mutated sites 
+
+detection of sequence inversions
+we simulated a scenario in which local inversions are to be detected, based on the same organisms as above . for each organism, we altered their genomes by inverting three 80 bp long sequences at positions  <dig>  ,  <dig> , and three 60 bp long regions on chromosomes  <dig>   <dig>  and  <dig> in s. cerevisiae. microtaboo detected all the sequences in and around the vicinity of the inverted regions. we repeated the experiment by introducing additional point substitutions and achieved identical results .
+
+detection of viral incorporation
+here, we inserted four regions of size 70 bps of tblcjv into the s. cerevisiae genomes into chromosomes  <dig>   <dig>   <dig> and  <dig>  in addition to inserting the regions, we introduced a number of base alterations in the following way: one region was left intact whilst in the others, we introduced base alterations in  <dig>   <dig> or  <dig> positions respectively. running microtaboo with parameters w =  <dig> and k =  <dig>  mircotaboo reported the insertion sites and their vicinities .
+
+candidate crispr-target mining
+we applied microtaboo to find unique crispr target sequences of length w = 20 bp in the genomes of c. albicans strain s288c, d. melanogaster  <cit> , and chromosome  <dig> of m. musculus  <cit>  against the entire mouse genome. varying k =  <dig>   <dig> and  <dig>  the results are listed in table  <dig>  reporting both the genomic terretory covered by the sites, as well as the fraction of unique sequences . while the fraction of target sites only drops slightly with increasing k to  <dig> in the small genome of c. albicans, this drop is more pronounced in d. melanogaster, and falls from more than 80% to less than 5% in mouse, leaving less than one percent of the mouse genome for targeting at this stringency. we repeated this analysis at k =  <dig> on mouse chromosomes  <dig> and  <dig> with similar results,  <dig> % and  <dig> % respectively .table  <dig> fraction of unique sequences
+
+
+c. albicans
+
+d. melanogaster
+
+m. musculus
+listed are the fraction of  <dig>  nucleotides long sequences and the genomic territory covered  for k =  <dig>   <dig>   <dig> on c. albicans, d. melanogaster and m. musculus. for each run, copies of the files containing the genome for the organism of interest were placed both in the query folder and the “taboo” folder. for the mouse genome, only the genome file for chromosome  <dig> was placed in the query folder
+
+
+
+
+comparison with an inverse alignment approach and a suffix array
+to assess the relative run-time and coverage efficiency of microtaboo, we compared the runtime performance and sensitivity of microtaboo against an inverse blast+  <dig> . <dig> search on two random sequences of length 10 kb and 4 mb, and a ~10 kbps section of the enterobacteria phage lambda  <cit>  phage against the ~ <dig> mbps escherichia coli k <dig>  <cit>  genome. on one core of a 64-bit intel-core i7-4720hq machine, microtaboo was up to 61x faster than blast, depending on k and w, in addition to finding more sequences. the fact that microtaboo had a larger coverage is likely attributable to being an exhaustive algorithm . we next compared the performance to a suffix array, as implemented in the sequence alignment software cola  <cit> , adjusting the -s parameter, which determines the minimum length of exact sub-matches before giving up the search, for different combinations of w and k as s = w/, following the pigeon hole principle. while the suffix array runs efficiently with larger values of s , albeit slower than microtaboo in all but one case , performance dramatically drops with lower values , since the number of regions to be considered for an exhaustive search increases exponentially. we note that for s <  <dig>  which corresponds to e.g. w =  <dig>  k =  <dig>  we terminated the program after two cpu hours.
+
+comparison with exact string-matching algorithms
+since microtaboo outperforms a suffix array even for k =  <dig>  we sought to compare the method to exact string matching methods, namely: rabin-karp  <cit> , knuth-morris-pratt  <cit>  and boyer-moore  <cit> . on the enterobacteria phage lambda phage escherichia coli k <dig> data set described above, we found that boyer-moore was more efficient than the suffix array, knuth-morris-pratt, and rabin-karp methods, but at least two to three times slower than microtaboo .
+
+multi-threading and performance
+since the bulk of the computations in microtaboo are multithreaded, we tested the performance gain of running many cores. the reduction in wall clock time is sub-linear with the number of cores  the organisms used for this run were enterobacteria phage lambda as query organism and escherichia coli k <dig> as “taboo” organism.table  <dig> runtime scaling over multiple cores
+
+runtime of microtaboo for different number of cores where all other parameters were fixed. speed up factor is calculated compared to runtime for a single core. enterobacteria phage lambda was used as query organism and escherichia coli k <dig> was used as “taboo” organism. there parameters used were w =  <dig> and k =  <dig> for all runs
+
+
+
+
+CONCLUSIONS
+we present microtaboo, a fast, efficient, and general tool for directly solving the k-disjoint problem for short  sequences and k ranging from  <dig> to  <dig>  in a microbial genome, we show that the method is capable of quickly finding padlock probes that allow for uniquely identifying a specific strain, and in three simulated experiments, we demonstrate that microtaboo can identify mutations, inversions, and insertions, even in presence of single-point mutations. for pre-filtering regions that could serve as crispr targets at different stringencies of uniqueness, we applied microtaboo to a fungal, fly, and mammalian genome. while the genomic territory at three mismatches leaves only less than 1% of the genome accessible to genome editing at high stringency, examining this fraction as a function might be useful to predict the number of expected off-target hits.
+
+the software is available for the windows, mac os and linux operating systems and runs both on standard laptop computers for smaller tasks, as well as larger computer clusters for more profound tasks. we also demonstrate that microtaboo can be used for several applications and that it serves especially well as a powerful pre-filtering tool for further analysis of sequence data.
+
+additional files
+
+additional file 1: table s <dig>  padlock probe target search. 
+
+ 
+additional file 2: section  <dig> - results, section  <dig> - runtime comparisons. 
+
+ 
+additional file 3: table s <dig>  point mutation detection. 
+
+ 
+additional file 4: table s <dig>  inversion detection and virus incorporation. 
+
+ 
+additional file 5:table s <dig>  runtime comparisons -microtaboo vs. blast and a suffix array method. 
+
+ 
+additional file 6: table s <dig>  result coverage comparison — blast vs microtaboo. 
+
+ 
+additional file 7: table s <dig>  runtime comparisons for exact string matching algorithms. 
+
+ 
+
+
+abbreviations
+crisprclustered regularly interspaced short palindromic repeats
+

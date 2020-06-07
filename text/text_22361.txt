@@ -1,0 +1,278 @@
+BACKGROUND
+systems of differential algebraic equations   <cit>  are one particularly common and useful form of mathematical model. these systems are of the general form  
+
+where f is a function, t is the independent variable, x is the vector of state variables, and x' is the vector of derivatives of the state variables.
+
+dae systems are often broken up into individual equations, each of which hold true. systems of daes are used to model a wide variety of biological processes, across a diversity of scales. for example, at one extreme there are models describing the action of ion channels  <cit> , and at another extreme, models of predator-prey dynamics  <cit> .
+
+historically, models of daes have been exchanged and archived by publishing equations, constant values, initial conditions, specific protocols, and other associated information in a scientific paper. someone wanting to independently compute results from the published model then needs to convert that model back into a computer program. this process is both time-consuming and error prone. reviewers are unlikely to check that the published model accurately corresponds to numerical results presented in the paper.
+
+likewise, it becomes prohibitively expensive to do integrative biology  <cit> , as building a large model out of several pieces then requires significant effort on each of the pieces already in the literature.
+
+cellml  <cit>  is an xml  <cit>  based format for representing mathematical models, capable of representing dae systems . as such, it provides an ideal mechanism for the exchange and archival of models. there are public databases containing large numbers of cellml models, such as the cellml model repository  <cit> . the biomodels database  <cit>  also provides models which have been translated from systems biology markup language  to cellml.
+
+however, for the scientific advantages of using formats such as cellml and sbml for mathematical model exchange to be fully realised, it is important that software used by modellers is able to read and write models in these formats. it is also important that the scientific community has the ability to easily develop software which relies on the existing databases of models in these formats.
+
+using an application programming interface  simplifies the task of processing an xml language, thus apis are important to the exchange of information.
+
+supporting cellml correctly can be a difficult task, due to some of the more complex features in the cellml language. it is therefore important that software developers do not need to re-invent the same functionality every time they develop a new tool. we thus present both an api for working with cellml models, and an efficient implementation of that api.
+
+sbml  <cit>  is another xml-based format, used for encoding computational models of biochemical reaction networks. it requires that implementations support elements specific to biochemical reaction networks , and thus differs from cellml in that cellml avoids domain-specific elements. there is an api for processing sbml models, known as libsbml  <cit> . the cellml api serves an analogous purpose to libsbml, except for cellml rather than sbml models.
+
+implementation
+the cellml api is a platform and programming language independent description of interfaces, with attributes and operations on the interfaces. these attributes and operations are used to retrieve information about the model, or alternatively to manipulate the model in memory.
+
+the overall architecture of the api consists of a core api, along with a series of extension apis . the extension apis are listed here, and discussed in detail later:
+
+• annotation tools service
+
+• cellml variable association service
+
+• cellml units simplification and expansion service
+
+• validation against cellml specification service
+
+• mathml language expression service
+
+• cellml code generation service
+
+• cellml language export definition service
+
+• cellml integration service.
+
+the extension api implementations are cleanly separated from our implementation of the core api, so that alternative implementations are possible.
+
+the api is specified using omg idl  <cit> , and is made available under an open source/free license, at http://www.cellml.org/tools/api/. it is suitable for both cellml  <dig>   <cit>  and cellml  <dig>   <cit>  documents. all attributes and operations in the idl files are documented in place using the doxygen comment format  <cit> . the choice of this programming language independent format to specify interfaces makes it possible to define bindings to the api from many programming languages. we have developed bindings for c++  <cit> , java  <cit> , and javascript   <cit> .
+
+in addition, we have developed an implementation of the api, optimised to reduce time taken to run a test-suite of typical tasks. this implementation is written in c++, and is based on the libxml <dig> xml parsing library  <cit> , and our own implementation of the w3c dom  <cit>  and mathml dom  <cit> . language bindings and bridges offer access to the api from c++, java, javascript, and from an even wider range of languages  over corba  <cit> .
+
+RESULTS
+we firstly discuss the basic functionality used throughout the core api. we then discuss how the api can be used to process cellml metadata and imports. we discuss the object model and memory management scheme used by the api, and proceed to discuss each of the extension apis in sequence. we then discuss our suite for testing api implementations, and conclude the section with a comparison to other software with similar functionality.
+
+core api
+the scope of the core api is the basic manipulation of, and access to, the content of cellml models. the facilities for information retrieval in the api are closely aligned to the arrangement of xml elements in a cellml document. the idl specification for the core api can be found in the file interfaces/cellml apispec.idl, in the cellml api source tree.
+
+there is one object for each cellml element in the document. these objects implement an interface, which is specific to the type of the cellml element. the interfaces of these elements all inherit  from the cellmlelement interface. this interface provides functionality which is useful on all elements. for example, it provides the ability to insert or remove any of the child elements of the element concerned, and to set temporary user data annotations, identified by a unique key, against the elements. these annotations do not form part of the in-memory dom representation, and so do not, for example, appear in the generated xml when the model is serialised.
+
+the interfaces for cellml elements which have a mandatory name attribute all inherit from the namedcellmlelement interface. this interface provides a name attribute , and inherits from the cellmlelement interface. for example, cellmlcomponent inherits from namedcellmlelement, because the cellml specifications require that all component elements have a name attribute.
+
+for each type of child cellml element allowed by the cellml specification, the interface for the parent element has a read-only attribute for retrieving all the cellmlelements of that type. the returned set implements an interface specific to the type of element expected. for example, component elements can contain variable elements, so the cellmlcomponent interface has an attribute called variables, of type cellmlvariableset.
+
+these specific types of set follow an inheritance hierarchy parallel to those of the element objects in the set. each set interface has a corresponding iterator interface, which allows each object to be fetched in sequence. because the iterator interface is specific to the object being fetched, the required interface is returned, avoiding the need to call queryinterface . however, it is also possible to use the less specific  set interfaces to retrieve a less specific  iterator object .
+
+iterators derived from namedcellmlelementiterator also provide interfaces for fetching elements by name. all descendant iterator interfaces provide more specific fetch by name operations.
+
+set interfaces also provide facilities for modifying the relevant sets by inserting cellml elements. because order is not important to the meaning of the model, the iteration and insertion facilities provide no control over the actual order of the elements in the model.
+
+cellml makes heavy use of the namespace facilities in xml  <cit> . cellml provides for extension elements, that is, elements which are not in the usual cellml, mathml, or rdf namespaces. the cellmlelement interface provides an attribute extensionelements, of type extensionelementlist. the extensionelementlist interface allows for dom elements which are not in the cellml namespace to be examined and manipulated.
+
+handling cellml metadata
+in addition, cellml models commonly contain metadata  <cit>  encoded in rdf/xml  <cit> . there are many different ways to process the rdf data encoded in rdf/xml. the model interface provides an operation called getrdfrepresentation, which takes a type uri to describe the type of rdf representation requested. these representations provide an interface deriving from the rdfrepresentation interface. the api requires that all implementations provide at least an implementation which provides a serialised rdf/xml document as a string, and an implementation which provides a dom document node for the data as a single rdf/xml. in order to produce these rdf/xml outputs, implementations need to pool several different fragments of rdf found throughout the document into a single rdf/xml document. applications can also modify the rdf/xml and push it back into the model.
+
+our implementation of the cellml api also provides an interface allowing access to and modification of the rdf triples  <cit>  found in the model.
+
+dealing with model imports in cellml  <dig> 
+cellml  <dig>  provides for components and physical units to be imported into models from other models  <cit> . an import is created by adding an import element, which refers to another model to be imported by uri. the import element has child elements which describe which components and units from the imported model are accessible in the importing model. the cellml api provides facilities to allow such information to be accessed.
+
+the result of supporting cellml  <dig>  is that processing one mathematical model can require that more than one cellml file be examined. to deal with this issue, the api introduces the following two concepts: an imported model is said to be instantiated once it has been loaded. when all imports required for a mathematical model have been loaded , the model is said to be fully instantiated.
+
+the api has an operation for selectively instantiating particular imports, as well as an operation for fully instantiating the model. for imports that are instantiated, the model element is also accessible, as well as the components they import.
+
+we have included three separate attributes for sets of components in the model, with three corresponding sets of units:
+
+• local component set - contains only the components in the particular cellml file ;
+
+• model set - contains all components which are in the local set, and also the import component elements  in the same file; and
+
+• full set - contains all components in the model, across all files making up the model. where the model containing a component is uninstantiated, the import component element is provided by iterators. when a model is instantiated, the components in the imported model are returned by the iterators, and in addition, these models are examined to identify further imported models to search for components, as appropriate.
+
+the three corresponding sets of units follow the exact same semantics as the sets of components, except over units rather than components.
+
+some technical details
+the interfaces defined in the api all use the inheritance capabilities of omg idl to derive from a base interface, called iobject. iobject is modelled after the similarly named interface in the xpcom object model. the iobject interface is used to provide interfaces for basic common facilities relating to the object underlying the interface, such as maintaining the reference count , and providing a unique identifier for each object. this unique identifier is useful for determining if two interface references describe the same object, and for building data structures which require that objects can be compared. api implementations use reference counting  <cit>  to determine when there are no remaining references to a particular object. the iobject interface has operations for incrementing and decrementing the reference count. in order to ensure reference counting works correctly, a few simple rules are followed consistently throughout the api design . all operations and attributes which provide an interface reference also increase the reference count of the underlying object. for example, in the case where the operation creates a new object, but no internal references to the new object are kept, the reference count of the returned interface should be one. secondly, for every time the reference count is incremented by invoking the add_ref operation , the programmer must ensure that eventually, the reference count is decremented by invoking the release_ref operation. the api is designed to be accessed through wrappers, and so the actual storage of the object may even reside on a different machine to the wrapper providing the interface being used. for this reason, the third rule arises: add_ref invocations must always be matched with a release_ref invocation on the exact same interface pointer .
+
+it is worth noting that while iobject provides facilities for reference counting, many programming languages perform automatic garbage collection. when using a direct bridge to these languages, the wrapper code will automatically call add_ref and release_ref on behalf of the user, and so the need for explicit memory management is avoided. for example, the java bridge makes use of the finalisation facilities in java, combined with the memory management facilities provided by the java native interface, so that java users do not need to explicitly modify reference counts.
+
+in addition to the reference counting scheme, the iobject interface also provides a queryinterface operation. this operation is used to ask an object if it supports a particular interface, and if it does, to provide an interface representation. as discussed earlier, the api is often accessed through wrapper code, and so users of the api should always perform queryinterface operations on api interfaces, rather than directly using the language-specific casting mechanisms.
+
+objects which are created by api implementations exist purely in memory . modifications can be made to the model in memory. the original file will only be updated if the application uses the api to serialise the cellml model back to xml, and then writes that xml to disk, replacing the original file. likewise, if the same model is loaded twice, there will be two separate, and independent instances of the model in memory. modifying one instance will not automatically change the other instance. where a model is imported, a separate instance of the imported model exists for each import element, and for each instance of the importing model. however, all elements, sets, and iterators in the core cellml api are 'live', in the sense that making any change to an in-memory instance of a model through the api will immediately affect responses from the api, even if the element, set or iterator was retrieved prior to when the change was made. for example, if an iterator is created, and has iterated through all units elements but one in a model, and that remaining units element is deleted, and next element is retrieved from the iterator, it will return a null value, signifying that there are no remaining units elements to iterate.
+
+the api makes use of the exception mechanism in omg idl to handle exceptional conditions . our implementation makes consistent use of exception safety techniques  <cit> , such as the resource acquisition is initialisation  pattern, to ensure that memory leaks do not occur when exceptions are raised.
+
+the language independent idl based interfaces do not provide a solution to the 'bootstrap' problem of how an interface is initially obtained, for example, the interface for creating a new model. the solution to this problem is language dependent. in each language, we provide functionality to retrieve a pointer to a bootstrap interface. for example, in c++, this is obtained by a method defined in a header. the bootstrap interface is defined in idl, and therefore standardised across all language bindings. each extension api has a separate bootstrap interface.
+
+our implementation of the api is not designed to allow for two writes  to occur concurrently, or for a read to occur concurrently with a write, on the same model. applications accessing the same model on multiple threads need to either protect all access to the api with a mutex, or more efficiently, use a read-write lock to ensure that there is no activity concurrent with a write.
+
+extension apis
+in addition to the core api, we have also produced apis to provide services which are beyond the scope of the core api.
+
+the core api does not depend upon the extensions, and so individual api implementations can choose not to support all extension apis. however, all extensions depend upon the core api, and some extensions also depend on other extensions .
+
+the annotation tools service
+the core cellml api provides basic facilities for in-memory annotation of elements in the cellml model with arbitrary user-supplied objects. however, the user data annotations are difficult to use for some applications, because the core api requires that user data be associated with a key, which must be manually removed when the application has finished with it.
+
+the annotation tools  api provides the ability to allocate and release a set of annotations, without needing to worry about interfering with other annotations being placed by independent calls to the same code, or about needing to individually remove all annotations left on objects.
+
+the idl specification for the annotools api can be found in the file interfaces/annotools.idl, in the cellml api source tree.
+
+annotools implementations generate a unique prefix for each annotationset, and allow the user to set annotations with that prefix. they keep an internal list of all annotations which were added, and clear all annotations in the annotationset when the annotationset is destroyed.
+
+the annotools api also includes facilities for more easily setting and retrieving string, integer, and floating point annotations.
+
+the cellml variable association service
+the cellml variable association service  api facilitates the treatment of interconnected cellml variables as the same mathematical variable . these variables may come from different components, some of which may be imported from different models.
+
+the idl specification for the cevas api can be found in the file interfaces/cevas.idl, in the cellml api source tree.
+
+cellml  <dig>  and  <dig>  require that variables which are connected to variables in other components have a public or private interface value of 'in' or 'out'. whether the public or private interface applies depends on the encapsulation relationship between the components. in cellml, all 'in' interfaces must be connected to an 'out' interface, encapsulation is always acyclic, and valid cellml models have a finite number of variable elements. this means that, in a complete and valid model, there is always a variable in each connected network of variables that has no 'in' interfaces. this variable is called the source variable, and is used by cevas as a representative of all variables connected  to it.
+
+the interface allows users to supply a cellml model interface, and pre-compute which variables are connected. all variables connected to a particular variable can be iterated, and the source variable can be retrieved.
+
+this is implemented using an efficient disjoint sets algorithm, which allows for inverse ackerman amortised time merges of sets  <cit> . initially, every variable in the model is treated as a set of size  <dig>  the algorithm iteratively processes all connections in the model, merging the disjoint sets associated with each of the two connected variables. therefore, the amortised time complexity of processing a model with n components and m connections is in o), where α is the inverse ackerman function. note that the inverse ackerman function grows very slowly; for example, α =  <dig>  while α =  <dig> 
+
+the cellml units simplification and expansion service
+the cellml units simplification and expansion service  api provides facilities for processing physical units in a cellml model.
+
+the idl specification for the cuses api can be found in the file interfaces/cuses.idl, in the cellml api source tree.
+
+cellml has a set of built-in units. these units are defined in terms of the si  <cit>  base units; ampere, candela, kelvin, kilogram, metre, mole, and second. other pre-defined units are defined in terms of these. for example, the joule is defined as kg.m <dig> s- <dig>  in addition, the modeller can define their own derived units , or a new base unit. however, when processing models, it is important to know what the relationship between connected variables is, so the appropriate conversions can be performed, if necessary. for example, when a variable in metres is connected to a variable in millimetres, tools are expected to insert an implicit conversion factor, so the same variable is compatible across the two components. cuses allows tools to implement this more simply.
+
+all units are firstly expanded to be expressions in terms of the base units. si prefixes are converted to multipliers. all units are converted to a canonical form, consisting of the product of powers of base units, each base unit occurring at most once, possibly with a single multiplier and/or offset. the base units, and their corresponding exponents, are exposed to users of the api in an enumerable list of base unit instances. facilities are provided to enquire whether two units are dimensionally equivalent. this is useful for determining if a connection is valid. the necessary offset and multiplier needed to perform a conversion can also be retrieved.
+
+the validation against cellml specification service
+the validation against cellml specification service  api accepts files which are putatively cellml files, and identifies whether or not the cellml is valid, and where the file is not valid, it attempts to build a list of the problems.
+
+the idl specification for the vacss api can be found in the file interfaces/vacss.idl, in the cellml api source tree.
+
+errors that can be detected fall into two types:
+
+• representational - errors relating to the encoding of cellml in xml, such as essential elements or attributes which are missing, or illegal extraneous elements; and
+
+• semantic - higher-level errors, where the basic elements of the cellml are in the correct form, but there are inconsistencies, such as references to names which are required to exist but do not, or violations of any of the numerous rules specified in the cellml specification. semantic warnings, such as about potential units problems in mathematical equations, due to dimensional inconsistency, are also made available.
+
+mathml language expression service
+one task which is common to many applications is to convert the fragments of mathml embedded in cellml documents into fragments of text in some other linear text-based representation, such as programming language source code.
+
+the mathml language expression service  api provides functionality to assist with this task. malaes makes use of cevas in order to identify the source variable corresponding to each mathml ci element . it then makes use of annotools to retrieve an annotation  containing the symbol to be used for that variable in the output. the idl specification for the malaes api can be found in the file interfaces/malaes.idl, in the cellml api source tree.
+
+it is often the case that these transformations need to take units into account, to ensure that all variables in the mathml contain any necessary conversion factors. malaes thus allows variables  to be converted into the units of the source variable, and also for the result of an expression to be converted. in order to allow for conversion into many different languages to occur, malaes uses a specification in a custom format called mal . the mal description describes the mapping between mathml elements and their forms in the output text-based representation , as well as describing the precedence of each operation, what strings are used to begin and end groupings of low precedence operators inside a higher precedence operator, and the format of conversions. the mal is precompiled into an efficient in-memory representation, which can then be used to generate output.
+
+the cellml code generation service
+another common task is to convert an entire cellml model into code in a procedural programming language, capable of solving the model. the cellml code generation service  api simplifies this task.
+
+the idl specification for the ccgs api can be found in the file interfaces/ccgs.idl, in the cellml api source tree.
+
+the ccgs is specialised for the common case where there is a single independent variable  and the index of the dae system is at most one  <cit> . users of the api obtain the codegeneratorbootstrap interface pointer through the language specific bootstrap process, and then use the createcodegenerator operation to obtain a codegenerator interface.
+
+on this codegenerator interface, it is possible to specify a wide range of different attributes about the language to be generated. this means that code can be generated for a wide range of procedural programming languages .
+
+because ccgs relies upon malaes to translate individual mathematical expressions into the correct text-based form, the user also needs to supply a mal description for the language of interest.
+
+ccgs uses the terminology 'computation target'  to represent anything which is required to be computed to evaluate the equations in a cellml model . there is not a one-to-one relationship between variables in the cellml model and computation targets. for example, there may be a variable called x, with an initial value of  <dig>  and then an equation such as . in this case, x and  are both computation targets . note that when a variable is used in several components, but the variables are connected together , there will only be one computation target for all the variable elements.
+
+ccgs gives every computation target a degree . all computation targets which have a corresponding computation target of higher degree are treated as being state variables, while computation targets with a lower degree computation target are treated as being rates. computation targets which have both a higher and lower degree computation target are in the unique position of being both a rate and a state variable. ccgs generates code for this case by making use of the standard technique for transforming an ordinary differential equation  system with higher derivatives into an equivalent ode system with no higher than first order derivatives  <cit> .
+
+initially, cellml variables which are in fact constant in value are identified and marked as such. variables which are computable using only constants are in turn classified as constants . it is possible that a system of simultaneous equations may need to be solved in order to determine n otherwise unknown constants from n equations . this is done in our implementation using a heuristic algorithm which guarantees that the smallest possible systems are found when the largest indivisible system needed to be solved has at most three equations with three unknowns, and has given good results in our testing.
+
+after identifying the order in which equations or systems need to be solved, code is generated for them. this is done using one of three different patterns supplied to ccgs by the application. where ccgs needs to compute a computation target y using an equation like y = f , ccgs will use the assignment pattern to directly assign into the symbol for y. in other cases, the equation might be in the form f  = g, in which case the univariate solve pattern is used to compute y. finally, for systems of equations, the multivariate solve pattern is used.
+
+any computation targets which are not constants, states, nor are rates, are classified as being 'algebraic computation targets'. in the same fashion as is done for constants, ccgs works out a directed acyclic graph for the order in which systems or equations are used to work out the rate and algebraic computation targets, using the constants, states, and the independent variables. however, these computations are split into two code fragments. the first code fragment contains all computations necessary to compute the rates from the states, constants, and independent variables, while the second code fragment computes any remaining algebraic computation targets not computed in the first code fragment. this separation allows for more efficient processing of models, because at many time steps, the integrator may not want to report back any results, and so there is no need to evaluate computation targets that are not required to compute the next time step.
+
+ccgs has the capability to automatically assign indices into four different arrays:
+
+• constants array - stores the values of any computation targets which do not depend on the independent variable, or upon any of the rate or state computation targets;
+
+• states array - used to store the values of each state computation target;
+
+• rates - used to store the values of the rate of change corresponding to each state computation target; and,
+
+• algebraic array - used for all remaining variables.
+
+the codegenerator object allows the first index to be assigned in each array to be set . in addition, the user can supply a pattern, for example states , to describe how the arrays are dereferenced in the output programming language. the caller can also supply their own annoset object, and explicitly provide a name for each computation target if this is required.
+
+overall, four different code fragments are available. firstly, the fragment to initialise constants, as discussed above. secondly, the fragment to compute the rates . thirdly, the fragment for the remaining variables. the final code fragment contains any functions which needed to be generated  in order to evaluate the code. these functions can then be called from the univariate and multivariate solver patterns, and also in mal specifications, such as those for evaluating definite integrals.
+
+as a ccgs implementation processes models, it will also check for and report back on certain error conditions, such as models which have extraneous equations , or models which have too few equations to compute all computation targets . as ccgs only supports daes of index one or lower, it will, for example, report that the model is incorrectly constrained if the model is a valid index two dae.
+
+the cellml language export definition service
+defining a new programming language for use with malaes requires setting up a mal description of the language, and configuring this through the api. however, it is convenient to be able to exchange this information with other users, in order to allow for the definition of arbitrary languages by the user. the cellml language export definition service  allows for the mal description of a language to be embedded in an xml file. in addition, it provides a generalised dictionary service, to allow information required to generate output for different languages to be provided to the consumer of the celeds service. the idl specification for the celeds api can be found in the file interfaces/celeds.idl, in the cellml api source tree.
+
+the celedsexporter service builds upon that offered by celeds to support full code generation . instead of programmatically setting attributes on the codegenerator interface, all information is specified in a standardised xml format, along with the mal description. in addition, celeds contains information on the super-structure of the program, including unchanging fragments of code which are required to allow the program to run .
+
+this means that all the information required to generate code for a language is encapsulated in a single xml file, which can be read in at run-time. users can easily modify these definitions in order to customise aspects of code generation, and to create new definitions for conversions to other languages.
+
+due to this standardisation of how conversions are specified, we have created a small repository of celeds/celedsexporter compatible conversion definitions, including definitions for c, matlab, and python. this repository can be found in the celeds/languages subdirectory of the cellml api source code. we have also created a definition for fortran <dig>  although it requires further testing before being considered ready for widespread use.
+
+the cellml integration service
+the cellml integration service  api provides an interface for performing simulations of models, and receiving asynchronous notifications as results become available.
+
+the idl specification for the cis api can be found in the file interfaces/cis.idl, in the cellml api source tree.
+
+cellml model interface pointers are given to cis, which then creates a cellmlcompiledmodel object. the application then specifies the algorithm to be used, and the parameters of the simulation . the application may also choose to override an initial value without recompiling the model.
+
+the integrationprogressobserver interface can be implemented by the application, and given to the cellmlintegrationrun interface prior to starting the simulation. this interface receives information about the values of constants which were computed, as well as the results from each time-step, and an indication of whether the integration has succeeded or failed .
+
+our implementation of the cellml api internally makes use of ccgs to generate c code. the c code is then compiled using a compiler. for example, in one of our applications based on the cellml api, we bundle a stripped down version of the c compiler from the free/open source gnu compiler collection  <cit>   with our application. the code is then linked into a shared object and dynamically loaded into the cis implementation, which then uses a separate program thread to simulate the model .
+
+test-suite
+we have also developed an extensive test-suite for validating api implementations. for the core api , and some extension apis, a program included with the test-suite makes use of every attribute and operation in the api, and checks that invariants which are expected to be true, if the implementation behaves correctly, are in fact true. in addition, the test-suite also includes a series of small programs, as well as a series of inputs to those programs, and expected outputs. for example, the program cellml2c is a small, command-line driven test program, that takes a cellml model as input, and uses the ccgs extension api to generate c code from it. the test-suite calls cellml2c with  <dig> different models . our api implementation is automatically tested against this test-suite after every commit, on linux, mac os x, and windows xp, with ad hoc testing on a range of other platforms. the api implementation currently passes all of the above tests.
+
+in the future, we plan to add tests which can confirm that the numerical results provided by implementations of the cellml integration service are correct, in a similar vein to the sbml test-suite http://sourceforge.net/projects/sbml/files/test-suite/ <dig> .0%20alpha/.
+
+comparison with libsbml
+the cellml api is, to our knowledge, the first publicly available api that supports the processing of cellml models. however, there are other similar projects designed to process mathematical models in different encodings.
+
+libsbml is, in many ways, analogous to the cellml api, except that it processes sbml models. as cellml provides a higher level of domain independence than sbml, it is expected that tools used across many different domains of expertise will need to exchange cellml models. in addition, some tools, such as generic modelling environments, may need to import and export both sbml and cellml models, in which case, both a cellml api implementation, and libsbml can be used together in the same program. aside from the difference in language support, there are some additional major differences between the cellml api and libsbml.
+
+the cellml api emphasises the technical separation of the interface definition  and implementations of the interface. with the cellml api, adding a new language binding involves developing code to automatically produce a wrapper from the idl description, rather than using swig  <cit>  . we therefore expect that the cellml api approach is more robust to changes to the api, and to the addition of completely new modules.
+
+in addition, the cellml api takes a different approach to the manipulation of mathml. the cellml api requires implementations to support an existing api, the mathml dom  <cit> , while libsbml provides a more limited abstract syntax tree  based approach. the libsbml approach, however, does allow for translations to and from plain text; this feature is available in opencell , and we plan to include the feature in a future version of the cellml api.
+
+discussion
+applications of the api
+our cellml api implementation is at the point at which it is stable enough for widespread use. it is already used extensively by the opencell  <cit>  environment , which provides support for viewing, editing, and running simulations from cellml models. it is also used by the physiome model repository  <cit> .
+
+in addition, third-party users have applied the api to process cellml models and carry out simulations and post-processing  <cit> .
+
+ongoing support for the api
+the cellml api is a free/open source project, and contributions from any interested parties are encouraged. the project is regularly updated to support new features.
+
+a public mailing list has been set up to allow communication amongst developers using and improving on the cellml api and other cellml tools. users can view the archives and subscribe at http://www.cellml.org/mailman/listinfo/cellml-tools-developers/.
+
+in addition, other development facilities, including an issue tracker for bugs and feature ideas https://tracker.physiomeproject.org, and an automated build and test monitoring system http://autotest.bioeng.auckland.ac.nz/cellml-build/, are provided.
+
+future developments
+a number of potential future contributions to the api and implementation are under consideration. for example, there is a proposal for a new api for converting cellml models to and from input languages .
+
+in addition, there are plans to make ccgs support dedicated dae solvers such as ida  <cit> , which could allow for daes of arbitrary index to be solved.
+
+another important future improvement is the addition of more language bindings. the choice of language bindings will depend on the input we receive from the community, but could, for instance, include python, ruby, and haskell.
+
+other important improvements for future consideration include improving the documentation of the api, providing better support for working with metadata, and providing utilities for easier symbolic manipulation of mathematics.
+
+CONCLUSIONS
+the cellml api and its implementation are available, and are ready for widespread adoption by the community. developers of tools which process mathematical models are strongly encouraged to support cellml, so that users of the tool can participate in model sharing, with all the associated benefits to the scientific community. the cellml api and its implementation provide facilities which should make this task substantially easier.
+
+availability and requirements
+• project name: the cellml api. version  <dig>  was the latest release at the time of writing.
+
+• project home page: http://www.cellml.org/tools/api/
+
+• operating systems: the api implementation can be built on any posix like system, including linux, mac os x, and cygwin. it can also be built using microsoft visual c++  <dig>  it has been tested on linux , aix, windows  and mac os x.
+
+• programming language: the api is in idl , and the implementation in c++, callable through bridges from c++, java, javascript, and from other languages through corba.
+
+• other requirements: the build requires the omniidl tool, which is part of omniorb  <cit> , as well as libxml <dig>  <cit> , and optionally the gnu scientific library   <cit> . if the java bindings are desired, the java development kit is required. if javascript  bindings are desired, xulrunner is required  <cit> .
+
+• license: the cellml api and implementation can be redistributed under any one of: the gnu gpl version  <dig> or later, the gnu lgpl version  <dig>  or later, or the mozilla public license version  <dig> . this allows the api and implementation to be used in a wide range of public and private research and applied settings.
+
+• any restrictions to use by non-academics: there are no restrictions on usage of the api. redistribution requires compliance with one of the licenses above, as well as the licenses of any dependencies being used .
+
+the source code and change history is available on sourceforge. documentation on how to build the api on various platforms is included in the 'docs' directory of the source tree. in addition, the documentation extracted from the idl files using the doxygen tool are available in html form. links to these resources can be found on the project home page.
+
+list of abbreviations used
+annotools: the annotation tools; api: application programming interface; ccgs: the cellml code generation service; celeds: the cellml language export definition service; cellml: an xml-based language for describing mathematical models; cevas: the cellml variable annotation service; cis: the cellml integration service; corba: common object request broker architecture; cuses: the cellml units simplification and expansion service; dae: differential algebraic equation; dom: document object model; idl: interface definition language; mal: mathml to language; malaes: the mathml language expression service; ode: ordinary differential equation; rdf: resource description format; uri: uniform resource indicator; vacss: the validation against cellml specification service; xml: the extensible markup language; xpcom: cross-platform common object model.
+
+authors' contributions
+akm developed most of the api and its implementation and wrote the first draft of the manuscript. mh contributed to the development of an earlier api, and provided guidance on the development of the api discussed here. jm contributed to the development of the api and implementation. ar developed the celeds and celedsexporter modules. ag contributed documentation for the api. pn, rb, ag, and jc contributed advice on the development of the api and its implementation. all authors provided input into this manuscript.
+

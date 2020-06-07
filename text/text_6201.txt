@@ -1,0 +1,206 @@
+BACKGROUND
+a first step in the analysis of next-generation sequencing  data is the transformation of the measured intensity signals to a sequence of nucleotides. this process, referred to as base-calling, is an important task, as systematic base-calling errors may mislead downstream analysis
+ <cit> , e.g. in genome assembly and sequence mapping. more accurate base-calling and more reliable base-calling quality scores result in a better distinction between sequencing errors and true polymorphisms between the base-called reads and a reference sequence. this is an essential merit in the detection of single nucleotide polymorphisms  or sequence variants
+ <cit> . a myriad of applications such as the characterization of hiv mutation spectra
+ <cit> , the detection of somatic mutations in cancer
+ <cit> , and the identification of operational taxonomic units in metagenomics
+ <cit>  have the potential to benefit from improved base-calling and more informative quality scores.
+
+the  <dig> life sciences system is based on the sequencing-by-synthesis principle. in each flow of the sequencing process, light produced by a pyrosequencing reaction is emitted if one or more identical nucleotides are incorporated into the dna template. the addition of each of the  <dig> possible nucleotide solutions a, c, g or t occurs in a fixed and known order. hence,  <dig> base-calling is a matter of discerning the number of incorporated nucleotides or homopolymer length  of a known nucleotide type from the measured intensity signal in each flow
+ <cit> . consequently, the principal sources of  <dig> sequencing errors are insertion and deletion errors . these are more frequent in sequences containing long homopolymers
+ <cit> , because the increase of intensity signal when more nucleotides are incoporated, attenuates at higher hpls. this makes it harder to discriminate between subsequent homopolymer lengths, resulting in an inflation of undercalls or overcalls as the hpl increases .
+
+in the default  <dig> sequencing pipeline the raw intensities are preprocessed to flowgram values by correcting for the major error sources. these include spatial and read-specific effects such as the abundance of long homopolymers in a read
+ <cit> . this preprocessing eliminates much obscuring noise, but removes some useful information as well . in the next step the base-calling takes place, where, roughly speaking, the flowgram values are rounded to the nearest integer. subsequently, a quality score is assigned to each called base. quality score calculation in current  <dig> base-calling is solely based on the flowgram values without considering information from the preprocessing step
+ <cit> . an alternative method for quality score assignment has been proposed that focuses on the distribution of observed flowgram values for every possible hpl
+ <cit> , but it does not account for additional error sources. a common feature is that such methods are designed as a next step in the pipeline after the base-calling is finished. hence, the base-calling uncertainties inherent to the base-calling model or algorithm are not directly utilized in the construction of the quality scores.
+
+a second shortcoming of the current base-callers is that they only produce quality scores in the phred format
+ <cit> . phred scores can be interpreted in terms of the probability that the called base is not an overcall. although well-known and widely used, they provide a measure for the quality of the base-call, but they lack additional information on whether there is an undercall or an overcall, and on how likely it is for other hpls to be the correct call, instead of the hpl being called. this feature is particularly essential in  <dig> pyrosequencing. an example of overcalls of reference sequences with hplref  <dig> shows that the distributions of  <dig> quality scores are nearly identical for the called bases associated with position  <dig>   <dig> and  <dig> in the homopolymer run  . hence, these quality scores do not give any insight into whether it is more likely to have an undercall or an overcall, given that a base-calling error was made. this information would, however, be very useful in downstream tasks such as sequence alignment and sequence variant calling. quite some methods have recently been proposed that consider quality scores to increase accuracies in these downstream analyses, e.g.
+ <cit> . by adding more detailed information about the probabilities of having an undercall or overcall, these methods could be improved even further.
+
+for these reasons we have developed hpcall, a general probabilistic framework that seamlessly integrates the base-calling with more informative quality score assignment. hpcall is based on the classification of the calls in groups representing the possible hpls. to this end, a statistical model for count data is used that predicts the hpl in each sequencing cycle as a function of a number of explanatory variables. a particular property of the  <dig> pyrosequencing process is the high abundance of background intensities . whenever a nucleotide flow does not match the nucleotide at the interrogated position of the dna template, no nucleotide is incorporated and no sequencing reaction takes place. the resulting light intensity mainly reflects background optical noise. consequently, there are more zero counts than expected for a poisson distribution. hurdle poisson regression models
+ <cit>  are one way to deal with these excess zeros.
+
+for each possible hpl, the model produces an estimated probability that this hpl is truly present in the dna sequence at the interrogated position. the called hpl is then the hpl with the largest estimated probability. the calculation of these probabilities allows the simultaneous construction of quality scores. these scores directly reflect the base-calling’s uncertainties and provide information about potential undercall or overcall errors. in the model we combine information of flowgrams and earlier-stage raw intensities. by including the raw intensities we employ the additional information otherwise removed by the preprocessing , both for the base-calling and for the calculation of the quality scores. however, they are not strictly necessary for the method to provide valid results.
+
+methods
+sequencing data
+to assess the base-calling accuracies, dna of the reference k- <dig> strain mg <dig> of the bacterium escherichia coli was sequenced at the nxtgnt sequencing center, using shotgun sequencing with titanium reagents. results are presented for a random subset of  <dig> out of the  <dig> produced reads. the reads in the standard  <dig> pipeline were produced using software version  <dig> .
+
+base-calling pipeline
+before running the hurdle poisson base-calling model a preliminary data preparation step is performed in hpcall. in this step several raw data files are merged to create a data set that can be used for calibration of the model, if needed, and for subsequent base-calling. after the base-calling three output files are created:  the base-called reads,  the associated phred-like quality scores, and  a file with the base-calling probabilities by hpl. a visualization of the base-calling pipeline, including a more detailed description, can be found in the additional file .
+
+weighted hurdle poisson model
+model specification
+let nbc be the number of nucleotides b that are incorporated in cycle c, with b ∈ b = {actg} and c =  <dig> …,l, where l represents the total number of cycles in the sequencing experiment. note that one cycle consists of  <dig> flows of nucleotide solutions added in fixed order. the base-calling problem is treated as a classification problem, where nbc is the class indicator. based on the observed input information on the raw intensities and flowgram values, the flows are assigned to one of these classes. if there are only two possible classes, this is often done by logistic regression. here, we use poisson regression, because multiple hpls have to be classified. furthermore, these models also allow for extrapolation to larger hpls. to model the excess zeros in the data we consider hurdle poisson models. they are mixture models with a binomial component that distinguishes between zero counts and positive counts, and a zero-truncated poisson component which models the positive counts, conditional on having a non-zero count. because  <dig> data show considerable underdispersion after truncation, i.e. the variance is smaller than the mean, a weighted poisson component
+ <cit>  is adopted in the model to cope with this. the following hurdle poisson model is considered: 
+
+  pr{nbc=nbc}=1−Πbcifnbc=0Πbcfztwpifnbc= <dig> , <dig> … 
+
+where the probability pr{nbc = nbc} is conditional on the observed raw intensities and flowgram values, and fztwp is the density of a zero-truncated weighted poisson distribution which is given by 
+
+  fztwp=fwp1−fwpfornbc= <dig> , <dig> …, 
+
+with fwp denoting the density of the weighted poisson distribution, 
+
+  fwp=wnbce−λbcλbcnbcwbcnbc!. 
+
+in ,
+wnbc denotes a set of weights, λbc >  <dig> and the normalizing constant is given by
+wbc=∑nbc=0∞e−λbcλbcnbcwnbcnbc!. we use exponential weights
+wnbc similar to the ones proposed in
+ <cit> , 
+
+  wnbc=e−θ2withθ> <dig>  
+
+by considering a positive θ the underdispersion in the count data can be modeled properly.
+
+the nucleotide- and cycle-specific parameters Πbc in the binomial component and λbc in the poisson component are modeled with several predictors. we allow the predictor effects to be nonlinearly associated with the hpl by considering generalized additive models 
+ <cit> . in particular, 
+
+  logit=β <dig> bc+∑j=1kfj, 
+
+  log=γ <dig> bc+∑j=1lgj, 
+
+with the fj and gj being smooth functions of the corresponding predictor variables xj,bc and yj,bc, respectively. details about the smooth functions are provided in the additional file
+ <dig>  note that the predictor variables in  and  can be specified separately. in this paper we propose that the following information is used in either or both of the  <dig> submodels: 
+
+• flowgram values in the current flow;
+
+• log <dig> raw intensities in the current flow with or without a read-specific normalization;
+
+• the cumulative sum of flowgram values and log <dig> raw intensities up to the current flow; this allows for modeling a cycle-specific effect and recognizes the abundance of homopolymers in the preceding flows;
+
+• flowgram values of  <dig>   <dig> and/or  <dig> flows before and/or after the current flow; this corrects for homopolymers in preceding and subsequent flows.
+
+parameter estimation or model training
+the model parameters are estimated by maximum likelihood. this is done by using an iteratively reweighted least squares procedure
+ <cit>  for both submodels. efficient fitting of the model is conducted by the -package
+ <cit> .
+
+the estimation of the model parameters is based on the use of a representative training data set generated from a reference dna sequencing experiment. the corresponding reference hpls are the class indicators in the classification model. for the e. coli reference run we randomly selected  <dig> reads to fit the base-calling model. the remaining  <dig> reads in the subset were used for assessing the performance of the base-calling method.
+
+base-calling and quality score construction
+in flow bc, hpcall calls the hpl nbc for which
+p^{nnc=nbc|xj,bc,yj,bc} is maximal. these probabilities are obtained by plugging the estimated parameters from submodels  and  into model . they are also very useful quality scores because they provide a direct probabilistic interpretation to the base-calling uncertainties and give insight into potential undercall or overcall errors. moreover, they can also be used for the construction of phred scores in a similar fashion as the traditional  <dig> quality scores: it is a quality score that reflects the probability that the called base is not an overcall. in particular, the phred-like quality score of the k-th called base in a homopolymer stretch  is thus given by:
+qsk,overcall=−10log <dig>  since we can obtain the probabilities for all possible hpls, we can also calculate an alternative quality score that reflects the probability that the called base is not an undercall. this is given by
+qsk,undercall=−10log <dig>  using qsk,overcall and qsk,undercall a new quality score is calculated: qsk,hpcall = idir × min with idir = −  <dig> if qsk,undercall < qsk,overcall and idir =  <dig> if qsk,undercall > qsk,overcall. the sign of qsk,hpcall thus indicates whether an undercall or an overcall is more likely.
+
+performance evaluation
+the performance of hpcall is compared with that of the native  <dig> base-caller and of pyrobayes
+ <cit>  based on the e. coli reference run. the phred-like quality scores produced by the different base-callers are compared to ‘observed’ quality scores. the latter are computed by grouping all the bases with an equal quality score together, and computing for each group the proportion of overcalls. an observed quality score is calculated as qsobserved = −10 log <dig>  high hpcall quality scores are trimmed to  <dig>  just like it is done by the native  <dig> base-caller. further, the proportions of high-quality bases for the different base-callers are compared. next, we illustrate the added value of the hpcall base-calling probabilities and the new quality scores qshpcall.
+
+the raw base-calling accuracy is assessed to give insight into the base- and read-level error rates. for hpcall the reproducibility of this accuracy is evaluated based on  <dig> random training data sets. subsequently, an indel and snp-analysis is conducted using variant detection software. we use both ssaha <dig> <cit>  and subread <cit>   to map the base-called reads to the reference sequence and ssahasnp <cit>  to compute the number of sequence variants, both snps and indels. false positive calls are determined by comparing the base-calls to the e. coli k- <dig> strain reference genome. finally, the computational performance for the different methods is compared.
+
+RESULTS
+quality scores and base-calling probabilities
+hpcall provides estimated probabilities that a certain hpl is present given the values of all the input variables in the model. these probabilities are thus the most direct way to quantify the base-calling uncertainty. in addition, they can also be used to compute phred-like quality scores as generated by the native  <dig> base-caller and by pyrobayes. the quality score assignment of the different base-callers is assessed by comparing the predicted quality score with the observed quality score for the e. coli data set. both for hpcall and for the native  <dig> base-caller the predicted quality scores seem to reflect the observed quality quite well, and the quality score assignment seems equally good . for pyrobayes the performance is clearly worse, as predicted high quality scores overestimate the true quality of the base-calls. we also observe that hpcall generates more high quality scores than the other two base-callers . as an illustration, hpcall assigns to 95% of the called bases a quality score of  <dig> or more, whereas this cumulative base fraction is only 82% for the native  <dig> base-caller and 54% for pyrobayes.
+
+in the introduction we have argued that the  <dig> quality scores do not give any insight into whether it is more likely that a possible undercall or overcall was made . using the same example of overcalls for reference sequences with hplref  <dig>  the hpcall quality scores qsovercall clearly indicate that overcalls are more likely  in this situation. this can be seen from the large quality scores associated with hpl  <dig> and hpl  <dig>  whereas hpl  <dig> gives smaller quality scores. a similar picture is seen for the undercalls of reference sequences with hplref  <dig>  based on qsundercall . note that this plot can not be made for  <dig> quality scores. plots with respect to the combined hpcall quality score qshpcall reveal that the sign of these quality scores provides additional information about whether an undercall or an overcall is more likely .
+
+as mentioned before, the phred-like hpcall quality scores are based on estimated probabilities of being the correct call. hence, these probabilities are also very useful to assess the base-calling quality. their distribution for the example of reference sequences with hplref  <dig> shows that undercalls and overcalls are associated with larger base-calling uncertainties than correct calls . in case of a correct call almost all probabilities at hpl  <dig> are very close to  <dig>  whereas the cumulative sum of probabilities below hpl  <dig> in case of an undercall and above hpl  <dig> in case of an overcall are more evenly distributed between  <dig>  and  <dig>  in case of a miscall the estimated probability at the reference hpl very often is second largest. moreover, the miscalled maximal probability and the probability at the reference hpl nearly always sum to a value close to  <dig> .
+
+the merit of having the base-calling probabilities at our disposal is further demonstrated by examining indels that are flagged in sequence variant detection . in the first example  an undercall with respect to the reference sequence aaaaa is called by both hpcall and the native  <dig> base-caller. the native  <dig> base-caller assigns a quality score of  <dig> to the fourth a in the homopolymer sequence. this score of  <dig> does not indicate whether it is more likely that the fourth called a is a potential under- or overcall. either way, there is no fifth quality score available to provide more information about a possible fifth a to be called. for hpcall we have the additional information that the estimated probability that there should be five a’s called is  <dig> . this indicates that a miscall for this flow would almost certainly be an undercall. this is confirmed by the negative sign of qshpcall = − <dig> for this example. it is obvious that mapping algorithms that take this additional information into account will be able to more reliably map the base-called reads to the reference sequence. a very similar situation is observed in the case of an overcall . a homopolymer stretch aa is considered in the reference sequence, but is called as aaa by both base-callers. again, the quality score of  <dig> given by the native  <dig> base-caller for the third a does not give an indication of the probability of having an undercall or an overcall, given that there is a miscall. hpcall on the other hand does provide this information. since the estimated probability of hpl  <dig> is  <dig> , an overcall seems much more likely than an undercall. also here this is confirmed by the positive sign of qshpcall =  <dig>  finally, an example of the special situation is considered where no base is called while there is one in the reference sequence . because the native  <dig> base-caller only produces a quality score for every called base, there is no quality score provided in this situation. hence, there is no indication of the uncertainty of not having a call in the current flow. hpcall estimates the probability of having hpl  <dig> at  <dig> , and of having hpl  <dig> at  <dig> , with an associated qshpcall of − <dig>  indicating that it is not unlikely that there should be one base called instead of none.
+
+the estimated probability for hpl  <dig>  and the associated qshpcall  provided by hpcall clearly indicate the possibility of having an undercall with respect to the reference sequence, whereas this information is lacking in the quality scores of the native  <dig> base-caller.
+
+base-calling probabilities example 2: overcall. hpcall gives a probability for hpl  <dig> of  <dig>  and an associated qshpcall of  <dig>  this indicates that it is not unlikely that the fourth called a is an overcall. this information can not be extracted from the quality scores of the native  <dig> base-caller.
+
+because there is no base called by the native  <dig> base-caller, also no quality score is provided. hpcall on the other hand generates probabilities for hpl  <dig>  and hpl  <dig>  and an associated qshpcall at hpl  <dig> of - <dig>  indicating that an undercall is not unlikely.
+
+prediction accuracy
+the prediction accuracy of hpcall is examined for the e. coli data and compared with the performance of the native  <dig> base-caller and pyrobayes. based on the  <dig> evaluation reads in the e. coli reference run, an overall decrease of 35% of the percentage of base-calling errors is observed for hpcall as compared to the native  <dig> base-caller . the lower number of base-calling errors is consistent throughout the whole range of hpls, with peaks at hpl  <dig>  and hpl  <dig> . a plot of the absolute number of base-calling errors is shown in the additional file . these results are based on using information from both the raw intensities and the flowgram values. if only flowgram values are used, the prediction accuracy is slightly smaller but still larger as compared to the competing base-callers . sensitivity analysis indicates that hpcall prediction accuracies are very stable across different training data sets .
+
+read-wise assessment and sequence variant analysis
+the reads produced by hpcall are mapped to the reference sequence using ssaha <dig> and subread. in the mapping of the hpcall reads the traditional quality scores produced by hpcall without sign information are used. the read-wise error rate is compared to the native  <dig> base-caller . for this data set mapping percentages of  <dig> %  and  <dig> %  are obtained. 66%  to 69%  of the reads produced by hpcall map perfectly to the reference genome of the e. coli k- <dig> strain, whereas this is only the case for 56%  to 60%  of the reads produced by the native  <dig> base-caller. this evidently leads to a higher percentage of  <dig> reads with at least one mismatch to the reference genome as compared to reads generated by hpcall. the mapping location of the reads produced by hpcall and those produced by the native  <dig> base-caller differed by more than  <dig> bp for only  <dig> reads. the good performance of hpcall was confirmed by a read-wise assessment on data of a  <dig> amplicon resequencing experiment of the human tp <dig> gene. more details can be found in the additional file
+ <dig>  sequence variants of the mapped reads are detected by the ssahasnp program . a reduction of the number of sequence variants with 40% is obtained when using hpcall as compared to the native  <dig> base-caller. the decrease is observed both for indels and for snps.
+
+computational performance
+the performance of hpcall was tested using a representative  <dig> dataset containing  <dig>  sequences. both the native  <dig> basecaller and pyrobayes processed the dataset in approximately 4h, while the base-calling by hpcall was conducted in approximately  <dig> h. both pyrobayes and hpcall had comparable memory footprints of less than 1gb. hpcall used  <dig> gb hard disk space to store the preprocessed data before actual basecalling took place. the computational performance was measured on a 2× <dig> core intel xeon x <dig>   <dig>  ghz processors gnu/linux server system with  <dig> gb ram.
+
+software package
+the hpcall pipeline contains three modules. the first is a preprocessing module that stores all required data in a sql database. the second module performs the actual base-calling by means of the r package . all base-calls, hpcall probabilities and quality scores are postprocessed in the final module to produce the final output files. the hpcall software and manual are available at
+https://sourceforge.net/projects/hpcall/.
+
+discussion
+one of the main contributions of hpcall is that the base-calling and quality score assignment are seamlessly integrated and occur simultaneously, instead of in two separate steps. for a given cycle and nucleotide, the probability of being the correct hpl is estimated for each possible hpl based on different noise predictors, and the call corresponds to the hpl with the maximum probability. in this way the extent of the maximal probability provides direct information about the base-calling uncertainty and can thus be used as a measure for the base-calling quality. moreover, in the case of a miscall the second largest probability indicates whether an undercall or an overcall is more likely. this information is important for the downstream analysis of sequencing data, but it is completely lacking from traditional phred-like quality scores produced by current  <dig> base-callers. the distributions of maximum base-calling probabilities in case of a miscall are more evenly distributed between  <dig>  and  <dig> than in the case of a correct call where it is very often nearly  <dig>  this suggests that relatively small maximum probabilities are often associated with miscalls and therefore should raise caution.
+
+because they are commonly used in the analysis of ngs experiments, hpcall also calculates phred-like quality scores, based on the base-calling probabilities. these can be used in the same way as  <dig> quality scores. they are related to the probability of not having an overcall. these ‘overcall’ quality scores appear to compete well with the  <dig> quality scores, while the pyrobayes quality scores perform clearly worse. at the same time, however, hpcall produces considerably more high-quality scores. since we have all possible base-calling probabilities at our disposal, we can also calculate alternative quality scores based on the probability of not having an undercall. subsequently, a summarizing phred-like quality score is constructed by determining which of these two quality scores has the smallest value at the base-called hpl and this information is coded by the sign of the quality score . this new quality score now also contains information about the direction of a possible miscall. quality-aware sequence aligners may use these scores to provide more reliable mapping results. we further illustrate the use of the hpcall base-calling probabilities and the phred-like hpcall quality scores for assessing indels in sequence variant detection. in each sequencing flow, the native  <dig> base-caller produces quality scores for each called base, i.e. for a homopolymer of length  <dig>  also  <dig> quality scores are provided. these quality scores are not informative to discriminate between potential undercalls or overcalls. furthermore, in the situation that  <dig> bases are called instead of  <dig>  no quality scores are provided by the other base-callers. hence, no information is given about the probability that indeed  <dig> bases should have been called. in contrast, hpcall clearly indicates which type of miscall - undercall or overcall - is possibly to be expected in these examples, by means of the second highest base-calling probability and the sign of the hpcall quality score.
+
+besides the added value of the base-calling probabilities and quality scores, the prediction accuracy of hpcall surpasses that of the native  <dig> base-caller and of pyrobayes. based on our e. coli data we detect a 35% reduction of base-calling errors as compared to the current  <dig> base-caller. this reduction is quite stable throughout the whole hpl range. this number is based on a model that uses not only information from the preprocessed flowgram values, but also from the earlier-stage raw intensities to call the hpl in each flow of the sequencing process. if only information of flowgram values is used, the reduction of base-calling errors is still there, but it is smaller. hence, although preprocessing raw intensities to flowgram values in a separate step prior to base-calling has the merit of reducing the spatial, read-specific and background optical noise in the data to a large extent, it also seems to remove crucial information for the base-calling task itself. the lower number of base-calling errors is also reflected in the lower number of detected indels and snps after mapping the base-called reads to the e. coli reference sequence. the beneficial performance of hpcall was confirmed on a  <dig> amplicon resequencing experiment of the human tp <dig> gene. when hpcall is run using the model trained on the e. coli data set the base-calling accuracy slightly decreases . for optimal results, it is therefore recommended to retrain the model for different experiments. for calibration of the base-caller the associated hpls of a reference sequence are used to fit the model. a possible way to implement this is by adding plasmids to the sequencing experiment. the  <dig> sequencer uses control reads containing varying hpls for recalibrating its native base-caller. hence, these control reads would be very valuable for this purpose. up to now, however, the  <dig> software does not allow to extract the flowgram values associated with these reads. the larger accuracy and creation of the more informative quality scores by hpcall comes at the cost of an additional computing time that is in the same order as the time for native  <dig> base-calling. based on the e. coli data, the accuracy performance of hpcall is stable across different training data sets used to fit the model.
+
+while hpcall was primarily developed for base-calling of  <dig> data, it has the potential to be used for other homopolymer-sensitive sequencing platforms as well, e.g. the pgm sequencer of ion torrent. within the broad framework of the hurdle poisson model the algorithms to train the model remain unchanged. this also means that similar informative quality scores can be produced for other platforms. only the explanatory variables used to predict the hpl will be specific for each platform, e.g. the nucleotide flow order of the ion pgm sequencer is different from the  <dig> sequencer. although it was not the main focus of this research, a first test with pgm  <dig> e. coli reference data already shows promising results .
+
+CONCLUSIONS
+in this paper, we have proposed an alternative method for the base-calling of  <dig> pyrosequencing data, referred to as hpcall. based on the obtained results, we strongly believe that using hpcall for base-calling and taking advantage of the base-calling probabilities in downstream tasks like mapping, genome assembly and sequence variant detection will lead to more accurate and powerful applications. although hpcall is developed based on sequencing data of the  <dig> sequencing system, the underlying probabilistic framework is quite general. therefore, we expect it to be rather straightforward to adapt hpcall for use in novel emerging sequencing platforms based on flow cycles, for which base-calling of long homopolymers is critical, e.g. ion torrent pgm.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+kdb, lc and ot developed the statistical method. kdb and lc implemented the method in r. kdb performed all the analyses and wrote the manuscript. jds implemented the base-calling pipeline in perl. wvc provided the data set. ri contributed to the method development and design of the paper. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+probability of miscalls by native  <dig> base-caller. probability of miscalls by the native  <dig> base-caller for different hpls. the base-calling error rate clearly increases by increasing hpl and becomes quite substantial from hpl  <dig> 
+
+click here for file
+
+ additional file 2
+overview of hpcall base-calling pipeline. overview of the hpcall base-calling pipeline. different source files are merged in a data preparation step before the base-calling takes place. the output of the pipeline contains base-called sequence reads, phred-like quality scores, and base-calling probabilities for the different hpls.
+
+click here for file
+
+ additional file 3
+smooth functions in hurdle poisson model. specification of the smooth functions fj and gj in the hurdle poisson model.
+
+click here for file
+
+ additional file 4
+distribution of quality scores at hplref <dig> undercall. the empirical cumulative distribution function of  <dig> quality scores  and hpcall quality scores qsundercall  for sequences with reference hplref  <dig> assigned to bases associated with hpl  <dig>   <dig> and  <dig>  because of the undercall only  <dig> quality scores associated with hpl  <dig> are available. the hpcall quality scores associated with hpl  <dig> and hpl  <dig> are mostly very high, whereas this is not the case for those associated with hpl  <dig>  hpcall clearly indicates that undercalls are more likely in this situation, whereas this insight is not provided by the  <dig> quality scores.
+
+click here for file
+
+ additional file 5
+distribution of new informative quality scores at hplref <dig>  the empirical cumulative distribution function of hpcall quality scores qshpcall for sequences with reference hplref  <dig> assigned to bases associated with hpl  <dig>   <dig> and  <dig>  in the case of an undercall , correct call  or overcall .
+
+click here for file
+
+ additional file 6
+histograms of estimated probabilities by hpcall.  histograms of the maximal estimated probabilities by hpcall in the case of a correct call , and  in the case of a miscall .  the histogram in the lower left panel gives the distribution of estimated probabilities for the reference hpls in the case of a miscall. these very often correspond with the reference hpl.  the lower right panel gives the histogram of the sum of the probabilities given in the upper right and lower left panel. these two probabilities almost always sum to a value close to  <dig> 
+
+click here for file
+
+ additional file 7
+comparison of absolute number of base-calling errors. comparison of the absolute number of base-calling errors by hpl for the three base-calling methods. using hpcall leads to an overall decrease of the number of base-calling errors of 35% compared to the native  <dig> base-caller. the lower number of base-calling errors for hpcall is consistent throughout the complete range of reference hpls.
+
+click here for file
+
+ additional file 8
+comparison of base-calling prediction accuracy. prediction accuracy for the different base-calling methods separated by nucleotide type. although the prediction accuracy of the native base-caller is already quite high, hpcall obtains higher prediction accuracies for each individual nucleotide type. this is still the case if only flowgram values  are used. both hpcall and the native  <dig> base-caller clearly outperform pyrobayes.
+
+click here for file
+
+ additional file 9
+variability of the prediction accuracy by hpcall. variability of the prediction accuracy of hpcall. the obtained prediction accuracies are very stable among the different random samples of training data. the standard deviations of the prediction accuracies range from  <dig>   to  <dig>  .
+
+click here for file
+
+ additional file 10
+comparison of mapping mismatches. percentage of reads with different numbers of mismatches in the mapping between the reads produced by either hpcall or the native  <dig> base-caller and the e. coli k- <dig> reference sequence. for mapping either ssaha <dig> or subread is used. detected number of sequence variants for the e. coli data set using ssahasnp. hpcall results in more perfect-matching reads and less overall indels and snps.
+
+click here for file
+
+ additional file 11
+base-calling of human tp <dig>  <dig> amplicon resequencing data. percentage of reads with different number of mismatches in the mapping between either hpcall  or the native  <dig> base-caller and the human tp <dig> gene reference sequence. hpcall results in more perfect-matching reads. when trained on the e. coli data set the percentage of perfect-matching reads decreases slightly.
+
+click here for file
+
+ additional file 12
+base-calling of pgm 314e. colidata with hpcall. cumulative percentage of reads as a function of mismatches per read in the mapping between the reads produced by either hpcall or the standard ion pgm base-caller and the e. coli dh10b reference sequence. the results for hpcall are promising.
+
+click here for file
+
+ acknowledgements
+herwig van marck and bie verbist are kindly acknowledged for the insightful discussions. part of this research was supported by iap research network grant no. p6/ <dig> of the belgian government  and ghent university .

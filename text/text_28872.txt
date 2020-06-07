@@ -1,0 +1,240 @@
+BACKGROUND
+an rna sequence is a chain of nucleotides from the alphabet {g , a , u , c }. one segment of a rna sequence might be paired with another segment of the same rna sequence due to the force of hydrogen bonds. this two-dimensional structure is called the rna sequence's secondary structure. two nucleotides in an rna sequence can form watson-crick au and gc base pairs as well as the gu wobble pair. several algorithms have been proposed to predict an rna sequence's secondary structure. these algorithms are referred to as rna folding algorithms. waterman and smith  <cit>  and nussinov et al.  <cit>  made the first attempt in  <dig>  zuker et al.  <cit>  refined nussinov's algorithm by using a thermodynamic energy minimization model, which produces more accurate results at the expense of greater computational complexity. although our focus in this paper is the simpler nussinov's algorithm, our strategies may be applied to zuker's algorithm as well.
+
+the complexity of nussinov's and zuker's algorithm is o, where n is the length of the rna sequence to be folded. other rna folding algorithms with better prediction properties and higher complexity also exist. when folding viral sequences, n ranges from several thousand to several million and single-core run time becomes excessive and so much effort has gone into developing parallel versions of various rna folding algorithms. for example,  <cit>  develop a multicore code for an o folding algorithm while  <cit>  does this for nussinov's algorithm.  <cit>  develops a framework for rna folding algorithms on a cluster and tests this framework using an o  and an o  algorithms for the prediction of rna secondary structure. fpga solutions for secondary structure prediction have been proposed in  <cit>  and gpu solutions in  <cit> . we note that  <cit>  is based on the algorithm of zuker et al.  <cit>  while  <cit>  is based on that of nussinov et al.  <cit> .
+
+we start in this paper by describing the gpu architecture and programming model. then we state nussinov et al.'s  <cit>  dynamic programming recurrence for secondary structure prediction and we give modifications of these equations as obtained by chang et al.  <cit> . these modifications simplify the parallelization of the original equations and compute the same results. we also describe the strategy used in  <cit>  to obtain a gpu algorithm to solve the modified equations. a naive implementation of the modified equations of  <cit>  together with a cache efficient version and multicore versions are given. we note that although  <cit>  gives a multicore version of nussinov's algorithm, our multicore version is much simpler and provides similar speedup. then our gpu algorithm for the modified equations is described. experimental and benchmark results are presented after that.
+
+gpu architecture and programming model
+our work targets the nvidia c <dig> gpu. figure  <dig> shows the architecture of one streaming multiprocessor  of the nvidia fermi line of gpus of which the c <dig> is a member. the c <dig> comprises  <dig> processor cores grouped into  <dig> sms with  <dig> cores per sm. each sm has 64kb of shared memory/l <dig> cache that may be set up as either 48kb of shared memory and 16kb of l <dig> cache or 16kb of shared memory and 48kb of l <dig> cache. in addition, each sm has 32k registers. the  <dig> sms access a common 3gb of dram memory, called device or global memory, via a 768kb l <dig> cache. a c <dig> is capable of performing up to  <dig>  tflops of single-precision operations and  <dig> gflops of double precision operations. a c <dig> connects to the host processor via a pci-express bus. the master-slave programming model in which one writes a program for the host or master computer and this program invokes kernels that execute on the gpu is supported. gpus use the simt  programming model in which the gpu accomplishes a computational task using thousands of light weight threads. the threads are grouped into blocks and the blocks are organized as a grid. while a block of threads may be 1-, 2-, or 3-dimensional, the grid of blocks may only be  <dig> or 2-dimensional. the key challenge in deriving high performance on this machine is to be able to effectively minimize the memory traffic between the sms and the global memory of the gpu. this effectively requires design of novel algorithmic and implementation approaches and is the main focus of this paper.
+
+nussinov's dynamic programing recurrence
+let s = a1a <dig> ..an be an rna sequence where ai ϵ {a, c, g, u} is a nucleotide. nussinov's algorithm finds the most possible secondary structure by maximizing the number of bonded pairs . let c be the maximum number of bonded pairs in the subsequence ai ⋯ aj,  <dig> ≤ i ≤ j ≤ n. nussinov's dynamic programming recurrence for c is given below.
+
+ c=02≤i≤nc=01≤i≤n 
+
+ c=maxccc+bondmaxi<k<j{c+c} 
+
+here, bond is  <dig> if  is an au, gc or gu pair and  <dig> otherwise, and the third equation applies when i <j. the third equation computes the maximum of four terms that have the following significance.
+
+ <dig> add unpaired ai to the best structure for subsequence ai+ <dig> ..aj , as shown in figure  <dig> 
+
+ <dig> add unpaired aj to the best structure for subsequence ai...aj− <dig>  as shown in figure  <dig> 
+
+ <dig> add  pair to the best structure for subsequence ai+ <dig> ..aj− <dig>  as shown in figure  <dig> 
+
+ <dig> combine two best structures for ai...ak and ak+ <dig> ..aj, as shown in figure  <dig> 
+
+once the c,  <dig> ≤ i <j ≤ n, have been computed, a traceback procedure can be used to construct the actual secondary structure, which is represented in the matrix as a path leading to the maximum score. while this traceback procedure takes o time, the actual computation of the c matrix takes o time.
+
+simplified recurrence and gpu algorithm
+chang et al.  <cit>  simplified nussinov's recurrence to the following.
+
+  c=0for1≤i≤n 
+
+  c=0for1≤i≤n- <dig> 
+
+  c=maxc+bondmaxi≤k<j{c+c} 
+
+like nussinov's original recurrence, the simplified recurrence uses o memory and o time. however, chang's formulation is easier to parallelize. in a serial computation of c, we would start by initializing c  and c  using equations  <dig> and  <dig> and then use equation  <dig> to compute the remaining diagonals in the order c ... c. figure  <dig> shows how the computation progresses.
+
+in  <cit> , the entire computation is divided into three stages as shown in figure  <dig>  namely the initial stage, the middle stage and the final stage. in the initial stage, since the computation at each element is shallow , one gpu thread is assigned to compute one element. no data exchange between threads is needed. all threads synchronize before moving to the next diagonal. in the middle stage, an entire block of threads is assigned to compute one element and the parallel reduction method contained in cuda sdk is used. in the final stage, all sms collaborate to compute one element because the distance from the element to the central diagonal is long and the computation for each element is heavy. again, parallel reduction is used in this stage. to reduce accesses to device memory, the gpu algorithm of  <cit>  stores each c value, i <j in positions  as well as in the otherwise unused position . when c is to be read from device memory , the read is done from position . this changes column reads to row reads and better utilizes the l <dig> and l <dig> caches of the target gpu.
+
+methods
+cache efficient and multicore algorithms
+cpu <dig>  is a naive single-core algorithm to compute c using the simplified recurrence of chang et al. this algorithm computes m  = c,  <dig> ≤ i ≤ j <n, where n is the length of the rna sequence r.
+
+algorithm  <dig> cpu1
+
+require: rna sequence r
+
+ensure: array m such that m  = c
+
+1: for i ←  <dig> to |r|- <dig> do
+
+2:    m  ← 0
+
+3: end for
+
+4: for i ←  <dig> to |r|- <dig> do
+
+5:    m  ← 0
+
+6: end for
+
+7: for diag ←  <dig> to |r|- <dig> do
+
+8:    for row ←  <dig> to |r|-diag- <dig> do
+
+9:        col ← diag + row
+
+10:        a ← r; b ← r
+
+11:        max ← m  + bond
+
+12:        for k ← row to col- <dig> do
+
+13:            t ← m  + m 
+
+14:            max ← max{max, t}
+
+15:        end for
+
+16:        m  ← max
+
+17:    end for
+
+18: end for
+
+by using the lower triangle of m to store the transpose of the computed values in the upper triangle of m as is done in the gpu implementation of  <cit> , we get a cache efficient version of cpu <dig>  to arrive at cpu <dig>  we change line  <dig> of algorithm  <dig> to "t ← m  + m ", and change line  <dig> to "m  ← m  ← max". values of m  locate in the same column but values of m  locate in the same row, for row ≤ k < col. reading values in a row is more cache efficient than reading values in a column.
+
+multicore versions of cpu <dig> and cpu <dig>  respectively labeled omp <dig> and omp <dig>  are obtained by inserting openmp statements to parallelize the for loops of lines  <dig>   <dig>  and  <dig> 
+
+our gpu algorithm
+unlike the gpu algorithm of  <cit>  which computes c by diagonals, we use a refinement of the block strategy used in  <cit> . figure  <dig> shows the  <dig> ×  <dig> c matrix for the case of rna sequences whose length is n =  <dig>  to compute the element labeled "x", elements "a" to "l" are, respectively, added to elements "a" to "l" and the maximum of "a+a", "b+b", ... "l+l" is computed. we note that the computation for "y" also requires "a" to "l" and that "x" has to be computed before "y" and "z" can be computed.
+
+in our block strategy, we partition the upper triangle of the c matrix into square blocks except that adjacent to the main diagonal the partitioning is into triangles and that at the right end is into possibly non-square rectangles. figure  <dig> shows the partitioning for the case n =  <dig> using  <dig> ×  <dig> blocks. notice the triangles adjacent to the main diagonal and the  <dig> ×  <dig> non-square partitions at the right end. the blocks  are indexed left-to-right top-to-bottom beginning with . in keeping with the traditional way to number blocks for gpu computation, the first coordinate increases as you move to the right and the second as you move down. so "x"  resides in , "k" in , and "p" in . blocks on the main diagonal are indexed  and are triangular. for the dependencies in equation  <dig>  it follows that blocks that lie on the same diagonal of blocks  for some fixed k) are independent and so may be computed in parallel but that elements within a block are to be computed by diagonals. our  <dig> ×  <dig> example of figure  <dig> has  <dig> diagonals of blocks and so six iterations of computation with each iteration computing all blocks on the same diagonal in parallel are required.
+
+as noted earlier, the first diagonal of blocks is comprised of triangles. to each triangular block, we assign a thread block. the threads within the assigned thread block compute the elements in the triangular block in diagonal order with all elements on the same diagonal being computable in parallel. hence, for this computation, the number of thread blocks equals the number of triangular blocks.
+
+let us turn our attention now to the remaining blocks . notice that when we start the computation of the elements in, say, block , where "x" resides, "a" to "j", and "c" to "l" have already been computed, because they are on preceding block diagonals. but "k", "l", "a", and "b" have yet to be computed. the computation of the maximum of "c+c" to "j+j" can be done using a kernel maxkernel . this kernel uses registers for temporary values and writes these temporary values to shared memory upon completion. the final value for "o" can be obtained by comparing the temporary maximum value in "o" with "p" plus the bond value in equation  <dig>  then the maximum of "r+o", "q" plus its bond value, and the temporary maximum value in "m" is written to "m" as its final value. similarly, for "m", the maximum of "o+r", "q" plus its bond value, and the temporary maximum value in "m" is written to "m" as its final value. the computations for "m" and "m" can be done in parallel. so the computation within element block  is done in diagonal order. all elements on the same diagonal can be computed in parallel with all data residing in shared memory. the pseudocode is shown as algorithm  <dig> 
+
+algorithm  <dig> our gpu algorithm
+
+require: rna sequence r, blocked diagonal index d, block size bs
+
+ensure: c matrix
+
+1: register <cit>  reg
+
+2: shared_memory sa
+
+3: shared_memory sc
+
+4: global_memory gb
+
+5: global_memory gc
+
+6: tx ← threadidx.x; ty ← threadidx.y
+
+7: bx ← blockidx.x; by ← blockidx.y
+
+8: arow ← by × bs; acol ← arow − 1
+
+9: brow ← arow; bcol ← d × bs −  <dig> + arow
+
+10: for blk ←  <dig> to d −  <dig> do
+
+11:        sa ← the block starting at 
+
+12:        gb ← the block starting at 
+
+13:        maxkernel
+
+14:        syncthreads
+
+15: end for
+
+16: sc ← reg
+
+17: for d ←  <dig> to bs ×  <dig> −  <dig> do
+
+18:        for each element e on diagonal d do
+
+19:            finish remaining computation
+
+20:        end for
+
+21:        syncthreads
+
+22: end for
+
+23: gc ← sc
+
+algorithm  <dig> maxkernel
+
+require: block sa in shared memory, block gb in global memory
+
+ensure: partial result of reduction in reg
+
+        r <dig> ← gb <cit> ; r <dig> ← gb <cit> 
+
+        r <dig> ← gb <cit> ; r <dig> ← gb <cit> 
+
+        for j ←  <dig> to  <dig> do
+
+            for k ←  <dig> to  <dig> do
+
+                reg ← max{reg, r <dig> + sa}
+
+            end for
+
+            r <dig> ← gb
+
+            //  <dig> similar for loops for r <dig> and r <dig> come here
+
+            for k ←  <dig> to  <dig> do
+
+                reg ← max{reg, r <dig> + sa}
+
+            end for
+
+            r <dig> ← gb
+
+        end for
+
+        for k ←  <dig> to  <dig> do
+
+            reg ← max{reg, r <dig> + sa <cit> }
+
+        end for
+
+        //  <dig> similar for loops for r <dig> and r <dig> come here
+
+        for k ←  <dig> to  <dig> do
+
+            reg ← max{reg, r <dig> + sa <cit> }
+
+        end for
+
+description of maxkernel
+the computation of the maximum of "c+c" to "j+j"  bears some resemblance to the computation of a term in a matrix multiply. so, we can adapt the ideas used in matrix multiply kernels to arrive at an efficient kernel to find the desired maximum of the sum of pairs. in our case , we adapt the gpu matrix multiply kernel of volkov and demmel  <cit> . the element block size used in our implementation is  <dig> ×  <dig> and a thread block is configured as  <dig> ×  <dig>  each thread computes  <dig> elements that lie in the same column as shown in figure  <dig> . the  <dig> elements computed by one thread are represented as a slim gray bar in block c. the gray area in block a depicts the data needed by the first  <dig> threads. this data will be read into shared memory. to achieve high throughput from/to device memory, we use coalesced memory accesses in which all data accessed by one warp  falls in the same device memory cache line of size  <dig> bytes. in figure  <dig>  six threads fetch the first row from the gray area of block b. then each thread uses the value just fetched to add with the first column in the gray area of block a . in other words, thread i will add b <cit>  with a <cit>   and compare this value with register of thread i and update register if necessary. then b <cit>  is added with a  <cit>  and the result is compared with register; the register is updated as needed,  <dig> ≤ j <  <dig>  since threads in the same warp will read data in the same row of block b, this reading is coalesced and serviced at the throughput of l <dig> or l <dig> cache in case of a cache hit, or at the throughput of device memory, otherwise. besides, all threads in the same warp use the same value from block a, which resides in shared memory. this value can be broadcast to all threads in the same warp.
+
+we note that  <cit>  also employs a maxkernel but their kernel is different from ours.
+
+RESULTS
+we benchmarked our algorithms using a pc with a hyperthreaded 6-core intel i7x <dig>  <dig> ghz cpu and 12gb ddr <dig> ram. the pc also had nvidia tesla c <dig> gpu. since only two threads may be scheduled per i <dig> core at any time, a maximum of  <dig> threads may be gainfully used. we used randomly generated rna sequences in our experiments. since the run time of our codes is relatively insensitive to the actual rna sequence in use due to the fact that the entire computation is to fill out an n × n matrix, our use of random sequences does not materially impact our conclusions.
+
+single and multicore algorithms
+in both the codes omp <dig> and omp <dig>  the work assigned to the threads is well balanced by openmp and so best performance is expected using either  <dig> or  <dig> threads. our experiments confirmed this expectation with the use of  <dig> threads generally being better than the use of  <dig> threads. so, for our application the overhead of context switching between the two threads assigned to a core when a total of  <dig> threads are used generally exceeded the gains obtainable from having a second thread ready in case the first thread stalls from memory delay. table  <dig> gives the run times for our algorithms cpu <dig>  cpu <dig>  omp <dig>  and omp <dig> for n values ranging from  <dig> to  <dig>  the columns labeled ratio give the ratios cpu1/omp <dig> and cpu2/omp <dig>  respectively. although we have  <dig> cores on our cpu, we are able to achieve speedups of almost  <dig> from the multicore versions. by comparison, the far more complex multicore code of  <cit> , which uses a blocking strategy similar to that used by our gpu code, achieves a simulated speedup of  <dig>  with  <dig> threads. the speedup reported in  <cit>  is referred to as "simulated speedup" because it comes from the use of a multicore simulator rather than from actual speedup measurements on a real muticore computer. however, this simulated speedup ignores several factors such as synchronization overhead that will reduce speedup in a real environment. further, the simulated speedup of  <dig>  is relative to the equivalent of the code cpu <dig>  the speedup achieved by omp <dig> relative to cpu <dig> is between  <dig>  and  <dig> ! we note also that the speedup obtained solely from the use of the caching strategy  ranges from  <dig>  to  <dig> .
+
+
+n
+ratio
+ratio
+gpu algorithms
+we experimented with three versions of our gpu algorithm. the first is called ours <dig>  which is as described in our gpu algorithm section. in the second version, which is called ours <dig>  device memory usage is reduced by half by storing only the upper triangle of the output matrix. this upper triangle is mapped into a onedimensional array using the standard row-major mapping. since this version uses only half the device memory used by the other versions, it may be used on larger instances. in the third version, which is called oursr, we replaced our maxkernel with the kernel described in  <cit> . since we were unable to get the gpu code of  <cit> , the kernel used by us was actually one we wrote based on the description provided in  <cit> . these three codes were benchmarked against each other as well as against the gpu nussinov code of  <cit> . the maximum size of sequence ours <dig> can handle is  <dig> while the other versions can handle sequences of size up to  <dig>  ours <dig> runs slightly slower than ours <dig> as shown in table  <dig>  so, ours <dig> is recommended only when the instance size is large enough to make ours <dig> nonfeasible. table  <dig> and figure  <dig> show the running time for the four different gpu codes. ratio <dig> in table  <dig> shows the speedup of ours <dig> relative to  <cit>  . ratio <dig> shows oursr/ours <dig>  as can be seen, ours <dig> is up to  <dig>  times as fast as oursr indicating that a corresponding speedup could be obtained for zuker's algorithm by replacing the maximum finding kernel used in  <cit>  with our kernel for this operation. also, ours <dig> is between  <dig>  and  <dig>  times as fast as the gpu algorithm of  <cit> .
+
+
+n
+oursr
+single core vs multicore vs gpu
+
+n
+n
+CONCLUSIONS
+we have developed simple and efficient single and multi-core algorithms as well as an efficient gpu code for rna folding based on nussinov's equations  <cit> . our cache efficient single-core algorithm provides a speedup between  <dig>  and  <dig>  relative to a naive straightforward single core code. the multicore version of the cache efficient single core algorithm provides a speedup, relative to the naive single core algorithm, between  <dig>  and  <dig>  on a  <dig> core hyperthreaded cpu. our gpu algorithm, ours <dig>  for the nvidia c <dig> is up to  <dig> times as fast as the naive single core algorithm and between  <dig>  and  <dig>  times as fast as the fastest previously known gpu algorithm for nussinov rna folding. with the available 3gb device memory on an nvidia gpu, ours <dig> is able to handle sequences of length up to  <dig>  sequences of length between  <dig> and  <dig> may be handled using ours <dig>  which uses a onedimensional array mapping of the upper triangle of the output matrix rather than a two-dimensional array that represents the full output matrix. ours <dig>  however, runs slightly slower than ours <dig>  our methods can be used to speedup up rna folding using zuker's equations as well  <cit> .
+
+list of abbreviations used
+rna: ribonucleic acid; gpu: graphics processing unit; pci-express: peripheral component interconnect express; cuda: compute unified device architecture; gcups: billion cell updates per second; sm: streaming multiprocessors; dram: dynamic random-access memory; tflops: trillion floating point operations per second; gflops: billion floating point operations per second; i/o: input/output; cpu: central processing unit.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+jl, sr, and ss developed the gpu algorithms, and analyzed the experimental results, and wrote the manuscript. jl also programmed and debugged the gpu algorithms and ran the experiments.
+
+declarations
+publication of this supplement was funded, in part, by the national science foundation under grants cns <dig>  cns <dig>  cns <dig>  and the national institutes of health under grant r01-lm <dig> 
+
+this article has been published as part of bmc bioinformatics volume  <dig> supplement  <dig>  2014: selected articles from the third ieee international conference on computational advances in bio and medical sciences : bioinformatics. the full contents of the supplement are available online at http://www.biomedcentral.com/bmcbioinformatics/supplements/15/s <dig> 

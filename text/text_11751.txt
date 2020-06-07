@@ -1,0 +1,271 @@
+BACKGROUND
+the advent of the sanger sequencing method enabled dna sequence data to be collected and manipulated on computers, paving the way for explosive growth in the new field of bioinformatics. publicly available dna sequence databases such as genbank play a crucial role in collecting and disseminating the raw data needed by researchers in the field. this database currently contains  <dig> gb of sequence data  <cit>  section  <dig> . <dig>  and is expected to continue to grow at an exponential rate, doubling in size roughly every  <dig> months  <cit> . the volume of data being dealt with now presents serious storage and data communications problems. currently, sequence data is usually kept in large "flat files," which are then compressed using standard lempel-ziv compression  <cit>  . unfortunately this approach rarely achieves good compression ratios: typically, gzip fails to match the "compression" afforded by simply encoding each base using  <dig> bits  <cit> .
+
+previous work concerning the compression of biological  sequences can be divided into two categories: techniques developed for efficiently compressing sequence data for the sake of reduced resource consumption   <cit> ; and investigations of the usefulness of compressibility as a measure of information content, for the purpose of making inferences about sequences   <cit> . in this article we will focus on work in the former category. examining this body of work reveals two distinct approaches:
+
+• compressing individual biological sequences
+
+• compressing databases of biological sequences
+
+compressing individual biological sequences
+it is now widely recognised that dna data is inherently difficult to compress below the level of  <dig> bits per base achievable through direct encoding  <cit> . much research has gone into developing algorithms for more effectively compressing individual dna sequences. these include biocompress  <cit> , biocompress- <dig>  <cit> , gencompress  <cit> , the ctw+lz algorithm  <cit> , and dnacompress  <cit> . perhaps the best of these is dnacompress, which employs the patternhunter  <cit>  sequence search algorithm to discover patterns of approximate repeats or approximate palindromic repeats in sequence data. dnacompress achieved compression averaging  <dig> % on a sample set of dna sequences and is substantially faster than earlier algorithms. grumbach and tahi  <cit>  allude to a "vertical" mode of compression for compressing multiple sequences in a database, however they do not elaborate on how this might be accomplished.
+
+while these single-sequence algorithms are interesting from a theoretical point of view, and are certainly becoming increasingly practical in the modern world of genome-scale analysis, a great deal of everyday bioinformatics work continues to entail the communication and storage of multiple sequences, and the modest compression gains afforded by these algorithms are ultimately not sufficient to justify their adoption for large databases.
+
+compressing databases of biological sequences
+strelets and lim  <cit>  describe a program, sagittarius, for compressing pir-format  <cit>  protein sequence databases. their system uses standard dictionary-style compression of sequence entry metadata, and a novel alignment-based compression strategy for the protein sequence data itself. a small number of sequences is maintained in memory as the reference sequence accumulator, and each sequence in the database is aligned with each sequence in this list. if any alignment produces a strong match, the input sequence is recoded using symbols describing insertions and deletions to enable recovery from its close match in the accumulator; otherwise, the sequence is output verbatim and added to the accumulator, overwriting the oldest incumbent sequence if the accumulator is full. sequences to be output are compressed using run-length encoding and huffman encoding, and the shorter of the two encodings is chosen. thus the accumulator represents a window of recently encountered interesting sequences. the authors set the size of the accumulator at three sequences, and were able to achieve  <dig> : <dig> compression, significantly better than pkzip©  <cit>  at  <dig> : <dig> 
+
+strelets and lim  <cit>  were interested in producing a compressed database that could be used interactively in much the same way as the original database. this was facilitated in part by the fact that their approach never requires recursive decoding of sequences – each sequence is encoded in terms of at most one other sequence, which is itself available "as-is," . while useful for interactive operations, it is clear that avoiding recursive encoding must limit the overall level of compression obtained. since we are targeting maximum compression, coil differs from that of  <cit>  in this respect. another difficulty arises in the assumption that similar sequences are likely to appear near each other in the input file. this is crucial in order to be able to limit the size of the accumulator and thereby the runtime. the authors found that increasing the size of the accumulator past three sequences increased the runtime but made no substantial improvement in compression, which appeared to justify their assumption. unfortunately, while this neat localisation of similar sequences may have been true of the pir database in  <dig>  it is certainly not true of the large nucleotide databases of today, and we chose not to make this assumption.
+
+li, jaroszewski and godzik have taken a similar approach to the related problem of producing non-redundant protein databases with their cd-hi  <cit>  and cd-hit  <cit>  packages. more recently, li and godzik have extended this approach to dna sequences with the cd-hit-est program  <cit> . their main advance over  <cit>  is in employing short-word filters to rapidly determine that two sequences cannot be similar, which significantly reduces the number of full alignments necessary. despite impressive speed on small-to-medium datasets, they report that clustering  <dig> billion ests at 95% similarity takes  <dig> hours  <cit> .
+
+the program nrdb  <cit>  locates and removes exact duplicate sequences from a dna database in fasta format. while this program is clearly a step in the right direction, many sequences in a typical database are almost but not quite exact duplicates of other sequences , highlighting opportunities for further improvements.
+
+compression and the maximum parsimony criterion
+a phylogenetic tree is a steiner tree estimating the evolutionary history of a set of taxa . maximum parsimony is a criterion for building phylogenetic trees from dna sequences that aims to identify the tree or trees containing the fewest point mutations along their edges, where a point mutation, or edit, is an insertion or deletion of a single nucleotide or a substitution of one nucleotide for another.  we then note:
+
+if we are given the complete sequence at one node of a tree, as well as all edge mutations, we can reconstruct the sequences at all the nodes.
+
+thus a maximum parsimony tree represents an optimal solution to storing sequence data in the form of a list of edit operations on a tree rooted at a single reference sequence. this can be an efficient compression if the sequences are closely related, so that the number of edit operations is small in comparison with the total sequence length. within a large database, it is expected that there will be large groups of closely related sequences – for example, the dna encoding a particular gene from many different species. more precisely, we expect that many sequences will be highly similar to at least one other sequence in the database. if this is the case a considerable saving in storage space can be achieved by identifying such groups, determining good trees for them, and encoding each group as a single root sequence plus a series of "deltas" along the tree edges. we have called this approach edit-tree coding. figure  <dig> illustrates how sequences within a database are processed according to this scheme.
+
+in practice, it soon becomes apparent that even a heuristic maximum parsimony search on subsets of sequences is not computationally feasible for a large database. the standard maximum parsimony tree evaluation algorithm requires all sequences to be aligned. both alignment and the subsequent parsimony searches are hard problems  <cit> . fortunately, when dealing with data compression we are not concerned about exactly maximising some function – our requirement is a method which is fast and performs well on typical cases. a practical alternative to maximum parsimony search is to construct an approximation to the minimum spanning tree on the sequences, where the metric is the edit distance between two sequences – the number of single-character insertions, deletions or replacements required to transform one sequence into the other. unlike steiner trees, minimum spanning trees do not introduce new internal vertices, and computation is fast: an algorithm having time complexity almost linear in the number of edges exists  <cit> . the total tree length is bounded by twice that of the maximum parsimony tree. by judicious selection of algorithms and data structures, we have developed heuristics and approximations that make this task feasible for databases having sizes in the gigabyte range, despite having essentially quadratic time complexity in the size of the database.
+
+goals of coil
+our goal was to develop a software package, coil, for compressing and decompressing dna sequence databases based on edit-tree coding. the primary intention is to reduce the bandwidth required to transmit large amounts of dna sequence data from a central repository to many recipients, and also to reduce disk space requirements for archival storage of such data. while it is desirable to enable efficient searching of a compressed database, and progress has been made in this area  <cit> , we have not attempted to do so here. instead, coil is geared towards maximising compression ratios. this is achieved at the expense of execution time and memory usage – but note that the compression time represents a "one-off investment" whose cost is quickly amortised if the resulting compressed file is transmitted many times. decompression requires little memory and takes o time for data sets of size d nucleotides.
+
+coil primarily targets sequence databases containing many short sequences of roughly equal length, such as expressed sequence tag  databases. many such databases exist: at the time of printing, genbank contains  <dig> gb of est sequence data in fasta format, comprising  <dig> , <dig> sequences in total  <cit> . targeting these databases simplifies design and implementation: many operations on pairs of sequences take time quadratic in the length of their operands, so shorter sequences are important for high performance; also, assuming reasonably short sequences means that little attention need be paid to the intra-sequence positions of regions of similarity between two sequences.
+
+coil reads and write fasta format databases  <cit> . this simple format is easy to work with manually, easy to program input and output routines for, and widely used. additionally, the format contains a minimum amount of additional context information for each sequence, which allows us to focus on compressing the sequence data.
+
+implementation
+coil consists of a small group of c programs that perform the compression and decompression steps described below, as well as a perl script which simplifies the compression process by automating sequences of steps and providing sensible defaults where helpful. use of these programs is described later.
+
+overview
+hereafter, unless otherwise qualified, d denotes the number of nucleotides  in a database, n the number of sequences, and l = d/n the average length of a sequence. as in the c language, the notation a % b is used to indicate taking the remainder of a modulo b, for some non-negative integer a and positive integer b.
+
+conceptually, the process of compressing a database with coil proceeds through the following stages:
+
+ <dig>  creating a similarity graph that pairs sequences of high similarity. the similarity graph is an edge-weighted undirected graph in which vertices represent sequences and edges exist between highly similar sequences, with edge weights indicating similarity strength.
+
+ <dig>  extracting an encoding graph from the similarity graph. the encoding graph is a set of rooted directed trees  whose arcs correspond to a subset of the edges in the similarity graph.
+
+ <dig>  encoding each tree in the encoding graph. for each tree, the root sequence is stored verbatim ; an in-order traversal is then used to delta-encode each other sequence in the tree in terms of its parent sequence.
+
+ <dig>  a multi-platform general-purpose compression program, such as gzip or bzip <dig>  <cit> , is applied to extract further compression gains.
+
+a typical usage pattern in a unix-like environment would be to use the tar archive program to collect the files of step  <dig> together, and pipe the resulting file through bzip <dig> - <dig> .
+
+decompression of a coil archive amounts to inverting the delta-encoding of the final compression stage: for each encoded tree, the root sequence is written out, following which an in-order traversal recovers every other sequence using the  parent sequence and the encoded delta information. this takes place after the general-purpose compression step is undone. note that in general, the order of sequences in the recovered fasta file will be different than in the original fasta file; if this is undesirable, program options can be set to restore the original order .
+
+all of these steps are explained in more detail below.
+
+edit distances and similarity graphs
+a common way to quantify the similarity between two strings a and b is to compute the levenshtein distance: the smallest number of single-character insertions, deletions and substitutions required to transform a into b. ideally, we would compute exact distances between every pair of sequences in the database and output a complete graph with perfect similarity information. but since computation of the levenshtein distance between two strings of length m and n takes o time  <cit>  in the general case, a database of size d containing n roughly equal-length sequences would require oo = o comparisons. when database sizes are in the gigabyte range, quadratic-time algorithms are not viable.
+
+instead, coil uses a more efficient related similarity measure derived by counting the number of length-k substrings, or k-tuples, two strings have in common. for small k, calculation of k-tuple similarity scores can be made very fast by using a k-tuple index data structure  to obtain a list of all sequences in the database that contain a given k-tuple in constant time.
+
+the k-tuple index
+a nucleotide  can be encoded as a 2-bit integer, and consequently a k-tuple of nucleotides has a natural representation as an integer of 2k bits. in coil, the leftmost nucleotide occupies the most significant bits. the k-tuple index data structure, which is prepared in a preprocessing step using the program make_index, consists of two files: a k-tuple sequence list file ending with the extension .ktl, which contains )/s integer sequence numbers ; and a k-tuple index file ending with the extension .kti, which contains 4k integer offsets into the first file. s is a "slide" parameter used to reduce the size of the k-tuple sequence list file, at the cost of reduced accuracy: only k-tuples beginning at sequence positions divisible by s are entered into the index. as figure  <dig> shows, the ith entry in the k-tuple index file points to the beginning of the list of seqnums that contain k-tuple i, which continues until the seqnum list for the th entry begins.
+
+these files are built in o time using a bucket sort algorithm that performs two passes over the raw sequence data. the algorithm is similar to that used to build the k-tuple indices used by ssaha  <cit> . note that unlike in ssaha, we do not record the intra-sequence positions of k-tuples in the k-tuple index, nor do we ever record a given seqnum more than once in a given k-tuple's seqnum list; instead we rely on our assumption that the database contains short sequences to ensure that there is a low probability of a sequence containing more than one instance of a particular k-tuple. should this not be the case, the efficacy of the algorithm will be reduced, however correctness will not be compromised.
+
+the bucket sort algorithm requires both files to be able to fit in memory simultaneously. if this is not possible, make_index produces multiple pairs of output files: each pair is an index on a segment of the database that will just fit in the amount of memory specified.
+
+it is worth mentioning that empirically, the sizes of seqnum lists in a k-tuple index built from dna sequence data are highly nonuniform, with some k-tuples appearing several orders of magnitude more frequently than others. these k-tuples cause many spurious hits that slow down the similarity graph construction step. coil follows the smart practice described in  <cit>  of completely eliminating k-tuple seqnum lists that exceed a user-specified size: this has the double effect of reducing index file sizes and dramatically improving the selectivity, and hence the speed, of the next stage.
+
+creating the similarity graph
+constructing the similarity graph is the main compression bottleneck in coil. the main contribution made by coil is in engineering an algorithm to efficiently compute pairwise approximate sequence similarity scores using a combination of the raw sequence data and the k-tuple index, which is implemented in the find_edges program. we first introduce a "naïve" comparison algorithm, and several variants which each proved unsatisfactory.
+
+the naïve algorithm is parameterised by k, s and b. b is a small integer which is used to limit the total number of edges in the similarity graph to bn; it is necessary to avoid storing o edges in the similarity graph. in most testing, b was set to  <dig>  the pseudocode for the algorithm follows:
+
+• for each query sequence q in the database:
+
+∘ create an empty linked list of  pairs, m.
+
+∘ for each k-tuple t in q:
+
+▪ look up the list of sequences that contain t starting at a position divisible by s using the k-tuple index.
+
+▪ merge this list into m.
+
+▪ keep track of the number of times each sequence in m has had a k-tuple in common with q.
+
+∘ for each pair  of the b pairs having the highest hit counts in m:
+
+▪ create the edge  in the similarity graph and assign it weight c.
+
+the seqnum lists read from the k-tuple index are in seqnum order, and m is maintained in this order also. the merge step is the usual list merge, except that whenever pairs having the same seqnum are to be merged, the result is a single pair whose hit count is equal to the sum of the hit counts of the arguments to the comparison. the intuition here is that if two sequences share many k-tuples, they are likely to be similar. in fact, it is relatively straightforward to show that if a string of length n is at edit distance d from another string, then the two strings must share at least n - k +  <dig> k-tuples  <cit> ; so we can reasonably expect a correlation in the reverse direction. the output of the algorithm is a representation of the similarity graph in edge-list format.
+
+unfortunately, the above algorithm suffers from severe performance degradation due to random k-tuple matches clogging m and slowing down list merges. m soon fills with many pairs containing low hit counts, representing sequences that are not significantly similar to q but share one or two k-tuples with q by chance. in fact it can be shown that under reasonable assumptions about the distribution of k-tuples in the database, the repeated list merging introduces an o factor into the running time.
+
+ssaha  <cit>  overcomes the clogging problem by choosing k to be high enough that very few chance matches occur; however this is only a viable approach if enough memory is available as memory requirements are exponential in k. the impressive search speeds described in  <cit>  were obtained on a computer with  <dig> gb of ram and with k set to  <dig> or  <dig>  requiring this amount of memory for coil would immediately put the program out of range of almost all computers in use today.
+
+another way to ameliorate the situation is to convert the list m into a form of hashtable by maintaining r separate pair lists m <dig> ... mr- <dig>  and merging the seqnum list for the ith k-tuple in q into the list mi%r. after all k-tuples have been scanned, a final merge step combines the r lists. even better, partition by seqnum rather than k-tuple position: send each seqnum i to the list mi%r. the latter technique is more resilient to variations in seqnum list sizes. choosing r = 2h for some positive integer h enables fast calculation of the remainder through bitwise operations. while these modifications do improve the running time of the naïve algorithm, as table  <dig> shows, there remains much work to be done before this algorithm will be feasible for gigabyte-sized databases. we describe below a way to eliminate the time spent processing unpromising hits
+
+the dataset used, month.est_mouse, is a monthly update of the genbank mouse est dataset comprising  <dig>  sequences having average length  <dig> nucleotides.
+
+letting go of perfection: the leaky move-to-front hashtable
+the algorithms described in the preceding subsection all compute the complete list of  pairs for a given query sequence q, including the "noise" matches with small hit counts, even though we end up keeping only the best b such matches. to avoid getting bogged down with noise matches, we modify the seqnum-hashing hashtable from the previous subsection by replacing each of the r variable-length linked lists in the hashtable with a small fixed-size array of size f. instead of maintaining these arrays in seqnum order, a move-to-front discipline is used: whenever a seqnum i arrives, we scan the array mi%r for an occurrence. if it is found, it is moved to the front of the array, its hit count is incremented and all preceding elements are shunted down one position. if it is not found, it is inserted at the front of the array with hit count 1; all existing elements are shunted down one position to make room, with the last pair being deleted .
+
+intuitively, the success of this algorithm hinges on the following key assumption:
+
+if a database sequence is genuinely similar to the query sequence, its seqnum will turn up often enough that it will never be pushed off the end of the list.
+
+there are several reasons for the improved performance of this algorithm:
+
+frequently occurring seqnums are found more quickly and require fewer updates
+a frequently occurring seqnum x is more likely to have been recently referenced and hence is more likely near the front of its array. thus when x next occurs, the scan will not need to proceed very far down the array. also note that only those elements that precede x in the array need to be shunted back – later elements remain in their original positions.
+
+packing the seqnum and count values
+a "side effect" of the hashtable structure is that there is no need to explicitly record the low h bits of each seqnum in each array, since every seqnum in array mi must have these bits equal to i. thus these bits are available for other uses. since each array entry consists of a  pair, and since count rarely exceeds l/s, it makes sense to store the count value in these bits. for our default choice of k and s parameters, this is reasonable for h ≥  <dig>  
+
+fixed-size multidimensional arrays require very low memory overhead
+the leaky move-to-front hashtable data structure is a 2h × f array. because of their highly regular structure, accessing data items in fixed-size multidimensional arrays requires only multiplications and additions using the fixed dimension sizes, and does not require any pointers or special list termination symbols to be explicitly stored in memory, reducing the memory allocation overhead.
+
+computers like fixed-size arrays
+linked lists are efficient in theory, but in practice, computer hardware has long been designed for efficient processing of contiguous arrays of elements, and the "pointer-chasing" inherent in working with linked lists inevitably introduces comparatively large overheads. in particular, items at consecutive positions in a linked list may occupy widely separated memory addresses – a problem known as poor spatial locality of reference. in these circumstances, when iterating through the items in a linked list, memory cache hardware cannot predict which bytes will be read or written next, and performance suffers. in contrast, a scan through an array accesses memory bytes in sequential order, and will benefit from cache line fills that read contiguous blocks of memory into cache.
+
+assuming pessimistically that every seqnum must endure a full f comparison and move operations, analysis gives a time complexity of o for this algorithm.
+
+pentium  <dig> optimised version
+many modern cpus use pipelining to increase instruction throughput. we have developed an implementation of the find_edges algorithm optimised for the heavily pipelined pentium  <dig> processor .
+
+extracting the encoding graph
+once a similarity graph has been created with find_edges, the next step is to extract from it an encoding graph that distinguishes groups of similar sequences and describes how they are to be encoded. then each group is compressed independently. both steps are performed by the program encode. for the time being, we assume the availability of a subroutine for delta-encoding one sequence in terms of another that produces a "black box" block of data bytes; this algorithm is described in the subsection "delta-encoding sequences".
+
+first we note some structural properties of the encoding graph. each sequence in the database will be either raw-encoded, or delta-encoded in terms of one other sequence: this implies that each vertex in the encoding graph will have at most one in-edge. then by prohibiting cycles it is easy to show that the encoding graph will be a forest of directed trees, each having edges directed away from a root vertex. since the decision about which vertex to choose as the root has little bearing on the speed or compression level achieved for a tree, coil selects the lowest-numbered sequence.
+
+to be effective in compressing sequence databases, coil needs to produce an encoding graph in which highly similar sequences are linked by an edge whenever possible. more precisely, we want to maximise the total similarity score of the encoding graph, subject to the constraints that it be a subgraph of the similarity graph, and also a forest. this is the maximum spanning forest problem, which is equivalent to the minimum spanning forest problem using negative edge weights, which in turn is a generalisation of the heavily studied minimum spanning tree  problem. happily, several algorithms exist for efficiently solving these problems  <cit> .
+
+since the similarity graph produced by find_edges is very sparse  and is already in edge-list format, we employ kruskal's o algorithm  <cit> . kruskal's algorithm is very simple to state:
+
+ <dig>  read in the similarity graph edge list.
+
+ <dig>  sort edges by similarity score.
+
+ <dig>  for each edge in the sorted list:
+
+• if this edge would not introduce a cycle, add it to the encoding graph forest.
+
+importantly, both sorting and cycle-testing can be performed efficiently. edge sorting is accomplished in o) time using bucket sort. /s). cycle-testing is performed using the fast union/find data structure described in  <cit> . this data structure manages an equivalence relation on a set: here, the classes are the connected components of the encoding graph, which combine as edges are added. determining whether an edge would induce a cycle amounts to testing whether its two endpoints are in the same class. m such tests can be performed on a set of size n in o) time  <cit> , where α is the extremely slow-growing inverse ackermann function: effectively constant time per test.
+
+delta-encoding sequences
+once the encoding graph has been created, encoding of the individual trees can begin. for each tree, the root sequence is output verbatim, and an in-order tree traversal then delta-encodes every other sequence in terms of its parent. it is well-known that such a traversal can be used to encode a rooted tree as a string containing only vertex identifiers and parentheses. conversion in both directions can be accomplished without requiring random access to the characters of the string, implying that an in-memory tree data structure can be efficiently "streamed" to or from a sequential storage medium  in time linear in the number of nodes.
+
+an edit script is a list of edit operations, which we here take to be single-character insertions, deletions and substitutions. our task is to find a minimal-length edit script for converting one string a of length n into another string b of length m. this problem can be solved in o time using a straightforward dynamic programming approach, in which we successively compute optimal edit scripts for pairs of prefixes of a and b in terms of previously computed solutions. several algorithms exist that are asymptotically faster for certain input distributions  <cit> . in particular, an algorithm of myers  <cit>  can solve a variant of this problem in which only insertions and deletions are allowed in o time and space, where d is the edit distance . since the encoding stage of coil deals only with sequences already deemed to be similar by heuristics, this algorithm was chosen for implementation. another attractive feature of the myers algorithm is that it considers possible edit scripts in increasing order of edit distance, and can be terminated when the edit distance reaches some predetermined maximum distance dmax. in coil's encoding stage, this is used to bound the runtime of the algorithm: if the edit distance between a pair of sequences exceeds a user-specified figure , the algorithm terminates early and a trivial edit script having length a + b is produced.
+
+once an edit script has been found, it must be compactly encoded into data bytes. coil uses a simple scheme in which the most significant bit  of a byte specifies whether an insertion or deletion is to take place, and the remaining seven bits specify the offset  from the previous edit operation. if an edit operation is more than  <dig> characters along from the previous edit operation, a special code byte, having its lowest seven bits equal to  <dig>  is emitted, indicating that the next byte should be read and  <dig> should be added to that byte's value to form the offset. this code byte may occur multiple times, adding  <dig> to the total offset each time. since deletion operations identify character positions within the source string while insertion operations identify positions between characters, special care must be taken to handle string positions and offsets in a manner that permits unambiguous decoding.
+
+in the case of an insertion operation, the character to be inserted is not recorded in-place but written to a separate file. this breaks the "edit script as black box" design principle, however separating the edit script and nucleotide data streams in this way makes the distributions of bytes in each stream more predictable, resulting in compression gains that cannot be overlooked.
+
+although the encoding described is fairly compact, it is clearly not optimal: for example, we expect position offsets to be tightly clustered around zero, implying that an encoding in which lower offset values were represented with fewer bits would yield higher space savings. however, this and any other detectable redundancy will be eliminated when the coil archive files are passed through an external general-purpose compression program.
+
+sequence buffering
+we have developed a simple buffering system that enables maximally efficient random access to sequence data .
+
+incremental compression
+large sequence databases such as genbank  <cit>  are not static. they are being updated daily, and there is a need for database users to access the latest versions. the solution found by most organisations distributing these databases is to make available daily or weekly updates in the form of deltas – lists of sequences added, changed or removed from the original database release. end users who already have the main database installed can download the updates and apply these changes to their local database copies to produce up-to-date versions. these database deltas are much smaller files, often less than  <dig> mb in size, and coil's usual mode of compression performs poorly on such small files.
+
+a common update performed on a database is the addition of one or more new sequences. coil therefore supports incremental compression: the ability to efficiently encode one sequence database, the increment, in terms of another baseline database. we presume a user who downloads a database delta already has the original baseline database, so we can "refer back" to baseline sequences from within the encoding graph of the compressed increment. this approach makes available a large pool of candidate root sequences that can be used for efficient delta-encoding of each sequence in an increment.
+
+in the remainder of this section we will refer to the mode of compression discussed in previous sections as standalone compression. for concreteness we will talk about compressing an increment database named incr.fasta in terms of a baseline database named base.fasta. it may be helpful to first read the subsection "using coil", which describes the overall workflow and the individual files read and written by the various programs in the coil package.
+
+implementation of incremental compression
+suppose that there are b sequences in the baseline database base.fasta, and i sequences in the increment incr.fasta. compression of the baseline entails ordinary standalone compression; the only difference is that the k-tuple index files, and also the base.coil.seqnos file, need to be retained for compression  of the increment. to compress the increment, k-tuple index files are produced from the increment database itself. however, we require the seqnums of the increment to be distinct from those of the baseline, so the -i b command-line option must be used with the make_index and find_edges programs to offset the starting seqnum by b.
+
+the encode program is then run with the command-line option -i base, to indicate that the input file should be encoded in terms of the coil archive base. when this option is chosen, the kruskal maximum spanning forest algorithm is modified to avoid adding an edge between two components which both contain baseline sequences. this is easy to accomplish, since all baseline sequences have seqnums less than b, and as components are identified by their lowest-numbered seqnum any component that contains a baseline sequence will be represented by the seqnum of that sequence, effectively limiting the involvement of baseline sequences to being the roots of components in the encoding graph.
+
+once encode has produced an encoding graph, it needs access to the sequence data so that delta-encoding can be performed. obtaining the sequence data for an increment seqnum can be accomplished in the usual way , but this is not the case for baseline sequences.
+
+the necessary baseline sequences are obtained from the baseline coil archive by decompressing the entire baseline database in-memory, but writing out only those baseline sequences which are the roots of trees in the increment encoding graph . during this step, baseline sequences will be visited in decode order; by first sorting the list of required baseline seqnums into this order, extraction can take the form of a list merge. the sorting step involves inverting the permutation of baseline seqnums recorded in the base.coil.seqnos file , hence the requirement that this file be retained after compression of the baseline database. then the encode program traverses and encodes all trees rooted in baseline sequences in decode order. for each such tree, the  position of the baseline root sequence in the decode order is written to the file incr.bud, which is included in the increment archive to facilitate decompression. finally, the program traverses and encodes all trees rooted in increment sequences in the usual fashion.
+
+when decompressing an increment with the program decode, the command-line option -i base is used to specify that the coil archive base should be used as the baseline. decode first decompresses the baseline sequences at the positions listed in incr.bud and uses these sequences as roots for decoding the initial segment of the increment archive; then the remaining trees are decompressed as usual.
+
+using coil
+compressing a fasta database using coil involves running several c programs that work together to produce a number of output files. some of these files, collectively termed the coil archive, are required for recovering the original data, while the remainder may be discarded once compression is complete. alternatively, the user may run a perl script which automates these steps. the final step requires the files comprising the coil archive to be compressed by a general-purpose compression program. figure  <dig> shows the complete process of using coil for standalone compression of a database; incremental compression is similar, but requires that all output files produced during baseline compression  are also available. incremental compression produces one additional, small output file ending with the extension .bud which must be included in the final archive.
+
+decompression
+decompressing a coil archive is simple: first "undo" the general-purpose compression used to compress the archive, then run the program decode. decompression of an increment requires the name of the baseline database be specified on the command line with the -i switch. the process takes o time and requires o * max) memory. max is typically small, but could be bounded using a simple adjustment to the kruskal algorithm if necessary.
+
+if the x.coil.seqnos file has been stored with the coil archive, then it is possible to recover the original sequence order at decompression time using the -x switch to the decode program; otherwise, sequences in the fasta output file will appear in a different order.
+
+for maximum portability across platforms, all files containing binary integer data use the little-endian storage format. all reading and writing of such files occurs through platform-specific load_vector() and save_vector() functions.
+
+all programs accept the -h and --help switches, which can be used to display usage information. a brief description of each program can also be found in the readme.txt file included in the coil software package.
+
+RESULTS
+to investigate the compression ratio achieved and running time required by coil for datasets of various sizes, tests were performed on randomly chosen subsets of sequences from a version of the genbank est_mouse database, which contains  <dig> , <dig>  nucleotides in  <dig> , <dig> sequences. twelve dataset sizes were examined, with three test datasets produced for each size. each dataset having a name of the form emsn contains  <dig> , <dig> × n/ <dig> sequences randomly selected from the est_mouse database. for the 100% size level, a single dataset  was run three times, giving an indication of the noise level involved in execution time measurements.
+
+a number of alternative compression programs were tested in addition to coil:
+
+ <dig>  bz2: the general-purpose compressor bzip <dig>  <cit>  with compression level  <dig> 
+
+ <dig>  nrdb+bz2: elimination of duplicate sequences with the nrdb program, followed by bzip <dig> with compression level  <dig> 
+
+ <dig>  ppmdi: the ppmd general-purpose compressor variant i described in  <cit> , with model order  <dig> and ram usage  <dig> mb .
+
+ <dig>  7z: the lzma compression mode of the freely available general-purpose compression program 7-zip  <cit> . this was the only other program we found that was capable of utilising  <dig> gb of ram during compression.
+
+we also attempted to compress our datasets with the program dnacompress  <cit> , however we found that we were unable to compress datasets larger than  <dig>  million bases using this program. unfortunately this is smaller than the smallest dataset we used in testing, and we were forced to abandon this attempt.
+
+the tests on the emsn datasets specified restrictions for 7-zip and coil to use at most  <dig> gb of ram. it should be noted that the other programs all use substantially less memory than this; in particular, ppmdi is limited to  <dig> mb. to enable a fairer comparison with the ppmdi program, a further series of tests was carried out on the  <dig> mb fasta dataset rfam_full using  <dig> mb settings for each program, and the -x option to coil.pl to enforce in-order sequence recovery. due to problems attempting to compile nrdb on windows, the nrdb+bz <dig> measurements were performed on a different computer: a linux  <dig>  ghz xeon machine with  <dig> gb of ram. to measure decompression speed for nrdb+bz <dig>  a simple c program, unnrdb, was written to expand the multi-header fasta files produced by nrdb.
+
+all coil runs used the parameter values k =  <dig>  s =  <dig>  f =  <dig> and h =  <dig>  and were run on a  <dig> ghz intel core  <dig> duo computer with  <dig> gb ram running microsoft windows xp. most parameter values were chosen by earlier experimentation, however the choice of f and h received extra attention. since it is important for the speed of the find_edges program that its hashtable data structure fit in cache memory, and it is not obvious how to trade off the f and h parameters for a fixed memory size, preliminary testing was conducted with several values of these parameters, suggesting  is best for the case where the hashtable is limited to  <dig> kb in size – small enough to fit in the first-level cache of any modern computer system.
+
+all sizes are in bytes. the fasta column shows the size of the original uncompressed fasta file. the smallest file in each row is shown in bold. * this row shows the result of using version of find_edges optimised for the pentium  <dig>  nrdb+bz <dig> failed to compress the ems <dig> dataset because the size of the fasta file exceeded  <dig> gb. all coil runs performed on the rfam_full dataset used the -x option to enable in-order recovery of sequences. nrdb+bz <dig> was not used with the rfam_full dataset because it is incapable of restoring this order.
+
+looking at the execution times in table  <dig>  a similar transition takes place: coil is faster than 7-zip up until around ems <dig>  at which point the quadratic nature of find_edges starts to dominate. coil compresses the ems <dig> datasets faster and better than does 7-zip by a small margin.
+
+all durations are in seconds. the rightmost five columns break down the execution of coil by its main component programs; the "other" column includes the time needed for the programs extract_seqs, make_index and select_lines.
+
+*this row shows the result of using the pentium 4-optimised version of find_edges – surprisingly, this version of find_edges is actually about 6% slower than the original version on this cpu.
+
+finally, the decompression times shown in table  <dig> show that coil is somewhat slower than the other programs, though still essentially linear-time as expected. not shown in the table is coil's frugal memory usage during decompression – the maximum memory usage while decompressing ems <dig> is just  <dig>  mb, in comparison to the  <dig> mb used by 7-zip and the  <dig> mb used by ppmdi.
+
+all durations are in seconds. *this row shows the result of using the pentium 4-optimised version of find_edges.
+
+with respect to the rfam_full datasets, coil outperformed the nearest competition – again, 7-zip – by around 3% in terms of compression ratio, though requiring more than twice as much time to do so. ppmdi performed poorly, producing a file more than twice the size of that produced by coil or 7-zip. this is especially surprising given that these other programs were operating with the same  <dig> mb ram constraints as ppmdi for this dataset. bzip <dig> does substantially better with only  <dig> mb of ram at its disposal.
+
+surprisingly, although the optimised pentium  <dig> version of find_edges produced a speed improvement of 25% on the pentium  <dig> computer on which we performed initial testing, using this version of the program actually decreased performance by 6% on the core  <dig> duo platform. only one test was run using this version of the program, indicated by a row with an asterisk in tables  <dig>   <dig> and 4; all other results shown use the regular version of find_edges.
+
+CONCLUSIONS
+we have demonstrated that the concept of edit-tree coding can be applied to produce a practical compression tool for sequence databases. the execution time required is not negligible and appears to grow quadratically with database size, but adequate compression on large est databases can nevertheless be achieved on "everyday" modern computers. furthermore, concern over compression time diminishes when it is considered to be amortised over the many decompressions that may take place in the targeted field of one-source-many-sinks operations. decompression is acceptably fast, uses very little memory and can be performed on any computer with a c compiler. source code portability and binary compatibility of compressed files has been tested on two widely used platforms, linux and win <dig> 
+
+there remains a wide scope for experimentation with coil and fine-tuning of algorithms and parameters. for example, one avenue not pursued here is the extent to which filtering of common k-tuples affects execution time and matching accuracy. it may be that the most commonly occurring 80% of k-tuples can be removed without dramatically affecting overall compression. while this kind of search space pruning would never be acceptable in a program like ssaha that is specifically designed to find matches between sequences, we only care about accuracy of sequence matches where it noticeably improves compression.
+
+availability and requirements
+project name: coil
+
+project home page: 
+
+operating system: tested on windows and linux. binaries are additionally provided for windows. source code should compile in any unix-like environment.
+
+programming languages: ansi c, perl
+
+other requirements: perl  <dig>  or higher
+
+licence: bsd-style license
+
+abbreviations
+est: expressed sequence tag. in order to produce a protein, a cell first copies the segment of dna encoding that protein  to a complementary messenger rna molecule. ests are dna sequences obtained by extracting and sequencing the messenger rna molecules from a cell. because only a single sequence read is performed on each molecule, ests are limited to approximately  <dig> bases in length. 
+
+fasta: a simple text file format for storing multiple dna or protein sequences. each sequence begins with a single line starting with the character ">" and containing the sequence name, followed by any number of lines containing the sequence data. 
+
+mst: minimum spanning tree. given a connected, edge-weighted graph, a minimum spanning tree of the graph is a subgraph that  contains all vertices of the graph,  retains connectivity and  has minimum total weight among all such subgraphs. it follows that in a graph with positive edge weights, such a subgraph is always a tree.
+
+authors' contributions
+wtjw conceived the concept of edit-tree coding, designed and implemented the coil software, performed performance measurement, and produced an early draft of the manuscript. mdh provided design advice and made significant contributions to the final version of the manuscript.
+
+supplementary material
+additional file 1
+appendix  <dig> – pentium iv optimised find_edges. describes the version of the find_edges program optimised for the pentium iv processor.
+
+click here for file
+
+ additional file 2
+appendix  <dig> – sequence buffering system. describes the system used for efficiently obtaining random access to sequence data in memory-constrained environment.
+
+click here for file
+
+ acknowledgements
+the authors would like to acknowledge the helpful comments of d. penny in preparing this manuscript.

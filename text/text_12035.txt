@@ -1,0 +1,60 @@
+BACKGROUND
+image formats are defined by the logical layout of metadata and pixel information across one or more data sources. proprietary file formats  are created when an imaging instrument, such as a microscope, records such data in a structure that is not publicly described. pffs are especially problematic in scientific domains, as each company or even instrument brings the potential for a new file format, possibly requiring licensed software to decode, or the file format changing in structure without notice or recourse. the scientific method necessitates that data can be analyzed by others to verify and reproduce results; when said data is stored in a proprietary format, by definition, it cannot be freely shared and inspected.
+
+in response to the proliferation of pffs in the fields of life science, the open microscopy environment  consortium developed the bio-formats library to standardize the reading of microscopy data  <cit> . bio-formats provides an application program interface  for reading and writing images, backed by a comprehensive collection of extensions to decode format-specific information and translate it into an open specification called the ome data model  <cit> . a translated image can then be written as ome-tiff, an “open-exchange format” which combines the universal readability of the tiff standard with an xml schema representing the ome data model . these ome-tiff images can be freely shared, with pixel data accessible via standard libraries such as libtiff  <cit> , and the complete metadata parseable by any standards-compliant xml reader. in this way, the bio-formats project greatly mitigates the pff problem in microscopy.
+
+bio-formats has become an essential tool for scientists worldwide; however, its metadata model specifically targets 5-dimensional images in microscopy and related life sciences disciplines. pffs from other scientific domains—e.g., medical imaging, astronomy, industrial x-rays, materials science and geoscience—each have their own unique considerations with respect to the dimensionality and metadata of their images; as such, it would be infeasible for a single “one-size-fits-all” metadata model to fully address the needs of scientific imaging as a whole. with this conclusion in mind, we have developed the scifio  library, generalizing the success of bio-formats to create a domain-independent image i/o framework enabling seamless and extensible translation between image metadata models. the goal of scifio is to provide the architecture that will equally facilitate: 1) the conversion of additional formats into supported open-exchange formats such as ome-tiff and 2) the integration of additional scientific open-exchange formats such as digital imaging and communications in medicine   <cit> , flexible image transport system   <cit>  and netcdf  <cit>  into a common image i/o framework.
+
+implementation
+scifio is implemented as a plugin suite for the scijava plugin framework. its core is written under the permissive bsd license to maximize freedom of inclusion in both open and closed source applications. the scijava framework collects plugins in an application context which are typically accessed via services. as such, scifio defines a collection of plugins and services facilitating image i/o. developers will typically start with the scifio class itself: a gateway to the scijava context providing convenient accessor methods for functional components of the scifio framework.
+
+the scijava framework sorts plugins by “type,” representing the role of a given plugin. extensibility and flexibility is achieved by providing a public service api which organizes and delegates to available plugins of each type. thus, scifio development is primarily concerned with adding new plugin implementations to achieve a desired result. the following sections describe the key plugin types in scifio, and the behavior they control.
+
+first and foremost is the format. formats are a collection of interface-driven components  defining the steps for decoding an image source to its metadata and pixel values. in scifio, the imagej common data model is used to describe pixels; this data model is built on imglib <dig>  <cit>  due to its type and algorithmic flexibility, ensuring images opened with scifio are universally recognized within the imagej ecosystem  <cit> . a format must always include a metadata component defining its unique fields and structures, such as acquisition instrument details, dimensional axis types, or detector emission wavelengths. each metadata implementation must also be able to express itself as a standard format-independent imagemetadata object, establishing a common baseline for use within the framework.fig.  <dig> components of a format plugin and their role in image i/o
+
+
+
+
+the checker component contains the logic for matching a given format with a potential image source, while the parser component performs the actual creation of metadata from that source. the reader and writer components use metadata to read or write pixel data, respectively. given the goal of freely shareable image data, writers are optional components and should not be implemented for proprietary formats.
+
+a second essential plugin type is the translator, which encodes logic for conversion from one metadata type to another. translators enable the standardization of proprietary formats to common metadata structures such as ome, and hence play a key role in converting images between formats. translators are typically created to accompany writers, ensuring format-specific metadata is properly populated. additionally, the translator framework enables the integration of new open-exchange formats via translator-only libraries, converting supported metadata types to the new standard. an example of this model can be seen in the scifio-ome-xml component .fig.  <dig> scifio-ome-xml translator suite, for converting metadata to the ome-tiff open-exchange format
+
+
+
+
+while formats and translators add new behavior to the base framework, scifio also has plugin types to control existing behavior. for example, filter plugins provide a format-agnostic mechanism for modifying reader behavior. filters create an ordered chain of delegation, each operating on the data of its parent, and can be individually toggled ‘on’ or ‘off’ on a per-reader basis. sample filter stacking behavior is illustrated in a channelfiller for converting “indexed color” pixels to rgb values and a filestitcher for unifying multiple files on disk to form one dataset .fig.  <dig> behavior of channelfiller and filestitcher filter plugins
+
+
+
+
+with all scijava plugins, a numeric priority value attached to each class creates an implicit relative ordering for operations—e.g., order of checker querying, translator querying, or filter application. priorities are automatically considered when using the scifio services: from the formatservice polling checker components to the translatorservice finding the correct translator for a given request, priorities allow querying the most specific solutions first, before moving to more general options. these pieces together provide a robust and flexible library for reading and writing image data.
+
+RESULTS
+as the fundamental goal of scifio is to establish an extensible framework for image support, the scijava framework is a logical choice for implementation. scijava provides extensible solutions to common software problems, which implicitly benefit scifio. a core example is the extensible script language framework  which effectively allows scifio to be used from any number of programming languages without requiring language-specific considerations in scifio itself.
+
+imagej  <cit>  presents the flagship use case for scifio, allowing an established community to vet and refine the library. although users do not directly interact with scifio api, all image i/o operations in imagej ultimately rely on scifio. as developers contribute new format plugins for image types relevant to their work, any application using scifio can immediately benefit from the new plugin. looking beyond imagej, projects like knime image processing , built on the knime analytics platform  <cit> , have already adopted scifio for their image i/o mechanism. this sort of code sharing leads to a form of mutualistic collaboration: a new format plugin developed for knip will automatically work in imagej, with the converse true as well. equally importantly, both imagej and knip can implicitly operate on image data produced by the other program, laying the foundation for algorithmic interoperability.
+
+collaborations like this would not be possible with a focused library like bio-formats. knime is a platform for extensible workflows, thus its handling of image data demands flexibility beyond the fixed 5d microscopy schema of ome. additionally, bio-formats’ mechanism of format extension requires either modification of a text-based configuration file to define format priority, which can lead to conflicts if multiple libraries provide differing versions of this file, or runtime modification by api calls, which may not be reproducible without a central mechanism controlling these calls. conversely, the dynamic discovery of the scijava plugin framework allows scifio developers to provide their formats completely independently—e.g., on an imagej, knime or eclipse update site, while scifio’s backing by the imagej common data model ensures adaptation to any future requirements in imaging dimensionality and data types.
+
+bio-formats readers and writers and scifio format components define similar high level logic, but in bio-formats several i/o steps are conflated in a single monolithic interface with many protected methods as potential extension points. scifio encapsulates each i/o step into its own dedicated component, to minimize the effort required in format development. whether a format is added to bio-formats or scifio libraries; the scifio-bf-compat and scifio-ome-xml components offer bidirectional compatibility between scifio and bio-formats.
+
+bio-formats has demonstrated the feasibility of standardizing a broad field of pffs into a common open-exchange format. scifio provides a natural generalization of thinking, allowing extension to new domains, through the integration of their metadata standards and open-exchange formats via translators, and clear paths for contributing to existing domains by encapsulating the logic of format components. given the added immediate power of the bio-formats integration layers, we see the scifio framework as a potential unifying solution to pffs in scientific image data.
+
+CONCLUSIONS
+scifio is an open-source library generalizing the successful structure of bio-formats to create a domain-independent framework for the reading, writing, and translation of images. the extensible design of scifio facilitates community contribution, the establishment of domain-specific metadata standards, and integration into a unified system capable of adapting to the demands of scientific imaging analysis.
+
+abbreviations
+apiapplication program interface
+
+i/oinput and/or output
+
+knimekonstanz information miner
+
+knipknime image processing
+
+omeopen microscopy environment
+
+pffproprietary file formats
+
+scifioscientific image format input and output
+

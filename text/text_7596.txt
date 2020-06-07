@@ -1,0 +1,430 @@
+BACKGROUND
+next-generation sequencing technologies are presently being used to answer key biological questions at the scale of the entire genome and with unprecedented depth. whether determining genetic or genomic variations, cataloging transcripts and assessing their expression levels, identifying dna-protein interactions or chromatin modifications, surveying the species diversity in an environmental sample, all these tasks are now tackled with high throughput sequencing  and require different, but computer intensive bioinformatic analyses. typically, a recent rna sequencing experiment  produces about  <dig> million reads of  <dig> base pairs each  <cit> , but both the yield and read length will increase  <cit> .
+
+mapping the reads against a reference genome provides the genomic positions of mapped reads. for instance with rna-seq reads, these positions allow to know whether a gene is expressed in the studied condition. the set of mapped positions represents only part of the information needed to analyze the reads, and it can be obtained only if a genome is available. indeed, other important information are contained in the read collection itself. for instance, to determine the frequency of haplotypes at a snp position, one needs to align the reads related to this position. these can be obtained by considering for some length k, the k-mers overlapping the snp and searching for the reads sharing this k-mer. this procedure is applicable even in the absence of a reference genome, and similar ones can be designed to search for a binding motif in chip-seq reads, to determine with rna-seq data whether different regions of a messenger rna sequence are susceptible to be differentially expressed, etc.
+
+for tasks like assembly or read clustering, one needs to determine reads overlapping each other or that align partly one to another. numerous works on similarity search algorithms have developed seed-and-extend strategies and shown that it can be performed efficiently by searching common k-mers between two sequences  <cit> .
+
+surely, now and even more in the near future, we will need efficient indexing data structures to store and query large collections of reads in main memory. up to now, a lot of computational research has been devoted to read mapping, and the most efficient tools owe their efficiency to the use of involved genome indexing data structures, like the burrows-wheeler transform  <cit> . on the other hand, the question of read indexing remains quite unexplored, although the improvements in sequencing throughput suggest that such structures will become a compulsory part of future read analysis programs. a sign supporting this view: even mapping programs now start to index both the genome and the k-mers of the reads to boost efficiency and accuracy  <cit> .
+
+numerous works have presented data structures to index a single text, like the well known suffix tree  or the suffix array   <cit> . these enable the so-called locate query, that is to locate all occurrences of a pattern p either from its sequence or from a position j of occurrence in the text, as well as count query to obtain the number of occurrences of p. these structures can be adapted to index a set of texts, where each text differ from each other; the structures are then called generalized suffix tree  <cit> , or generalized suffix array   <cit> . this is done by concatenating all texts and adding a separator symbol that does not belong to the alphabet  after each text  <cit> , or directly  <cit> . then it requires to store the length of each text in an additional array to correctly answer locate queries. such algorithms have not been adapted to collections of texts, where two texts may be equal in sequence but differ in their identifier. the reads obtained from sequencers form a collection, not a set.
+
+when the total text is too large, compressed indexes reduce the memory needed by storing not all, but only a certain proportion of the text positions. compression is obtained by sampling the positions to be stored, while non sampled positions need to be recomputed at run time. this enables the user to control the balance between amount of memory and query time. hence, compression has an impact on the time needed to compute a query. ferragina et al. report in a large practical evaluation of compressed text indexes, that the query time of all tested compressed indexes are between  <dig> and  <dig>  times slower than with a plain sa for an index that is  <dig> times smaller  <cit> . the fm-index  <cit>  is used to index all chromosomes in mapping applications  <cit> . however, the scalability of neither plain nor compressed indexes to collections of millions of texts has not been investigated so far. we thus address the question of indexing large collections of reads with an uncompressed index and compare its performance to a generalized suffix array and a hash table. our structure aims to save space compared to those indexes while globally retaining queries as fast. thus we avoid the pitfall of compressed indexes which are less space consuming but slower by orders of magnitude.
+
+in this work, we propose a new data structure to index reads, an algorithm to build the structure, and procedures to query it. our structure, named gk arrays, is kept in main memory once built and repeatedly accessed to answer different kinds of queries like "given a k-mer, get the reads containing this k-mer ". one can ask both for the k-mer positions or simply for the reads containing it, which can prove useful in different applications. we focus on cases where millions of queries need to be computed; clearly, memory usage will be the key issue. an alternative solution is to adapt some uncompressed indexing structures designed for long texts . we compare gk arrays to such an alternative and show experimentally that they process queries fast, while requiring much less memory . we also perform experimental comparisons against a method using hash table: it shows that while the hash table method can answer quickly to queries it does not scale to large collections of reads.
+
+if in biology the term k-mer is preferred, computer scientists rather use the equivalent words of k-factor or k-substring; we will stick to the term k-mer. the gk arrays allow to answer queries related to an input k-mer; let us call these k-mer queries. before entering the algorithms description, we list below the applications of k-mer queries in the analysis of high throughput sequencing data. the results section will first present our data structure, its construction algorithm and the procedures to answer k-mer queries, then detail the experimental comparisons.
+
+finally, we discuss the advantages of our structure and conclude with future developments.
+
+note that this study does not tackle the question of read mapping, it focuses on read indexing.
+
+queries and applications
+let us give an informal presentation of the problem. we are given a collection of q reads of length m and a length of substring k such that k ≤ m.
+
+suppose one is given a string f of length k; one does not know whether it appears in some of the reads or not . in the algorithm section, we describe a data structure in which all substrings of length k of the reads are ordered lexicographically. hence, one can search for f using a dichotomic search in oq))) worst case time in this structure , and determine whether at least one read contains f as a substring and at which position. if not, the answers to the queries below, which are all related to a sub-collection of reads containing f, are trivially the empty set or zero. otherwise, one knows that f occurs in some read r of the collection at position j, and wishes to get some information on the other reads where f occurs. one wants to answer the following questions:
+
+q1: in which reads does f occur?
+
+q2: in how many reads does f occur?
+
+q3: what are the occurrence positions of f in the reads?
+
+q4: what is the number of occurrences of f in the reads?
+
+q5: in which reads does f occur only once?
+
+q6: in how many reads does f occur only once?
+
+q7: what are the occurrence positions of f in each read where f occurs only once?
+
+q8: what is the number of occurrences of f in the reads where it occurs only once?
+
+we state several remarks about the queries before dwelling on applications.
+
+ <dig>  the queries go by pairs: the first one computes a set of positions or read indices, while the second computes the cardinality of that set.
+
+ <dig>  note the clear semantic difference between q1/q <dig> and q3/q <dig>  the answer to q <dig> yields the identifiers of the reads in which f occurs, while that to q <dig> gives also all its positions in the read. this clearly differs since f may occur several times in a read . sometimes the positions are needed, sometimes only the reads .
+
+ <dig>  queries q5-q <dig> are versions of q1-q <dig> constrained to a single occurrence of f in the reads. of course other variants can also be computed, e.g. where the number of occurrences is limited by a user defined threshold. since f is constrained to occur only once in each read, q <dig> and q <dig> are equivalent, and we will mention only q <dig> in the sequel.
+
+ <dig>  the data structure we propose is intended to be kept in memory and used for multiple queries.
+
+although this paper focuses on the data structure, its efficiency, and on the algorithms to solve these type of queries, it is important to list applications of these queries. in which context of read analysis, can one use such queries? note that in such context, k is smaller than the read length. theoretical and empirical investigations show that for instance, with k ≥  <dig> or  <dig>  k-mers indicate in average a single genomic location in the human genome  <cit> . such values of k can be computed depending on the genome length. translated to reads or sequences: it is unlikely that two reads sharing a k-mer were not sequenced from the same part of the dna. in other words, sharing a k-mer is a witness for having a common genomic origin.
+
+mutation detection
+putative mutations  are indicated by differences between a read and a reference genome. once the reads have been mapped to the reference genome, one analyzes the sub-collection of reads that covers a genomic position to count how many reads support the variation observed in the read or that observed in the genome. if one considers the two substrings of length k centered on this mutation position, one in the read and one in the genome, answering q <dig> for these substrings will give an approximate count of these two haplotypes. if one needs the corresponding reads, then q <dig> is the appropriate query. if only a single, or a few reads, share this k-mer, then a sequence error might be suspected  <cit> .
+
+local coverage
+suppose one is given a target sequence, which can be a read or an external sequence. for each of its k-mer, let us call the local coverage, the number of reads sharing this k-mer . the local coverage profile  along the target sequence provides useful information in various contexts. for a known mrna and an rna-seq experiment, the average local coverage on all k-mers is a proxy for the expression level of the target, while the profile enables one to distinguish the target's sub-regions expressed at different levels  <cit> . in another context, with a genomic library, taking reads as queries and looking at their local coverage profile may help to detect those overlapping the extremity of a repeated or transposable element. this may prove useful to study the distribution and evolution of these elements in the genome.
+
+clustering and assembly without a reference genome
+as for expressed sequence tags, it is suitable to cluster and assemble rna-seq reads to compute the various transcripts expressed in the assayed library  <cit> . it is necessary to detect near exact alignment between pair of reads, and this is usually performed efficiently by filtration using seeds. in such case, very efficient and sensible seeds are exact shared k-mers  <cit> . here, the sub-collection of reads sharing a k-mer with a given read, as well as the k-mer positions, can be obtained using query q <dig>  the answer to q <dig> can help guiding the clustering process.
+
+similar needs of query occur in the assembly of genomic reads  <cit> . to know with which reads one can assemble a given read without ambiguity, one may perform query q <dig> using k-mers at the 5' or 3' extremities of the read. the obtained occurrences together with their positions will indicate the matching reads and the relative positions of read pairs for assembly.
+
+our application list provides examples and is by no means exhaustive. we could also mention for instance the estimation of the target genome length in assembly context, which uses k-mer counting  <cit> . clearly, these applications are beyond the scope of this paper. however, these paragraphs underline that the proposed data structure suits the needs of read processing in various application contexts, and will provide a unified framework for building read analysis programs.
+
+RESULTS
+this section contains the main contribution: a data structure to index large read collections, the gk arrays. to describe it, we first introduce the notation, formalize the queries, exhibit the index data structure, give its construction algorithm, and the procedures for answering all queries. this makes the content of the algorithms section. then, in the comparison section we investigate its practical usability compared to two alternatives: one based on a generalized suffix array  and another based on a hash table. this includes theoretical and practical comparisons.
+
+algorithms
+here, we detail the algorithms to build the gk arrays and to answer the queries. we start by defining more formally the queries we want to answer and introduce the necessary notation.
+
+notation and definition of the queries
+let Σ be an alphabet of size σ. Σ* denotes the set of words, strings or sequences over Σ and, for any integer n, Σn denotes the set of words of length n over Σ. for a word x, |x| denotes the length of x. given two words x and y, we denote by xy the concatenation of x and y. for every  <dig> ≤ i ≤ j ≤ |x| -  <dig>  x denotes the th element of x, and x denotes the substring xx . . . x. let ≤l denotes the comparison operator for the lexicographic order on words. lexicographic ranks start from zero and all arrays are indexed from zero. for any finite set a, we denote its cardinality by #a.
+
+the input consists a list r =  of q short sequences of length m, called reads, which are not necessarily distinct. we know that m, k, q ∈ ℕ satisfy m ≥ k >  <dig> 
+
+a k-long substring of a word is called a k-mer. for any u ∈ Σ*, we denote by fk the set of k-mers in u: fk = {v ∈ Σk | ∃p ∈  such that v = u}. let f ∈ Σk and let us denote the set of indexes of the reads in which f occurs by indk = {j ∈  = f}, where a positioned occurrence is given by the pair made of the read index in r and the beginning position of f in this read. let us denote the restriction of indk ) to subset of read indexes where f occurs only once by uindk ). formally, uposk = { | rj = f and ∀i ≠ ℓ, rj ≠ f}, and uindk = {j |  ∈ uposk}. let i ∈ [ <dig>  q[, j″ ∈ [ <dig>  m - k + 1[, and let f be the k-mer starting at j″ in read ri. note that here we require the knowledge of the pair , which defines the k-mer f. now, the seven k-mer queries can be formally defined as computing  
+
+clearly, it appears  that the algorithms to compute uindk, resp. uposk, for answering q5/q <dig>  simply filter indk, resp. posk, on the fly, and are thus similar to the algorithms for q1/q <dig>  for place sake, we will only detail the solutions for q1-q <dig> in the sequel.
+
+the index structure
+our algorithm relies on four arrays that allow to query the k-mers of all reads. hence, we define a word made of the concatenation of all reads: cr = r0r <dig> ⋯ rq- <dig>  of course, a k-mer that overlaps two reads in cr is not necessarily a k-mer of some read. hence, we introduce a system to renumber the positions of interest in cr. the rationale behind is to save place in the gk arrays by discarding the positions of overlapping k-mers in cr. let us denote by  the number of distinct k-mers of all reads, and for the sake of legibility we set  and  . we call:
+
+• p-position, a starting position in cr of a k-mer that is not overlapping two reads, i.e. an element of .
+
+• g, the function that renumbers p-positions in order such that their index are consecutive; g is defined by:  
+
+• q-position, an image of a p-position by g, i.e. an element of . note that the set qpos is not a query.
+
+clearly, ppos and qpos have the same cardinality , and as  implies g ≠ g, g is bijective. hence, g- <dig> exists and maps a q-position back to its corresponding p-position in cr. proposition  <dig> explicits the conversion between a positioned occurrence and a p-position.
+
+proposition  <dig>  let  with j ∈ [ <dig> q[,  be a positioned occurrence of a k-mer in a read. the corresponding p-position in cr is jm+ℓ. conversely, let j' be a p-position, the corresponding positioned occurrence in a read is .
+
+this numbering system is important for it allows us to go back and forth between a positioned occurrence in a read, its corresponding p-position in cr, and its q-position that will be stored in our arrays.
+
+let j be a q-position. we denote by sq, resp. fq, the suffix, resp. the k-mer, of cr beginning at the p-position g- <dig>  i.e. sq = cr and fq = cr. we call sq a p-suffix. note that all suffixes beginning at p-positions have different length and are pairwise distinct; thus, there are  such suffixes and they all have a different lexicographic rank. however, this may, and in real data applications will, not be the case for the k-mers, i.e. the fq. we call the set {fq | j ∈ qpos} the set of pk-factors, whose cardinality is  with our notation.
+
+now, we define the gk arrays:
+
+gksa  is a modified suffix array of cr that lexicographically sorts only the p-suffixes,
+
+gkifa  is a modified inverse suffix array  that stores for each q-position, in position order in cr, the lexicographic rank of the pk-factors starting at the corresponding p-position,
+
+gkcfa  is an array that associates to a k-mer  its number of occurrences at p-positions in cr,
+
+gkcfps  stores the prefix sums of gkcfa. since gkcfa and gkcfps are equivalent only one of them is necessary at a time.
+
+formally, the definitions are :
+
+• for i a suffix lexicographic rank and j a q-position ,
+
+   gksa = j iff sq has lexicographic rank i among the p-suffixes.
+
+• for i a k-mer lexicographic rank and j a q-position ,
+
+   gkifa = i iff fq has lexicographic rank i among the pk-factors.
+
+• for i a k-mer lexicographic rank ,
+
+   gkcfa = #{j ∈ qpos | fq = fq },
+
+• for i a k-mer lexicographic rank , the definition of the prefix sum is  and 
+
+gkcfps =  <dig> 
+
+remark  <dig>  the array gkcfps is not essential to the algorithm: it is solely there to avoid multiple, time consuming computations of prefix sums over gkcfa . moreover, any value of gkcfa can also be accessed in constant time using gkcfa = gkcfps -gkcfps. thus, gkcfps will be kept in memory to replace gkcfa.
+
+we give some useful properties of gk arrays.
+
+proposition  <dig>  for , gkcfps = #{j ∈ qpos | fq ≤l fq} .
+
+in other words, gkcfps is the number of pk-factors having lexicographic rank less than or equal to i. since gksa is sorted on the lexicographic order of the p-suffixes, it is also sorted on the lexicographic order of the pk-factors. hence, we get:
+
+proposition  <dig>  let f ∈ Σk such that indk ≠ ∅. all occurrences of f have the same rank among the pk-factors, and are stored consecutively in gksa.
+
+construction algorithm
+first, we detail the algorithm for building gksa, and then the one computing gkifa and gkcfa.
+
+computation of gksa
+we first build the full suffix array  of cr using a linear time and space algorithm. since |cr| = mq this first step can be done in o. then gksa is obtained from sa by selecting only the p-positions and by renumbering them to q-positions using function g. this second step is performed in o time and space. moreover, gksa is built in place of the suffix array: our algorithm allocates only the memory for the sa table. when answering q1/q <dig>  each read where a given pk-factor occurs should be counted only once . similarly, for q5/q <dig>  we count only reads where a given pk-factor occurs exactly once. to avoid using masks on the reads, we sort in increasing order the values of gksa corresponding to pk-factors sharing the same lexicographic rank . the values that have to be sorted are q-positions, i.e. integers, thus the sort can be performed in linear time on values of gksa using e.g. radix sort  <cit> . the whole process takes o time and space.
+
+computation of gkifa and gkcfa
+algorithm  <dig> shows how to compute jointly gkifa and gkcfa. its correctness proof is given in additional file 1: proof and queries' algorithms.
+
+algorithm 1: computation of gkifa and gkcfa.
+
+data: gksa, cr, k, 
+
+result: gkifa and gkcfa
+
+ <dig> begin
+
+ <dig>    gkifa ← 0;
+
+ <dig>    gkcfa <cit>  ← 1;
+
+ <dig>    t ← 0;
+
+ <dig>    foreach  do
+
+ <dig>       j ← gksa;
+
+ <dig>       j' ← gksa;
+
+ <dig>       if fq ≠ fq then
+
+ <dig>             t ← t + 1;
+
+ <dig>           gkcfa ← 0;
+
+ <dig>     gkifa ← t ;
+
+ <dig>     gkcfa ← gkcfa + 1;
+
+ <dig>   return ;
+
+theorem  <dig>  algorithm  <dig> correctly computes the arrays gkifa and gkcfa. .
+
+the comparison between two pk-factors  is naively performed in o time, and is the only instruction of the inner loop that takes more than constant time. hence, the computation of both gkifa and gkcfa is performed in oqk) time. let us emphasize the simplicity of the algorithm, which explains the fast construction times obtained in practice.
+
+remark  <dig>  once the values of gkcfa have been calculated, one can compute the values of gkcfps in-place in oq) time .
+
+answering the queries
+assume the gk arrays have been built in a preprocessing step ; we show how to answer the first four queries, starting with q <dig> and q <dig>  let , and let f be the k-mer starting at j" in read ri. this occurrence of f in cr is found at p-position j':= im + j" and the corresponding q-position is j := g.
+
+q4: computing the cardinality of posk
+first, we need to find the lexicographic rank of f among the pk-factors, which we obtain directly by setting t := gkifa . the cardinality of posk is simply the number of occurrences starting at p-positions in cr, which is given by gkcfa . by remark  <dig>  gkcfa = gkcfps - gkcfps.
+
+q3: computing posk
+by proposition  <dig>  all occurrences of f starting at p-positions are stored consecutively in gksa. it suffices to find the lower and upper indices, denoted by ℓf and uf respectively. by the ordering of gksa all occurrences of factors smaller than f in the lexicographic order are stored before its occurrences in gksa. hence, by definition of gkcfps and proposition  <dig>  we have uf = gkcfps and ℓf = gkcfps. since gksa is indexed from  <dig>  the starting q-positions of occurrences of f are comprised in the range  in gksa. the corresponding p-positions are obtained using g- <dig> and are then transformed into positioned occurrences with proposition  <dig>  this proves theorem  <dig> 
+
+theorem  <dig>  let f be a k-mer of a read occurring at q-position j in cr. then, its lexicographic rank among the pk-factors is t := gkifa. if we set uf := gkcfps and ℓf := gkcfps then
+
+ <dig>  the starting p-positions of f's occurrences in cr are {g- <dig> | ℓ ∈ [ℓf, uf [},
+
+ <dig>  posk = { mod m) | ℓ ∈ [ℓf, uf [},
+
+ <dig>  #posk = uf - ℓf.
+
+given theorem  <dig>  the queries regarding indk can be answered as follows:
+
+q1: indk: = {| ℓ ∈ [ℓf, uf[},
+
+q2: by counting the elements of indk while computing it.
+
+the algorithms for q <dig>  q <dig>  and q <dig> are given extensively in algorithms  <dig>   <dig>  and  <dig>  the algorithms for all other queries are included in additional file 1: proof and queries' algorithms.
+
+to answer q <dig>  one computes posk and scans it on the fly to remove reads  having strictly more than one occurrence of f. a similar approach solves q <dig>  and q <dig>  variants of these queries where the number of allowed occurrences is constrained by a parameter can be answered similarly.
+
+complexity
+answering q1-q <dig> or q5-q <dig> requires to scan the values in gksa inside the range corresponding to the k-mer f, which can be performed in o) time, where occ_reads denotes the occurrence number of f in the reads. query q <dig> is computed in constant time using gkcfps.
+
+algorithm 2: q <dig> )
+
+data: f ∈ ∑k, j ∈ ppos such that cr = f
+
+result: the set indk
+
+ <dig> begin
+
+ <dig>    indk ← empty set;
+
+ <dig>    t ← gkifa;
+
+ <dig>    ℓf ← gkcfps;
+
+ <dig>    uf ← gkcfps;
+
+ <dig>    prev ← - 1;
+
+ <dig>    foreach i ∈ [ℓf, uf [  do
+
+ <dig>       readindex ← ;
+
+ <dig>       if readindex ≠ prev then
+
+ <dig>          add readindex to indk; prev ← readindex;
+
+ <dig>  return ;
+
+algorithm 3: q <dig> )
+
+data: f ∈ ∑k, j ∈ ppos such that cr = f
+
+result: the set posk
+
+ <dig> begin
+
+ <dig>    posk ← empty set;
+
+ <dig>    t ← gkifa;
+
+ <dig>    ℓf ← gkcfps;
+
+ <dig>    uf ← gkcfps;
+
+ <dig>    foreach i ∈ [ℓf, uf [  do
+
+ <dig>       readindex ← ;
+
+ <dig>       posinread ← g- <dig> mod m;
+
+ <dig>       add the pair  to posk;
+
+ <dig>  return ;
+
+algorithm 4: q <dig> )
+
+data: f ∈ ∑k, j ∈ ppos such that cr = f
+
+result: the cardinality of posk
+
+ <dig> begin //gkcfa = gkcfps -gkcfps
+
+ <dig>    t ← gkifa;
+
+ <dig>    return ;
+
+practical considerations: implementation and variable read length
+the value of k, which determines the length of k-mers used for querying the collection of reads, is a parameter of our index. however, the gk arrays remain flexible. if for the simplicity of the presentation we have assumed until now that all reads have the same length, the whole structure can be adapted to a collection of reads having variable length. indeed, since some sequencing technologies produce variable-length reads , this adaptation is an important issue of versatility.
+
+indexing variable-length reads
+we show how our method can be slightly adapted to tackle this problem. remind that the gk arrays consider the string cr, the concatenation of all reads, and save place by discarding positions at which a k-mer overlaps two reads. this was done efficiently by converting any read position, or p-position, into a q-position, and conversely, using function g. up to now, this function relies on the fact that the read length is fixed. thus, we need to modify its definition to accommodate different read lengths. for this, we use a bit vector f, as long as cr, to record which positions in cr are p-positions: j is a p-position iff f =  <dig>  we implement it as a vector having rank and select capabilities  <cit> . we define these operations as
+
+• rank <dig> is the number of ones in f.
+
+• select <dig> is the position of the i-th one in f .
+
+these operations can be performed in constant time, and f can be stored in a compressed form needing only |f|h <dig> + o bits, where h <dig> is the zero-th order empirical entropy of f. then computing g and g- <dig> can be easily performed with a single rank or select query. indeed, we have g = rank <dig>  and g- <dig> = select <dig>  finally, using little extra memory, gk arrays can also handle variable-length reads.
+
+implementation
+gk arrays are available as a reusable c++ library under a cecill c licence . it accepts standard formats for the input read collection . depending on the number of k-mer positions, the user should turn on the  <dig> bit encoding at compilation. it allows to process data sets of more than  <dig> positions. default is set to  <dig> bit encoding. another compilation option can be activated to handle variable-length reads , otherwise by default gk arrays process fixed length reads.
+
+the data structure construction and queries algorithms are coded in standard c and c++. to reduce memory consumption, the full sa of cr is built using libdivsufsort library https://code.google.com/p/libdivsufsort/, which was chosen for its efficiency and low memory usage . however, its worst case time complexity is not linear in the length of the input sequence. also the sort of values in gksa inside each range corresponding to one pk-factor is performed with the quicksort algorithm. a linear time construction of the array gkifa is possible by using an lcp array . however, building this array would need at least 9mq bytes with manzini's algorithm  <cit> .
+
+we implemented two versions of the gk arrays: one which indexes only fixed-length reads, and another for variable-length reads. when not stated otherwise, gk arrays refers to the implementation for fixed-length reads. for managing variable-length reads we used sux http://sux.dsi.unimi.it/, an implementation of bit vectors with rank and select operations.
+
+theoretical and experimental comparisons
+the sequencing capacity of new technologies continues to improve. managing ever increasing read collections will be a major bottleneck in the bioinformatic analysis of high throughput sequencing data. the gk arrays implement one solution to read indexing. if plain, as well as compressed, indexing data structures have been described in the litterature , their ability to handle large read collections have not been investigated. as we seek to optimise in practice the memory consumption, the construction time, and query running time, we will compare gk arrays to two other uncompressed indexes: a generalized sa  and hash tables. we choose these two alternatives for they represent different approaches to read indexing. among the uncompressed text indexes that have been generalized to handle a set of texts, the gsa is reckoned to be one of the most memory efficient and has been preferred to hash tables or the suffix tree in other contexts  <cit> . on the other side, the optimisation of web search engines have triggered recent development of highly efficient hash tables, like google sparse hash http://code.google.com/p/google-sparsehash or the hash tables from sgi extension of the c++ standard library http://www.sgi.com/tech/stl. it is thus instructive to also compare gk arrays to state of the art hash tables. as explained in introduction, compressed indexes save memory but induce much longer running times to answer queries compared to plain indexes, and have been excluded from this comparison. nevertheless, designing efficient compressed read indexes is a challenging future research avenue, which could be addressed by compressing the gk arrays.
+
+a generalized suffix array  solution
+we detail here the solution based on a generalized suffix array  to index a collection of reads, all reads having the same length. we call it the gsa solution. in fact it indexes the string made of the concatenation of all reads, cr. the preprocessing consists in building the generalized suffix array , the inverse suffix array , and the longest common prefixes  array of cr. the gsa is built using the same algorithm than for gk arrays . the isa is built by scanning the gsa in mq time, while the lcp array is also constructed in linear time using an efficient algorithm  <cit> . the tables are built in this order and add up in term of memory footprint.
+
+in figure  <dig> and  <dig>  we compare the time and space complexities of gsa and gk arrays solutions. since both start by building gsa and this is the dominant term of the time complexity, we obtain o time complexity: the space occupied during the construction of that table alone is  <dig> mq, while it amounts to 4mq once built  <cit> . the last three columns of these tables show how the cumulated memory footprint evolves after each step during construction. we also monitored the memory footprint evolution during the construction of gsa and of gk arrays and illustrate these graphically in figures  <dig> and  <dig>  respectively. for the gsa the three tables add up in memory and each takes 4mq space. with gk arrays
+
+ <dig>  the gksa table replaces gsa in memory and takes only ,
+
+ <dig>  gkifa takes an additional  while gkcfa occupies  with  denoting the number of distinct pk-factors, and
+
+ <dig>  finally the gkcfps replaces gkcfa and takes exactly the same space.
+
+in total, gsa takes 12mq bytes of memory, while gk arrays occupy  bytes , and  is smaller than m. this explains why the memory footprint of gk arrays remains smaller in practice than that of gsa  and 4), even for varying k values ,  <dig> and 4). indeed, the gain of memory provided by gk arrays increases with both k and q. if k is small, each k-mer tends to occur more in average, and thus , meaning that gkcfps is much smaller than the lcp array. if k is large then 4q ≪ 4mq and thus, gksa plus gkifa tables occupy much less place than the gsa and isa tables. this constitutes, in almost all cases, a saving of at least 12q bytes.
+
+locating a k-mer in the reads can be done with a binary search in o worst case time with gsa using sa and lcp arrays and  worst case time with gk arrays using gksa. .
+
+however, manber and myers  <cit>  mentioned that a simple improvement over the classical binary search  permits to run in practice as fast as a  worst case method .
+
+thus, starting from a k-mer, rather than from a position, when answering the queries will bring an overhead similar in practice for the gsa and gk arrays.
+
+algorithm 5: q <dig> ) with the generalised suffix array solution
+
+data: f ∈ ∑k, j ∈ ppos such that cr = f
+
+result: the set indk
+
+ <dig> begin
+
+ <dig>    indk ← empty set;
+
+ <dig>    initialize the whole bit vector, d, to zero;
+
+ <dig>    i ← isa;//starting position of f occurrences in sa
+
+ <dig>    repeat
+
+ <dig>       if  then
+
+         //the occurrence position does not overlap two reads
+
+ <dig>          readindex ← ;
+
+ <dig>          if d ≠  <dig> then
+
+            //we have not found an occurrence in this read yet
+
+ <dig>             add readindex to indk;
+
+ <dig>           d ← 1;
+
+ <dig>     i ← i + 1;
+
+ <dig>   until  or ;
+
+ <dig>   return ;
+
+nevertheless although we consider the same input, a position j of occurrence of the k-mer in a read, answering queries differ between the gk arrays and gsa solutions. indeed, since the gsa stores all positions in cr, we need to filter out positions of k-mers that overlap two reads in cr to keep only p-positions. this adds instructions to the procedure compared to that for the gk arrays: see line  <dig> in algorithm  <dig>  which gives the algorithm for query q <dig> with the gsa. for answering queries q <dig> and q <dig>  we must perform another slight modification: we use a binary mask for dealing with duplicate k-mers in a same read. this mask is stored in a binary vector b having q bits, one bit per read. the bit corresponding to a read is set to one whenever the k-mer has been found to occur in that read, and subsequent occurrence positions in that read will be filtered out if the corresponding bit is set .
+
+assume we query on a k-mer f from one of its occurrence position j. let us denote by occ_cr the number of occurrences of f in cr, including those overlapping two reads , and by occ_reads the number of its occurrences that are totally included in a read . for q1/q <dig>  q5-q <dig>  we obtain with gsa a complexity of o) since one initializes the bit vector b of size q and scan all occ_cr occurrences. while with gk arrays, the complexity depends linearly on occ_reads and we know that occ_reads ≤ occ_cr.
+
+for q3/q <dig>  there is no need of a bit vector with the gsa method, hence their complexity is o), for one needs to scan positions in the gsa using the isa and the lcp arrays. however, gk arrays offer a complexity of o) for q <dig> and o for q <dig>  we summarize all queries time complexities in figure  <dig> 
+
+remark  <dig>  to avoid scanning occ_cr entries, an alternative solution consists in delimiting reads inside cr using a separator. this solution would lead to a space overhead of q bytes for lowering the time complexity to occ_reads. however we did not retain this solution since our goal is to diminish the space complexity and this solution would not improve much the time complexity.
+
+a solution based on a hash table
+an alternative solution is to index all k-mers in a hash table and to store for each read the list of its occurrence positions in the read collection. this list will contain pairs of integers: the read index in the collection, and the starting position of the k-mer in that read. the read index can be stored on a 32-bit integer, while a 16-bit integer suffices for the starting position. in such a case, storing the text is not necessary. the number of entries is the number of distinct k-mers in the read collection, i.e. our parameter . generally,  is small compared to 4k for values of k in  <cit> . hence the hash table will be sparsely populated. we tried several implementation of state of the art hash tables: the google sparse and dense hash arrays, and that from sgi extension of the c++ standard library .
+
+preliminary experiments have shown that google sparse requires significantly much longer to build than sgi hash map, while having a lower memory footprint. with  <dig> million  <dig> bp reads, google sparse hash occupies one third of the memory needed by the sgi hash map, but it takes thrice more time to build. on the contrary google dense hash tables takes twice more memory, and offers only similar construction time. hence, sgi extension hash map exhibited the best compromise in term of memory consumption and construction time compared to google implementations. thus, we choose sgi extension implementation for the comparison with gk arrays.
+
+experimental settings
+we tested index structures on three datasets.
+
+ <dig>  we used a collection of  <dig> million illumina® rna-seq reads of length  <dig> from a human k <dig> library taken from the rgasp data . we call it the k <dig> dataset.
+
+ <dig>  we compiled several lanes of roche 454® genomic sequencing to obtain a collection of  <dig>  million reads ranging from  <cit>  bp with an average read length of  <dig> bp. these were sequenced on a roche 454® gs flx platform with titanium chemistry for the khoisan genome project  <cit> . we call it the khoisan dataset.
+
+ <dig>  as much longer fixed length reads are not yet available, we constructed a collection of fixed length reads by slicing the khoisan reads in non-overlapping pieces of  <dig> bp. we obtained  <dig> millions of  <dig> bp reads, a read length that will soon be generated on high throughput sequencing platforms.
+
+in the first and third collections, reads have a fixed length, while in the second their length varies. the experiments were performed on an intel xeon  <dig>  ghz equipped with  <dig> gb of main memory, and running linux  <dig> . <dig> with c++ compiled using gcc version  <dig> . <dig> and - <dig> -funroll-loops options.
+
+experimental comparison
+the use of read indexing raises three questions: how much computing resources does the index demand? is it scalable? how fast can it answer large number of queries? clearly the resources will depend on the number of reads , their lengths and on the length of k-mers . we compare three solutions: a hash table , a generalized suffix array , and gk arrays.
+
+scalability
+we measured the construction time and amount of memory taken by all solutions for various numbers of reads and k-mer lengths. figure  <dig> plots the maximal memory footprint on k <dig> data. at this scale, the value of k impacts only the hash table size; its influence on the gsa and gk arrays is not visible on that graph. second, the solutions can be ordered as follows: gk arrays take the less memory, followed by the gsa, and then the hash table. this order is irrespective of the read number. for k =  <dig> e.g., gk arrays use  <dig> gb, the gsa uses  <dig>  and the ht  <dig>  and the curves clearly indicate that these differences increase with the number of reads. whatever the value of q, the hash table requires twice as much memory as the gsa, which itself takes at least 70% more memory than gk arrays. with  <dig> million reads the hash table saturates the memory, with  <dig> million the gsa also does, while the gk arrays constitute the only solution able to index the whole collection,  <dig> million reads, on that computer. note that in both cases, the 64-bit implementation of gsa and gk arrays have to be used to index that amount of reads. for the whole read collection, gk arrays needs at most  <dig> gb  and at least  <dig> gb .
+
+for all solutions, construction times increase linearly with the number of reads as expected ). it remains very similar between the gsa and gk arrays, which both takes e.g. < <dig> s. for  <dig> million reads. the influence of k is clearly visible on the hash table for  <dig> million reads: its construction time decreases with k because the parameter  also does . as long as they fit in memory, all compared solutions offer practical construction times.
+
+we examined the behavior of gk arrays on much longer reads,  <dig> bp, when variable-length read option is activated and when it is not. figure  <dig> plots space consumption, while figure  <dig> records the construction time for both options.
+
+we see that adding a bit vector is not space consuming since there is little difference between the two methods ). for  <dig> million reads, the difference is, at most, of  <dig> mb between the two methods. in figure  <dig>  we plotted the construction time for both indexes. the variable length read implementation becomes slower when the number of reads grows, compared to the fixed length gk arrays. this shows that despite a constant-time theoretical complexity for rank and select operations; there is a dependency on the length of the bit vector in practice. however, the construction time remains reasonable in the variable case.
+
+figures  <dig> and  <dig> plot space and time measured for the hash table and gk arrays  on the khoisan read collection. the gsa has not been implemented to handle variable length reads; note that the relative cost would have been similar to that observed with gk arrays between fixed and variable read length options. here for one million reads, variable length gk arrays require  <dig> s. to build vs  <dig> s. for the hash table, but  <dig> times less memory . the difference increases strongly with the read number. above one million reads, the memory footprint of the hash table exceeds the computer memory , while gk arrays index the complete collection of  <dig>  million reads on the same hardware with < <dig>  gb. hash tables appear to be more space consuming on the khoisan dataset than on the k <dig> dataset. this can be explained by the nature of the data. roche 454® sequencers offer a coverage depth much lower than illumina's. hence the number of distinct k-factors in the reads is likely to be greater with the khoisan dataset.
+
+answering queries
+we measured the mean time needed to answer  <dig>  random queries of q1-q <dig>  since q5-q <dig> are slight variations of q1-q <dig> we do not report on these queries.
+
+for our comparison of gk arrays with fixed or variable length read options, we see that the latter is becoming slower than the former  when k is small, i.e. when the number of occurrences of k-mers is large. with larger k, the query time of the latter diminishes and becomes  <dig> to  <dig> times slower than with fixed gk arrays.
+
+with variable length reads ) the query times remain practical, but the hash table needs between  <dig> and  <dig> fold less time than gk arrays depending on the query.
+
+in summary, under various conditions gk arrays are equivalent in construction time to a generalized suffix array or to a hash table. compared to these solutions, they also offer reasonable query times under all circumstances; however, gk arrays clearly outperform them in terms of memory footprint, the main bottleneck for processing high throughput sequencing data.
+
+CONCLUSIONS
+as high throughput sequencing becomes widespread, computational biology will face the challenge of managing astronomical quantities of short sequences. mining such amount of sequences is feasible if the sequences are indexed in a preprocessing step. an index is a data structure that, like a telephone book, enables one to find easily a piece of information. for some value k, it records the positions of all k-mers in the reads in an organized fashion to minimize the memory usage. then finding the reads related to some k-mer takes as long as reading the k-mer and listing the corresponding reads, but not as long as scanning all the reads. in other words, read indexing factorizes the results of searches, which later speeds up the numerous queries made while the index is kept in memory. our main contribution is to propose such an index: the gk arrays. they are fast to build, require less space than alternative uncompressed solutions, and can thus handle larger read collections:  <dig> million vs  <dig> million reads for the hash tables with a memory limited to  <dig> gb. it is a key issue in practice.
+
+while being comparable to hash tables in terms of time efficiency, only the gk arrays can completely index a large read collection  with a memory size available on nowadays computing servers. moreover, our index remains fast for a wide range of values of parameter k . we have also shown that gk arrays are both faster and smaller than an alternative generalized suffix array approach. similarly, on variable-length reads like a roche 454® dataset, gk arrays can handle the whole read collection using less than  <dig> gb while hash tables are limited to a smaller sub-collection  on a  <dig> gb machine.
+
+the gk arrays answer efficiently different types of queries, but they have been optimised for queries where the searched k-mer is extracted from an indexed read. sometimes one wishes to know for a given k-mer the reads in which it occurs and its positions inside those , while in other contexts one only wants the number of reads sharing this k-mer . moreover, gk arrays adapt well to variable length reads. their scalability and versatility are key advantages, which allows to envisage multiple applications as mentioned in introduction. however, scaling up to gigantic datasets , as the ones obtained in large metagenomic projects, will require compressed read indexes. the simplicity of use of our index, and its implementation as a c++ library make it a software brick that can be easily exploited in future programs or further developed by the community.
+
+for mapping reads on a reference sequence, solutions exist that index reads with hash tables  <cit> . for the error correction problem, other works have indexed reads with classical text indexing solutions: with a generalized suffix trie  <cit> , a suffix array  <cit> , or hash tables  <cit> . gk arrays represent a first, attractive read indexing solution; it is specialised for this question and should suit different applications. nevertheless, one can envisage several research perspectives. indexing approximate k-mers or spaced seeds will authorize more types of queries, but will certainly increase the construction time and space requirements. designing a dynamic construction algorithm for gk arrays would futher enlarge their range of applications. another challenge is to compress gk arrays by storing sampled positions and recomputing other positions at run time, as done with the burrows wheeler transform  <cit> . this would enable the user to adapt the index to its computer memory, while sacrificing some of its performance.
+
+list of abbreviations used
+high throughput sequencing: hts; rna: ribonucleic acid; mrna: messenger rna; rna-seq: rna sequencing; chip-seq: chromatin immunoprecipitation and sequencing; sa: suffix array; gsa: generalized sa; lcp: longest common prefix; snp: single nucleotide polymorphism; bp: base pairs; iff: if and only if.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+all authors have designed the algorithm and contributed to the writing of the manuscript. np and ms have developed the code. np, ms, tl, er have performed the experiments. er supervised the manuscript redaction and submission. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+proof and queries' algorithms.
+
+click here for file
+
+ acknowledgements and funding
+this work is supported by a cnrs peps grant "bioinformatique, séquençage haut-débit et transcrits chimères en cancérologie", a cnrs pics grant, a biostic grant, the region languedoc roussillon, and the atgc bioinformatics platform. ms and np were supported by fellowships from the french ministry of research, and np benefits from a fellowship from the ligue contre le cancer. er thanks dortmund university for the dortmunder gambrinus fellowship. we gratefully thanks a. mancheron for packaging the gk arrays library.

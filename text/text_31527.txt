@@ -1,0 +1,193 @@
+BACKGROUND
+deep sequencing approaches were successfully applied to examine the architecture of primary bacterial transcriptomes and uncovered an unexpectedly complex architecture
+ <cit> . although plain transcriptome sequencing can in principle be sufficient to determine transcription start sites  as local accumulations of read starts, this approach requires extensive sequencing depth
+ <cit> . alternative tss located within well-expressed genes or operons remain undetectable since moderate changes in coverage do not offer a sufficiently distinctive signal. on the other hand, tss are not the only loci at which read starts accumulate in rna-seq data. alternative sources of such signals are specific processing sites, secondary structures that influence rna degradation patterns, or chemical modifications
+ <cit> .
+
+the differential rna sequencing method drna-seq
+ <cit>  is designed to overcome these difficulties. it makes use of the 5’-monophosphate dependent terminator rna exonuclease  that specifically degrades processed rna, which exhibits a monophosphate at its 5’ end. transcription initiation, in contrast, produces a 5’-triphosphate that protects the unprocessed 5’ end from degradation by tex. treating rna isolates with tex prior to reverse transcription to cdna, leads to a sequencing library  that is enriched in primary transcription starts, compared to an untreated total rna library . similar to other library preparation steps that enrich or deplete certain transcript types, e.g. tap treatment
+ <cit>  and rrna depletion
+ <cit> , the tex dependent degradation of processed rna fragments is not perfect. the -library, therefore, still contains a mixture of primary and processed transcripts, albeit with a distribution of read starts that is shifted significantly towards tss positions
+ <cit> . in the data used in this contribution a median enrichment at tss positions of  <dig>  is observable. the discrimination of tss from other accumulations of read starts is thus non-trivial and cannot be performed unambiguously from a tex treated library alone. on the other hand comparison of - and -libraries offers a potentially highly informative source of information: while read starts will be relatively enriched, we can expect the alternative types of read start accumulations to be depleted in the -library.
+
+since the signal at hand is quantitative rather than an all-or-none qualitative difference, it is imperative to employ a statistical model to assess when an observed enrichment is indeed significant. this depends strongly on the expression level. to distinguish between real tss signals and accidental read start accumulation resulting from imperfect tex degradation or high local expression, the aid of a background model, e.g. the -library, is needed.
+
+hitherto, the analysis of the drna-seq data consists of mapping sequencing reads for each library onto the reference genome, visualizing the read coverage in a genome browser, often with displayed gene and transcription unit annotation, promoter predictions and other available prior knowledge. with this background the genome is manually inspected for positions with a more pronounced peak in the - compared to the -library. the interpretation of drna-seq signals in such a way is not only very time consuming, tedious, and error-prone, but also highly subjective and weakly reproducible. additional annotation information from third-party sources can be very helpful but bear the risk to introduce biases, resulting in re-annotation of already "known" features, and neglecting signals that are less obviously associated with current annotation data. it is, therefore, preferable to separate drna-seq data analysis from subsequent data integration with additional available information.
+
+to overcome these shortcomings we developed tssar , a tool for automated de novo tss annotation from drna-seq data. incorporation of information like gene annotation or promoter predictions is deferred to post-processing steps.
+
+implementation
+theory
+detailed knowledge of the underlying background distribution is required to quantify the significance of differential read start count signals. although related, this problem differs from the thoroughly examined problem of describing the variance in read counts per gene, which is routinely applied in the process of differential gene expression analysis. on one hand, the background is variable along the genome, depending on the transcription activity of the considered region. on the other hand, the distribution of read starts within an equally transcribed region depends on many concomitants. these are met by the different steps in the rna-seq library construction, namely cdna production by reverse transcriptase, fragmentation , adapter ligation, read amplification by pcr, size selection, and finally the chemistry of the sequencing platform itself. since the technology and the protocol details vary and develop with a compelling rate, it is far from trivial to capture these details
+ <cit> . therefore, it is sensible to recollect the basic characteristic of rna-seq data, which basically constitute count data. with this simplification we can assume that the distribution of read starts within an expressed genomic region can be modeled by a poisson distribution with parameter λ. given λ the poisson probability
+p=λke-λk! describes the probability that k reads start at a genomic position. in drna-seq data genomic positions with significantly enriched differences between the poisson distributions of - and -library are potential tss. therefore, we are concerned with finding positions where the observed difference cannot be explained easily by the local model of the background expression in the -library. the difference of two poisson distributions is given by the skellam distribution
+ <cit>  with the cumulative distribution function
+
+  f=∑d=-∞de-λλk2i|k| 
+
+here λ and λ are the parameters describing the average read start rate in the - and the -library, respectively. i|k| is the modified bessel function of the first kind and integer order |k|
+ <cit> .
+
+a major practical issue is the estimation of the parameters λ for the two libraries. we assume that read start counts per position within transcriptional active regions follow a poisson distribution, with the expected value λ depending on the transcription rate, or to be more precise, on the rna abundance, which depends on the transcription rate and the rna stability. within untranscribed regions the read start count per position is ideally zero. in reality, this idealization is often not met due to "leaky" promoters, read-through from adjacent genes, spurious transcription starts at random positions, sample contamination, and sequencing errors leading to mis-mapping of individual reads. nevertheless, as a first approximation it is reasonable to neglect these sources of error since the effect can be regarded to be small compared to the coverage dispersion within transcribed regions.
+
+as a consequence, randomly selected genomic regions, which are most likely a mixture of untranscribed and transcribed regions, can be modeled with a mixture model of a poisson distribution and a background that is  <dig> with probability  <dig>  to separate the two underlying distributions and estimate the parameter λ, describing only the transcriptionally active region, a zero-inflated poisson model regression
+ <cit>  is applied. for each sample y the probability ϕ that an observed zero is an excess structural zero, is estimated, such that
+
+  p=ϕ+·e-λ 
+
+where e-λ
+ is the probability for a position within the poisson distributed part to have zero reads starting there . these positions are part of transcriptional active regions. we use a zero-inflated poisson regression to estimate ϕ and thus determine how many positions without read starts are structural and sampling zeros, respectively. only the latter and positions that have at least one read start are used to estimate λ of the - and -library, respectively. the estimation of λ thus effectively considers the transcriptionally active regions only. in practise, the removal of structural zeros leads to larger estimates for λ and thereby avoids the incorrect prediction of tss from small counts in regions with low numbers of observed read starts.
+
+program architecture
+tssar has been implemented in perl and r and is available in two variants: a stand-alone version incorporates the core statistic routines and is best suited to be used in custom high-throughput drna-seq analysis. the web service  comprises additional components for pre- and post-processing, thus providing a web-based, cross-platform compatible pipeline for drna-seq analysis. an overview of the pipeline workflow can be found in additional file
+1: figure s <dig> 
+
+the tssar web service is built on top of the perl dancer <cit>  framework and adheres to the representational state transfer 
+ <cit>  principles of web architecture. the first step in using the tssar online pipeline is pre-processing of mapped reads, i.e., extracting the essential information of read start counts per genomic position. to avoid the necessity of uploading huge mapping files , we implemented the tssar client for local pre-processing of mapped reads in sam/bam or bed format on the user’s computer. to grant platform independence, the tssar client is implemented in java. once the relevant data is extracted from the mapping files assisted by the picard tools <cit> , files are compressed using xz utils <cit>  and automatically transferred, using the apache httpcomponents <cit>  package, to the tssar web server. on the web server the statistical calculations are conducted and potential tss are predicted. the tssar web service provides an assortment of post-processing steps. the list of predicted tss can be reduced by merging consecutive tss and cluster them into the most prominent position. for samples where the reference genome annotation was specified, all annotated tss are classified into primary, internal, anti-sense or orphan, according to their position relative to nearby genes, see figure
+1a. based on the classification the 5’ utr length distribution is determined. all results are visualized and provided for download. figure
+ <dig> depicts partly the output for showcase data sets
+ <cit> . beside the shown results, the output additionally contains all annotated tss and the clustered tss list in bed
+ <cit>  and gff format. all tables are available in comma and tab-separated lists, as excel and html files. with the assistance of the pre-computed plots, it is easy to gain a quick overview of the quality of the analysis.
+ <cit>  each annotated transcription start site is classified according to its genomic context: if a tss is positioned within  <dig> nt upstream of an annotated gene, it is classified as primary. tss within an annotated gene is labeled internal. a tss which is on the opposite strand of an annotated gene is classified as antisense. this class further splits into ai and ad, for internal antisense and downstream antisense, respectively. the latter is reserved for a tss which points in the opposite reading direction and is less than  <dig> nt downstream of an annotated gene. a tss that falls in none of these classes is reported to be orphan.  as a matter of fact, one tss can have several labels as it might fall into more than one of the aforementioned classes. the tssar web service summarizes the counts of the overlapping main classes graphically.  for tss which are annotated as ’primary’ the 5’utr lengths are deduced and the corresponding distribution is plotted.  to assess the efficiency of the tex treatment, the distribution of read starts per position is provided as a helpful indicator. if the enrichment in the -library worked efficiently, we expect fewer read start sites, each of which will have more reads. hence the distribution is flattened on the left side and bulged at the right side. the corresponding distribution and the mean  is expected to be shifted to the right compared to the -library.
+
+while the tssar web service provides convenient usability for routine drna-seq analysis tasks, there is also a demand for integrating third-party bioinformatics tools into custom analysis pipelines. to address this issue, we provide a tssar stand-alone version. in this version, the implementation is restricted to processing of sam files, analysis based on the statistical calculations, and output of annotated tss in bed format. the stand-alone version is available for download from the tssar web site.
+
+statistical calculation
+we chose a sliding window approach with a dynamic assessment of each position in the context of its local surrounding in order to account for different transcription rates across the genome. as a matter of fact, the choice of the window size parameter has an effect on the results . there, two conflicting interests have to be balanced. on the one hand, the region should be large enough to provide enough information for a reliable distribution parameter estimation. on the other hand, the region should be small enough to provide an as homogeneous surrounding as possible. if the sliding window covers more than one actively transcribed gene, with different rna abundances, the variance will be estimated over all transcribed entities. this might blur small signals, e.g., for low abundant srna genes. as a compromise, the default window size is  <dig>  nt, approximately matching the average length of prokaryotic genes. it can be easily adjusted by the user.
+
+for each window the parameters describing the poisson distribution are estimated in the following manner: first, the sample values are winsorized
+ <cit> , i.e., the highest read start count is substituted with the second highest count. the same procedure is done for the lowest value. this increases the robustness of the method against outliers, which may be caused by mis-mapping and/or abundant rna fragments e.g. arising from rrna loci.
+
+second, the zero-inflated poisson regression is applied to estimate ϕ, the probability that an observed zero is a structural zero from an untranscribed region instead of a sampling zero from a transcribed region. the r package vgam is used for the regression
+ <cit> . here, the parameters describing the poisson distribution are fitted by full maximum likelihood estimation . in case the mle algorithm fails to converge, which might happen because the underlying assumption of a well behaved poisson distribution is violated, the respective window is excluded from further analysis. while this might seem to be a drawback, it serves as a minimal plausibility check, ensuring the data fulfills the underlying assumption of following a poisson distribution. sequencing libraries with low complexity but many pcr duplicates might otherwise feign confidence in the results, which can actually not be deduced from the data. a bed file listing the omitted segments which typically correspond to less than 1% of the genome is provided . in the evaluation data set  modeled with a window size of  <dig> ,  <dig> regions with a total length of  <dig>  bases could not be modeled . the majority correspond to trna and rrna coding loci . additionally,  <dig> regions overlapped with annotated protein coding genes and the remaining  <dig> did not overlap with any annotated gene. a manual screening of the corresponding regions revealed that they share common characteristics. generally, they are small islands with very high expression levels.
+
+third, a regression procedure is applied to each window in the - and in the -library separately. for each library the probability ϕ is transformed into an expected number of excess structural zeros. since the same genomic region is under consideration in both libraries, a similar proportion of untranscribed and transcribed regions can be expected. to increase robustness, the average between the number of structural zeros in both libraries is calculated and the estimated number of zeros are removed from each library. to determine λ for each library, describing the poisson distribution of the sample, the arithmetic mean of the remaining counts is calculated.
+
+in the next step the probability that the read start differences between - and -library can be explained by the aforementioned background model is calculated. for this purpose, the original read start counts are normalized by
+
+  p^i=pi·∑m∑pif∑m>∑ppi·1if∑m≤∑p 
+
+  m^i=mi·∑p∑mif∑p>∑mmi·1if∑p≤∑m 
+
+thereby, p
+i
+ and
+p^i are the raw and normalized values of the -library at position i, respectively. the same applies to the -library, i.e., m
+i
+ and
+m^i.
+∑p and
+∑m are the native sums of all read start counts in the total - and -library, respectively. the effect of this step is to scale the read counts of the larger library relative to the smaller one, hence avoiding artificial distending of the sample variance. the estimated parameters λ and λ are therefore normalized accordingly.
+
+for each sequence position i in the current window, the difference
+d^i=p^i-m^i of the normalized counts between - and -library is calculated. unexpectedly large positive values of
+d^i for position i indicate tss, while exceptional negative values may indicate processing sites. the probability of observing
+d^i is evaluated w.r.t. the skellam distribution with the estimated normalized poisson parameters.
+
+the window slides along the genome with a step size equal to 1/10
+th
+ of the window size, hence each position is evaluated in  <dig> slightly different contexts. the geometric mean of all ten p-values is calculated in order to obtain the final position-wise p-value. finally, each position that falls below a user-specified average p-value cutoff and whose total read start count in the -library exceeds a user specified noise cutoff is reported as a significant tss. the noise cutoff serves as an additional safeguard to restrict the results to plausible annotations. this is needed because the skellam distribution works only with the differences of the expectation values of the underlying poisson distributions. a very high expectation value in the -library in combination with a small expectation value in the -library leads to a negative expectation value of the resulting skellam distribution. this, in turn could lead to annotated positions which are not supported by reads in the -library, as significantly enriched. to prevent this unwanted behavior a user defined number of read starts must be observed in the -library.
+
+RESULTS
+the goal of the tssar method is to provide user-friendly tools for rapid annotation of significant tss based on drna-seq data. we therefore implemented a stand-alone version and a web service. the first is intended to be used in high-throughput analysis pipelines whereas the latter represents an easy to use and platform independent user interface. for a web service it is important to avoid the transfer and storage of gigabyte-sized mapping files. we therefore provide a java client that extracts the necessary information and asks the user for only two parameters, namely genome size and window size. the data is pre-processed locally on the user’s computer. the essential information, i.e., the number of sequencing reads starting at each position, is automatically uploaded and analyzed on the tssar web server . all relevant cutoffs like p-value and noise threshold are subsequently selectable for precomputed values.
+
+evaluation
+to evaluate the performance of tssar in analyzing drna-seq data, we resort to the published data set for helicobacter pylori <cit> . we used the publicly available raw sequencing data from the sequence read archive
+ <cit>  , restricting ourselves to the drna-seq data from mid-logarithmic growth phase and acid stress growth condition. the reads were pooled and mapped to the reference genome  using segemehl version  <dig> .4
+ <cit>  with default parameters.
+
+based on this data, which were normalized in the same way as indicated in equations  <dig> and  <dig>  we predicted putative tss with three different approaches. the first two represent a naïve benchmark. first, we calculated the difference  for each position i of the - and -library read start counts. we applied different cutoff thresholds between  <dig> and  <dig>  thereby denoting every position with a difference higher than the cutoff to be a putative tss. the resulting list of potential tss was compared to the manual annotation from
+ <cit>  using bedtools intersect <cit> , allowing ± <dig> nt inaccuracy to call a manual and an automated annotated tss the same. the second approach is quotient based. analogous to the difference based approach, the quotient
+p^i+1m^i+ <dig> is calculated for each position i . again we use different cutoff values between  <dig>  and  <dig>  these two approaches have their static nature in common. the same threshold is applied for the whole genome. a similar approach was already applied by
+ <cit> . albeit, there it was used to identify differentially induced tss between different strains and growth conditions and additional information about promoter sequences was used to gain specificity.
+
+finally, we applied the dynamic tssar model, which analyzes the transcriptome locally and thus is able to model the different dynamics within the transcriptome. here, we used a window size of  <dig>  nt  and a noise cutoff of  <dig> reads per position. we filtered with different p-value threshold from 1·10- <dig> to 9·10- <dig> 
+
+from these results, each threshold based prediction is evaluated using standard measurements: recall rate , precision , accuracy  and the f-measure 
+ <cit> , where tp, tn, fp and fn are true positive, true negative, false positive and false negative predictions, respectively. figure
+ <dig> depicts the results of this analysis. tssar shows a much higher precision and simultaneously a less sharp decrease of the recall rate. in terms of the f-measure, it outperforms the fixed-threshold approaches by about 2-fold. a further major advantage is the smoother course of the f-measure along different p-value cutoffs. this makes the resulting annotation less dependent on the cutoff choice. the optimal cutoff value for the basic annotation strategies based on difference or ratio might be very variable for different experiments and difficult to deduce without a reference annotation.
+1: figure s <dig> 
+
+in its default settings tssar merges consecutive tss. since the tested naïve approaches do not share this behavior, we tested the influence of tss clustering on the prediction performance separately . although, clustering contributes to the precision of the prediction, the effect is too small to cause the improved performance of tssar.
+
+additionally, besides comparing our automated annotation to the manual annotation by the authors, we examined how precise tssar reproduces known h. pylori tss. therefore, we used tss studied in detail by independent methods, such as primer extension or 5’ race. from the  <dig> examples described in the literature , we calculated the distance to the closest position which we annotated as tss. if the discrepancy was more then  <dig> nt, we considered the tss as not recovered. figure
+ <dig> shows the result of this analysis for two tssar annotations with different parameters. the first one with lenient threshold values , and the later with more stringent values . in both cases the majority of experimentally confirmed tss could be detected at the exact same position . tssar missed  <dig> and  <dig> tss, respectively, compared to the  <dig> tss that were also not detectable in the manual annotation by the authors of
+ <cit> . we have to emphasis that, in contrast to a manual annotation, our method is not aware of any annotation information, which might induce a human curator to prefer certain positions. comparison of the two naïve approaches and tssar emphasizes that the presented statistical method is relatively insensitive to certain parameter thresholds, see additional file
+1: figure s <dig> 
+ <cit>  with tssar results. the manual tss annotation recovered  <dig>   <dig> and  <dig> tss with a  <dig>  ± <dig> and ± <dig> nt offset, respectively. here  <dig> tss were annotated more than  <dig> nt away from the experimentally determined position . tssar was run with a sensitive and a specific parameter set . with sensitive parameters  <dig> tss  were annotated on the exact same position. of the remaining tss  <dig> and  <dig> were annotated with ± <dig> and ± <dig> nt variance, respectively, whereas  <dig> tss  were annotated more than  <dig> nt away. the specific tssar prediction annotated  <dig>   <dig> and  <dig> tss with  <dig>  ± <dig> and ± <dig> nt offset, respectively, relative to the experimentally validated position. in this case  <dig> tss  were annotated more than  <dig> nt away, and therefore annotated as missed. the results of the same analysis including also our naïve benchmark approaches can be found in additional file
+1: figure s <dig> 
+
+during manuscript preparation a new method for drna-seq data analysis, called tsspredator, became available. it combines a peak calling approach for the treated library and a ratio based approach between the treated and untreated library
+ <cit> . since the parameters for this method were trained on the very same data set we used for the evaluation, the performance of methods cannot be impartially compared on this data. we can report, however, that tssar’s statistical method performs equally well even on this set . to demonstrate that tssar has more generally applicable default parameters, we compared the two methods on a new, publicly available drna-seq data set from stenotrophomonas maltophilia <cit> . based on the mapped reads , tssar and tsspredator were applied each in the default settings.
+
+the tss predictions, together with the authors’ manual annotation taken from the supplementary data of
+ <cit>  were analysed for congruency , and for enrichment of conserved sequence motifs that may be constitute promoter elements . to this end, we extraced the  <dig> nt upstream regions of the putative tss reported by tssar , tsspredator , and manual annotation . the combined set was then screened for overrepresented sequence motifs with meme <cit> . we found three motifs with e <  <dig> . their position weight matrices  are shown in figure
+5a. the pribnow box
+ <cit>  like motif  <dig> is very similar to the dominant promoter motif determined for xanthomonas campestris in
+ <cit> , a close relative of s. maltophilia.
+
+the pwms of these motifs were then mapped back to the putative promoter regions with fimo <cit> . we counted a motif found if the p-value of the hit was below  <dig> , figure
+5b. for tss annotated by tssar  <dig> % are associated with one of the three motifs, of which the majority corresponds to the pribnow box like motif, while only  <dig> % of the tsspredator results are associated with a motif. the manualy curated list of tss shows a motif for  <dig> % of the entries.
+
+the reproduction of the manual annotation on the s. maltophilia data shows an f-measure of  <dig>  and  <dig>  for tssar and tsspredator, respectively. which is mainly due to the fact that the latter predicts about  <dig>  additional tss whereas tssar only predicts about  <dig> not manually annotated tss, figure
+5c.
+
+these results indicate a higher accuracy of the tssar analysis. tssar reproduces manual annotation more precise and tss annotated by tssar exhibit a higher enrichment in putative promoter motifs, indicating its greater specificity compared to tsspredator. however, the latter results have to be interpreted with caution since several recent studies, e.g.
+ <cit> , showed that the textbook knowledge of the homogeneous architecture of promoter region motifs does not capture the full complexity of biological reality.
+
+discussion
+a major advantage of an automated tss annotation, based on a sound statistical analysis, neglecting a priori knowledge of the whereabouts of promoters and other already established annotation, lies in the avoidance of any bias towards certain genomic positions. this ensures an unbiased analysis as well as a comparable and reproducible tss annotation procedure.
+
+although our approach checks whether the basic assumption that the read starts of a sequencing library are poisson distributed holds, a manual inspection of the produced data is still recommended. the automated tss prediction is only as good as the underlying drna-seq libraries. we therefore emphasize that a thoughtful investigation of the input sequencing reads, especially for pcr duplicates, is advised. manual inspection is necessary for those genomic regions that are not annotated by tssar due to non-convergence in the estimation of the expression parameters. for tssar’s output, we recommend at least a basic sanity check, since very complex regions, such as trna and rrna loci, might be misconstrued. in spite of these precautions, the work load to check hundreds or a few thousands of predicted tss positions is significantly reduced compared to screening millions of genomic positions in the first place.
+
+reliable and automated tss annotation is a prerequisite for many applications. so far, most genome-wide tss annotations focused on a static picture of the transcriptomal architecture
+ <cit>  . one reason is that data analysis was more laborious than data generation. relieving the experimenter from this time-consuming burden might liberate the resources to investigate more of the dynamics and alteration of the transcriptome, due to external stimuli or evolutionary differences. during manuscript preparation the latter was demonstrated by conducting a comparative transcriptomics approach
+ <cit> . there, tss annotation was also conducted in an automated manner. first, putative tss are selected by considering the "flank height", and the differences of mapped read starts of position i- <dig> to i are calculated. these sites are then evaluated similarly to our quotient approach based on the ratio between the tex treated and untreated library. the problem of selecting an educated cutoff, which is immanent to all methods but especially troublesome for classifiers which directly depend on variable conditions such as sequencing depth, was neatly circumvented by using a comparative approach. transcriptomes of different campylobacter jejuni isolates were used to dynamically adjust thresholds if signals in different strains could be observed. in the more typical application scenarios, where such comparative information is not available, a robust p-value estimate that takes the dynamic range of transcription activity along the whole genome into account for the classification seems to be preferable.
+
+currently, tssar is based on the assumption that a - and -library is analyzed and only positions with a significant enrichment in the -library are reported as potential tss. at least two other application scenarios of the statistical framework are possible. one is to detect rna processing sites and the other to analyze differentially induced transcription starts. in principle the latter could be achieved by comparing two tex treated libraries resulting from drna-seq runs of different growth conditions. in that case, a large positive and negative
+d^i is of importance as it indicates  induction of a tss in the one or the other library. rna processing sites are in principle detectable using the "standard" drna-seq approach. positions where a significant enrichment in the -minus over the -library is observable are of interest. extremely small values of
+d^i point to these positions. tackling both issues, processing sites and induced transcription initiation, is however currently hampered by the lack of experimentally verified training sets. furthermore, although tailored for analyzing drna-seq data, in principle, the tssar method should be applicable to other rna-seq protocols, e.g.,
+ <cit> , which aim to enrich read starts at certain positions in the sequencing library. currently, the run-time of tssar, see additional file
+1: figure s <dig>  prevents its application for one of the above mentioned purposes to complete eukaryotic genomes. an improvement of this aspect will be a task for the future development and refinement of the program.
+
+the modularity of the tssar framework makes it possible to extend the current approach e.g., by improving the statistical model. alternative approaches based on a different  distribution or the pitman sampling method
+ <cit>  can be implemented in the tssar core module, without the necessity to change the java client or the web service front end. the restful architecture of the tssar web service provides additional extensibility, rendering implementation of new functionality such as promoter or operon characterization straightforward.
+
+CONCLUSIONS
+here, we presented an automated analysis of drna-seq data which aims to detect significantly enriched tss positions. the background distributions of sequencing read starts are modeled locally by a zero inflated poisson distribution. positions with a larger difference between the tex treated and the untreated library than expected, considering the background, are annotated as significant transcription start sites. we could show that our method reproduces manually analyzed drna-seq data better than two simple approaches that use a global cutoff to discriminate between true and false signals. furthermore, the choice of a p-value cutoff is more intuitive and less arbitrary.
+
+tssar is available both as a stand alone tool and as a web service at
+http://rna.tbi.univie.ac.at/tssar/. the latter provides additional post-processing functionality like tss classification or merging of consecutive tss. the tssar web service offers user-friendly and intuitive online access to the tssar framework whereas the stand-alone version is intended for integration into third-party annotation pipelines.
+
+availability and requirements
+• project name: tssar
+
+• project home page:http://rna.tbi.univie.ac.at/tssar
+
+• operating system: platform independent
+
+• programming language: java, perl and r
+
+• other requirements: client needs java  <dig>  or higher and the standalone version is based on perl  <dig>  r  <dig> 
+
+• license: java client under apache license, statistics module under gpl <dig> 
+
+• any restrictions to use by non-academics: for non-profit use only.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+fa implemented the statistical analysis and evaluated the performance, sf programmed the java client, mtw, fa and rl implemented the web service. fa, mtw, rl, ilh, pfs and sf contributed to the implementation details and testing, collaborated in writing and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplementary information. file that contains supplementary information, i.e. additional figures.
+
+click here for file
+
+ acknowledgements
+we thank david hot for initiating our interest in drna-seq and sharing data, thomas yee for valuable advice and peter kerpedjiev for proof reading.
+
+funding
+this work was partly funded by the austrian science fund  projects "in silico annotation of noncoding rnas and their targets" , "rna regulation of the transcriptome" , the german ministry of science , and the deutsche forschungsgemeinschaft .

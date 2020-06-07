@@ -1,0 +1,163 @@
+BACKGROUND
+biological data is being generated at an unparalleled rate and data analysis is becoming a key challenge in bioinformatics and systems biology. two common tasks that are more difficult than they should be are identifier unification, where datasets from various sources must be merged together for analysis and identifier translation, where identifiers from one source  need to be converted to those from another source  so that they can be used in database specific tools and queries. a major hindrance to the effective implementation of those tasks is that data comes from multiple sources, each using a proprietary identifier scheme that is not always easily traceable to a specific provider.
+
+it is common to observe the same protein sequence being referred to by multiple identifiers. redundant databases may even assign multiple identifiers to the same sequence. this problem is compounded by the fact that identifiers are unstable and can  disappear from source databases. for example, it is common for hypothetical proteins to be replaced when gene prediction algorithms are updated. identifiers from in-house or proprietary databases are unknown to the outside world. at best, protein identifier translation into a common search space is a tedious task. at worst, it is an impossible one.
+
+the major reference databases, such as the universal protein knowledge base   <cit> , ensembl  <cit>  and the ncbi refseq  <cit>  maintain a comprehensive list of cross-references to each other but full coverage is difficult to achieve because these databases have different production cycle and release schedules. smaller, more specialized databases or proprietary ones might not be included in the cross-referencing process described above and will not be linked from these databases. ultimately, this means that users must still query multiple sources to ensure that they have a complete picture with the latest information available.
+
+the mapping problem has been tackled before by many groups using varied approaches. unified identifier schemes have been proposed in the past, such as life science identifiers   <cit>  and sequence globally unique identifiers   <cit> , but their adoption remains limited.
+
+many tools have been investigated but were found wanting, either because of the limited scope of databases or species they cover, their lack of api to use for batch or programmatic access, or because they are slanted to use in one particular field. others have limited usability, such as few variables per request or requiring knowledge about the exact source and destination database.
+
+for example, seqdb  <cit>  imports sequence information from external sources and generates a list of known aliases. however, coverage of synonyms is only limited to a small number of source databases and is only available to use interactively online using a web browser. idconverter and idclight  <cit>  are web-based tools that map between clones, gene identifiers and protein accession numbers but the mappings are restricted to three species  and only cover a small number of sources. idclight does offer the possibility to use web links to perform one mapping per request, but datasets are only refreshed every two months  <cit> . the national cancer institute cabig geneconnect project will offer both programmatic and interactive queries, but is currently limited to mappings between ensembl, refseq and uniprot  <cit> .
+
+the id mapping service offered by protein information resource   <cit>  has limited functionality in that it can only map between two sources per request, meaning that if the user wishes to map proteins from sgd, ipi and genbank to uniprot, three requests must be made . also, not all mappings are available. for example, it is possible to map from sgd to uniprot and from genbank to uniprot, but not from sgd to genbank.
+
+matchminer  <cit>  is aimed more towards gene name and gene product mappings and is limited to only two species . onto-translate  <cit> , source  <cit>  and resourcerer  <cit>  are designed to be used primarily for microarray and gene expression data analysis and as such, are not suitable for general use as they are gene-centric rather than protein-centric.
+
+prompt  <cit>  is a standalone comparative proteomics tool that can perform protein mapping based on sequence similarity as one of its functions. however, it is up to the user to download the source files and load them into the application. mapping coverage is therefore limited to those sources the user installs and data freshness is only ensured by how often the user refreshes the source files. furthermore, although it does provide an api to integrate some functionality in other applications, it does require that a local installation be maintained.
+
+our goal in starting this project was to build a service that would meet the following requirements:
+
+• the ability to map sequences as well as protein identifiers;
+
+• identifiers could come from multiple sources in one request;
+
+• identifiers could be mapped to multiple destination databases in one request;
+
+• mappings could be done interactively as well as programmatically;
+
+• mappings could be limited to specific taxon identifiers or across all species;
+
+• mappings could handle identifiers deleted from source databases but still available in result sets and the scientific literature;
+
+• mappings could be done against all primary protein data sources;
+
+• mappings could be done against most other protein data sources.
+
+the first users of this service will be the proteomics identifications database   <cit>  and the intact database  <cit> , to simplify the task of mapping large scale proteomics and interaction experiments to a common reference system. however, by implementing the abovementioned requirements, we would provide the most powerful, comprehensive and versatile public service for mapping protein identifiers across different data sources to the scientific community at large.
+
+implementation
+system architecture
+picr is built using a classic 3-tier application model, as illustrated in figure  <dig>  the data layer is built around the uniprot archive . an in-depth description of uniparc and its production cycle can be found here  <cit> . the logic layer uses an api written in java  <cit>  to implement the mapping algorithm described below and return jaxb-annotated  <cit>  data model objects to the presentation layer. the presentation layer uses servlets and java server pages  in the context of an apache struts  <cit>  application. to make the application more responsive and provide a better browsing experience, ajax is used wherever possible. the presentation layer also provides a jax-ws  <cit>  implemented soap service and a rest api.
+
+to improve performance, database connection pooling  is done using the apache commons dbcp  <cit>  api at the data layer and caching is done where possible using the opensymphony cache  <cit>  api. logging is done using log4j  <cit>  and real-time error reporting and user notification is done using the javamail  <cit>  api.
+
+data model
+the data model for picr is very simple and revolves around two objects: upentry and crossreference. the xml schema of these objects is shown in figure  <dig>  upentry represents an entry in the uniparc database and will contain a protein sequence and its crc <dig> checksum, a timestamp and two collections of crossreference objects – one based on sequence identity and obtained from the xref table of uniparc and one based on the data from uniprot. the meaning of each collection will be elaborated on in the explanation of the mapping algorithm, below.
+
+crossreference objects contain the description of the source database they originate from, the accession number and version of the entry, a status flag indicating if the entry is active  or inactive , the date the entry was first loaded into uniparc as well as additional information such as the newt  <cit>  taxonomy id , the corresponding ncbi gi number  and the date the entry was last loaded  or the date the entry was deleted .
+
+RESULTS
+uniparc is the central data warehouse for picr, though it can be complemented by external sources on occasion. the central tenet of uniparc is that each version of each sequence from each source database will be archived. source databases are polled daily and updates are loaded into uniparc as soon as they become available. as such, uniparc is the largest and most comprehensive historical sequence archive available . at time of writing, it contained  <dig>  million distinct sequences loaded from  <dig>  releases obtained from  <dig> distinct sources. this corresponds to  <dig>  million non-unique protein identifiers and  <dig>  unique protein identifiers. the disparity in the numbers is due to the nature of uniparc. as protein entries are updated, identifiers may be assigned to different protein sequences if the sequence associated with it has changed. protein sequences are stored in the protein table and are assigned a unique uniparc protein identifier  that will be invariant for the life of the protein sequence. as each source database is loaded in uniparc, if a protein sequence is already present, the source database identifier will be created or updated in the xref table. if the protein sequence is novel, a new protein entry will be created with an associated xref entry .
+
+data sources warehoused in uniparc. the source name should be used when using the rest and soap interfaces. the number of releases indicates how many times the source files have been parsed and loaded into uniparc and includes incremental and full releases. the number of entries corresponds to the total number of protein entries parsed for all the releases. note that uniparc is based on 100% sequence identity so one protein entry might be repeated multiple times as versions are updated. replaced entries are simply marked as inactive, but are never deleted in order to provide archival coverage.
+
+mapping algorithm
+the complete mapping algorithm is illustrated in figure  <dig> and has two phases. the first is to find the proper protein entries that correspond to the input data, be it sequences or accessions. the second is to gather all known cross-references for each entry that fit the search criteria.
+
+mapping by sequence
+once a sequence is submitted for mapping, a crc <dig> checksum is computed for that sequence and is used to quickly and efficiently query the protein table of uniparc. mappings are done on the basis of 100% sequence identity over the whole sequence. subsequence matches are not considered as valid mappings as they will not generate identical crc <dig> values. if no entries are found, the sequence cannot be mapped. if multiple entries are found, due to checksum collisions, the sequences are retrieved from uniparc and only the matching one is kept. crc <dig> collisions are very rare but will occur, given the sequence volume of uniparc. at time of writing,  <dig> % of the total number of sequences have crc <dig> collisions.
+
+a upentry object is created and the upi, sequence and timestamps fields are populated. the upi of the correctly identified sequence is used to retrieve the xref entries associated with that sequence, based on the search criteria. these criteria include the selected databases to map to, the possibility to retrieve all mappings  or only active ones and the possibility to limit mappings to a selected species. the entries obtained from the xref table will then be used to create crossreference objects and will be added to the identicalcrossreference collection of the upentry object as they are all based on 100% sequence identity.
+
+if the submitted sequence happens to have an active uniprot  cross-reference, additional data is looked up in a separate table in the uniparc schema. this supplementary information table will contain additional information extracted from the current uniprot release files, including secondary identifiers, uniprot ids  and cross-references maintained by uniprot to data sources available in uniparc. these human-annotated  and automatically-derived  cross-references can provide added value as the mappings they provide, while valid, might be to sequences that are different to the main uniprot sequence . such mappings would not normally have been available via uniparc unless the exact variant sequence was queried. however, since they may not represent the exact sequence, it was decided to keep them separated from those obtained based on sequence identity. as such, crossreference objects created from those records are stored in the logicalcrossreference collection of the upentry. logical crossreference data will also be filtered according to the search criteria .
+
+querying with taxonomy restrictions was designed to be pessimistic. while taxonomy annotation coverage is improving in uniparc, many databases do not provide taxonomy information. xrefs entries that are not annotated with taxonomy information or are not an exact match to the query parameter will not be included in the search results.
+
+mapping by accession
+mapping by protein identifier uses similar logic as that described above, but with a different starting point. if a protein accession is submitted, the supplementary information and xref tables are queried to obtain all pertinent upis.
+
+a upentry is created for each upi and the relevant fields are populated from data gathered in the protein table. the crossreference collections of each upi are then populated using the mechanisms described above. if a ncbi gi number is submitted , the xref table is queried as a starting point. however, gi number coverage is still low with respect to the overall number of entries in uniparc at only  <dig> % at time of writing. if a gi number is not in uniparc, picr will query the ncbi eutilities  <cit>  to obtain the corresponding sequence and use that as a starting point for mapping by sequence, as described above.
+
+using picr to map pride identifications
+pride is a user-driven submission database and will be a significant user of picr. at time of writing, the distribution of data sources that were used to generate pride identifications is shown in figure  <dig> 
+
+89% of pride identifications come from  <dig> major data sources  but this still leaves 11% of identifications coming from secondary or proprietary databases. to test the coverage of picr, we attempted to map the  <dig>  current pride identifications. the results of the mapping are shown in figure  <dig> 
+
+90% of pride identifications can be mapped to one or more upentry. of the remaining 10% of identifications that are unmapped, less than 1% come from unresolved or badly formatted identifiers . the majority of the unmapped identifications originate from proprietary databases, for which the protein sequences have not been provided, or other databases not available in uniparc . as such, most of the unmapped identifiers would have been difficult, if not impossible, to map with other available tools.
+
+using the web interface
+great care has been taken to design a user-friendly interface . the interface is divided into  <dig> sections. the first is for the input data, where the user can paste a list of protein identifiers in the text box, one identifier per line. sequences in fasta format can also be entered. alternatively, users can click on the browse button and select a text file to upload. if submitting sequences, the user must update the data type radio button to sequences from accessions.
+
+users can refine their search by changing values in the input parameters section. by default, picr will only return active protein mappings across all species but it is possible to limit queries by taxonomy or expand them to include non-active mappings. to retrieve both active and non-active mappings, uncheck the 'return only active mappings' box. to limit the mappings to a particular species, select the desired option from the 'limit by species' menu. this menu contains the most common species present in uniparc, though over  <dig>  distinct taxonomy ids are currently annotated in uniparc. if users wish to limit their searches to a species which is not predefined in the menu, they can type the organism name in the field provided.
+
+the web application will interactively query the ontology lookup service  <cit>  as the organism name is typed and will provide a list of suggested values .
+
+if species are entered both in the selection menu and in the search box, the search box will take precedence. it must be noted that although we have tried to get the maximum taxonomical coverage for the mappings, some source databases do not provide taxonomy information and, as such, those mappings cannot be properly assigned to a taxon and will therefore be excluded from any search that is limited by taxonomy.
+
+the next step involves selecting the databases the user wishes to map the input data to by updating the selections in the mapping databases section of the search form. to keep the interface light and simple, some mapping options actually refer to more than one database. for example, selecting ensembl will query all the organism-specific ensembl releases, as is the case for refseq, vega  <cit>  and trome  <cit> . selecting swissprot and trembl will also include the respective splice variant databases  <cit> .
+
+finally, the user can choose how results should be presented. the default option is the 'simple html' table view, where each row represents a submitted protein identifier or sequence and each column represents a selected mapping database . some mappings might be highlighted in red. these mappings are historical and inactive, as the referenced entries have been removed or renamed from the current release of the mapped databases. some mappings might be highlighted in green. these represent inactive, secondary uniprot identifiers. some mappings might be highlighted in blue. these mappings, while valid, are the logical cross-references obtained from the mapping algorithm and may not be based on 100% sequence identity. all active mappings are hyperlinked to the original records from the source database if the user wishes to get more information on the entry.
+
+the 'detailed html' option will give a full description of each uniparc entry corresponding to the submitted protein accession or sequence, including the entry timestamp and a full description of the mappings .
+
+the 'xls' option allows the download of the mappings as a tabulated microsoft excel file , with columns for the submitted identifier, mapping database, mapped accession and status. each line represents one mapping from a submitted accession to a selected database and preserves the colour-coding information available in the web interface. the 'csv' option allows the download of a comma-separated file with an identical layout to that of the microsoft excel file, though the colour-coding information is lost.
+
+generating the mappings is a computationally intensive process which may require calls to external services and can therefore take some time. to give the user interactive feedback on the status of the search in progress, a progress bar will be displayed on the screen as the search is processed and is updated, every second, using ajax. when the search is complete, the results will be displayed on the screen or a file download dialog box will appear, depending on the selected options.
+
+users can submit any number of protein accessions or sequences to be mapped at a time. however, if more than  <dig> are submitted in one request, the user will be prompted to enter a valid email address and must select one of the file output formats . once the search is done, an email is sent to the user providing a url to download the generated result file.
+
+using the soap and rest interfaces
+picr provides a publicly available soap web service to perform mappings. the service is encoded in the document/literal style for maximal interoperability. it is implemented in java and deployed using jax-ws to adhere with the latest ws-i specifications. detailed developer documentation describing the soap service, as well as the wsdl descriptor file and sample java client code examples are available online from the picr website  <cit> .
+
+representational state transfer  allows data elements to be associated with a well-formed url. the same methods that are available in the soap interface are also available using the rest interface, with minor modifications to the parameters. developer documentation on how to build valid rest queries is available online from the picr website  <cit> .
+
+CONCLUSIONS
+resolving protein identifiers from multiple data sources is a difficult problem and there was no existing solution generic enough to suit our needs. as such, we have created a powerful and flexible system that allows for the batch querying of protein identifiers and sequences against multiple data sources using the most comprehensive protein sequence data archive available.
+
+mappings can be limited by source database or taxonomic classification and the results can include data no longer available in source databases. this last feature is particularly useful when dealing with old data sets and literature citations.
+
+we offer three distinct query interfaces: one interactive and two programmatic. the interactive web interface uses ajax to enhance the browsing experience wherever possible and provides the possibility to obtain results in four different formats: simple html, detailed html, xls and csv. users and application developers can query soap and rest interfaces programmatically to integrate picr functionality in their applications or perform batch requests.
+
+our application will provide a valuable service to wide areas of the scientific community and plans are already underway to build on its success. future work will include improving the gi number coverage with uniprot sequences. we are in communication with the ncbi to obtain daily up-to-date gi number to uniprotkb accession number mapping files, which will be incorporated into the uniparc data warehouse and made available via picr. furthermore, we plan to implement a similarity search to uniprot sequences. the mapping algorithm as presently available will be expanded such that users will be able to submit protein identifiers or sequences and obtain mappings to swissprot and trembl based on a user-defined similarity threshold.
+
+the application is freely available to use. clients and code examples are available online under the apache open source  <dig>  license.
+
+availability and requirements
+• project name: protein identifier cross-reference service
+
+• project home page: 
+
+• wsdl service descriptor: 
+
+• soap client demo: 
+
+• operating system: platform independent
+
+• programming language: java
+
+• other requirements: java  <dig>  or later, apache ant  <dig>  or later
+
+• license: apache license  <dig> 
+
+• any restrictions to use by non-academics: none
+
+abbreviations
+ajax- asynchronous javascript and xml;
+
+api- application programming interface;
+
+crc- cyclic redundancy check;
+
+csv- comma-separated values;
+
+ncbi- national center for biotechnology information;
+
+html- hyper text mark-up language;
+
+picr- protein identifier cross-referencing service;
+
+rest- representational state transfer;
+
+soap- simple object access protocol;
+
+uniparc- universal protein database archive;
+
+upi- uniparc protein identifier;
+
+xml- extensible mark-up language.
+
+authors' contributions
+rc, pj and lm developed the mapping algorithm, based on original discussions with sk. rc implemented new uniparc data loaders and implemented the algorithm, the soap and rest interfaces as well as the interactive web interface. fr generated the soap stubs and bindings for the server-side code. ql and rl developed the new uniparc database schema extensions and are responsible for the uniparc production cycle. ra and hh developed the project concept. all authors read and approved the final manuscript.
+

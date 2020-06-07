@@ -1,0 +1,157 @@
+BACKGROUND
+the profiling of microbial communities by the sequencing of the 16s rrna gene has become a standard approach in metagenomics  <cit> . this means that collected dna is subject to a targeted sequencing to extract a selected region of the 16s gene from all organisms in the sample. the actual content of the sample can then be described by performing a large scale taxonomic classification of these sequences, i.e. assign them to the proper taxonomic bin, also referred to as binning  <cit> . since 16s-based microbial profiling has become such a widely adopted approach, it is also important that the bioinformatics tools involved are optimized to the highest standard. a widely used tool for this job is the rdp-classifier  <cit> . it is beyond doubt a good tool for this job, but at the same time it is not perfect, and in a systematic testing of this and other approaches we found there were always other methods that performed better  <cit> . alternative tools are a benefit to the scientific community, and here we present a software to be used within the popular r computing environment  <cit> .
+
+there are some issues that must be considered when it comes to making tools for the binning of 16s sequences. first, the pattern recognition algorithm itself must be capable of recognizing the, sometimes small, differences in dna that separates taxa. it must also handle the huge amount of bins or categories we are facing here, thousands rather than 2– <dig> which is often the case in textbook literature. precision also very much depends on the quality of the training data  <cit> . due to the ever expanding taxonomy of prokaryotes, there are no comprehensive gold standard data sets available. along with the microclass package described here, we also supply the microcontax r data package, containing designed data sets based on a consensus taxonomy assignment among several data repositories. this is probably the closest we get to a gold standard today.
+
+speed is another issue. with today’s sequencing technology and low prices, a data set may easily contain millions of reads. some procedures for otu  picking will start out by classifying reads to pre-defined taxa  <cit> . thus, the number of sequences to classify may be huge. other procedures cluster the reads before taxonomy assignments, defining otu’s as ’spherical’ clusters in a space of evolutionary distances approximated by alignment percentage identity, and then classify only the cluster centroids  <cit> . in some applications, e.g. in forensic applications  <cit> , we are more interested in recognizing specific taxonomic profiles rather than discovering new taxa. in such cases the classification of all reads into pre-defined bins is clearly what we seek.
+
+uncertainty is the third issue. in any collection of reads there will be a number of sequences that cannot be given a high-confidence classification. there are several reasons for this. first, the taxonomy itself is not always well defined, and sometimes even high-quality sequences fall on the border between existing taxa, making the classification uncertain. second, due to sequencing errors and chimeras some reads may be difficult to recognize, and third, some microbial communities will contain new taxa not previously seen.
+
+in the presented r-package we have implemented some algorithms that have proved efficient and/or are much used for 16s taxonomic classification. efforts have been made to make them both fast and memory-efficient. all methods can be trained on new data, but we have also supplied the package with a ready-to-use tool that is already trained and optimized for the contax.trim data set from  <cit> . this tool also quantifies uncertainties in a new way. the microclass r-package, as well as its symbiotic data package microcontax, are freely available at the comprehensive r archive network .
+
+implementation
+the multinomial method
+based on our previous testing of k-mer based classification methods in  <cit>  we found that the best overall results were obtained by the algorithm denoted the multinomial method  <cit> . thus, we have focused the attention on this method in this package. the function multinomtrain is used to train a model of this type on any data set containing fasta-formatted sequences along with the correct taxon assignments for each sequence. the function multinomclassify is then used to classify new sequences based on a trained model.
+
+both training of a multinomial model and classification of new sequences involves counting a large number of k-mers  in the sequences. the overhead when doing such operations is large, and efficient vectorization is difficult to achieve. a direct implementation would also require the computation of a matrix product of size  · , where n and m are the number of sequences to classify and the number of taxa in the training data, respectively. this is a time consuming task for large n, m and k. therefore, these computations have been implemented in c++ through the rcpp  <cit>  interface in r, and some short-cuts are made, which will be explained in the following paragraphs.
+
+the nucleotide sequences are first converted to integer vectors my mapping a, c, g and t  to  <dig>   <dig>   <dig>  and  <dig>  while all other letters are mapped to -  <dig>  the latter is done to easily discard k-mers including alien symbols when counting. for training of a multinomial model, all k-mers of each taxon are counted. the counting itself is done by sliding a window along the integer vector of each sequence and computing a position as the inner product between  and the integers in the window. for each of the inner products, this position in the taxon’s counting vector is increased by  <dig>  the result is a matrix, x, of size  that holds the counts for all k-mers in all taxa. finally, each position in the matrix is re-scaled to log2xij−p/4k∑xi·−p, where p is the number of pseudo-counts added. this is stored in an  matrix named q to represent multinomial log-probabilities with pseudo-counts.
+
+when classifying new sequences using the multinomial method, we avoid the mentioned matrix product by combining the k-mer counting with summing of multinomial log-probabilities. for each counted k-mer, the corresponding column in the q matrix is added to the result, thus never explicitly creating the k-mer count matrix or performing the product with q. as such we reduce from  operations to ·m) for a new sequence of length n. for full 16s sequences  the number of calculations will be lower for k> <dig>  and is easily parallelized.
+
+the taxmachine
+users often want a ready-to-use tool to classify  16s sequences without having to perform all the training. based on the work in  <cit>  we have arrived at an optimized tool for classifying 16s sequences, called taxmachine in this package. the taxmachine is based on using the multinomial method with a word length of k= <dig> and a pseudo count of  <dig>  it has been trained on full-length 16s sequences to recognize full or partial  sequences at the genus level, using the designed and optimized contax.trim data set for training. see the microcontax data package for details. the taxmachine includes computations of classification uncertainties that requires a detailed explanation.
+
+classification uncertainty
+uncertainty in a taxonomic classification can be split into two types. the first type is when a sequence happens to be very close to the decision boundary between two or more taxa. we can be fairly certain it belongs to one of these taxa, but it lacks the final discriminative power to safely assign it to one of them. the second type of uncertainty occurs when something completely new is seen. this is not uncommon in metagenome samples, and should be flagged separately since it may indicate sequencing errors, chimeras or some novel type of organism.
+
+the d-score
+the first type of uncertainty is measured by what we name the d-score. consider sequence i in a set of sequences that we want to classify. in the taxmachine the predicted genus of sequence i is found by computing the posterior log-probability for every genus, and classifying to the genus with maximum value. if we sort all posterior log-probabilities for sequence i in descending order, p
+i, <dig> denotes this maximum, while p
+i, <dig> is the second largest, etc. these log-probabilities all depend on the sequence length, since a longer sequence will in general contain more unique k-mers, and the posterior log-probability will be a sum with more  terms. this is illustrated in the left panel of fig.  <dig>  here we have sampled fragments of random length  from all sequences in the contax.trim data set, and then classified them, collecting the p
+i, <dig> for sequence i= <dig> …, <dig>  <dig>  the p
+i, <dig> values are clearly biased by sequence length, and their variance is also increasing for longer sequences.
+fig.  <dig> posterior log-probability normalization. the left panel shows posterior log-probabilities for  <dig>  <dig> sequences. the sequences are random sub-sequences of the contax.trim data set, spanning all lengths from  <dig> bases to more than  <dig>  every sequence has been classified using the multinomial model trained on the full-length data, and each dot marks the maximum posterior log-probability for one sequence. there is clearly a linear trend in the values, with larger variance for longer sequences. in the right panel the same values are plotted after the normalization procedure described in the text
+
+
+
+
+we first normalize the posterior log-probability with respect to sequence length. we fitted linear regression models describing how both the mean and the standard deviation of the data in the left panel of fig.  <dig> varies by sequence length l. thus, if sequence i has length l it gets the normalized posterior log-probability 
+  <dig> p~i,1=pi,1−p^lŝl 
+
+
+where p^l and ŝl are the predicted mean and standard deviation at sequence length l, using the fitted regression models. note that p
+i, <dig>  can be normalized in the same way, using the same fitted regression model.
+
+the d-score of sequence i is simply the difference between the largest and the second largest normalized posterior log-probability: 
+  <dig> di=p~i,1−p~i, <dig> 
+
+
+if we are near a decision boundary we expect d
+i≈ <dig> since the second best genus is almost as good as the best. on the other hand, if d
+i>> <dig> it means the predicted genus is much more likely than any other, and we have a high confidence classification.
+
+the r-score
+the second type of uncertainty is high if we see something very different from what we have in the training data set. consider sequence i belonging to genus g with corresponding normalized maximum posterior log-probability p~i, <dig> from . from all sequences belonging to genus g we computed the sample mean and sample standard deviation of the p~i,1’s, denoted p¯g and s
+g respectively. the r-score for sequence i is the standardized residual 
+  <dig> ri=p~i,1−p¯gs¯g 
+
+
+where s¯g is a smoothed version of s
+g as explained below. thus, the r-score is a standardized measure of how different a sequence is from its predicted genus centre.
+
+different genera have different sequence diversity, which is reflected in different values of the sample standard deviation s
+g. however, many genera have too few sequences to provide a reliable estimate of this standard deviation, some even have only  <dig> sequence making s
+g impossible to compute. thus, the s¯g in  is based on a simple smoothing. first, all sample standard deviations where grouped by genus-size. in fig.  <dig> we show how smaller genera  tend to have smaller sample standard deviations. we used the loess method  <cit>  to estimate the size-specific sample standard deviation, shown as black squares in fig.  <dig>  we denote this s
+n where n is the genus-size. if genus g has size n we get the genus-specific standard deviation estimate as 
+  <dig> s¯g=sg2+sn2n 
+fig.  <dig> smoothing genus standard deviation. the sample standard deviations for every genus  are plotted against genus size . the black squares are the mean values for each genus size, after loess-smoothing as described in the text
+
+
+
+
+when a new sequence is classified, we do not know its true genus. the predicted genus is then used as a plug-in in , i.e. we use p¯g and s¯g where g is the predicted genus. if the resulting r
+i has a large negative value, it means the computed p~i, <dig> is much smaller than the average p¯g for genus g, and sequence i is unlikely to belong to this genus even if this is where it maximizes the posterior probability.
+
+exactly how negative is the r-score for an un-recognized sequence? to guide this decision we computed the r-scores for all sequences in the contax.full data set  <cit> , and from this we computed the empirical cumulative distribution function. for any given r
+i value this gives us the probability of having an r-score this small, or smaller, given that the sequence was from the training data. a very small probability means the sequence is very unusual compared to the training data.
+
+other methods
+the package also contains some alternatives to the multinomial method, mostly for comparisons. the rdp-classifier  <cit>  is a popular tool used in many metagenome applications. the version implemented here is a stripped version without the bootstrapping effort to quantify uncertainties in the classifications. it has been implemented in c++ and accelerated similarly to the multinomial method, see above for details.
+
+a classification using blast is also included, since this approach has been common. it is both slower and less precise then the other methods. it requires the blast+ software to be installed on the system.
+
+RESULTS
+the microclass package provides optimized tools for taxonomic classification of 16s sequence data in the r computing environment. some well established and proven methods are available to all users of r, with the possibility to train all methods on new and specialized data sets. however, a ready-made classification tool, taxmachine, is also supplied as an r-function. this has been optimized in several ways to produce the most accurate classifications at the genus level, without consuming too much memory. specifically, it employs k-mers of length  <dig>  where an increase to k= <dig> or k= <dig> comes at high cost in computation time and memory consumption compared to the small gain in accuracy for genus classifications. pseudo counts have been set to  <dig> in the taxmachine as a robust compromise regardless of sequence length .
+
+the classification of 16s is the most fundamental approach to profiling a microbial community, and due to the explosion in metagenomic research activities, tools for recognizing taxa from 16s sequences  should be tuned to their optimal performance. the taxmachine r-function builds on a parallelized sparse-matrix implementation of the multinomial method that makes it efficient both with respect to speed and memory usage. it has been trained on the contax.trim data set, containing  <dig>  <dig> full-length high-quality sequences covering  <dig> genera, where all sequences have a consensus taxonomy, making it the closest we get to a well-balanced gold standard training set.
+
+the proposed implementation of k-mer counting simply discards a word if it contains an ambiguous character. the main reason for this is the added overhead to the computations by introducing another layer of logic to handle these symbols. for instance the occurrence of the letter d in a sequence means that the base in question could be a g, a or t. one could add 1/ <dig> count to each of the three resulting words, but this would require a substantially slower k-mer counting logic. since informative ambiguous characters  are rarely seen in reads, we chose to disregard these words and keep the speed advantage of the integer logic.
+
+as described in the implementation section the taxmachine provides information about classification uncertainty, based on the posterior probabilities of the multinomial model. the very first step needed in these computations is to remove the bias from sequence length in the log-probabilities, as suggested in eq. . the right panel of fig.  <dig> shows how the normalized posterior log-probabilities have no apparent trends over sequence length, as opposed to the raw-values in the left panel. this normalization makes it possible to compute uncertainty/reliability scores to sequences regardless of their exact lengths.
+
+the proposed d-score for a sequence is the difference in score between the most likely and the second most likely taxon. a d-score close to  <dig> means the sequence is close to a decision border, being almost equally similar to both taxa, and more likely to be mis-classified. to visualize this, we classified fragments of all sequences in the contax.trim data set using the taxmachine. we considered fragments of typical read-lengths; 120– <dig> and 270– <dig> bases, which is typical for illumina hiseq and miseq raw data, and 450– <dig> bases, which is typical for roche  <dig> and merged  illumina miseq data. from each of the original  <dig>  <dig> sequences we sampled  <dig> such fragments at random locations along each sequence.
+
+comparing the predicted genus to the assigned genus, the error percentages were 1% for 450– <dig> bases reads, 3% for 270– <dig> bases and 11% for 120– <dig> bases, respectively, when the sequences from which the reads were generated were included in the model training . the d-score should ideally be small for the mis-classified sequences, and large for the others. in fig.  <dig> we show a roc analysis where all sequences are ranked by their d-score. based on the large auc statistics  we conclude that a small d-score is an effective criterion for identifying mis-classified sequences. in fig.  <dig> we show how the d-score distributes for the mis-classified sequences. clearly, the majority has a d-score below  <dig>  and the shorter the reads the more the d-scores are concentrated near  <dig>  the probability of mis-classification will in general never exceed that of correct classification even for d-score almost at  <dig>  but at  <dig> there is a 50− <dig> chance of making a mistake. various applications will require different strictness, but a classification with d-score above  <dig>  can in general be considered safe. based on the results in fig.  <dig> we found that among all classifications with a d> <dig> there were  <dig> ,  <dig>  and  <dig> % errors for input sequences of lengths 120– <dig>  270– <dig> and 450– <dig> bases, respectively.
+fig.  <dig> roc analysis of d-scores. based on the classification of read-length fragments, each sequence was either correctly or incorrectly classified. each sequence also has a d-score. ranking by d-score produced a separation of incorrect and correct classifications as indicated by the roc-curves and the corresponding auc statistics. each curve is based on results for  <dig>  <dig> sequences
+
+
+fig.  <dig> histogram of d-scores. the histograms show the proportions of d-scores for the mis-classified sequences only, in the range from  <dig> to  <dig> . this is from the same results as fig.  <dig>  with three different read-lengths
+
+
+
+
+we face a different type of uncertainty when we collect sequences very different from what we have seen in the training data set. in the implementation section we describe the r-score to detect this. a negative r-score means the sequence has a lower probability than average for the assigned taxon. but how much lower than the average is critical? to investigate this we used the same results as mentioned above, classifying sub-sequences of typical read-lengths, but in addition we also included full-length sequences. we then computed the r-score for all correctly classified sequences. figure  <dig> shows the r-score densities for the various cases. it is the heavy left tail of the densities that is of interest. first, we notice there is some difference between densities for sequences of different lengths. next, we see that even for correctly classified sequences, a very negative r-score occurs in a few cases. an r-score below − <dig> to − <dig> is rare for correctly classified sequences, and indicates an unusual sequence. the taxmachine also provides a probabilistic measure related to the r-score. based on the contax.full data set  we computed densities similar to those in fig.  <dig>  and from these the empirical cumulative distribution functions. the probability pr is found from this distribution, for any given r
+i. this probability reflects how unusual a sequence is compared to the training data, and if this is very small, its classification is not reliable.
+fig.  <dig> densities of r-scores. based only on correctly classified sequences, the densities show how the r-scores distribute. the densities were estimated by a non-parametric kernel smoother in r. only negative r-scores are of interest, since a  negative value indicates a  unusual sequence
+
+
+
+
+in fig.  <dig> we demonstrate how the r-score histograms change when faced with sequences from unknown taxa. here we have only focused on sub-sequences of lengths 450− <dig>  but the results were similar for other sequence lengths as well. we used a taxon-wise cross-validation, i.e. in each iteration we leave out all sequences from a taxon, train the model on the rest, and classify the sequences of the left-out taxon. this means all classified sequences are from an unknown taxon, not part of the training data. the upper left panel shows, for comparison, how the distribution looks like without this cross-validation . in the upper right panel each genus has been left out, i.e. the training data contains no sequences from the genus of the classified sequence. the r-scores in general become more negative even if some are still quite large, even positive . this is not surprising, since many genera are quite similar, and a sequence from the neighboring genus may not look very unusual. in the lower panels we have cross-validated over order and phylum , making the classified sequences gradually more distant from those of the training data. the lower left tail of the histograms seems thinner, but a substantial number of sequences got very negative r-scores well outside the range of the plots. the proportion of sequences in the green-yellow region  is gradually smaller.
+fig.  <dig> effect of unknown taxa on r-scores. the four histograms show distribution of r-scores. the colors are: green for all positive r-scores and black for scores more negative than ever observed in the contax.full data set. the transition from yellow to red indicates gradually smaller probabilities  of observing the corresponding r-score in the training set. red colors are probabilities below 10− <dig>  the upper left panel are r-scores where all classified taxa are present in the training data, i.e. no unknown taxa. in the upper right panel each genus is unknown, i.e. when classifying a sequence from genus a, there are no sequences from this genus in the training data. in the lower panels the same procedure has been repeated but the training data lack sequences from the same order and phylum, respectively
+
+
+
+fig.  <dig> effect of sequencing error. histograms of r-scores similar to those in fig.  <dig>  reads of lengths 450− <dig> bases were corrupted at random before classification. in the upper panels 1% and 5% of the bases in each read were corrupted with a base different from the correct one. in the lower panels insertions and/or deletions of lengths  <dig> and  <dig> bases were distributed randomly at 1% of the positions in each read
+
+
+
+
+chimera sequences will also result in sequences that are different in k-mer composition from its source sequences. in additional file 3: figure s <dig> we show an example of such a mixture, including d- and r-scores.
+
+the r-score, and/or its corresponding probability, may be used to discard sequences that appear unusual. as always, the strictness of this procedure will depend on the application. for most applications we would not discard reads unless they are in the lower 1% or  <dig> % quantile, at least . instead of fixing some threshold, and discarding reads, one may also use these probabilities as weights, and give reads with small r-scores less weight. when tabulating read-counts into a taxonomic profile, this seems like a natural procedure. conservative estimates of the expected success rates in classifying new reads and full sequences can be found in additional file 2: table s <dig> 
+
+the heavy computations of the microclass package are performed in optimized, parallelized c++. this means that the users can comfortably work in r, knowing that reasonably large data can be processed on a personal computer. larger problems can be tackled in a further parallelized fashion on computational clusters, simply by splitting data into blocks for separate processing. as the package has an open gpl 2/ <dig> licence, reuse of the code in other, possibly pure c++, implementations is allowed as long as the licencing is correct and proper acknowledgements are used.
+
+CONCLUSIONS
+the package microclass offers tools for taxonomic classification based on 16s rrna sequence data to the r community. there are function for training classifiers on your own, specialised data sets, and for using these classifiers to classify new sequences. the taxmachine function has synthesized the designed training data from the microcontax data package with the methods of this package, and is our suggested tool for general classifications. it also implements some novel ways to express uncertainties in the classifications, indicating if the input sequences are difficult to recognize.
+
+additional files
+
+additional file  <dig> supplementary figure  <dig> effect of pseudo-counts. the fraction of mis-classified sequences after 10-fold cross-validation, using various number of pseudo-counts in the training of the multinomial models . this is based on the contax.trim data set, and models have been trained at all levels of the taxonomy, from domain to genus . the effects of different choices of pseudo-counts are modest, and at the genus-level the use of  <dig> pseudo-counts is a reasonable compromise for all types of input sequence lengths. the amplicon sequences are obtained by using the primer pair 515f  and 806rb  to extract subsequences, in general matching the v3-v <dig> region of the 16s gene. 
+
+
+
+
+
+additional file  <dig> supplementary table  <dig> performance of the multinomial classifier. a table with results describing the performance of the multinomial classifier. 
+
+
+
+
+
+additional file  <dig> supplementary figure  <dig> chimera example. we constructed a chimera sequence by mixing salmonella and enterococcus. both sequences have  <dig> bases, and the chimera starts as salmonella and ends as enterococcus. the horizontal axis shows the number of salmonella bases, i.e. if the n first bases are salmonella then the 1503−n last bases are enterococcus. the blue axis/dots shows how the d-score changes as we gradually mix the two sequences, and the tan axis/dots similar for the r-score. the red/yellow/green band at the top shows the classification at each chimera level. on the left side, when only a minority of the sequence is salmonella, it is recognized as enterococcus . in the middle, it is misclassified as escherichia , which is a fairly close relative of salmonella, but as the salmonella-part gets majority it is recognized as salmonella . notice the low d-score values in the middle section, indicating uncertain classifications. the r-scores also drop in the middle region. the ’jumps’ in r-score are due to the dependency of the classified genus. the posterior log-probabilities do not change abruptly, but the r-score is related to what we expect for the assigned genus, and the latter causes the switches. 
+
+
+
+
+abbreviations
+blastbasic local alignment search tool
+
+crancomprehensive r archive network
+
+otuoperational taxonomic unit
+
+rdpribosomal database project
+

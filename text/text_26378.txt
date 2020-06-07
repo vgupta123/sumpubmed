@@ -1,0 +1,184 @@
+BACKGROUND
+following the rapid decrease in the cost of high-throughput sequencing and the standardisation of analytical pipelines for microarray data, complex multifactorial experimental designs have become commonplace in many research fields. many different methodologies have been proposed to address data summarisation and visualisation at the pathway level . gene ontology  is one of the most robust and widely used resources to categorise biological entities into functionally related groups . the most common system biology techniques currently used to extract biological knowledge from transcriptomics data sets often apply gene-set enrichment analysis  on gene lists resulting from differential expression outputs. however, this approach has two limitations:  gsea approaches are typically limited to the analysis of a single gene list resulting from a two-group comparison, and  gene expression estimates in the individual replicates are lost in differential expression statistics, potentially obscuring outliers. the first limitation can be circumvented by combining multiple comparisons into a summary statistic assigned to each gene feature . to the best of our knowledge no publicly available tool addresses the second limitation and provides a simple interface to access and visualise individual gene expression profiles following the identification of relevant genes and molecular pathways. the goexpress software package described here provides a number of functions for visualisation of gene expression data from multi-factorial experimental designs, both as individual gene profiles or summarised as functionally-related gene sets. additionally, the package facilitates the use of supervised classification or parametric analysis of variance, which complement existing approaches to identify gene features that best discriminate multiple groups of samples. indeed, while parametric differential expression approaches are widely used to identify significant changes in expression levels, non-parametric supervised learning and classification methods represent a valuable alternative strategy to identify modest yet consistent differences, even between limited numbers of replicates  <cit> .
+
+although the underlying technologies are very different, rna-sequencing  and microarray transcriptomic approaches both yield quantitative expression levels for each gene in each sample. typically, this expression matrix is filtered to retain only ‘informative’ genes . in addition, the removal of genes expressed at very low levels is normally performed to minimise stochastic background expression at the lower ends of the dynamic ranges for both rna-seq and microarray technologies . traditionally, differential expression analysis of transcriptomics data sets has been performed using parametric statistical methods such as edger  <cit>  or limma  <cit> . however, non-parametric methods using bootstrapping  or non-parametric empirical bayesian-based approaches  have been shown to perform equally well or better using transcriptomics data sets with few or no replicates to produce biologically meaningful rankings of differentially expressed genes  <cit> .
+
+the non-parametric random forest  algorithm has been shown to perform comparably or better than other methods for both microarray and rna-seq data sets  <cit> . it shows excellent performance even with high levels of noise; it is a powerful method for feature selection ; it can be used when the number of variables is significantly larger than the number of observations; and for data sets involving two or more experimental groups . moreover, in contrast to parametric approaches intended to optimally detect differences in mean expression among groups, the non-parametric rf algorithm is assumption-free regarding parameters of the distributions underlying gene expression patterns , facilitating detection of more subtle associations between gene expression levels and phenotypes  <cit> .
+
+in this paper we extend the rf approach for gene feature scoring by integrating a supervised rf analysis with a subsequent summarisation at the go level, to identify robust panels of functionally related genes that best classify multiple sample groups. this multi-classifier fusion approach differs from other functional class scoring  methods: it combines classification of multiple groups with ranking information to identify go terms that best classify samples, and estimates probability of go ranking through permutation-based p-values. it is important to emphasise that goexpress is not a conventional gsea tool; its purpose is to use supervised learning to prioritize gene sets within go functional classes that best classify samples according to their known experimental labels. in addition, the non-parametric rf algorithm has many desirable features, including considerable robustness to outliers, and absence of overfitting  <cit> . the software implementation provides a range of visualisation functions, and seamless integration with the r/bioconductor framework. it also reduces the burden of programming for non-expert users, while providing a route to more advanced applications .
+
+to demonstrate the capabilities of the goexpress package we use a previously analysed and published multifactorial microarray gene expression data set  <cit> . a separate demonstration rna-seq data set is also included with the package and the package vignette guides users through the implementation of the corresponding analysis workflow, which is essentially identical to that of microarray data provided in additional file  <dig> 
+
+implementation
+general aspects and design
+goexpress is written entirely in the r programming language  <cit>  and relies on several other widely used r packages available from bioconductor  <cit>   and cran packages . the entry point for the package is the function go_analyse, which processes the input gene expression data and returns the resulting scoring tables and annotations required for all downstream filtering and visualisation functions . critically, goexpress does not transform the input expression data in any way. for the input expressionset, goexpress is designed to use normalised expression data pre-processed using widely available dedicated software packages; for example, log2-transformed microarray intensities normalised using the farms package or log2-transformed counts per million obtained using the edger package for rna-seq data. conveniently, the function allows analyses based on a subset of samples defined on-the-fly, without the need to manually create multiple input expressionset objects. the procedure performed by the go_analyse function comprises several steps:  collection of gene and gene ontology annotations,  evaluation and ranking of genes by capacity to classify groups of samples,  summarisation of classification power at the go level, and  formatting of resulting statistics into a structured list returned to the user . these steps are described in more detail in the following sections.fig.  <dig> overview of the goexpress workflow. a typical goexpress analysis takes as input: an expressionset of the biobase bioconductor package containing either microarray or rna-seq normalised expression data; the name of an experimental factor present in the phenodata slot of the expressionset; and annotations for the features and go terms  considered. the go_analyse function calculates scores and ranks for the individual genes and go terms. optionally, the pvalue_go function randomly permutes the gene features to estimate the probability of each go term to rank  higher by chance. finally, various functions allow visualisation of gene expression profiles by gene and gene ontology, and export of the calculated statistics in text files
+
+
+
+semi-automated annotation of input gene expression data
+the go_analyse function requires a minimum of two mandatory user inputs. the package source archive includes an example of each input and output . firstly, the function expects pre-processed expression data , and associated sample phenotypic information loaded in the assaydata and phenodata containers of an expressionset object  . this standardised format ensures interoperability with other bioconductor packages, and simplifies data handling. the second mandatory user input is the name of an experimental factor—with two or more levels—present in phenodata. the function will consequently estimate the capacity of each gene and go term to classify groups of samples associated with different levels of that experimental factor based on the provided expression data.
+
+in many cases these two arguments are sufficient due to retrieval of gene and go annotations from the current ensembl release using the bioconductor biomart package. however, it is strongly recommended to generate a local copy of all annotations for two key reasons:  to ensure traceability and reproducibility of results, even when new ensembl annotations are released; and  to avoid multiple calls to the web ensembl biomart api, saving significant runtime during the execution of the function. additionally, custom annotations may also be provided to analyse datasets using gene feature identifiers not currently supported .
+
+the term “gene feature” will henceforth refer to either microarray probeset identifiers or ensembl gene identifiers, the two types of feature identifiers supported by the automated annotation procedure. custom annotations are imported in three independent data frames:  a two-column table that maps gene features to go terms,  individual gene annotations that include the gene id and associated gene name with an optional short description, and  individual go annotations that include the corresponding name  and namespace . the mapping table must also include genes absent from the expression data set such that all known annotated genes are used as a background set for the scoring of individual genes and go terms. genes present in the annotations, but absent from the expression data set, will be assigned a score of  <dig> and a corresponding rank equal to the number of genes in the expression data set plus one, impacting the subsequent scoring and ranking of their associated go terms, if any. this choice is further discussed below for the scoring of go terms.
+
+scoring of genes using expression data
+currently, the rf algorithm is used as the default method to answer the question: “how well does each gene feature in the expression data set discriminate between multiple groups of samples?” the rf algorithm consists of multiple decision trees; each internal node in each classification tree is built based on a different bootstrap sample  of observations  and a random sample of variables . the randomforest package first calculates the gini index  <cit>  for each node in the tree, where the gini index is a measure of homogeneity from  <dig>  to  <dig> . the decrease in gini index resulting from a split on a variable is then calculated for each node, and averaged for each variable over all the trees in the model. the variable with the largest mean decrease in the gini index is then considered the most important. technically, goexpress uses the mean decrease in gini index as the score for each gene feature in the expression data set.
+
+a key feature of the rf approach is the implicit handling of interactions between genes. in order to provide a robust solution, each tree in the random forest is built on a bootstrap sample of observations. as the trees are grown, a random sample of genes is selected for each internal node and these genes are tested for their individual capacity to improve the partitioning reached in the previous node. the larger the number of trees built, the more complete the coverage of interactions between gene features.
+
+summarisation and ranking of go terms
+the go_analyse function scores each go term by aggregating the rank  for all annotated genes associated with the term obtained in the previous step .fig.  <dig> ranking of filtered go terms by summarisation of gene ranks. the rank of each gene feature is shown on the left, while the average rank of each go term  is shown on the right. the ranks of all genes associated with the 1st- and 55th-ranked go terms are shown, following filtering for only molecular function go terms associated with at least  <dig> genes in the annotations. notably, eight and  <dig> genes associated with the go terms chemokine activity and kinase binding are absent from the sample expressionset and ranked last
+
+
+
+all genes annotated to go terms but absent from the expression data set are considered to have no classification power, and are assigned a score of  <dig> and the worst rank preserving the continuity of ranking. this procedure is particularly suited to transcriptomics data sets where uninformative gene features  are filtered prior to the analysis. indeed, during the summarisation step, these uninformative genes negatively impact the ranking of corresponding go terms. consequently, this summarisation approach implicitly favours go terms over-represented in the data set, in addition to integrating the ranking information for genes present in the expressionset.
+
+formatting of results for downstream analyses
+the final step of the go_analyse function is to assemble the resulting tables of ranked genes and go terms with important analysis parameters for traceability and reproducibility. these include the subset of samples used for the analysis , the number of decision trees and the number of gene features sampled , and the summarisation function used to score each go term based on the scores of all their associated gene features. alternatively, one-way analysis of variance  is available as a parametric statistical scoring approach.
+
+RESULTS
+sample data
+we demonstrate the use of goexpress using microarray data from a previously published and well-characterised multifactorial microarray gene expression data set . in this example, monocyte-derived macrophage  transcriptomes from five different cattle were examined over three time points spanning a 24-hour time course, following one of each of the following four treatments:  infection with mycobacterium bovis,  infection with m. bovis bcg,  infection with m. avium subsp. paratuberculosis, and  culture media for non-infected controls  <cit> . the expressionset used here was obtained following normalisation and filtering of informative probesets using the bioconductor farms package  <cit> , leaving  <dig>  probesets measured in  <dig> samples .
+
+probeset-level classification and visualisation
+in the example below, we use goexpress to identify and visualise the genes and go terms that best classify samples subjected to the four different treatments across all time points post-infection. given that the expressionset also includes control samples prior to infection, we use the subset argument of the go_analyse function to consider only the samples post-infection . we also use local versions of genome-wide annotations for the affymetrix® genechip® bovine genome array downloaded from the ensembl release  <dig> .
+
+in the resulting object, the table of ranked genes  demonstrates that the probeset bt. <dig> .s1_at , best classifies the samples according to treatment group. it is also possible to use the expression_plot and expression_profiles family of functions to visualise group trends and individual gene expression profiles for the four treatment groups .fig.  <dig> expression profiles for the top-ranked microarray probeset that best clusters treatment groups. the expression_plot and expression_profiles visualisation functions facilitate summarisation of gene expression levels for ccl <dig> by sample group , or individual sample series  for each experimental infection 
+
+
+
+to assess the performance of the rf algorithm we compared the importance score—i.e., the decrease in the gini index—to the f ratio obtained using the one-way anova method also implemented in goexpress, considering the same four treatment groups . the two methods show good agreement, with a positive pearson correlation coefficient of  <dig>  . in particular, the best  classifiers identified by the rf tend to display a high variance among groups relative to the variance within groups. conversely, poor classifiers identified by the rf generally display a low f ratio. notably, the rf produces generally more conservative results; indeed, a number of features identified as significant using the one-way anova  show little or no classification power .
+
+ontology-level summarisation
+permutation-based p-value
+from an ontology perspective, the basic go results present two limitations. firstly, all three types of ontology—biological process, molecular function, and cellular component—are all merged in a single table. secondly, and most importantly, go terms associated with fewer genes are favoured at the top of the ranking. this happens because the highest possible average rank for a group of five genes is  <dig>  as opposed to  <dig>  for a group of  <dig>  genes. additionally, go terms associated with small numbers of genes are more susceptible to outliers and single gene effects in the expression data; this problem is not normally observed for go terms associated with larger numbers of genes. moreover, when small go terms are filtered out, this scoring method emphasises specific and well-defined go terms , as opposed to the broad higher-level and generally less informative go terms . importantly, the effect of gene ontology size is an acknowledged issue of pathway analysis, most methods focusing the analysis on pathways that pass specific size thresholds  <cit> .
+
+to assess the probability of go term ranking, goexpress includes the function pvalue_go that randomises the gene feature ranking table, and produces a permutation-derived p-value that indicates the proportion of permutations where each go term is ranked equal or higher relative to the original result . in other words, these p-values directly translate into the estimated probability of each set of functionally-related genes reaching their calculated average rank by chance. in addition, it is important to note that p-values obtained for each go term in this manner are clearly non-independent, due to the competitive ranking of genes and subsequent go term summarisation. therefore, p-value adjustment for multiple testing is not recommended in this case.
+
+to assess the performance of the go summarisation step, we compared our results to those obtained using the widely used gsa package  <cit>  . in a similar fashion to goexpress, gsa determines the significance of pre-defined sets of genes with respect to an outcome variable, such as a multiclass group indicator. the “maxmean” test implemented in gsa was designed to detect unusually large and coordinated gene scores indicative of differentially expressed gene sets; significant gene sets are identified as those where most of the genes show either higher or lower expression correlating with the group indicator. in contrast, the rf approach implemented in goexpress identifies gene sets containing both up- and down-regulated genes that, together, contribute to improve the classification of samples into their respective phenotypic groups. notably, the supervised classification approach implemented in the rf algorithm was previously shown to have superior power to detect association of gene expression level with phenotype relative to a traditional significance analysis of microarray extended to gene-set analyses  in the presence of correlations between gene expression profiles, with similar performance in the absence of correlated gene expression  <cit> .
+
+comparison of the average-rank and permutation-based p-value implemented in goexpress to the gsa approach, revealed that four of the seven go terms identified by gsa  were also found to be significant  using goexpress. interestingly, all seven go terms are biological processes. in contrast, goexpress returned an additional  <dig> go terms ; these include additional relevant functional categories such as positive regulation of nf-kappab transcription factor activity , chemokine activity , and immunological synapse  . notably, the largest average-score metric available in goexpress also emphasises functional categories that are biologically highly relevant, including chemoattractant activity such as cellular response to interleukin- <dig>  and chemoattractant activity  . taken together, those results indicate that goexpress detects additional functional categories capable of improving the classification of samples, while gsa may be restricted yet more sensitive in detecting coordinated expression changes within gene sets  <cit> .
+
+filtering and visualisation
+using the subset_scores filtering function, users may filter go terms according to domain , and/or minimal count of annotated gene features. in the example shown below, only go terms associated with at least  <dig> genes, and an empirical p-value ≤  <dig>  are retained.
+
+the resulting object is a list with the same structure as the input object and an additional element stating the filtering criteria applied. in this example, the molecular function chemokine activity , which is associated with  <dig> genes in the annotations— <dig> of which are present in the expressionset—is ranked as the top go term that best classifies the four treatment groups across all time points . those results are consistent with our previously published finding highlighting the role of chemokine signalling and communication between innate and adaptive immune cells in the differential response to virulent and attenuated mycobacterial infections  <cit> .
+
+following this, using the heatmap_go function, it is possible to visualise the expression level of all genes associated with the go term in each sample, as well as the hierarchical clustering of samples and probesets resulting from the corresponding expression profiles . additionally, the table_genes function allows users to export individual scores, ranks and annotations for genes associated with a particular go term .fig.  <dig> heat map and hierarchical clustering of treatment groups using expression data from genes associated with the top-ranked go term. the heatmap_go visualisation function summarises expression level for all genes present in the expressionset and associated with chemokine activity . green: uninfected mdm; purple: m. avium subspecies paratuberculosis; orange: m. bovis bcg; yellow: m. bovis
+
+
+ccl5
+cxcl13
+cxcl16
+ccl20
+cxcl3
+gro1
+gro1
+ccl4
+gro1
+cxcl16
+ccl22
+ccl2
+ccl8
+xcl1
+cxcl6
+ccl3
+ccl3
+ccl16
+ccl16
+ccl1
+ccl2
+cxcl8
+pf4
+cxcl10
+the table_genes function was used to export results for the top-ranked go term chemokine activity 
+
+
+
+finally, the objects and functions available in goexpress may be readily integrated within r/shiny applications , offering a dynamic interface to rapidly access the various plots and tables with minimal additional programming . shiny applications may be distributed as zip archives or hosted on web servers, providing a flexible interface for collaboration and exchange of experimental data and results .fig.  <dig> screenshot of a sample r/shiny application built on goexpress results. users may run the web application from github  as shown in the main text, or from the zip archive provided in additional file 4
+
+
+
+
+discussion
+the widespread adoption of microarray and more recently rna-seq for gene expression analysis has witnessed parallel development of a large ecosystem of methodologies and software packages, all designed to extract biological knowledge from increasingly complex experimental data. traditional gsea methods simply use two gene lists: a target set and a background set, such that the background set is used to detect over-representation of molecular pathways in the target set . more recently, integration of information from differential expression and differential splicing has been proposed to weight genes . however, these tools are generally limited to the analysis of a single list of target genes identified from differential expression analysis in a two-group comparison, or alternatively require summarisation to merge multiple gene lists. time-series analyses can address this limitation through characterisation of correlated differential gene expression profiles, which can be used for go term enrichment . although the stem program represents a powerful approach for investigating functional enrichment in groups of co-regulated genes across continuous experimental factors, it uses go annotations largely as a descriptive summarisation of gene groups.
+
+in contrast to the gsea tools described above, goexpress does not estimate or evaluate enrichment in gene lists; instead, it uses go annotations in a functional class scoring  approach to identify terms containing genes that best classify multiple groups of samples according to any type of experimental factor. a comparison of goexpress features with existing go analysis software is provided in table  <dig> table  <dig> comparative table detailing features of different go analysis software tools
+
+
+abbreviations: rf random forest, anova analysis of variance, svm support vector machines, bagsvm bagging support vector machines, cart classification and regression trees
+
+
+
+it is well established that methodologies based on supervised learning of expression data are useful techniques for identification of biologically-relevant markers to differentiate and predict class membership in multi-level classification . furthermore, the rf algorithm has been shown to be one of the most robust multi-classifier algorithms for the identification of class predictors  <cit> . the use of supervised learning approaches such as rf for feature selection is particularly relevant for biological studies where group membership is defined by the experimental design and the number of observation is much smaller than the number of candidate predictors  <cit> . notably, goexpress is demonstrated here using an experimental design that consists of five biological replicates per experimental group, with gene expression measurements from  <dig>  microarray probesets. although there is debate concerning the optimal sample size for rf  <cit> , we would recommend sample sizes of at least five biological replicates to accurately estimate out-of-bag  classification error rates.
+
+in goexpress, each go term is individually scored by the average capacity of genes associated with the term to classify the predefined groups of samples. consequently, if a particular go term is associated with a number of genes that emerge among the best ranked predictors of class membership, this go term will also be present among the top-ranking go categories, indicative of robust differences in the corresponding cellular functions or molecular pathways . unfortunately, fcs approaches are dependent on the underlying properties of the annotations ; therefore, requiring users to choose from a complex range of univariate and multivariate pathway-level statistics  <cit> . goexpress, therefore, also allows users to provide their own scoring function, as an alternative to the default averaging of feature scores. it is also important to note that the go initiative is a rapidly developing resource, which still contains many entries that are only inferred from electronic annotation  for many species, as opposed to experimentally-validated annotations . therefore, careful use of appropriate gene annotations is critical for reliable results  <cit> . an additional feature of goexpress is the probability of go term scoring and ranking that may be assessed by estimation of permutation-based p-values. although more computationally intensive than the use of pre-computed statistical distributions such as the minimum hypergeometric  statistical framework used by gorilla, this assumption-free approach enables support of any set of annotations for which the underlying statistical distribution is unknown.
+
+to the best of our knowledge, no currently available software package provides similar integration of multi-level sample classification directly based on gene expression data from both microarray and rna-seq experiments . importantly, the data-driven visualisation functions provided in the goexpress package do not transform the input expression data, assuming this task was performed using dedicated tools such as edger  <cit> , limma  <cit> , cufflinks  <cit> , or deseq <dig>  <cit> . goexpress, therefore, can be seamlessly integrated within existing computational biology pipelines, and can be used for development of dynamic shiny web-applications that may be distributed online and offline, promoting collaboration and accessibility of high-throughput biological data and results within and between research groups.
+
+CONCLUSIONS
+we have introduced goexpress, an r/bioconductor package for identification and visualisation of gene expression profiles that best classify sample groups according to any known experimental factor. in contrast to most go term summarisation approaches, goexpress integrates prior biological knowledge and gene expression data from individual sample replicates to rank molecular pathways based on the capacity of functionally-related groups of genes to classify multiple sample groups. notably, the use of multiple genes for go-based classification improves the robustness and biological relevance of the resulting interpretations and predictions.
+
+availability and requirements
+project name: goexpress
+
+project home page: http://bioconductor.org/packages/release/bioc/html/goexpress.html
+
+operating system: platform independent
+
+programming language: r
+
+other requirements: r  <dig>  or higher, bioconductor  <dig>  or higher
+
+license: gpl 
+
+any restrictions to use by non-academics: none
+
+
+
+ethical approval for animal work
+all animal procedures were carried out according to the provisions of the irish cruelty to animals act  and ethical approval for the study was obtained from the ucd animal ethics committee .
+
+additional files
+additional file 1: script used to perform the analysis shown in the paper. the script includes preparation of local gene and go annotations, the main analysis, the computation of permutation-based p-values, the filtering of go terms, and the various visualisation functions at both gene and go levels. 
+
+additional file 2: package source code for goexpress release  <dig> . <dig>  
+
+additional file 3: pseudocode calculating the rank of go terms and average score from the rank of gene features, shown in fig.  <dig> and additional file  <dig>  
+
+additional file 4: compressed zip archive containing a sample shiny application built on the data demonstrated in the paper. the archive also includes serialised r objects saved to files, such as the expressionset described in the paper. 
+
+additional file 5: scoring table for gene features produced by goexpress using the expressionset described in the paper . 
+
+additional file 6: comparison of the importance score from the random forest algorithm  to the f-ratio from a one-way anova. probesets with large importance score  generally show a high f-ratio, indicative of high variance among the means of each group compared to the variance within the samples. 
+
+additional file 7: scoring table for go terms produced by goexpress using the expressionset described in the paper . 
+
+additional file 8: scoring table comparing the results of the gsa package to those of goexpress. a short description of the column headers in the ‘gsa positive results’ worksheet is provided in the ‘legend’ worksheet. 
+
+
+
+abbreviations
+cpmcounts per million
+
+fcsfunctional class scoring
+
+gseagene set enrichment analysis
+
+gogene ontology
+
+mdmmonocyte-derived macrophage
+
+rfrandom forest
+
+rna-seqrna-sequencing
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+kra conceived the package and wrote the manuscript. pam, bh and acp contributed to statistics development and programming for the package. ncn and dam generated the experimental data used to demonstrate the package. svg and dem provided overall supervision and coordination of experimental work and validation of the package. all authors reviewed, edited and approved the final manuscript.
+

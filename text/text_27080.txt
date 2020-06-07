@@ -1,0 +1,77 @@
+BACKGROUND
+evolutionary comparative genomics and population genomics analyses build on alignments of genome sequences that record homologous nucleotide positions between two or more genomes. while gene alignments are described with only three types of character edit , genome alignments allow for rearrangements, such as inversions, complementations and translocations, leading to breakage of at least one of the input sequence. regions devoid of such breaks are called synteny blocks, and a genome alignment can be defined as a set of such blocks of homologous positions .
+
+multiple alignment files are used for storing and sharing genome comparison data. they are typically written in the multiple alignment format , a format in particular popularized by the ucsc genome browser  <cit> . programs generating maf files include blastz and multiz from the threaded blockset aligner  package  <cit>  or last  <cit> . the multiple alignment serves as an entry to further analyses and several processing steps are required to filter the data, particularly the removal of low-quality regions. in addition, many downstream analysis tools take as input single syntenic blocks only, requiring the global alignment to be exported into multiple alignment files in an external format such as fasta or phylip. this conversion often comes at the cost of losing information such as original genome coordinates that may be required in the further analysis pipeline. solutions to this issue can involve the generation of a database that integrates all analyses results  <cit> . this is however a tedious process, which conveniently can be avoided.
+
+we here introduce a new program which facilitates the processing and analysis of multiple alignment files. the program allows the user to define his/her own analysis pipeline and efficiently processes the input maf file. each synteny block is processed separately and passed through a series of filters previously defined by the user . each filter performs a predefined task, such as cleaning the alignment or computing relevant statistics, and passes the synteny block, eventually modified, to the next filter. the output of the program is typically one or several maf files, and/or several alignment files in external formats like fasta or phylip. furthermore the program allows the output of statistical results in spreadsheet files, or even tree files if phylogenetics analyses are involved. maffilter deals internally with sequence meta-data such as genome coordinates or quality scores, thereby facilitating the analysis of final results and their integration with external sources of information.
+
+implementation
+program interface
+the maffilter program provides a command line interface to the maf parser and filters from the bio++ libraries. it uses the bio++ options language, a 'key-value’ syntax introduced for the bio++ program suite which features strong similarities with the r statistical language  <cit> . briefly, the behaviour of maffilter is controlled via commands of the type option=value, which can be passed as arguments to the program, or stored in an independent option file. in the simplest case, values are simple numbers or expressions, but can be of more complex structures with arguments. figure  <dig> shows the option file generating the pipeline displayed in figure  <dig>  the first lines describe the input file . subsequently is given a list of filters, defining the various steps in the pipeline . each filter accepts several arguments allowing the user to specify parameters and output files. the special filter sequencestatistics allows the computation of several statistics  which are specified by the user. some of these statistics accept additional control arguments such as a subset of species, or ingroup and outgroup specifications.
+
+a
+
+a
+depending on the method used.
+
+code design
+the central data elements in a genome alignment are synteny blocks, i.e. contiguous genomic regions sharing common ancestry represented as a sequence alignment. a genome alignment consists of a collection of these blocks together with the corresponding coordinates for each single genome. we developed new data structures for handling such data. each synteny block is stored as a mafblock instance which stores the underlying alignment into a sitecontainer, a central class of the bio++ library for which numerous methods and tools are already available  <cit> . individual sequences are stored as mafsequence objects, an extension of the sequencewithannotation class from the bpp-seq library allowing the storage and processing of associated quality scores. in addition, mafsequence stores genomic coordinates as chromosome names, strands and start positions.
+
+to process the input genome alignment, maffilter uses a streaming strategy, as storing all alignment blocks into memory would be highly inefficient, if ever possible, for large data sets. we developed an iterator-based implementation, which loops over all blocks in a file while storing only the necessary information in memory. this is achieved through the new mafiterator classes, which retrieve the next available block when calling the nextblock method. the use of iterator classes permits to easily implement complex processing procedures as workflows. we name “filter” a special instance of mafiterator which takes as input  another instance of mafiterator. calling the nextblock method of the filter will automatically call the nextblock method of the input mafiterator. looping on the final iterator will thereby automatically loop over all input blocks. as a filter can input another filter it is possible to design a complete processing chain in an easy and highly modulable way.
+
+computer efficiency
+as maf files can be rather large  maffilter can read and write compressed files, using the zip, gzip and bzip <dig> compression formats. the compression and decompression is achieved with the boost-iostream library. practically, the use of compressed files has very little impact on the memory usage or computation speed while reducing considerably the amount of disk space. at the time of writing, the amount of publicly available parsers for maf files is rather limited. the corresponding classes in the python language have not yet integrated the stable branch of the biopython libraries. in order to assess the performance of the bio++ parser, we therefore compare it to the bioperl library. the resulting perl script  parses the compressed maf file and outputs for each alignment block with more than a thousand sites the number of sequences, the length of the alignment and the coordinates of the sequence of one species if represented in the alignment block. this simple pipeline allows to directly compare the efficiency of the parsers themselves, as the only computations required are file reading, as well as allocation and initialization of the dedicated structures for storing data into memory. the corresponding maffilter option file is provided in the example directory of the distributed source code. to compare the two approaches, we used the  <dig> vertebrates alignment of human chromosome  <dig> downloaded from ucsc  <cit>  as input data, and ran the analyses on a linux workstation  xeon cpu e <dig> @  <dig> ghz, with 16gb of ram running ubuntu  <dig> ). the complete parsing takes  <dig> minutes with the bioperl script while it completes in only  <dig> minutes with maffilter. maffilter was used to analyse the complete gorilla genome aligned with other primates   <cit> , as well as resequencing data of  <dig> individual genomes from the fungus zymoseptoria pseudotritici .
+
+RESULTS
+approximate the ancestral recombination graph with 1kb windows
+we downloaded the  <dig> vertebrate genome alignment from ucsc  <cit>  and built a pipeline in order to infer underlying sequence genealogy along the genome . the tasks performed by maffilter involved:  extracting the primate sequences ,  merging syntenic blocks in primates,  removing gap positions in each block,  cutting the resulting alignment into windows of 1kb with no synteny break and  computing a distance tree with kimura distance  <cit>  in each window. the analysis of chromosome  <dig>  the largest alignment, completed in  <dig> minutes. the memory consumption increased at the start of the program execution, and was stable during the whole filtering, reaching a maximum value of  <dig> kb . the output file contained  <dig>  trees . among those trees,  <dig> grouped human and gorilla and  <dig> grouped chimpanzee and gorilla as the closest relatives leading to an estimate of 32% incomplete lineage sorting. this value is very similar to what was reported using more advanced modelling on the same data set  <cit> .
+
+extract homologous regions of a gene set
+we analysed the multiple alignment of the fungus zymoseptoria tritici  aligned with  <dig> genomes of three closely related species  <cit> . we extracted all sequences homologous to the reference gene set from z. tritici, containing  <dig>  exons. maffilter extracted all features where at least one homologue was found and output the resulting alignments in a file with clustal format. general statistics such as the number of homologues found were also computed. the full analysis completed in less than five minutes and used 30mb of memory . the pipeline extracted  <dig>  exons, of which  <dig>  had at least one homologue in another genome, and  <dig>  were shared by all the  <dig> aligned genomes. we report a highly significant positive correlation between the exon length and number of homologous exons  suggesting that isolate/species-specific genes tend to be shorter. among short genes are the so-called effector genes which play a role in pathogenicity by manipulating the host defence and metabolism. this result is therefore consistent with a high dynamics and specificity of the effector gene repertoire.
+
+extract all non-coding regions from a single genome
+in this example, a fasta file containing all chromosome sequences of the fungus ustilago maydis <cit>  was imported and compared to a gff <dig> annotation file containing all protein coding genes  <cit> . fasta import is enabled in maffilter providing that the sequences are comprehensive, that is, all contig data start at nucleotide position  <dig>  in this pipeline all gene sequences defined in the gff files were removed. the resulting blocks were then filtered to keep only regions greater than  <dig> bp, and were written in a gzip-compressed maf file. statistics  were also computed on the resulting blocks. the program completed in  <dig> minutes, used a maximum of 86mb of memory  and output  <dig>  blocks of intergenic regions. the global distribution of intergenic region lengths was well fitted by a log-normal distribution with mean  <dig> , corresponding to an intergenic length of 694bp . the gc content followed a logistic distribution with location  <dig>  and scale  <dig> , revealing a homogeneous gc content along the genome. gc content, however, was weakly – yet significantly – negatively correlated with chromosome size . such a correlation is expected if gc-biased gene conversion is at stake since smaller chromosomes have a higher average recombination rate and therefore a higher gc-content equilibrium  <cit> .
+
+CONCLUSIONS
+integrated analysis of large genome alignments is a computational challenge for today’s comparative and evolutionary genomics research and its importance is expected to grow in the near future. we have introduced here the maffilter program that allows the easy and efficient analysis of such data. the program is highly parametrizable and allows to perform a broad range of analyses and data processing on maf files. in addition, the components of the underlying parsers and methods are available as an object-oriented library, facilitating the implementation and integration of new analysis tools. as it reads and outputs standard formats, the maffilter software is a powerful complement of existing genomic tools such as the samtools  <cit>  and vcftools  <cit> .
+
+availability and requirements
+maf parser and filters
+project name: maffilter
+
+project web site:http://bioweb.me/maffilter
+
+operating systems: all for which a c++ compiler is available, including gnu/linux, macos and windows
+
+programming language: c++
+
+compiler: gcc  <dig>  and higher versions
+
+other requirements: the c++ standard library, the bpp-core, bpp-seq, bpp-phyl, bpp-seq-omics and bpp-phyl-omics libraries from bio++ , the boost-iostreams library .
+
+license: open source software distributed under the gpl-compatible cecill version  <dig>  license.
+
+the maf parser and analysis filters  are available through the bio++ libraries bpp-seq-omics and bpp-phyl-omics <cit> . the bpp-seq-omics library contains the parser sensu stricto and the sequence based analysis tools, while the bpp-phyl-omics provides more advanced computational tools such as phylogenetic reconstruction methods. the documentation of the application programming interface  is available online on the bio++ website at http://bioweb.me/biopp/articles/documentation/. the api is generic and enables the user to use the parser in his/her own software. it also allows the implementation and combination of new filters with the existing ones. a complete manual  is available from the maffilter website, which describes all available options. example application files are distributed along with the program.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+jyd, sg and ehs designed the software. jyd and sg implemented the algorithms and developed the software. jyd and ehs wrote the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+bioperl script using the seqio:maf parser.
+
+click here for file
+
+ additional file 2
+cpu and memory usage during the execution of maffilter for the three example pipelines.
+
+click here for file
+
+ acknowledgements
+kasper munch is acknowledged for his help on an earlier version of this program.
+
+funding
+jd acknowledges the loewe-zentrum für synthetische mikrobiologie  for funding. ehs acknowledges the max planck society for funding. this publication is the contribution no. 2014- <dig> of the institut des sciences de l’Évolution de montpellier .

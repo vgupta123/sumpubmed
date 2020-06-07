@@ -1,0 +1,145 @@
+BACKGROUND
+the past few years have witnessed a number of improved de novo genome assemblers, providing users choices between speed and accuracy  <cit> . the more recent ngs technologies have gradually increase the read length beyond 100 bp , yet existing efficient assemblers do not have much improvement regarding accuracy, and it remains challenge how to take better advantage of longer ngs reads to assemble genomes in a fast and accurate manner. this paper presents a new assembler that can achieve better assembly quality for longer reads when compared with those efficient assemblers, without scarifying speed a lot.
+
+most state-of-the-art short read assemblers such as soapdenovo <dig>  <cit>  and allpaths-lg  <cit>  are based on de bruijn graph . in these assemblers, reads are chopped into a sequence of overlapping k-mers such that two adjacent k-mers have k- <dig> bases in common. the dbg based method works well for short reads but it is non-trivial to handle repetitive sequences that are longer than k. when the reads are longer, it is natural to consider using a larger k, yet this is not feasible as this will require higher sequencing depth and consume much more memory . another method is to use the multiple k-mer strategies like idba-ud  <cit>  and spades  <cit> , which could save memory by using smaller k parameter to take care most of sequencing errors, and using larger k to solve longer repetitive sequences. yet this requires multiple constructions of dbg and much longer running time, limiting their usage for the assembly for relative large genome.
+
+assemblers for sanger sequencing reads or roche  <dig> reads  are mostly based on overlap-layout-consensus  strategy, such as celera assembler and newbler. an alternative representation named string graph was proposed by mayer a decade ago  <cit> , which has been implemented in assemblers such as sga  <cit> , fermi  <cit> , and readjoiner  <cit> . like olc based assemblers, a proper minimum overlap size is required in string graph based assemblers to reduce the complexity of graph and to improve the connectivity of graph. smaller minimum overlap size will increase the probability that the overlap sequence falls within a repetitive region of the genome. this leaves much more branches in the graph and may result in shorter contigs. meanwhile, according to the lander-waterman model  <cit> , larger minimum overlap size leads to a reduction of sufficient support for overlap among reads, thus enhancing the demand for higher sequencing depth. therefore, due to the variation in length of repetitive sequences in genome, it is difficult to find a fixed minimum overlap size that fits all use cases especially when the ngs read is not so long. regarding speed, for 30x 100 bp reads, base took 2 days and 5 days to assemble raw contigs by sga  <cit>  and fermi  <cit> , respectively. this speed is much slower than dbg based assembler soapdenovo <dig>  which takes only a half day to obtain raw contigs.
+
+recently, a very efficient gpu-based method has been developed to index short reads using the burrows wheeler transform  or bi-directional bwt of short reads  <cit> . for 30x human short reads, it only needs 6 h to build the bwt index. with such an index, the depth of any sequence that is no longer than the read length could be calculated in real time, which enables us to predict whether a sequence comes from a repetitive region of the genome  <cit> . with such efficient indexing, we find that it becomes feasible to produce better assemblies efficiently for large genomes using longer ngs reads, and in particular, we developed an adaptive seed extension method called base to construct contigs by searching for non-repetitive overlaps between reads. the details of our algorithm are given in the methods section, and an overview of the extension method is shown in fig.  <dig>  we tested the performance of base using data from hiseq and miseq, with length ranging from 100 bp to 250 bp and compared base to popular assemblers including soapdenovo <dig>  sga and spades.fig.  <dig> overview of the whole assembly method. there are five steps for one direction extension. firstly, we choose an initial read by order and find an initial seed in this read. then we use bi-directional bwt to get the sa ranges of this seed using backward exact matching. thirdly, we build up a backward extension tree by adding bases to continue the backward matching. after removing erroneous branches and heterozygosis branches, we obtain the consensus sequence of the extended region. finally, we continue to find a new seed in the extended region and extend iteratively
+
+
+
+methods
+preliminary
+given a set of reads r = {r <dig>  r <dig>  …, rn-1}, and each ri is terminated with a sentinel symbol $ . we also define ri < rj, if i < j.
+
+let suffr = {ri | 0 ≤ i < n and 0 ≤ j ≤ |ri|} be all possible suffices of reads in r. the suffix array sar of r is defined as sar =  if ri is the k-th lexicographical smallest suffix in suffr. the bwt of r is an array defined by bwtr = ri if sar = .
+
+given a string p, the range  of p in sar is defined as follows:lr = min{k | sar =  and p is a prefix of ri}
+
+ur = max{k | sar =  and p is a prefix of ri}
+
+
+
+from this definition, the size of sa range  -lr + 1) is the number of reads containing string p. if lr > ur, it means that p is not a substring of any reads in r.
+
+for double-stranded dna sequence, we define p' as the reverse sequence of p and rc for its reverse complement sequence. in this way, we also define r’ as the reverse of r, sar’ as the suffix array of r’ and bwt of r’. then for string p, we can also have the sa' range as , which can help to find the reads containing the rc  <cit> . the bwt of r and bwt of r’ form the bi-directional bwt of r.
+
+for bi-directional bwt, we introduce the term intact sa range  of p, which is the combination of: a) the sa range of p in r, b) the sa range of rc in r, and c) the sa' range of rc in r. the intact sa range is denoted by isr = . note that the size of b) and c) are the same. with respect to isr, the depth of p  is defined as follows:dep = max{ <dig>  ur - lr + 1} + max{ <dig>  ur') - lr') + 1}.
+
+
+
+as shown by lam et al.  <cit> , bi-directional bwt can finish the following operations in constant time:for any string p and a character c in {a, c, g, t, $}, calculate the sa range of cp from the sa range of p.
+
+for any string p and a character c in {a, c, g, t, $}, calculate the sa range and the sa' range of cp  from the sa range and the sa' range of p.
+
+
+
+then for p = p, using backward searching, the depth of p, p,…, p can be calculated incrementally by updating their isrs. therefore, with the bi-directional bwt of r, it is possible to trace how dep decreases with the increasing length of p.
+
+bi-directional bwt construction
+we build the bwt index of the reads based on our gpu-accerlated algorithm  <cit> . to test the efficiency of gpu acceleration and to make this construction available to computers without gpu, we have also developed a cpu-only version.
+
+meanwhile, the detailed content of bwt is also modified for easier genome assembly.a base is encoded with  <dig> bits using the first  <dig> bits to encode “a”, “c”, “g”, “t” or the read terminal symbol “$”, and the last  <dig> bit to indicate whether the base has a high sequencing quality with respect to a user-defined threshold.
+
+read id  is defined by the i-th pair of reads, and an auxiliary table is used to record the mapping between a read id and the position of the “$” in the bwt w.r.t this read. this enables fast recovery of read sequences and qualities in linear time. however, this method requires that all reads have equal length.
+
+
+
+seed selection
+a seed is a sub-sequence shorter than a read. the main idea of our seed selection strategy is to select the seeds that have only one occurrence in the genome to be assembled. in the context of de novo assembly, there is no way to calculate the exact number of occurrences of a seed in the genome. we develop the following method to guarantee a high probability to select one-occurrence seeds, which we call inferred-unique seeds.
+
+let d be the average sequencing depth of a genome, and each read has length m. here we define the expected depth of a sub-sequence p with length k to be dk =  * d/m  <cit> . if dep  in section 2) is no larger than z*dk, in which z is a user-defined parameter, we define p as an inferred-unique sequence, which means it is likely to occur only once in the genome.
+
+to find an inferred-unique seed in a read ri or a previously extended sequence, starting at the end and by using backward search mentioned above, we can update the isrs and calculate the depth incrementally until it achieves inferred-unique. for example, we find a seed in read ri of length m, we calcualte the isrs and depth of ri, ri, …, ri and ri. meanwhile, we calculate the expected depth dm-j with j decreasing from m- <dig> to  <dig>  then there would be two cases for the changes of depth from these sub-sequences:
+
+case 1: the depth of ri is reduced to less than user-defined depth threshold τ. then we will further try to find seed in the substring ri.
+
+case 2: the depth of ri is no larger than z* dm-j. then sub-sequence ri meets the requirement of inferred-unique and no more sub-sequences will be checked.
+
+each inferred-unique sub-sequence will be further checked to make sure the all the bases in seed have high quality scores . then we obtain a high quality inferred-unique seed to start the extension step. it can be found in a read to initialize an extention as an initial seed or in the extended regions to start a new iteration.
+
+seed extension and consensus
+given a pattern p with dep >  <dig> and a character c, we define cp as a valid backward extension of p if and only if dep >  <dig>  for a seed s, by adding characters in the head base by base, we can construct a backward extension tree ts whose nodes are tagged with characters chosen from {“a”, “c”, “g”, “t”}, except for the root node, which is tagged with seed s. define l, the label of a node v, to be the concatenation of tags from v to the root; and define w, the weight of the node v, to be the depth of l.
+
+backward extension tree is built recursively. the root tagged with s is firstly created. for each newly created node v, if cl is a valid backward extension of l for some character c in {“a”, “c”, “g”, “t”}, a new node is created as a child of v and is tagged with c. note that the label of a node will not be longer than the read length, the depth of the tree is limited by the read length minus the seed length. moreover, for any node v in the tree, if dep) >  <dig>  we obtain the ids of reads which have l as a shared prefix and mark these reads to avoid redundant assembly.
+
+the consensus sequence for the backward extension tree is constructed by walking down the tree from the root to a certain node. this process is called consensus-walk. when visiting a node with only one child, the walk moves on to that child. otherwise we have to select a branch to move on or stop immediately. a greedy algorithm, which chooses the child with the largest weight, is straightforward but error-prone. therefore, we introduce another strategy, which we call reverse validation, to improve the probability of choosing the correct branch. for simplicity, we describe our method for the case of two branches. as shown in fig.  <dig>  let ν be the node that the consensus is currently processing to, a and b be two children of v, tagged with ta and tb respectively. let c = l be the consensus sequence we have already constructed. the method incrementally calculates the depth of ta, tac <cit> , tac, tac, etc. and tb, tbc <cit> , tbc, tbc, etc.fig.  <dig> remove branches in backward extension tree. in the backward extension tree, we try to remove erroneous branches, repetitive branches and heterozygosis branches to obtain the consensus sequences of the extended region. as an example, we meet node v with two child node a and b. firstly, combined with l, we obtained tl for a and gl for b to detect erroneous branches between a and b. we incrementally calculate the depth of sub-sequences of a: t, ta, tat, …, and b: g, ga, gat, … until the depth of sub-a is less than user-defined threshold τ. at the same time, if dep is significantly smaller than dep, dep is significantly smaller than di and dep is significantly larger than dep, then branch a will be treated as a erroneous branch or repetitive branch. when there is no erroneous signal, we will further try to remove the branch, which might be caused by heterozygosis. after obtaining two sequences representing the consensus sequences of the sub-trees rooted at a and b respectively, we compare the two sequences to find the matched region and get the depth of it. then we use this depth to calculate base depth and compare to the base depth calculated by depth of initial seed. if the two sequences have high similarity and the two base depths are similar to each other, we will treat a as heterozygous branch if w is smaller than w
+
+
+
+below τ denotes a user-defined threshold.
+
+case  <dig>  if dep < τ and dep <  <dig> for some i, we immediately conclude that a is an erroneous branch and b is authentic if it demonstrates the following properties:dep is significantly larger than dep.
+
+dep is significantly larger than dep.
+
+the expected depth di+ <dig> is significantly larger than dep.
+
+
+
+case  <dig>  if dep =  <dig> for some i, we conclude that the initial seed is a false positive inferred-unique seed and a is near another copy of this seed in the genome, and a is named as a repetitive branch if it demonstrates the following properties:dep is significantly larger than  <dig> 
+
+dep is significantly larger than  <dig> 
+
+di+ <dig> is significantly larger than  <dig> 
+
+
+
+if we fail to identify the above two cases, an additional step will be introduced to estimate whether the branches are due to heterozygous sites. starting from a and b, we use a greedy algorithm mentioned above to obtain two sequences representing the consensus of the sub-trees rooted at a and b, respectively. if the similarity of these two sequences is high enough, we make a prediction that these two branches are caused by heterozygous sites, and walk to the child with larger weight. otherwise, the consensus-walk stopped at node v.
+
+if the consensus-walk does not stop at the root of the tree, i.e. the consensus sequence has been extent by at least one base pair from the seed, a new inferred unique seed will be chosen from the prefixes of the consensus sequences to start a new round. the process of seeding, backward extension and consensus is repeated until the consensus-walk stops at the root of the extension tree in some round. then a series of symmetric processes follow, which forward extend the initial seed. finally the contig containing this initial seed, which is the concatenation of the consensus sequences in both directions, is obtained when the forward extension completes.
+
+contig assembly using paired-end information
+paired-end reads have adjacent read ids in the bwt and this information is used to resolve longer repetitive regions, when the consensus-walk stops at the root of the extension tree. for two children nodes a and b of root node v, reads with “$” falling in the sub-tree of a and sub-tree of b regions are divided into r and r. we check whether the paired reads of r or r have been used in current assembled sequences and whether the distances are proper as estimated by their positions in this contig and their insert sizes. without loss of generality, if only paired reads of r are found and the number is larger than user-defined threshold τ mentioned above, the child node b will be removed. this method could be used to assemble repetitive sequences longer than read length and obtain longer contig sequences.
+
+RESULTS
+datasets
+we compared the assembly performance based on several sets of real data, including two bacterial staphylococcus aureusmw <dig> 240x hiseq 100 bp reads   <cit> , v. parahaemolyticus 240x miseq 250 bp reads   <cit> , and four human sequencing data sets including yh solexa 100 bp reads  <cit>  , yh hiseq 150 bp reads , na12878d hiseq x ten 150 bp data  and na <dig> hiseq 250 bp data . all raw sequencing data are pre-processed with soapfilter  <cit>  to remove reads containing excessive amount of ‘n’s or adaptors, low quality reads and duplicated reads. the four human datasets are further corrected with soapec  <cit>  using 23-mer.
+
+evaluation
+using reference genomes for staphylococcus aureus mw <dig>  and v. parahaemolyticus , we evaluated the accuracy of assembly using the gage pipeline  <cit> , in which metrics such as correct n <dig>  mismatch, align rate and coverage are assessed. for yh and na <dig>  we mapped the assembled contigs to hg <dig> with last  <cit>  and evaluated the alignment rate, reference coverage and repeat-masked reference coverage.
+
+comparison
+as shown in the bacterial assembly , base obtains contigs with the highest accuracy among all evaluated assemblers and is the only assembler that achieve 100 % alignment rate. except four translocations of spades in dataset of v.para, translocations assembled by base, sga and soapdenovo <dig> are all caused by circular dna and are not included in table  <dig>  for the 100 bp dataset of s.aureus, the correct n <dig> statistics of base is much shorter than that of spades and is only a bit longer than that of sga and soapdenovo <dig>  further analysis showed that base’s improvement over sga and soapdenenovo <dig> is mainly due to the effective usage of paired-end information. for the 250 bp dataset of v.para, the correct n <dig> from base is indeed comparable to that of spades and is much longer than that of sga and soapdenovo <dig>  as shown in table  <dig>  base takes slightly longer time in building index and assembling contigs than soapdenovo <dig>  but is much faster than spades and sga. the coverage of contigs from base is relatively low, which could be improved by devoting more time to initialize more extension or by scaffolding like soapdenovo <dig> table  <dig> contig assembly of deeply sequenced bacterial genomes
+
+
+
+
+s.aureus mw <dig> has its real reference with length  <dig>  mb and v.para has its species’ reference with length  <dig>  mb and two chromosomes. both of these two bacteria are sequenced up to 240x. gage validation pipeline was used to calculate the corrected contig n <dig>  base errors, structural errors, contig aligned rate and reference coverage. except base used single thread for contig assembly part, and other the assemblies were all performed with  <dig> threads. the time before semicolon is for index building and after semicolon is for assembly. for sga, indexing time contains the time used in the indexing after error correction and filtering; assembly time contains the time used in the overlap and assembly
+
+
+
+we also tested human genome assembly with four datasets: yh 100 bp ~35x, yh 150 bp ~63x, na <dig> xten 150 bp ~35x and na <dig> hiseq 250 bp ~45x. with 30x 100 bp reads, it already took sga more than 2 days  <cit>  and fermi nearly five days  <cit>  to output the contigs. as shown in table  <dig>  for the ~35x 100 bp yh dataset, both base and soapdenovo <dig>  took only about half a day to obtain the contigs. to assemble x ten data , base used much less memory than soapdenovo <dig> on indexing and contig assembly . this is probably related to the high error rate of x ten data, as shown in 17mer depth distribution of the three datasets in fig.  <dig> table  <dig> performance for human genome assembly
+
+for x ten data, we used a different machine with larger memory to finish soapdenovo <dig> and base assembly, so it is improper to compare the time usage of this dataset to other dataset. other dataset are all performed in the same machine with  <dig> cpu
+
+we mapped the raw contigs to hg <dig>  aligned rate is the contig-aligned length divided by total contig length. to calculate genome coverage, the length of gap regions in hg <dig> has been removed. for unique coverage, the repetitive regions have been further removed. for soapdenovo <dig> contig assembly, we all used single-kmer method and m <dig> to treat heterozygous regions
+
+fig.  <dig> 17mer depth distribution of three human sequencing dataset. we count the depth of all 17mers in the sequencing reads, and calculate the frequency of each depth. about 35 % 17mers of yh 100 bp reads, 30 % 17mers of yh 150 bp reads and 53 % 17mers of na12878d xten reads having depth no more than  <dig>  then we say the na12878d xten reads should have more sequencing errors left after raw data filter and correction than yh dataset
+
+
+
+in all four human datasets, shown in table  <dig> the n <dig> statistics of base improves as read length increases, while soapdenovo <dig> does not show such degree of improvement. base’s improvement over soapdenovo <dig> becomes significant for 250 bp reads. similar to bacterial assembly, base’s genome coverage, with repeat masked, is lower that of soapdenovo <dig>  but base has an overall higher genome coverage in each dataset. this suggests that base is able to assemble more repetitive regions, which can be used to explain the slightly more mismatches between assembled sequences and hg <dig> for base, as shown in table  <dig> table  <dig> mismatches analysis for human genome assembly
+
+we mapped the assembled contigs to hg <dig> and got the mismatches between each contig and reference sequence. then we used the detected snps and snps from published snp databases to analysis these mismatches in whole genome and exon regions respecitively
+
+
+
+the efficiency of gpu acceleration is shown in table  <dig>  to construct bwt of small datasets from two bacterial genomes, without gpu, it takes  <dig>  ~  <dig>  folds longer time than gpu version. but for large human datasets, the cpu-only version takes near  <dig> times as much time as the gpu version. therefore the gpu version is recommended especially for large sequencing dataset.table  <dig> acceleration performance of gpu on bwt construction
+
+
+s.aureus mw2
+
+v.para
+to evaluate the acceleration performance of gpu on bwt construction, we used two versions, one of which used gpu and the other not, to build bi-directional bwt on four datasets. the results showed that especially in large genome dataset, compared with gpu version, version without gpu costs ~ <dig> fold more time to construct bwt
+
+
+
+CONCLUSIONS
+the primary objective of this paper is to study whether a seed-extension approach to contig assembly, coupled with reverse validation, can give a performance  comparable to soapdenovo <dig> and sga. as shown in the previous section, the new approach gives clear advantage for longer reads, and with speed much higher than sga and comparable to soapdenovo <dig>  and stable memory usage . the contigs obtained by base are longer and cover more repetitive sequences than those from soapdenovo <dig> and sga.
+
+based on the high quality contigs assembled by base, one could use less accurate third generation reads or paired-end reads with longer insert size for scaffolding and gap closing. this approach has been used in a recently published assembler dbg2olc  <cit> , which assembles second level contigs onto high accurate dbg contigs. indels or sv could also be detected with these contigs using established methods  <cit> .
+
+with the increasing length of high quality illumina reads, it is of computational interest how to fully utlilize the read length information in contig assembly. sga, fermi and our tool base both build an index of the reads and make it possible to assemble high-depth short reads without splitting them into kmers. although sga and fermi could finish assembly with less memory, they need much longer time. as noted in megahit  <cit> , the requirment for big memory machine can be circumvented. for future bioinformatics analysis including assembly, it is time and robustness that matter most. we plan to further reduce the running time of base.
+

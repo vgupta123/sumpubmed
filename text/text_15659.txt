@@ -1,0 +1,204 @@
+BACKGROUND
+second generation  sequencing technologies have many and diverse biological applications  <cit>  and have effectively transformed the field of dna sequence analysis. with the advances in sequencing technologies that continuously increase throughput at dramatically decreasing costs, also an increased demand for computationally efficient analysis tools has arisen. one of the most demanding but fundamental computational processing steps is read mapping, i.e. finding the positions of all sequenced reads in a reference genome. a variety of tools to solve the read mapping problem have been published, e.g.  <cit> . as read mapping is fundamental to all downstream analyses, the outcome of an analysis may differ significantly depending on the way reads were mapped. in addition, research in this field will remain active due to continuous progress in sequencing technology. hence, the need for a careful and clear definition of the quality  of a read mapping result is apparent. also, as the number of users of 2g sequencing machines and the number of read mapping tools for different purposes increase, it becomes crucial to be able to compare read mapping software to determine what tool is the best one for a specific purpose. unfortunately, the various read mappers have different properties and use slightly different definitions of the read mapping problem which make such a comparison difficult.
+
+here, we will discuss and carefully define this problem, and point to the challenges that comprehensive and sensitive read mapping faces. furthermore, we present a novel benchmark based on which the quality and speed of read mapping tools can be assessed. our contribution consists of a precise definition of the read mapping problem and tools to evaluate the results of a read mapper. this enables the generation of gold standards for both simulated and real-world reads. it thus overcomes shortcomings when only using simulated reads, such as biases present in real data . using the four read mappers shown in table s <dig> , we give an example of such an evaluation.
+
+besides helping to objectively compare programs, proper benchmarking has other merits, namely to kindle a keen competition among computer scientists. this often results in efficient algorithms and fast implementations. examples are the rnaseq genome annotation assessment project  <cit>  or the encode gene prediction workshop  <cit>  which resulted in many new approaches to gene prediction and quantification.
+
+another advantage is better support for the algorithm engineering cycle  <cit> : first, an algorithm is designed and analyzed theoretically. this is followed by a careful implementation. the implementation is then experimentally evaluated and the theoretical hypotheses verified or discarded. using this information, the next iteration in the cycle can be started.
+
+careful experimentation is one key aspect of a successful practical solution to algorithmic challenges. we expect that our benchmark method will help to advance read mapping research in the next years.
+
+ <dig> methods
+we use common notation from mathematics and computer science. we denote closed ends of an interval with square brackets and open ends of an interval with round brackets. for example, [a, b) is a half-open interval with the values from, and including, a up to, and excluding, b.
+
+for a sequence s, src gives the reverse-complement by reversing s and exchanging the characters with their complement. as usual, in dna: c is exchanged with g and a with t.
+
+ <dig>  the read mapping problem
+an abstract definition of the read mapping problem can be given as follows. the input is a reference sequence s, a set r of reads r, a distance function δ and a maximal distance k. δ assigns a distance to semiglobal alignments of reads against s. the domain of δ determines which alignments are possible, e.g. whether hamming or edit distance is used. note that δ could also be the score of an alignment , which we do not consider in this paper .
+
+for each read r, the problem is to find a set of matches of r in s. the precise definition of the term match is suprisingly involved and will be given in sections  <dig>  to  <dig> . for now, let a match be a location in the reference where the read aligns. a feasible match is a match where the read aligns with distance ≤ k. a best match is a feasible match that has the smallest distance of all feasible matches for the given read. we can rank the matches ascendingly by their distance. now, let us consider the set of matches that is to be found. obvious choices for the match set could be to find:  all feasible matches,  all best matches,  up to c best matches, or  up to c best-ranking matches. in this work, we consider , and  with c =  <dig>  refered to as all, all-best, and any-best.
+
+from the application of read mapping in biology, the biological problem arises. here, the position in the reference should be found that corresponds to the sample position of each read. because of ambiguities, this problem cannot be solved directly, but is approximated by the mathematical problem.
+
+ <dig>  defining matches
+in this section, we will try to give an intuition for the difficulties inherent in defining matches. these difficulties stem mostly from the problem of how to decide when two matches are different and when they should be considered the same. this will profoundly influence how we define a match and thus how we count correct matches.
+
+first of all, we do not allow the first and last base of a read to align with a gap in the reference sequence. such alignments are superfluous: aligning the first/last base to the base at the left/right of the gap will always yield an alignment with a lower or equal distance. figure s <dig> gives an example.
+
+when are two matches different?
+when publishing their work, many authors of read mapping software simply count the number of mapped reads. this only allows for a crude assessment of read mappers relative to each other but not to the best possible solution.
+
+additionally, special care has to be taken when considering uniquely matching reads: if the read mapper does not have full sensitivity, it could miss a second match of a read and report it as unique match. another read mapper could find both matches and discard the read as non-uniquely matching. in this case, a less sensitive read mapper could get a higher rating. thus, one would also have to compare the non-uniquely matching reads as found by a read mapper to the ones reported as uniquely matching and compute a set of reads that are false positives. this is rarely, if ever, done in the literature, though. note that this set of false positives can only be seen as an approximation if no read mapper with full sensitivity is included in the comparison. additionally, a definition of "full sensitivity," i.e. of a gold standard is still required. consider the read and reference sequence fragments from figure  <dig>  say, we want to find the best two matches of the read in the reference sequence, with an edit distance of up to  <dig>  both with an edit distance of up to  <dig>  both localocations in the reference sequence are shown. the row alignments shows two alignments of the read to the reference sequence that appear to be "natural." however, the alignments in rows ⋆ and ⋆⋆ have a lower edit distance than the right one. common sense would tell us that the alignments in the left column are not "significantly different," though. each alignment with distance k induces alignments with distance at most k +  <dig> by aligning the leftmost/rightmost base one more position to the left/right and introducing a gap. repeats are another issue. consider the tandem repeat in figure  <dig>  intuitively, we can identify the two distinct alignments shown there. figure  <dig> shows another tandem repeat of shorter period with a read that aligns in this repeat region. searching for alignments in figure  <dig> in the same way as in figure 2), we could identify all alignments given in this figure.
+
+however, counting alignments in this way would require a read mapper to find lots of positions in repeat regions. this is not desirable since reads from long tandem repeat regions would get a higher weight with this counting scheme than reads from short tandem repeat regions or reads from non-repeat regions. only weighting each found match with 1/n  is deficient, too. it would be preferable to find a way to naturally merge similar matches , matches that are very close to each other ) and to separate matches that are sufficiently distinct ).
+
+to give a clear description on how to separate matches, we will first introduce trace trees.
+
+trace trees
+consider a dynamic programming matrix for semi-global alignment . each alignment is represented by a path from the top row to the bottom row. horizontal and vertical movements between cells represent indels, diagonal movements matches and mismatches.
+
+standard dp alignment algorithms yield the smallest distance for each alignment end position. from an end position, we can search for start positions by performing a traceback search backwards/upwards in the matrix. given a value for k, we can find all start positions for the given end position that yield alignments with distance ≤ k. the backward search yields a path through the matrix which we call trace.
+
+note that we only consider dp algorithms that are deterministic and always perform the same choice in case of ambiguities. for example, if they have the choice between tracing back vertically, diagonally, and/or horizontally, they could always take the rightmost choice. in this case, they would prefer vertical over diagonal, diagonal over horizontal movement. needleman-wunsch is one example of such an algorithm. when plotting the traces for all feasible matches, we could get an image like the one shown in figure  <dig> : we can consider the traces as graphs where cells correspond to nodes and movements in a trace between cells can be seen as edges. the resulting graphs have some simple properties, namely that a) the graph decomposes into connected components and b) each connected component is a tree. if one chooses any vertex on the trace shared by all alignments as a root, then the resulting rooted tree is split into an upper and a lower part. the upper leafs correspond to possible start positions of alignments, the lower leafs correspond to possible end positions. each combination of one upper and one lower leaf corresponds to a specific  alignment and is thus an upper bound on the number of feasible alignments.
+
+hamming distance matches
+if we want to count all possible alignments, we note that each match in the hamming distance model corresponds to exactly one diagonal in the matrix, namely the one between the start and end position of the match. thus, we can define a match with hamming distance simply with either its start or end position. for consistency with our choice for edit distance , we pick the end position.
+
+redundant edit distance matches
+considering all combinations of start and end positions is not desirable for edit distance: in figure  <dig>  there would be  <dig> ×  <dig> =  <dig> such matches in the left tree alone, possibly many feasible ones. we have to resort to other means for counting alignments in the case of edit distance.
+
+identify matches with end position
+we observe that the shared trace is usually longer than the branching parts. this means that large parts of the alignment are basically the same and even differing alignments might have the same distance. to avoid counting these as separate alignments, we proceed as follows.
+
+we identify each match with its end position e and use the leftmost start position s with minimal distance as its canonical start position. the choice of s as the canonical start position is arbitrary. however, picking the leftmost position as s has the advantage that the interval between s and e contains the start position of all alignments of minimal score ending in e. in the example from figure  <dig>  this reduces the number of matches for the right tree from  <dig> to  <dig> 
+
+ <dig>  error landscapes
+in this section, we define error landscapes in order to capture the intuition of the match definition we will give in section  <dig>  more formally. the distance δ of a read to the genome at position i is the distance of the best alignment that ends there. if we plot the points ) for each reference sequence position i and connect them, we get an error landscape such as the one shown in figure  <dig>  in this landscape, valleys represent regions where the read aligns with a low distance and mountains represent regions where the read aligns with a high distance.
+
+now, we let imaginary ground water in our landscape rise to a level of k +  <dig> . this is shown in figure  <dig>  in this example, this yields five lakes. each lake represents a class of matches with sufficiently low distance. the metaphor of the landscape with lakes corresponds to the natural merging of similar matches.
+
+we expect a read mapper to locate each of these classes but it suffices to find one representantive in each class for the all variant. for criteria all-best and any-best, each lake is assigned the distance of the point with the lowest distance of all contained points. put differently, each lake is assigned its depth – if we stay in the metaphor of landscapes and lakes.
+
+ <dig>  matches as equivalence classes
+after arguing, which matches should be considered the same and which different, we need to formalize this notion. hence, the aim of this section is to give a strict mathematical definition for the term match such that it closely models the intuitions from sections  <dig>  and  <dig> .
+
+in section  <dig> , we already argued that we want to identify each match with its end position. we also enforce the alignment of the last read and reference bases as described there. now, we want to find an equivalence relation that partitions the set of feasible matches in a sensible way such that each class corresponds to an intuitive match.
+
+we will do this by defining an equivalence relation for merging neighbouring matches and then defining another one that merges separated feasible matches sharing the same trace. for numbers a, b in the following, we assume w.l.o.g. that a ≤ b. also, we identify matches with their end position and use the two terms match and end position interchangeably.
+
+definition  <dig> . two feasible matches  a, b are neighbour equivalent  if for all x, a ≤ x ≤ b the following holds: δ ≤ k.
+
+definition  <dig> . two matches a, b are trace equivalent if their traces share a part. this is the case if their canonical start position is equal.
+
+for example, for k =  <dig>  the last match ending in the rightmost leaf of the left tree and the leftmost leaf of the right tree in figure  <dig> are neighbour equivalent but not trace equivalent. however, the matches ending at the third and fourth leaf of figure  <dig> are trace equivalent but not neighbour equivalent.
+
+definition  <dig> . two matches a, b are k-trace equivalent if one of the following holds:  they are feasible, neighbour equivalent, and trace equivalent.  there exist feasible, trace-equivalent matches α, β and a separating match ζ such that α ≤ a ≤ ζ ≤ b ≤ β.
+
+a separating match ζ is a match with δ  > k and there exists α, β, α <ζ <β such that δ , δ  ≤ k.
+
+obviously,  and  are equivalence relations. also, it is easy to see that  is reflexive, symmetric and transitive and thus an equivalence relation. we now define two matches a, b to be equivalent  if they are k-trace equivalent or neighbour equivalent. the disjunction of two equivalence relations yields another equivalence relation.
+
+it follows that ≡ gives a well-defined partition of the feasible matches which corresponds to the intuitions given in section  <dig> .
+
+ <dig>  gold standard and evaluation
+following the definition of k-trace equivalence, each equivalence class is an interval. the reference data set  can thus be described as an array of triples  describing all intervals of feasible matches  for a given k for each read.
+
+given the gold standard and the result of a read mapper, the quantitative evaluation of the read mapper result is easy. in the evaluation, a specific value is selected for k, say c. now, all intervals from the gold standard are selected, where the value of k equals c. after sorting these intervals, binary search can be used to check which equivalence classes were found by the read mapper.
+
+an additional preprocessing step has to be done in the case of all-best and any-best evaluations. here, we update the value of k in each interval i in the gold standard to the smallest value of k for all intervals contained in i. this is done before the selection step described in the above paragraph.
+
+further technical issues are described in section s <dig> 
+
+ <dig>  building the gold standard
+we differentiate between building the gold standard for the biological problem and the mathematical problem.
+
+biological problem
+since it is not possible to observe the sequencing process at the molecular level, we use simulated reads. note that simulation data always has certain shortcomings, as biases present in real biological data are hard to simulate. such biases in short read sequencing data have been reported e.g. in  <cit> . nevertheless, simulated data can be informative in benchmarking tools, and can therefore be used to complement real-world data.
+
+from our simulation, we obtain read sequences together with their actual sample positions. each of these positions is a representative of the one equivalence class the read mapper should find. given this representative, the whole equivalence class  can be found as described below for the mathematical problem. this procedure is, in essence, similar to simulating reads and checking whether their mapping position is close to the actual sample position, but has the advantage of not having to choose a cutoff for what is defined as "close". with our definition, the genomic sequence itself defines how far away from the originally simulated position a read may map in order to be counted as correct. intervals in ambiguously mappable regions will be broader, while intervals in unambiguous regions will be tight.
+
+mathematical problem
+a naïve solution for generating a gold standard for the mathematical problem is to use an online multiple string search algorithm and then merge the matches, according to ≡. however, this is too slow even for moderate genome sizes.
+
+a more sophisticated method is to take the matches of a read mapper with full sensitivity as the input. this will yield at least one match m in each equivalence class. using m as seed, we can then reconstruct the interval around it and only have to look at a fraction of the reference sequence.
+
+starting from each m, we first extend the interval to the right. we extend until we find a match that has score >k and no match right of it with score ≤ k that has the same begin position. analogously, we extend the interval to the left.
+
+finding the end and begin positions of the alignments can be efficiently implemented with approximate string search algorithms for hamming and edit distance. for edit distance, we use myers' bit vector algorithm  <cit> , for hamming distance we use a naïve implementation.
+
+given kmax, a maximal value for k, we compute the gold standard for all  <dig> ≤ k ≤ kmax for each read.
+
+ <dig>  read mapping and similar problems
+the mathematical objective of read mapping may vary for different types of biological analyses. for example, when mapping rna-seq reads onto a genomic sequence, one should consider that reads will span exon-exon boundaries. here, a spliced mapping approach would be a reasonable choice.
+
+the benchmarking method that we describe here considers the "core" read mapping problem, and evaluates how far a read mapper is away from the mathematically optimal solution. we do not address related problems such as spliced read mapping or multi-read assignment. we only consider pairwise alignments for individual reads using the popular and parameter free distance measures hamming and levenshtein distance.
+
+still, being able to measure how sensitively a read mapper detects all  mapping positions is indirectly useful for multi-read assignment: if a read mapper misses a high number of mapping locations, a subsequent multi-read assignment step is less likely to find the correct assignment.
+
+ <dig>  practical considerations
+the description above is simplified in some parts to ease the understanding. in practice, there are the following differences and additional considerations:
+
+we always used absolute error values in our descriptions which is appropriate for reads of the same length. however, some technologies, e.g.  <dig> pyrosequencing, yield reads of varying length. thus, we use error rates, which are relative to the read length.
+
+gold standards could be built from any read mapper with full sensitivity, e.g. mrsfast  <cit>  or razers  <cit> . razers supports both hamming and edit distance for arbitrary read length whereas mrsfast only supports hamming distance. of course, also tools that claim 100% sensitivity may contain bugs; razers is our in-house tool that we can correct quickly in case of problems. therefore, we chose razers for building gold standards.
+
+ <dig>  read simulation
+for our benchmark, we use the mason read simulator  <cit> . the program takes a fasta genome reference sequence s for its input. it then simulates an arbitrary number of haplotypes by adding indels and mismatches to s. third, it simulates read sampling from the haplotypes, depending on the sequencing technology. finally, it writes out the reads in fastq files and also creates a sam file that describes the gold standard for the biological problem from section  <dig> .
+
+details can be found in section s <dig> 
+
+ <dig> 
+RESULTS
+ <dig>  read mapper comparison
+we have evaluated the read mappers bowtie  <cit> , bwa  <cit> , shrimp <dig>  <cit> , and soap <dig>  <cit>  on read sets for d. melanogaster and s. cerivisae from the short read archive . information about the read sets can be found in table s <dig>  table s <dig> shows information regarding the used reference sequences. the gold standard for the mathematical problem from section  <dig>  was built with an error rate of 8% and edit distance. also, we generated simulated read datasets for the evaluation of the biological problem from section  <dig> .
+
+we used default parameters for bwa as advised by the author; illumina reads were mapped using the commands aln, samse, and sampe,  <dig> reads were mapped using bwasw. for shrimp <dig>  weighted seeds were used to improve performance for longer reads, as suggested by the authors. for soap <dig> and bowtie, we performed some initial benchmarks to optimize sensitivity, at the cost of a higher running time. these programs were also run with default paramters, the variants with tuned parameters are labeled soap <dig> and bowtie*. for parametrization details, see section s <dig> 
+
+we limited the output of each read mapper to  <dig> alignments per read, where possible, to  <dig> for simulated reads. there is no option to limit the output of soap <dig> to a certain number of alignments per read. for the evaluation, we perform a postprocessing step and only select the best  <dig> matches by edit distance, breaking ties randomly.
+
+the experiments were performed on a computer with linux  <dig> . <dig>  intel xeon processors with  <dig>  ghz and  <dig> gb of main memory. no program was run with more than one process/thread. memory consumption was measured by parsing the output of the unix command top every second. table s <dig> shows the resource consumption for building the indices of bowtie, bwa and soap <dig> 
+
+as a sanity check of the method, we also ran razers with default parameters on all read sets. the expectation was that it should find nearly all intervals since it uses the same definition of the read mapping problem as the read mapping benchmark. full sensitivity should only be limited by  reads with more than  <dig> matches,  the default sensitivity of 99%, and  its default error rate of 8% which might make it join lakes that are separated when analyzing with a lower error rate. the running time was expected to be generally lower than that of shrimp and higher than that of index-based tools. this expectation was fulfilled and subsequently, razers was excluded in the following evaluation. plots and data that also show the performance, as well as the running times of razers are available from the project homepage.
+
+the metric normalized found intervals is defined as follows: each read gives at most one point. if a read matches at n locations , each found location gives 1/n point. to get percentages, the number of achieved points is divided by the number of reads and multiplied by  <dig>  in the following, we will use the terms sensitivity and normalized found intervals interchangeably.
+
+real-world data
+figures  <dig> and  <dig> show the sensitivity results for the all problem on illumina reads. bowtie* and shrimp <dig> are the most sensitive tools; while all tools' performances suffer from increasing error rates, shrimp <dig> achieves the highest sensitivities at high error rates where the absolute number of errors is greater than  <dig>  soap <dig> and bowtie, especially in their default versions, seem to be tuned toward low numbers of errors. the effect can be seen on long reads in figure 5: using default settings, both tools' sensitivities drop dramatically for reads with more than  <dig> errors. the optimization of parameter settings for soap <dig> and bowtie clearly improves performance on long illumina reads. for high error rates, this improvement even leads to  <dig> percentage points more sensitivity. for the short reads in figure  <dig>  bowtie's default already constitutes the optimal parameter setting; the lines for bowtie* and bowtie are therefore the same here. from figures  <dig> and  <dig>  we also see that bwa does not perform very well in the all category. it is consistently about 2- <dig> percentage points behind bowtie*. this is explained by the fact that bwa only reports a single match for reads that exceed the number of matches to report .
+
+looking at the results for illumina reads in the any-best category shown in figures  <dig> and  <dig>  we see that bwa is the best performing tool for this case. this holds for long and short reads, and for all investigated error rates. for short reads, both versions of soap <dig> and of bowtie perform equally well. as they are fully sensitive for reporting at least one best hamming match for each read, their sensitivity only drops here due to missed gapped alignments. as can be seen for long reads, an absolute number of errors greater than  <dig>  again leads to an increase in missed matches for the default versions of soap <dig> and bowtie. while shrimp <dig> performs very well at the all problem, in the any-best criterium it lags behind all other tools . due to the limitations mentioned above, only bwa and shrimp are shown in figures  <dig> and  <dig>  for the long  <dig> reads, there usually exists only one or few mapping locations per read. therefore, differences in sensitivities between the all and the any-best category are not as pronounced as for the shorter, more ambiguously mapping illumina reads. here, shrimp <dig> consistently has a lead of 10- <dig> percentage points over bwa. this higher sensitivity comes at the cost of one order of magnitude higher running time and memory consumption.
+
+we conclude from our analysis that shrimp <dig> is a highly sensitive tool for detecing multiple matches . thus, it appears to be a good choice for analyses that require high sensitivity. also, bwa is a very diverse tool and shows especially good performance for the practically relevant any-best problem. apparently, bowtie and soap are geared towards fast short read mapping with low error rates. in the any-best category they find matches of short reads with high sensitivity.
+
+for all tools, parametrization becomes increasingly important with increasing read lengths and increasing numbers of errors. different parameter settings for the same tool can lead to discrepancies in sensitivity of more than  <dig> percentage points. this emphasizes the importance of a benchmark such as the one presented in this article which can be used by developers and users alike to test tools with different parametrizations. figures s <dig> and s <dig> show the same evaluation for the data on reads from s. cerivisiae.  the relative results and conclusion are similar for all read sets; sensitivies are higher for all read mappers, due to the lower repeat content of the genome. notably, shrimp <dig> does not gain as much as the other read mappers on the illumina reads, but still achieves a high sensitivity.
+
+simulated data
+tables  <dig> and s <dig> show the sensitivity of the read mappers on simulated data for fly . bwa and shrimp <dig> consistently yield the best results, finding the best locations of at least 90% of all intervals on all read sets. the results for yeast reads are better than for fly reads. the most likely explanation is the lower complexity of the yeast genome with less ambiguities. both read mappers' quality increases, with increasing read length, probably because of the same reason: the longer the reads are, the less ambiguities there are.
+
+data is given for mapping in edit distance mode.  <dig> reads were only mapped with shrimp <dig> 
+
+bowtie and soap <dig> do not support indels and are consequently not robust against the rising number of indels in the longer reads. this can be seen in the decreasing quality of their results. the optimized parametrizations yield slightly better results than the default parametrizations. in total, bowtie finds slightly more original locations than soap <dig>  probably because of support for base qualities.
+
+ <dig>  usages for our method
+our method is very useful for the exact validation of read mapper results. it can be used to compute the exact percentage of matches found by a read mapper. this can be done for large samples of read data sets,  <dig>  in our example, but more are possible.
+
+for performing a comparison of read mappers, we propose the following guidelines:
+
+1) use reads from state-of-the-art technology with popular parameters for size and paired-end modes. 2) use current versions of popular tools from multiple paradigms, such as index-based filtration-based read mappers. 3) run the read mappers with various parametrizations, including default parameters, possibly allowing the read mapper authors to provide the best possible parameters. 4) use a method based on a formal definition, e.g. rabema, to perform an exact assessment of read mapper quality. 5) complement this with heuristic measures such as counting mapped and uniquely mapped reads for datasets of real-world-size, taking into considerations the notes in section  <dig>  about possibly missed duplicate matches. 6) possibly, show how the results of downstream analysis differ between two read mappers. 
+
+our method gives a gold standard for the read mapping problem. this works for both simulated and real-world read sets and allows to put each read mapper not only in relation to other read mappers, but to an optimal solution.
+
+furthermore, the implementation of our method allows to print missed equivalence classes/intervals. this allows the analysis of why a read mapper does not find certain matches. it can also be used to debug and improve read mappers as well as evaluate the automatic computation of read mapper parametrization. if a read mapper finds a location that is not in the generated gold standard then this is reported by our tool as well and can be seen and used as a sanity check.
+
+ <dig> 
+CONCLUSIONS
+we presented a benchmark for read mapping, beginning with the distinction of the biological problem and a mathematical abstraction. for the mathematical abstraction, we gave a precise problem definition which allows to define the required results. our method works both for real-world reads and simulated data.
+
+we implemented tools to build the introduced gold standard and performed a comparison of several popular read mapping tools. the example comparison uses illumina and  <dig> reads, both real-world and simulated data. we found that shrimp <dig> is a highly sensitive tool for detecting multiple matches. bwa is a very diverse tool and especially good for finding one of the best alignments of a read. soap <dig> and bowtie are both good choices for mapping short reads quickly and sensitively, bowtie being a slightly better choice according to our analysis.
+
+currently, our method is limited to base-space reads. however, three of the four currently commercially available 2g sequencing platform , create reads in base space. thus, our method is useful for a wide audience.
+
+the online material at http://www.seqan.de/projects/rabema.html contains download links for the reference sequences and read sets we used, the resulting sam files, the tools for the benchmark evaluation, and a manual.
+
+ <dig>  future work
+at the moment, the generator for the gold standard does not incorporate mate pair information and quality values. we plan to add support for this in a future release. note that read mapper programs incorporating mate-pair and quality value information can already leverage this information in benchmarks for the biological problem.
+
+another point for improvement is allowing to use abi solid  <cit>  reads. for this, support for color-space sequences has to be added to seqan, the gold standard generator has to be adapted to support them and razers  has to be extended to work with color-space reads. more details on this can be found in section s <dig> 
+
+ <dig> authors' contributions
+the original idea of the benchmark came from dw and kr. dw came up with the intuition of the error landscape. from this idea, mh derived the exact definition through equivalence classes, trace and neighbour equivalency, implemented the software and wrote most of the paper. ake helped with the experimental evaluation. additionally, ake, dw and kr contributed equally to the work through discussion and editing.
+
+all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplemental material. this file contains supplemental text, figures, and tables.
+
+click here for file
+
+  <dig> acknowledgements
+we would like to thank the anonymous reviewers for their constructive comments.
+
+mh was supported by the dfg priority program algorithm engineering  through dfg grant re-1712/3- <dig>  ake is funded by an imprs-cbsc stipend.
+
+the programs that were used to perform the evaluation are based on seqan  <cit> , the c++ library for sequence analysis.

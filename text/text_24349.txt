@@ -1,0 +1,202 @@
+BACKGROUND
+efficient analysis of data from high-throughput experiments requires sufficient access to information about the measured biomolecules. such data are often referred to as meta-data and provide a biological and chemical context in the form of parameters such as function, localization, and structure. numerous applications of genomics and transcriptomics data analysis depend on the availability of meta-data, including pathway projections  <cit>  and gene set enrichment analysis  <cit> .
+
+metabolomics data analysis is no exception, and apart from the aspects of biological interpretation, meta-data are also needed for data integration. in particular, wide coverage detection of metabolites can only be achieved by combining multiple metabolomics platforms  <cit>  such as gc-ms , ce-ms   <cit> , lc-ms   <cit>  and 1h-nmr  <cit> . however, in order to summarize multi-platform data in a consensus data set, it is crucial that the meta-data define to which metabolite each feature corresponds in a consistent and non-redundant manner.
+
+data on biomolecules can be found in online databases, which must be cross-referenced to allow for collation of meta-data packages for individual data sets. creating mappings between local identifiers used in experimental data and public identifiers is a laborious process since missing, ambiguous or redundant entries are common. identifiers are also subject to frequent changes and it is therefore clear that cross-referencing must be an automated process to enable efficient and reproducible research. for sequence-based data, several tools have been developed that can be used to automatically cross-reference public databases. the annbuilder r package  <cit>  assembles and consolidates genomic information from resources such as locuslink and the gene ontology. picr  <cit>  and pannbuilder  <cit>  perform similar tasks for proteins.
+
+several public databases are focused on gathering information about metabolites and integrating this with data on genes and proteins. notable examples include the chemical entities of biological interest database   <cit> , the kyoto encyclopedia of genes and genomes   <cit> , the madison metabolomics consortium database   <cit>  and the human metabolome database   <cit> . all these databases use more than one public identifier and can therefore also be used for identifier conversion. middleware solutions such as biospider  <cit> , biomart  <cit>  and bridgedb  <cit>  are useful tools for querying these in an efficient manner. however, metabolomics data are often annotated with compound names  of varying consistency, or in the best case, references to in-house libraries. these local identifiers can often be associated with several different molecular structures causing ambiguities and redundancies that make them very difficult to cross-reference with public identifiers. a tool that aim to solve this task has, to the best of our knowledge, not yet been reported.
+
+there are several aspects of metabolite identifiers that make them difficult to cross-reference in an automated fashion. a major obstacle is the lack of a widespread standardized identifier. there is a multitude of different schemes for referencing chemical compounds because the best way of doing so largely depends on the purpose of the identifier. metabolites are in general best referred to by their absolute chemical structure using e.g. inchi . however, in certain circumstances it is necessary that the identifier is human readable warranting the use of chemical synonyms; on other occasions, we need to refer to a specific resource and therefore use database keys. currently, chemical databases solve this problem by using multiple types of identifiers in parallel.
+
+unfortunately, with different databases relying on different identifiers, consolidation becomes very difficult  <cit> , especially since one frequently must rely on multiple intermediate resources.
+
+another serious problem for data integration is that most referencing schemes are redundant in the sense that the same compound has multiple valid identifiers. therefore, even if everyone used, e.g., pubchem ids as suggested by kind et al.  <cit> , cross-referencing for the purpose of data integration may still be difficult as different identifiers do not imply different metabolites.
+
+a related problem stems from the fact that chemical databases are geared toward annotating single, specific compounds, which is not entirely compatible with real life metabolomics data. metabolites are often derivatized prior to separation due to analytical requirements or inexactly determined because of the limited resolution of high-throughput metabolomic platforms. hence, the measured analyte does not necessarily correspond to the same chemical structure as the original metabolite and is therefore associated with a different identifier. these identifiers must be mapped back to their plain structure prior to biological interpretation and integration with data from other platforms. this problem becomes especially vexing since different platforms may use different analytes for the same metabolite. the abstraction between analytes and metabolites is typically only defined in platform-specific in-house libraries . taken together, identifiers used in metabolomics are connected in a many-to-many kind of relationship, which current chemical databases do not fully support.
+
+one approach to solve the problem of gathering meta-data for metabolomics would be to build a new database of chemical compounds including all known analytes, how they relate to parent metabolites as well as links to all relevant biological resources. such a project, however, would be extremely resource intensive, and since different metabolomics researchers use different reference libraries and have different ambitions, it would still not solve the problem completely.
+
+instead, we opted for a more pragmatic strategy and designed a program that can import both in-house reference libraries and online resources and organize the identifiers by how they are interconnected. by this method, groups of compounds are formed containing both the analytes and the metabolites they refer to as well as links to the selected biological databases. because all available identifiers are used in parallel, there is no need for any master identifier, and databases can be consolidated as long as they can be linked using any of the imported resources. the result is a metabolite-centric database, which can be used to obtain tailored metabolite meta-data in a flexible and straightforward manner.
+
+here, we present and discuss our strategy for reconciling metabolite identifiers across in-house libraries and public databases. examples are given both for how to create and query a custom database as well as the types of data analysis that this technology enables. using the provided software, metmask , tailored mappings between different metabolite identifiers are easy to construct, thereby providing meta-data accessibility similar to that known from gene expression data analysis.
+
+implementation
+the goal of this project was to construct a method to efficiently cross-reference different types of metabolite identifiers in order to facilitate downstream data analysis . specifically, we wish to obtain a local database that associates every relevant metabolite with a group of identifiers comprising all known references to that metabolite. because we deal with applied data analysis, two metabolites that can not be distinguished by the metabolomics platform at hand are considered the same metabolite. every identifier group should also contain references to the platform-specific analytical derivatives, or analytes, of the associated metabolite.
+
+these ambitions imply that the constructed groups may contain references to more than one distinct chemical structure. the goal of the constructed database is therefore clearly different from that of public chemical databases such as hmdb and pubchem  <cit> , which gather information about specific chemical structures.
+
+the resources that are available for constructing the desired database are chemical reference libraries and external public databases such as kegg  <cit> , chebi  <cit>  and the *cyc databases . the information taken from external databases is the primary identifiers and their links to other public databases. the reference libraries are files that list the analytes that are recognized by the corresponding metabolomics platform and associate these with their parent metabolite. the listing typically uses local identifiers for the analytes and at least one publicly used identifier of the metabolite, e.g., a cas  registry number or commonly used synonyms.
+
+unfortunately, there are several limitations that make these resources non-trivial to integrate with each other.
+
+• the primary identifier that we seek, the identifier group, is not used by any resource.
+
+- all resources may list multiple entries for the same metabolite, e.g., separate entries for alanine and l-alanine.
+
+• there is no identifier type that is used by all entries in all resources.
+
+• comparing different resources, there may be errors in the sense that the same identifier can be used to refer to different metabolites.
+
+the input can be thought of as a large network of identifiers where primary identifiers are linked to other identifiers. a straightforward way of obtaining the groups of identifiers that we seek is to combine all identifiers that are interconnected. however, the last observation above implies that this could also erroneously group strictly different metabolites. to solve this problem we designed a heuristic, which is described in the following section.
+
+a strategy for cross-referencing metabolites
+we reason that the primary key, the identifier group, should correspond to a group of strongly interconnected identifiers. we grow these groups incrementally as new data are imported to our database and merge groups if they overlap strongly with each other; see figure  <dig> for a schematic representation of the integration strategy.
+
+all input can be broken down into groups of identifiers that associate a primary identifier with a set of associated identifiers. upon data import, the database that is being constructed is searched for any pre-existing identifier group that overlaps with the incoming group. if an overlapping group is found, it is tested for compatibility with the new group. if the two groups are compatible, they are merged to form a new larger group; if they are not compatible, the overlapping identifiers in the new group are annotated as 'weak' and the rest form a separate group. weak identifiers are defined as identifiers that may be associated with more than one identifier group. the compound name c is a typical example of a weak identifier as it can refer to either cysteine or cytosine.
+
+because no identifiers are deleted, all original associations found in the input are also present in the resulting database and can be used to query for metabolites.
+
+the constructed database may group different chemical structures, and therefore there is no direct way of knowing which identifiers should be connected and which should not. hence, we resort to a rule set and define two identifier groups as compatible if,
+
+ <dig>  they come from the same source and share a non-weak identifier.
+
+ <dig>  they come from different sources but share at least n types of non-weak identifiers, where n is user-defined .
+
+ <dig>  two identifier groups are not compatible if they do not have the same chemical sum formulas .
+
+the threshold in step  <dig> is included to cope with errors and minor ambiguities in the input. a high n implies that correctness is prioritized and only groups of identifiers that are very likely to refer to the same metabolite are merged. a low n on the other hand prioritizes non-redundancy, causing more groups to be merged. when consolidating two databases that only can be linked with a single type of identifier, this threshold should be set to one. when working with very unreliable data sources, it may instead be increased.
+
+the resolved groups of metabolite identifiers are stored in a local database that keeps track of the source of every imported identifier, which identifier group it belongs to and if that association is annotated as weak. the identifier groups have a local primary key that allows for instantaneous conversion between different types of identifiers.
+
+the notion of defining certain identifiers as weak also makes it possible to set entire identifier types as weak. this way, annotational identifiers such as pathway information can be imported without causing any identifier groups to be merged.
+
+the metmask interface
+the program interface is command line-based, making it easy to integrate into automated data analysis pipelines. sources and binary distributions can be found at http://metmask.sourceforge.net. the project page also gives access to a web-interface, which can be used to perform identifier conversion and visualization using an example database.
+
+the widely used statistical programming environment r  <cit>  together with the bioconductor project  <cit>  provides meta-data for proteins and genes but not metabolites. therefore, we designed the metmask.db r-package which can be used in a similar way as the packages depending on the annotationdbi  <cit>  framework. the metmask.db package depends on a slightly modified version of annotationdbi, which is available from the metmask project page. the package can be used either with its accompanying database or with a customized database by simply replacing the database file.
+
+the main metmask program is platform-independent, free, open-source software implemented as a python package. identifiers are stored in a local sqlite  <cit>  database and the package is distributed together with an example database including  <dig> identifier groups.
+
+import
+different parser modules depending on which source is being imported handle imports to the database. the parsers read different file formats but in essence all perform the same thing: collation of groups of identifiers, annotating and inserting them to the database. the currently distributed parsers are listed in table  <dig>  file format definitions can be found in the user manual provided as additional file  <dig>  the parsers modules are implemented as plug-ins making implementation of new parsers easy.
+
+the currently provided parsers for importing metabolite information. file format definitions can be found in the user manual. the imported identifier types indicate the identifiers that are extracted from the source file.
+
+imports can be performed both comprehensively and in synchronization mode in which only identifier groups are imported that already have some overlap in the database.
+
+the identifier types kegg compound id, cas number, knapsack, cq id , pubchem substance id and compound id, inchi, metlib id and hmdb id are matched with regular expressions to ensure that imported identifiers are well formatted.
+
+once a database has been created, minor updates that define new metabolites or add data to already existing metabolite groups may be performed by re-importing the updated source. larger rearrangements and deletion of identifiers is not supported in the current version of metmask and must therefore be done by rebuilding the whole database.
+
+query and visualization
+the metmask database can be queried in a flexible manner, making it easy to extract both information on single entries and to do batch queries. when input is given via standard input, each line is treated as a query string, and the result is provided as standard output. full export is also supported in which the requested identifier types are extracted for all identifier groups.
+
+default output is given as a comma delimited table where one row corresponds to one identifier group and each column corresponds to the queried identifier type. multiple identifiers of the same type and group are separated by the pipe character. this type of output can be imported into spreadsheet programs or read by interpreters such as python, perl or r.
+
+the associations in the constructed database are annotated with both the original source they came from and whether they are considered useful for identifying a specific metabolite or weak . the identifier groups can be visualized as graphs by tracing how primary identifiers link to other identifiers in the input sources . to facilitate these visualizations, metmask can output graphs of identifier groups as text files with one edge per row, with the source node in the first column and target node in the second column. the original source is given in the third column and the status as weak in the fourth column. this type of text file can be visualized using graph drawing software cytoscape  <cit>  or rgraphviz  <cit> .
+
+provided database
+metmask is distributed with a database built for our metabolomics platform. the database is geared towards plant primary metabolism and is not meant to suit all researchers' needs but mainly to serve as an example. the database was built by importing platform specific reference libraries and synchronization with kegg, plantcyc  and chebi  <cit> . there are  <dig> different identifier groups in the database representing our estimation of the total number of distinct metabolites in our reference libraries. table  <dig> presents a listing of the used sources, and table  <dig> shows a description of the created database.
+
+the sources used to build the provided database. each source contains one or more different identifier types. synchronization mode imports only additional data to already existing metabolite groups in the database.
+
+statistics of the provided database. the number of groups is the total number of constructed distinct metabolite groups. each group gathers one or more identifiers of the following listed identifier types.
+
+RESULTS
+in order to demonstrate our approach, we look at an example data set from a ce-ms-, gc-ms-, and lc-ms-based study measuring metabolite levels in tomato fruits in two ripening stages. the data set was composed of three different data matrices, each annotated with either chemical synonyms or identifiers referring to platform-specific reference libraries. the biological aspects of the experiment are not within the scope of this study and we will only consider it as generic data set coming from three platforms were all preliminary data processing such as peak picking, deconvolution and alignment has been successfully performed.
+
+in the following sections we use two reference libraries and public resources to create a metmask database and then show how it can be used to cross-reference the local identifiers with public identifiers. finally, we provide two short examples of data analysis techniques that the created identifier database enables. the results presented here are specific to how these particular libraries were constructed, but the main concept will be the same regardless of the utilized platform.
+
+creating and querying an identifier database
+first, we import two reference libraries consisting of comma separated text files and a nist ms export file listing local identifiers and synonyms as well as partial links to publicly used identifiers. using metmask, an import into a new database called 'mydb' is performed by,
+
+> metmask --import library-one.csv --parser simple --db mydb
+
+> metmask --import library-two.txt --parser riken  --db mydb
+
+this import limits the search space of the metabolites in order to obtain a stream-lined database for our libraries. when this import has been performed, we can enrich the created identifier groups with data from other sources by importing those sources in synchronization mode. augmenting our database with data from chebi and kegg is performed by,
+
+> metmask --import chebi --synchronize --db mydb
+
+> metmask --import kegg --synchronize   --db mydb
+
+the two commands listed above may take up to  <dig> minutes but only necessary when building or updating the database.
+
+our experimental identifiers may be cross-referenced by querying the created database. chebi identifiers, kegg ids and synonyms for our example data set can be extracted by calling,
+
+> metmask local-ids.txt --goal chebi, kegg, synonym -q --db mydb
+
+which yields
+
+ <dig>  c <dig>  glycolate|glycolic acid|hydroxyacetic acid
+
+17794| <dig>  c00197|c <dig>  3-phospho-dl-glycerate|3-phosphoglycerate|<cont..>
+
+other more complex queries such as "all cas numbers and chebi identifiers for the entries associated with kegg pathway  <dig> " are also straightforward, e.g.,
+
+> metmask --query  <dig> --table pathway --goal cas, chebi --db mydb
+
+comparison with using single resources
+the main, still relatively easy alternative to using metmask for cross-referencing identifiers is to write a custom script to query a public database. in order to compare our performance with this approach, we created metmask databases using only the example reference libraries library-one.csv, library-two.txt and the input file local-ids.txt  and one of the resources chebi, kegg, plantcyc, the mpimp ms  library  <cit>  and a manually curated list of chemicals which we refer to as the prime  chemical standards. we then tried to convert the identifiers and compound names used in the experimental data to the public identifiers cas, kegg id or inchi. these identifier types are used by all resources except the mpimp ms library and kegg which do not use the inchi identifier.
+
+comparison of cross-referencing performance for the  <dig> identifiers and synonyms found in the example data set. local reference libraries were combined with the sources listed in column databases via metmask and used to convert local identifiers to cas, kegg and inchi identifiers. the table lists the number of successfully converted identifiers. conversion to "any identifier" indicates the number of local identifiers that could be converted to any other type of identifier . using all resources together, as performed in the metmask approach, we obtain a better identifier conversion performance.
+
+enhanced performance in identifier conversion is, however, not the only advantage when using metmask compared to querying single public resources. metmask makes it possible to incorporate local identifiers to create a tailored database, something that is not supported by any online resource.
+
+metmask also gives a single interface for queries that facilitates and speeds up batch queries. performing the  <dig> queries for the example data set takes ca.  <dig> seconds on a standard pc. in comparison, the identifier conversion tool biospider  <cit>  use several online resources making it continuously up-to-date, but also fairly slow with a single query typically taking several minutes.
+
+visualization of a group of identifiers
+the associations in the example database provided with metmask are annotated both with the original source they came from and whether they are considered to be useful for identifying a specific metabolite or are weak . identifier groups can be visualized as networks where each source connects its own master identifier to a set of externally used identifiers. an excerpt of the connection graph for alanine is shown in figure  <dig>  the mpimp ms library connects alanine, -dl  with a kegg entry and two synonyms. as further sources were imported, more identifiers were added to the same group, making it easy to map our in-house identifier to the external resources even though those associations would require intermediate identifier types.
+
+note that multiple entries from the public databases chebi and kegg have been merged to the same entry since the analyte alanine, dl-  can be interpreted as any of the entries l-alanine , d-alanine  or alanine . this merging is an important feature because the resolution of the annotations must match that of the experimental platform and be as non-redundant as possible to avoid statistical bias toward multiply represented metabolites. gathering all equivalent identifiers also helps to avoid inconsistencies, which may arise when the same metabolite is annotated with slightly different compound names.
+
+performing this kind of identifier grouping is very difficult without combining the result of queries to multiple databases.
+
+to avoid creating connections between different metabolites we resorted to a heuristic rule-based approach. our capability to detect erroneous input is currently limited to ensuring good overlap and matching sum formulas between identifier groups before merging them. therefore, our accuracy depends largely on correct input. after importing new resources to the database it is recommendable to inspect the output manually to confirm the result. if mistakes are discovered, the graph visualization capability of metmask provides a way to track down the source of the errors. false associations can then be dropped from the database to avoid future errors. the main alternative to metmask, writing custom scripts, is not less error-prone, particularly since chemical databases tend to be sparsely connected requiring the use of intermediate identifiers.
+
+metmask facilitates multi-platform metabolomics and contextual data analysis
+identifier unification plays an important role if one combines multiple analytical platforms to obtain better coverage of the metabolome. different platforms may use different reference libraries, which results in data sets with mixed types of identifiers. in order to obtain a consensus, non-redundant data set, it is crucial that metabolite identifiers are used in a consistent manner. efficient identifier management is therefore a key technology for multi-platform metabolomics. current middleware solutions exemplified by biomart  <cit>  and biospider  <cit>  provide efficient access to online resources but do not resolve any ambiguities or redundancies that they imply.
+
+after the identifiers in the example data set are unified using metmask, all analytes that correspond to the same metabolite can be extracted and summarized by, e.g., replacing them with their first principal component . in figure 4a, the alanine features from ce-ms and gc-ms are replaced by their first principal component . this procedure can then be repeated for all duplicated metabolites until all features are unique. without proper identifier integration, this task would require manual intervention - an unfeasible process when working with wide coverage metabolomics data. the obtained consensus data set has the advantage over the original data that it is not biased towards the number of features that represent each metabolite. following data analysis thereby become easier to interpret and false positives due to multiply represented metabolites can be avoided.
+
+metmask can also link to databases with biological annotation and thereby facilitate biological interpretation. in figure 4b, the fold-changes between red and green ripening stages were sorted in to their metabolite classes as suggested by plantcyc. in a manner analogous to the gene set enrichment analysis   <cit>  where sets of genes are tested for association with a particular response variable, we can perform metabolite set enrichment analysis . using the kolmogorov-smirnov test , we test each class of metabolites to examine if the distribution of fold-changes within the class differs from that of the metabolites outside the class. here, we found that metabolites related to nucleotide/nucleoside synthesis, e.g., ribose, uridine, guanine and adenosine, have been up-regulated when comparing green tomatoes to red tomatoes . this observation is supported by carrari et al.'s  finding that transcripts for nucleotide conversion enzymes are strongly affected during tomato development  <cit> .
+
+CONCLUSIONS
+cross-referencing metabolite identifiers and gathering meta-data are essential technologies for metabolomics data analysis. there are several public databases that contain information on metabolites, but linking these data with the local identifiers and compound names often used in experimental data sets has been very difficult. here we presented a novel strategy for creating a database that gathers and organizes information about metabolites from both in-house reference libraries and external resources. our approach uses multiple identifier types in parallel when consolidating databases, thereby avoiding the problem of lacking a widely used identifier scheme. issues with redundant and missing entries are addressed by importing multiple resources to create a unified identifier database.
+
+the metmask tool provides an implementation of our ideas and can be used to create tailored metabolite mappings with minimum user effort. efficient handling of identifiers enables data summarization and biological interpretation via contextual analysis such as pathway projections.
+
+availability and requirements
+project name: metmask
+
+project home page: http://metmask.sourceforge.net
+
+operating systems: platform independent 
+
+programming language: python
+
+other requirements: none
+
+license: gnu gpl
+
+any restrictions to use by non-academics: none
+
+authors' contributions
+hr initiated the project, designed and implemented the program and wrote the manuscript. mk wrote the manuscript, provided gc-ms data and evaluated the program. af evaluated and tested the program and wrote the manuscript. fm provided lc-ms data, curated our library of reference compounds and contributed to the graph based visualization approach. ks and ma supervised the project.
+
+all authors read and approved the final version.
+
+supplementary material
+additional file 1
+user manual for metmask. instructions for installation and usage. also available by the project webpage.
+
+click here for file
+
+ additional file 2
+example reference library - csv. the comma separated text file based reference library used in the demonstration section.
+
+click here for file
+
+ additional file 3
+example reference library - nist. the nist ms data export based reference library used in the demonstration section.
+
+click here for file
+
+ additional file 4
+example input. the file with local identifiers used in the demonstration section.
+
+click here for file
+
+ acknowledgements
+the authors thank kouji takano, akiko takahashi, akane suzuki and dr takayuki tohge for their efforts with curating our chemical reference library. dr alisdair fernie is thanked for providing access to the mpimp ms library. dr shin watanabe, dr kyoko tanase, dr tadayoshi hirai, dr hiroshi ezura for providing tomato fruit material.

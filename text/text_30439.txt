@@ -1,0 +1,171 @@
+BACKGROUND
+sequence alignment is an order-preserving way to map characters between two dna or amino-acid  sequences. it is a pervasive operation in bioinformatics workflows used to identify regions of high similarity between sequences. similarity is generally measured by assigning a positive score to matches and a negative score to mismatches. for proteins, a substitution matrix, such as blosum  <cit>  or pam  <cit> , is used to score amino acid similarity for each possible residue pair. in addition to negative scores, alignments may be penalized by the insertion of gaps or deletion of characters. gap penalties are often linear  or affine  <cit> , where the gap opening penalty is typically larger than the gap extension penalty.
+
+there are three primary classes of sequence alignment, namely global, semi-global, and local. a global alignment causes the alignment to span the entire length of each sequence and is used when the two sequences are similar in length and presumed to be related. a local alignment identifies highly conserved regions or subsequences though the rest of the sequence may be divergent. a semi-global alignment does not penalize beginning or end gaps in a global alignment such that the resulting alignment will tend to overlap one end of a sequence with an end of the other sequence.
+
+sequence alignments are computed using dynamic programming because it is guaranteed to find an optimal alignment given a particular scoring function. regardless of the class of alignment being computed, a dynamic programming recurrence of the following form is computed. given two sequences s <dig> and s <dig>  three recurrences are defined as follows: let si,j denote the optimal score for aligning the prefixes s <dig> and s <dig> such that the alignment ends by substituting s <dig> with s <dig>  di,j denotes the optimal score for aligning the same two prefixes such that the alignment ends in a deletion, i.e., aligning s <dig> with a gap character. similarly, ii,j denotes the optimal score for aligning the prefixes such that the alignment ends in an insertion, i.e., aligning s <dig> with a gap character. given the above three ways to end an alignment, the optimal score for aligning the prefixes corresponding to the subproblem {i,j} is given by: ti,j=max. the dependencies for the individual dynamic programming recurrences are as follows: si,j derives its value from the solution computed for the subproblem {i− <dig> j−1}, while di,j and ii,j derive their values from the solutions computed for subproblems {i− <dig> j} and {i,j−1}, respectively.
+
+a typical implementation of this dynamic programming algorithm builds a table of size o with the characters of each sequence laid out along one of the two dimensions. each cell  in the table stores three values si,j, di,j, and ii,j, corresponding to the subproblem {i,j}. given the dependencies of the entries at a cell, the dynamic programming algorithms for all three sequence alignment classes can be represented using the pseudocode outlined in algorithm  <dig>  the algorithm has a time complexity of o.
+
+
+
+the three classes of sequence alignment initialize the first row and column differently . sw and sg alignments initialize the first row and column of the table to zero, while nw alignments initialize the first row and column based on the gap function. the table values for sw alignments are not allowed to become negative, while nw and sg allow for negative scores.
+
+hereafter, for convenience according to common practice, we call the sequence with characters along the rows of the table the “query” sequence and the sequence with characters along the columns of the table the “database” sequence.
+
+aligning two sequences of lengths m and n requires o time. this computation time becomes much more significant when computing many alignments as done in many bioinformatics applications, such as database search, multiple sequence alignment, genome assembly, and short read mapping. there have been many approaches to making this operation faster including heuristic methods such as blast  <cit> , however such heuristic methods may generate sub-optimal alignments.
+
+there have been numerous efforts to parallelize optimal sequence alignments using vector instructions . however, not all of these approaches necessarily address the same bioinformatics application. for example, database search may group database sequences to improve performance  <cit> , while protein homology graph applications may prohibit such optimizations  <cit> . that said, parallel sequence alignments generally fall into two categories: inter-sequence and intra-sequence. inter-sequence parallelization is the alignment of a single  sequence against a set of  sequences  <cit> , while intra-sequence parallelization is focused on parallelizing a single pairwise alignment of two sequences. zhao’s implementation of farrar’s “striped” method  <cit>  was previously the fastest intra-sequence implementation of smith-waterman while rognes’s swipe software is the fastest known inter-sequence implementation. no known implementations of vectorized needleman-wunsch or semi-global pairwise alignments existed for intra-sequence parallelism prior to the parasail library. two additional software libraries implement rognes’s inter-sequence approach, opal   <cit>  and libssa  <cit> . opal implements all classes of sequence alignments while libssa implements only local and global alignments. both libraries support the sse <dig>  as well as the avx <dig> instruction sets.
+
+implementation
+parasail is a simd c  library containing implementations of the smith-waterman , needleman-wunsch , and semi-global pairwise sequence alignment algorithms. here, semi-global means insertions before the start or after the end of either the query or target sequence are not penalized. parasail implements most known algorithms for vectorized pairwise sequence alignment, including diagonal  <cit> , blocked  <cit> , striped  <cit> , and prefix scan  <cit> . in addition, the parasail library implements each of these methods for the sse <dig>  sse <dig> , avx <dig>  and knc  instruction sets. parasail uses a technique called cpu dispatching to correctly select the appropriate implementation, at runtime, for the highest level of cpu instruction set supported. therefore, parasail is a reference implementation for these algorithms in addition to providing an implementation of the best-performing algorithm to date on the most advanced cpus. source code is available at https://github.com/jeffdaily/parasail under the battelle bsd license. the same files are included in a gzipped tar archive as additional file  <dig> 
+
+c library interface
+there are over one thousand functions within the parasail library. to make it easier to select a particular function, the function names follow a naming convention. the following will use parentheses “()” to indicate a selection from a set must be made. if a portion of the function name is optional, the description will indicate as such. underscores “_” separate each function name component. the components of the function names are listed in the order they should appear in the constructed function names. parasail required. the function prefix to avoid clashing with other libraries. all functions begin with this prefix.  required. the class of alignment; global, semi-global, or local, respectively, stats optional. return alignment statistics.  optional. return the entire dynamic programming table or return the last row and column of the dynamic programming table, respectively.  optional. the vectorized approach. striped is almost always the best choice. profile vector approaches only, specifically only prefix scan and striped, but optional in that case. the prefix scan and striped vector implementations must first compute a query profile. that step can optionally be performed ahead of time and the query profile reused to avoid costly recomputation of the query profile.  vector approaches only, but optional in that case. the instruction set and vector width. if not given, the default will use cpu dispatching to select the best available instruction set on the host system.  vector approaches only, but required in that case. the integer width of the solution. this also affects performance; a smaller integer width will increase the number of lanes used by the vectors and thus improve performance. if “sat” is used, the function defaults to the 8-bit implementation and, if overflow of the score is detected, it will retry using the 16-bit implementation.
+
+the two examples to follow should help illustrate how function names should be constructed. parasail_sw as simple as possible, this is the non-vectorized reference implementation of smith-waterman local alignment. it will return the alignment score as well as the ending locations of the alignment along the query and database sequences. parasail_sg_stats_scan_avx2_256_sat the prefix scan vector implementation of semi-global alignment. it will use 8-bit integers during the computation and recompute using 16-bit integers if overflow is detected . avx <dig> is selected for the cpu instruction set. additional alignment statistics are also computed and returned.
+
+instruction sets and cpu dispatching
+parasail supports the sse <dig>  sse <dig> , avx <dig>  and knc  instruction sets. in many cases, a compiler can compile source code for an instruction set that is not supported by the host cpu. the code is still compiled, however, parasail uses a technique called cpu dispatching to avoid running code that uses instructions that the host cpu does not support. cpu dispatching tests for features of the cpu at runtime which is different than testing whether a compiler can compile certain instructions at compile-time. the results of the runtime cpu tests are used to correctly select the appropriate parasail implementation for the highest level of instruction set supported on the host platform. this allows parasail to be compiled and distributed by a maintainer for the best available system while still allowing the same distribution to run with a lesser cpu.
+
+parasail is optimized for the sse <dig>  level of instruction set. some sse <dig>  instructions are missing for sse <dig> and were emulated using other available sse <dig> instructions. some avx <dig> instructions, e.g. bit packing, lane shifting, also needed to be emulated using other avx <dig> instructions because avx <dig> is effectively two sse 128-bit lanes operating independently and some operations do not cross the lane boundaries.
+
+improvements to striped vectorization
+farrar’s striped method  <cit>  remains the fastest smith-waterman inter-task algorithm to date. however, its implementation has seen two improvements. first, the swps <dig>  <cit>  implementation improved the lazy f evaluation loop. this improvement was duplicated in the ssw  <cit>  implementation.
+
+more recently, the striped method was evaluated with respect to the number of vector lanes utilized within the calculation. for example, sse uses a 128-bit vector that can be divided into 64-, 32-, 16-, or 8-bit integers which corresponds to two, four, eight, or sixteen vector lanes, respectively. a feature of the striped method is the recalculation of a column within the dynamic programming table until the column converges. evaluating ssw showed that the number of corrective passes increased as the number of vector lanes was increased  <cit> .
+
+this problem is improved within parasail using a technique of shifting the origin of the calculation towards the smallest representable integer. this takes advantage of the fact smith-waterman does not allow for negative values. for example, for 8-bit integers − <dig> is treated as  <dig>  allowing the entire range of  <dig> through  <dig> to be utilized. further, using saturation arithmetic keeps the calculation from underflowing. this is not unlike previous sse <dig> implementations that mitigated the lack of a signed 8-bit vector maximum instruction and instead used unsigned integers  <cit> . however, there is not a corresponding unsigned 16-bit vector maximum instruction for sse <dig> while there are sufficient signed saturation arithmetic operations available to perform the calculation. the combination of shifting the values and using saturation arithmetic significantly reduces the number of corrective passes needed for each column in the dynamic programming table.
+
+unfortunately, similar improvements were not possible for needleman-wunsch or semi-global alignment because the table values are allowed to be negative. as a result, in some cases the prefix scan implementation of those algorithms will perform better than the striped implementation  <cit> .
+
+one last improvement was made to the implementation of zhao et al.  <cit> . in their implementation of local alignment, a copy of the entire column is made for the column containing the highest score. parasail’s implementation avoids the costly memory copy by swapping pointer references to an auxiliary column. this only applies to local alignments; the global and semi-global implementations do not require the additional column.
+
+code generation
+the parasail library uses a code generation step in addition to some compiler preprocessor directives to create the thousands of functions implemented within the library. this takes advantage of the observation that the basic algorithms for the three classes of alignments remain the same no matter which instruction set and integer width is used. end users do not need to worry about this code generation step, though for code development this has a number of benefits including faster time to solution when modifying the code as well as enforcing consistency between the myriad implementations possible.
+
+verification
+the parasail library is rigorously tested using cross-verification to verify correct implementations of the various library functions. given a test dataset in fasta format, the result of the reference implementation for a given class of alignment is compared against all other implementations for the same class of alignment. this is done both for the resulting alignment scores as well as for the byte by byte comparisons of the entire dynamic programming tables involved. the software is not released until all tests pass for reasonably sized test datasets.
+
+parasail aligner application
+in addition to the parasail library, the software also provides the parasail_aligner application. the aligner application will take a fasta- or fastq-formatted query file as input and align all of the query sequences against a set of database sequences found in a second fasta- fastq-formatted database file. alternatively, if only one file is supplied, all of the sequences in the file will be compared against themselves. since the parasail library implements many different alignment routines, the name of the function to use must be specified to the aligner. optionally, a filter can be applied to skip the alignment of any two sequences that don’t contain an exact-matching seed of the given length. this filter uses an enhanced suffix array data structure  <cit>  that allows for arbitrarily long exact-matching seeds.
+
+RESULTS
+the following benchmarks repeat those performed by rognes  <cit> . the reader is encouraged to refer to rognes’s original manuscript. the database sequences, accession numbers, score matrices and gap penalties are identical to those used previously, however they are repeated in later sections for convenience. further, the figures and tables are intentionally similar in color, layout, and styling in order to more easily compare to the previous evaluation. however, the tests performed here do differ with respect to the software selected for evaluation. blast  <cit> , blast+  <cit> , and swipe  <cit>  were previously evaluated; the latest available versions were selected for the current evaluation. swps <dig>  <cit>  is not evaluated. the latest implementation of farrar’s striped method  <cit>  is evaluated in the context of the ssw library  <cit> . the new implementation of the striped method within parasail’s library is evaluated as “parasail”. no previous evaluation of global and semi-global alignment performance has been performed. since opal  <cit>  and libssa  <cit>  support global alignments, their performance is compared against parasail’s implementations. when comparing the performance of various approaches and implementations, speed is reported in billion  cell updates per second , where a cell is a value in the dynamic programming table.
+
+great care was taken to compare the various software libraries and applications fairly. all tests were run three times and the average gcups performance was recorded. the loading times for the database sequences were excluded from this study in order to focus on the algorithmic performance of the alignment routines. the following software reported the gcups performance directly for the alignments performed: parasail, opal, swipe, and ssw. for the remaining software including blast, blast+, and libssa, a wall clock timer was patched into the code that reported on the alignment times only, and the wall clock time was used to calculate the gcups result based on the known amount of work for each test case performed.
+
+softwaretable  <dig> software included in performance testing
+
+command line variables: threads , score matrix file name , gap open  and extension  penalties , query file name , database file basename , parasail alignment function name 
+
+
+
+the parasail_aligner can be run using any one of the many alignment routines the parasail library provides. the initial benchmarks compare other local alignment implementations against parasail’s local alignment implementation. the latter benchmarks compare parasail’s local alignment performance against its global and semi-global performance for the striped and scan vectorized approaches. the following parasail functions were evaluated. 
+parasail_sw_striped_profile_sse41_128_sat,
+
+parasail_sw_striped_profile_avx2_256_sat,
+
+parasail_nw_striped_profile_sse41_128_ <dig> 
+
+parasail_nw_striped_profile_avx2_256_ <dig> 
+
+parasail_nw_scan_profile_sse41_128_ <dig> 
+
+parasail_nw_scan_profile_avx2_256_ <dig> 
+
+parasail_sg_striped_profile_sse41_128_ <dig> 
+
+parasail_sg_striped_profile_avx2_256_ <dig> 
+
+parasail_sg_scan_profile_sse41_128_ <dig>  and
+
+parasail_sg_scan_profile_avx2_256_ <dig> 
+
+
+
+hardware
+results were taken on compute nodes of the constance cluster, part of pacific northwest national laboratory’s institutional computing. each constance node contains dual intel haswell e5- <dig> cpus  giving  <dig> cores and  <dig> gb 2133mhz ddr <dig> memory per node. intel’s haswell cpus support the avx <dig> instruction set. although these processors are capable of hyper-threading, which would have given each node  <dig> logical cores, it was not used for these experiments. hyper-threading is intentionally disabled as a matter of policy because constance is a general use cluster and hyper-threading benefits are strongly application dependent  <cit> . because it was not enabled, only up to  <dig> cores were utilized.
+
+database and query sequences
+the uniprot knowledgebase release  <dig>   <cit>   was chosen because it duplicates the benchmark evaluation performed by rognes in  <cit> . the dataset was originally chosen for being a realistic dataset less than 2gb in size because some of the software originally tested would fail for larger file sizes. the current software tested does not have the same input size limits, however the same dataset is used for consistency with the previous evaluation. this validates rognes’s original intent of selecting a dataset that should be available for download in the foreseeable future, since the new evaluation presented here occurs over eight years later.
+
+the query sequences used here are identical to the ones used by rognes. the  <dig> accession numbers are . note that  replaces . the queries range in length from  <dig> to  <dig> residues. as done previously by rognes, some of the tests were only performed with the  <dig> residues long p <dig> query, representing a protein of roughly average length  <cit> .
+
+score matrices and gap penalties
+the score matrices and gap penalties selected for this evaluation duplicate those used by rognes  <cit>  so that a direct comparison can be made between the two evaluations. previously,  <dig> different combinations of amino acid substitution score matrices and gap penalties accepted by blast were tested, including blosum <dig>  blosum <dig>  blosum <dig>  blosum <dig>  and blosum <dig> from the blosum series  <cit>  as well as pam <dig>  pam <dig>  and pam <dig> from the pam series  <cit> . these matrices previously represented the ones supported by earlier blast versions, though there are currently  <dig> combinations of amino acid substitution score matrices and gap penalties accepted by the ‘blastp’ website  <cit> . matrices were obtained from the ncbi ftp site. again, duplicating the same evaluation criteria as rognes, some of the tests were only performed with the blosum <dig> matrix and gap open and extension penalties of  <dig> and  <dig>  respectively, which is the blast default  <cit> .
+
+threading evaluationfig.  <dig> performance dependency on number of threads and query length. the speed in billion cell updates per second  of blast , blast+ , swipe , ssw , parasail’s striped sw implementation using sse <dig>   and avx <dig>  instruction sets, as well as libssa using sse <dig>   and avx <dig> , using a variable number of threads and queries of varying length. opal is only evaluated in c since the application was single-threaded . a number of threads ranging from  <dig> to  <dig> and the  <dig> residue long p <dig> query sequence. b query sequences ranging from  <dig> to  <dig> residues in length and  <dig> threads. c query sequences of varying length and  <dig> thread. all scales are logarithmic. the blosum <dig> matrix and gap open and extension penalties of  <dig> and  <dig>  respectively, were used in all cases. this figure corresponds to figure  <dig> in rognes  <cit> 
+
+
+
+compared to the previous evaluation in  <cit> , the performance of all striped implementations perform significantly better than previously reported. at best, striped  had a performance range of  <dig>  to  <dig>  gcups and now runs from  <dig>  to  <dig>  gcups. this large difference is attributed to both improved sequence database processing as well as the use of better workload scheduling. the performance of parasail’s sse <dig>  implementation ranges from  <dig>  to  <dig>  gcups while the avx <dig> implementation ranges from  <dig>  to  <dig>  gcups. swipe previously ran from  <dig>  to  <dig>  gcups and now runs from  <dig>  to  <dig>  gcups, indicating a relatively small drop in performance for a single thread while significantly improving on multithreaded performance. libssa’s sse <dig>  implementation ranges from  <dig>  to  <dig>  gcups while the avx <dig> implementation ranges from  <dig>  to  <dig>  gcups. blast reaches an early peak of  <dig>  gcups at  <dig> threads while blast+ continues to scale to upwards of  <dig>  gcups. overall, blast+ performs the best while the striped implementations are narrowly below swipe in performance.
+
+query length evaluation
+using  <dig> threads, similar to the threading evaluation above, the performance of all striped implementations perform significantly better than previously reported. ssw ranged from  <dig>  to  <dig>  gcups while previously ranging from  <dig>  to  <dig>  gcups. the parasail implementations start off somewhat slower at  <dig>  and  <dig> , and peak at  <dig>  and  <dig>  for sse <dig>  and avx <dig>  respectively. generally, longer queries performed better for all software evaluated. swipe was an exception, having a rather flat performance curve but quickly maxing out at  <dig>  gcups. libssa was the other exception, having peaked at  <dig>  and  <dig>  gcups for sse <dig>  and avx <dig>  respectively, but performance quickly dropped off for sequences longer than  <dig>  amino acids. parasail’s avx <dig> implementation begins to outperform swipe for query sequences longer than approximately  <dig> amino acids. blast+ again was the strongest performer, topping out at  <dig>  gcups.
+
+using a single thread compared to all  <dig> threads, similar performance characteristics are noted. performance peaks of  <dig> ,  <dig> ,  <dig> ,  <dig> ,  <dig> , and  <dig>  gcups are noted for swipe, ssw, parasail sse <dig> , parasail avx <dig>  libssa sse <dig> , and libssa avx <dig>  respectively. blast and blast+ perform similarly and peak near  <dig> gcups. opal is evaluated using a single thread, peaking at  <dig>  and  <dig>  gcups for its sse <dig>  and avx <dig> implementations, respectively, the slowest of any implementation evaluated.
+
+scoring system evaluationfig.  <dig> performance with different scoring systems. the speed in billion cell updates per second   is shown for blast , blast+ , swipe , and ssw , parasail’s striped sw implementation using sse <dig>   and avx <dig>  instruction sets, as well as libssa using sse <dig>   and avx <dig> , using different scoring systems. all combinations of scoring matrices and gap penalties accepted by blast were tested. the matrix name is indicated above each graph, while the open and extension gap penalties are indicated on the x-axis. the query sequence was p <dig> and  <dig> threads were running. this figure corresponds to figure  <dig> in rognes  <cit> 
+
+
+
+the striped implementations again perform better than previously reported. previously striped was running at an almost constant  <dig> gcups while ssw now shows a dependence on the scoring criteria with an average of  <dig> ± <dig>  gcups. both parasail implementations show a similar dependence on the scoring criteria of  <dig> ± <dig>  gcups and  <dig> ± <dig>  gcups for sse <dig>  and avx <dig>  respectively. swipe runs better at  <dig> ± <dig>  gcups compared to the previous 104± <dig> gcups. libssa performs better than its swipe counterpart when using avx <dig> instructions, running at  <dig> ± <dig>  gcups, while performing only at  <dig> ± <dig>  gcups using sse <dig>  instructions. the performance of blast and blast+ was highly dependent on the scoring matrix used, with gcups of  <dig> ± <dig>  and  <dig> ± <dig> , respectively.
+
+evaluation of global and semi-global implementations
+the threading and query length evaluations were additionally performed using global and semi-global alignment routines.
+
+libssa’s global alignment capabilities were evaluated. due to the lack of an available multithreaded application, opal’s global alignment evaluation was limited to the lone single-threaded evaluation. in addition to parasail’s striped vector approach, the prefix scan approach is also evaluated. unlike in the evaluation of local alignments where the 8-bit saturation-checking routines were used, the 16-bit element versions of the global and semi-global alignment routines were used because the 8-bit versions almost always saturated, resulting in poor performance with wasted computation. this was true both for parasail as well as libssa.
+fig.  <dig> performance dependency on number of threads and query length for global alignments. the speed in billion cell updates per second  of striped sse <dig>  vectors , prefix scan sse <dig>  vectors , striped avx <dig> vectors , and prefix scan avx <dig> vectors , as well as libssa using sse <dig>   and avx <dig>  instruction sets, using a variable number of threads and queries of varying length. a number of threads ranging from  <dig> to  <dig> and the  <dig> residue long p <dig> query sequence. b query sequences ranging from  <dig> to  <dig> residues in length and  <dig> threads. c query sequences of varying length and  <dig> thread. all scales are logarithmic. the blosum <dig> matrix and gap open and extension penalties of  <dig> and  <dig>  respectively, were used in all cases
+
+fig.  <dig> performance with different scoring systems for global alignments. the speed in billion cell updates per second   is shown for striped sse <dig>  vectors , prefix scan sse <dig>  vectors , striped avx <dig> vectors , and prefix scan avx <dig> vectors , as well as libssa using sse <dig>   and avx <dig> , using different scoring systems. note that the libssa results completely overlap. all combinations of scoring matrices and gap penalties accepted by blast were tested. the matrix name is indicated above each graph, while the open and extension gap penalties are indicated on the x-axis. the query sequence was p <dig> and  <dig> threads were running
+
+
+
+unfortunately, libssa is not performing as expected for global alignments. libssa was previously reported to be nearly two times faster than opal  <cit> , though here opal is outperforming all other implementations by a wide margin for single-threaded global alignments. parasail is also outperforming libssa for all alignments evaluated. examining the output of these runs showed that libssa was detecting overflow of the 16-bit calculations for all query and database sequence combinations, forcing libssa to perform a 64-bit evaluation instead. this is clearly an error, since parasail is not detecting overflow during its 16-bit calculations. this unfortunate result is attributed to libssa being research code; the results presented in  <cit>  validate the approach even though the current evaluation was unable to reproduce favorable results.
+
+semi-global results are similar to global results for opal. libssa does not implement semi-global alignment and as such is not evaluated. for parasail’s striped implementation, the semi-global routines are slightly faster than the global routines but significantly slower than local alignments. parasail’s scan implementation is slower than the striped implementation for semi-global alignments.
+
+for parasail’s prefix scan implementations, each column of the dynamic programming table is iterated over twice. this leads to stable, predictable performance of the prefix scan vector approach. the prefix scan routines have stable performance for the global classes of alignments. this stable performance of the prefix scan vector routines is especially evident in fig.  <dig>  even considering the stable performance of the prefix scan routines, the striped approach is always faster for local alignments and semi-global alignments.
+
+discussion
+the parasail library is an improvement over earlier simd intra-sequence implementations. the performance reported here is also better than what was previously reported for intra-sequence alignments  <cit> .
+
+the intent of the parasail library is to be integrated into other software packages, not necessarily to replace the already highly performing database search tools such as blast  <cit> , swipe  <cit> , or libssa  <cit> ; database search on its own is an important problem with satisfactory solutions. as a software library that focuses on individual pairwise alignments, parasail can be more readily adapted into other software packages needing such a capability, such as those described by  <cit>  or as part of other programming language packages such as scikit-bio  <cit> .
+
+the parasail library represents the first time global, semi-global, and local alignment routines are available as a high performance software library. the routines have been written to utilize the latest x <dig> cpu instruction sets while remaining compatible with any platform. the modular implementation and code generation process will easily allow parasail to be adapted to future instruction sets with wider vector units as they become available.
+
+future versions of parasail will add the capability of returning alignment tracebacks. though parasail already has the option of returning additional alignment statistics, the full traceback is important in some cases. as open source software, the intent is to welcome feature requests, enhancements, and fixes from the growing parasail community.
+
+CONCLUSIONS
+the parasail library is an improvement over earlier simd intra-sequence implementations. applications that require optimal alignment scores could benefit from the improved performance. for the first time, simd global, semi-global, and local alignments are available in a stand-alone high-performance c library.
+
+availability and requirements
+project name: parasail - pairwise sequence alignment libraryproject home page:https://github.com/jeffdaily/parasailoperating system: platform independentprogramming language: c, with python language bindingsother requirements: sse <dig>  sse <dig> , and/or avx <dig> compiler intrinsics preferredlicense: battelle bsd-styleany restrictions to use by non-academics: n/a
+
+additional file
+additional file  <dig> 
+parasail v <dig> . <dig> source code. the source code of parasail version  <dig> . <dig> as a gzipped tar archive file. 
+
+
+
+abbreviations
+gcupsgiga cell updates per second
+
+simdsingle instruction multiple data
+
+sse,sse <dig> sse <dig> streaming simd extensions, version  <dig>  or version  <dig> 
+
+avx,avx2advanced vector extensions, version 2
+
+swsmith-waterman local alignment
+
+nwneedleman-wunsch global alignment
+
+sgsemi-global alignment
+
+competing interests
+
+the author declares that he has no competing interests.
+
+this work was supported by pacific northwest national laboratory  institutional overhead funds. pnnl is operated by battelle for the u.s. department of energy under contract de-ac05-76rl <dig>  i thank dr. ananth kalyanaraman for discussions and comments relating to the paper’s research.

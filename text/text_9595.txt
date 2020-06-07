@@ -1,0 +1,134 @@
+BACKGROUND
+the phylogenetic relationship between organisms on a local genomic level does not always directly reflect the history of speciation. this can be due to well-known phenomena such as gene duplication and subsequent sub- and neo-functionalisation , population subdivision and asymmetric gene flow  <cit> , introgression  <cit> , incomplete lineage sorting  <cit> , hybridisation  <cit> , copy number variation  <cit> , and parallel adaptive evolution  <cit> . identifying the regions subjected to these processes promises important insights into genome evolution, as we can relate these changes back to their expected biological roles, and in extension, the possible evolutionary pressures that ensured the survival of these regions within the studied population. we previously used a machine-learning algorithm that incorporated a hidden markov model   <cit>  and a self-organising map   <cit> , to investigate the genomes of sticklebacks. there, we detected distinct signatures of local phylogenies that are discordant with ancestry, which we could attribute to the effect of parallel adaptive evolution  <cit> . we now expand the scope of this algorithm and present the software, saguaro.
+
+a number of analysis tools have been developed to measure differences in local phylogenies, including but not limited to phylo-hmm  <cit> , siphy  <cit> , and coal-hmm  <cit> . while these methods detect changes in phylogenetic tree size and branch lengths, or match local regions with a set of phylogenetic hypotheses, they lack a component to learn hypotheses directly from the data and without supervision. this is a particularly relevant limitation when analysing a large number of genomes, since these methods have no means of detecting patterns that were not anticipated. saguaro fills the gap left by these methods in that it learns from the data without input of any a priori hypotheses. however, it does not provide the biological interpretation of its findings, but instead helps in generating new questions and perspectives.
+
+at any given position in a multiple sequence alignment, the nucleotides in different genomes are either identical with each other, or not. consequently, this local relationship is best described as a binary phylogeny that is built from this single nucleotide site. wider branching patterns and branch lengths only become apparent as the average of adjacent binary trees, and from those, more meaningful phylogenetic patterns can be inferred. in order to accommodate a phylogeny that can be built up from such binary trees, saguaro is based on the concept of a cactus. given n genomes, a cactus is a symmetric matrix of n*n pairwise genome comparisons, where each element describes how different two genomes are relative to all other pairs. restricting input sites to positions in which a minimum number of genomes differ from the rest normalizes the elements in the matrix, both in terms of phylogenetic branch lengths, as well as the branching itself. the purpose of a cactus is thus to represent segments of the genome in which consecutive input sites, as a whole, best match a particular cactus, without a cactus providing any immediate biological meaning. while the segmentation can be efficiently computed by a hmm, the next challenge is to a priori hypothesise the shape of the cactus that best represents the genomic segments. to achieve this, saguaro utilises a som, which is an efficient unsupervised pattern recognition and classification algorithm. soms have been used in bioinformatics, including classification of the selectivity of inhibitors  <cit> , image analyses of fungal colonies  <cit> , and transcription factor binding site identification  <cit> . a feature that distinguishes a som from other clustering and classification algorithms is that it models the topology of the input data onto its neurons by reducing the dimensionality of the input space. in this regard, it can be considered a non-linear generalisation of principal components analysis  <cit> , which is a widely used multivariate analysis algorithm to automatically group data points by patterns. the purpose of saguaro’s som is to iteratively build up a set of cacti differing in the phylogeny that they describe, so that the local relationship between sequences in each region is well represented by at least one cactus.
+
+here, we first explain the methods behind saguaro, and continue by presenting results from analyses using two different data sets:  many genomes of short lengths:  <dig> strains of the dengue virus serotype  <dig> isolated from different geographical locations over several years and from various outbreaks  <cit> ; and  few, but complex, large genomes: five primates including human, chimpanzee, gorilla, orang-utan, and macaque.
+
+implementation
+saguaro’s basic workflow is shown in figure 1a. after the genomes have been aligned, saguaro first builds one cactus from all differences found in the entire genome, and then iteratively adds more cacti to refine representations for different subsets of the genome. in each iteration, it scores each nucleotide site against a set of cacti, using the hmm to determine segment boundaries. then, saguaro re-computes each cactus based on the sites in its segments to further improve the cactus’ representation of its sites. saguaro then trains a som for each cactus. this allows the software to further partition the pattern space, identifying genomic regions that are not well modelled by any of the cacti in the current set, and hypothesise additional cacti that are more representative of these regions. each som is trained with randomly chosen sites from regions assigned to its cactus so that the neurons model local patterns from these positions . this subdivision of the input space serves to hypothesise new cacti by examining the shape of the som after training.
+
+figure 1b is a schematic of the inner mechanisms of saguaro. after segmenting the genome into regions, the som is presented with random sites from regions assigned to the same cactus. input sites are transformed into binary vectors where white indicates nucleotide matches and black represent mismatches. the som is trained from binary vectors into neurons that are represented by continuous vectors. as a result, the neurons cluster by frequency of input patterns, with the most prominent pattern forming the tightest cluster with the highest density of data points. saguaro then finds the second-most weighted cluster at a minimum distance from the highest weighted cluster, representing input sites that are most abundant in the input data but least well modelled by the cactus they were assigned to. the data vector from these neurons is then expanded into a cactus and added to the hmm’s set of cacti. in the next round of iterations, the hmm re-segments the input data and re-estimates all cacti. this process is repeated for a set number of iterations, after which the final output is computed as a segmentation of the input sequences into different phylogenetic patterns for further examination and biological interpretation.
+
+input and output formats
+input data needs to be converted into saguaro-native binary format. saguaro provides conversion tools for multiple alignment format , variant call format , and multi-fasta format of aligned genomes. filtering out uninformative sites is configurable and implemented during conversion. at the end, saguaro also computes a local cactus for each individual region.
+
+hidden markov model 
+the states of the hmm are defined by cacti, applying a flat penalty when transitioning between states and requiring a minimum stay duration of three consecutive nucleotide sites, modelled by three sequential states. given n genomes, for each nucleotide site, we construct the observed matrix o of size n*n, which is a binary matrix of 0’s  and 1’s  based on pairwise comparisons. we next define the scoring scheme s to compare a cactus h to matrix o. we can think of a possible nucleotide substitution between genome i and j  as a poisson process with parameter hi,j representing a measure for the distance between genome i and j compared to all other pairwise comparisons. since the observed number of substitutions oi,j is either  <dig> or  <dig>  the likelihood li,j of the individual observation oi,j is:
+
+ li,j=e−hi,joi,j=01−e−hi,joi,j= <dig> 
+
+which can be summarised in one expression as:
+
+ li,j=e−hi,j+oi,j−2oi,je−hi,j 
+
+assuming independence across all genomes, the likelihood l of the entire observation o is the product of all the individual likelihoods li,j. this gives:
+
+ lo,h=∏i≠je−hi,j+oi,j−2oi,je−hi,j 
+
+l is positive as long as hi,j ≠  <dig>  we let the final score, s, be the log of the likelihood score l:
+
+ so,h=∑hi,j≠0loge−hi,j+oi,j−2oi,je−hi,j 
+
+if genome i or j  do not have any information at the given position, we set oi,j = − <dig>  the score s is then:
+
+ so,h=∑hi,j≠0oi,j≠−1loge−hi,j+oi,j−2oi,je−hi,j 
+
+subsequent to each segmentation, we update all cacti by modifying h to represent more of the observations indexed by the set r ∈ n. we minimise the total score s’ of h over all the observations:
+
+ s'h,r=∑r∈rsh,or 
+
+since s is the sum of log likelihood scores over all genome pairs, we can optimise each hi,j individually.
+
+for a single pair of genomes , let:
+
+a <dig> = the number of observations in {or} in which genome i and j agree
+
+a <dig> = the number of observations in {or} in which genome i and j disagree
+
+undefined observations are not included. we thus maximise the total score over all observations
+
+ s'i,j=∑r∈rloge−hi,j+oi,j−2oi,je−hi,j=−a0hi,j+a1log1−e−hi,j 
+
+s’i,j is a differentiable function of hi,j which attains its maximum at
+
+ h*i,j=−loga0a0+a1a0≠0∞a0= <dig> 
+
+thus, we update h for the data in {or} by setting:
+
+ hi,j=−loga0a0+a1a0≠0loga1a0= <dig> 
+
+for all pairs .
+
+self organizing map 
+saguaro’s self organizing map  is organised in a circle. given the number of genomes n, each neuron contains a vector f with size n, and its elements fi are initially assigned random values between  <dig> and  <dig>  to train the neural network, input positions are randomised in order, and each input position is converted into a vector l of size n, with each element li either set to  <dig> or  <dig>  depending on whether the nucleotides are identical  or not  compared to one randomly chosen genome that serves as the reference for the site. we then compute the distance between this vector and each vector fj of neuron j as:
+
+ dj=min∑ifij−li2n,∑ifij−1−li2n 
+
+based on this distance measure, we determine the neuron g with the shortest distance. all neurons j are then updated as:
+
+ fij'=fij1−w+wli 
+
+where the weight w is defined as:
+
+ w=hminj−g <dig> n−j−g2+ <dig> 
+
+with n being the number of neurons, and h monotonically decreasing with the number of processed input sites.
+
+parameter choice
+saguaro has two main parameters:  the penalty applied by the hmm when transitioning between different cacti, and  the number of neurons in the self-organizing map. to investigate parameter sensitivity, we previously applied saguaro to genomic re-sequencing data from the twenty populations of sticklebacks in which we previously identified signatures of adaptive evolution using this method, as well as a hypothesis-driven statistical approach  <cit> . we ran saguaro on all of chromosome iv with transition penalties of  <dig>   <dig>   <dig>  and  <dig>  for values of  <dig>   <dig>  and  <dig>  saguaro found the signature of adaptive evolution within four iterations, while a transition penalty of  <dig> required seven iterations, suggesting a drop-off in sensitivity above  <dig>  we next varied the number of som neurons, using  <dig>   <dig>  and  <dig> respectively. while  <dig> and  <dig> neurons yielded identical results over the first five iterations, the use of  <dig> neurons required one additional iteration before the signature was found, suggesting a drop in sensitivity at this value or lower. after  <dig> iterations, each run yielded very similar results, suggesting that  the choice of parameters mostly affects runtime, and that the algorithm is robust with regards to parameter settings. based on the test above and in absence of any training data particular to the data sets, we selected a transition penalty of  <dig> and  <dig> som neurons for the analyses described here, the same values that were used in the stickleback study.
+
+RESULTS
+simulated data
+we first generated a simulated data set, based on a  <dig> kb genome. genomes for  <dig> individuals were simulated in blocks of random size  using the program dawg  <cit>  version  <dig>  by specifying one of four phylogenies  with mutations at a rate of  <dig> -1% per generation. in order to simulate uneven abundance of these phylogenies, we set the probabilities to  <dig> ,  <dig> ,  <dig> , and  <dig>  to choose these phylogenies, allowing for consecutive blocks of the same phylogeny. figure 2b shows a visual representation of saguaro’s output after different numbers of iterations, compared to the “truth” input set for the simulation at the top. for comparison, we computed local phylogenies and coloured the segments according to which simulated phylogeny was most closely matched, as determined by topd  <cit> . as soon as in the second iteration, where only two cacti are available for segmentation, saguaro starts detecting segment boundaries correctly. after  <dig> iterations, saguaro segments the genome into blocks closely resembling the truth, with the shortest block being  <dig> bp long and containing  <dig> snp's. only one  <dig> nucleotide long region with  <dig> snps was not identified correctly .
+
+in order to determine sensitivity, we next varied the divergence rates from  <dig> to  <dig>  . to measure the performance of the segmentation, we computed tree topologies for each segment, and counted the percentage of the genome that was either:  assigned to a topology accurately representing the simulation ;  assigned to a topology different from the simulation ; and  the percentage not assigned to any cactus, i.e. invariant regions between snps at the segment boundaries . as expected, assignments were more accurate with increasing divergence, starting to level out at around  <dig>  .
+
+local pattern variation in dengue virus phylogeny
+dengue viruses are mosquito-borne single-stranded rna viruses of the flaviviridae family that infect humans with between  <dig> to  <dig> million cases reported every year  <cit> . over several years,  <dig> dengue virus serotype  <dig>  strains have been collected from various geographic locations in central and south america  as well as asia   <cit> . schmidt et al. reported that the genome-wide phylogeny is reflective primarily of geographic location, but also of the year of outbreak. the dengue virus genome size is small at around  <dig>  nucleotides, and we thus hypothesise that selection criteria may exert pressure on very localised regions in the virus. to explore this, we first extracted a total of  <dig> single nucleotide differences and short insertions and deletions  from multiple sequence alignments  <cit> . variants supported by at least three dengue virus strains were classified as phylogenetically informative. iterative runs of saguaro produced five different cacti, with cacti  <dig> to  <dig> being very similar to each other, but with cactus  <dig> being distinct. to independently validate whether these cacti describe changes in local phylogeny, we used a pipeline  <cit>  consisting of muscle  <cit> , gblocks  <cit> , and phyml  <cit>  to re-align different genomic sequences segmented into cacti directly, and to build a phylogeny based on all nucleotides, including identical sites. a dengue virus serotype  <dig> sequence was used as outgroup in the phylogeny.
+
+phylogenies based on regions covered by cactus  <dig> through  <dig> closely resembled previous findings  <cit> , namely that phylogeny followed geographic sampling and year of outbreak . by contrast, the phylogeny built from the regions identified by cactus  <dig>  which cover  <dig> % of the genome in  <dig> distinct loci, is clearly different . the sequences from thailand  show little within-group divergence and form an independent cluster separate from the shorter, collapsed branch lengths of the central and south american dengue virus sequences. this group of american dengue virus strains were collected from recent outbreaks in the early 2000’s and cluster with sequences representing outbreaks in the early 1980’s in sri lanka  and mozambique , suggesting shared evolutionary constraint. this phylogeny is consistent with the reported spread of these epidemics from sri lanka, through africa, and into the caribbean and the americas in the mid 1980’s  <cit> .
+
+closer examination of cactus  <dig> revealed that the longest continuous region was derived from five nucleotide sites spanning  <dig> bases in the 3’ untranslated region  of the  <dig> amino acid polyprotein open reading frame . the identification of this signal prompted us to use overlapping sequence windows to test the entire dengue virus genomes for signs of overall and strain-specific nucleotide conservation. for each nucleotide position l in the multiple sequence alignment where at least one genome had a mismatch with another, we determined the smaller number of genomes nl that differed from each other . for each l, we then report
+
+ cl=∑i=l−60l+60ni− <dig> 
+
+as a measure of conservation at site l.
+
+figure 3c shows the result graphically, plotting the calculated sequence conservation against the physical length of the viral genome. the value determined using all genome sequences  is illustrated in contrast to that generated by all sequences except those sourced from thailand . while the strongest signal of overall conservation is located close to the 3’ end of the genome , the signal extends in the 5’ direction when the thai sequences are excluded. this latter signal, masked when overall conservation is computed, is identical to the region identified by cactus  <dig>  and shows signatures of strain-specific conservation in two groups, both the thailand strains as well as the other strains.
+
+genes involved in the immune system leave a distinct trace in five primate genomes
+we extracted the human, chimpanzee, gorilla, orang-utan and macaque genomes from the multiz- <dig> multiple sequence alignments that were used in the analysis of  <dig> mammalian genomes  <cit>  and imposed filters to mask transposable elements and simple repeats, leaving only positions in which all genomes aligned. after also removing private snps, i.e. positions in which only one genome was different and all others were the same, we were left with ~ <dig>  million positions from which saguaro produced  <dig> cacti. figure 4a shows a neighbour joining distance tree of cacti based on their pair-wise euclidean distances. rather than exhibiting a star-like shape, which would indicate many different patterns, cacti are placed into four main clades. the top clade  captures mostly shared sequence ancestry and covers ~97% of the genome. phylogenies computed from this dominant clade are similar to each other in terms of branching pattern and length. notably, cacti representing close to one third of the aligned genomes transposed the relationships between gorilla, chimpanzee and human. this is consistent with previous reports that attribute these regions to the effect of incomplete lineage sorting  <cit> .
+
+outside of clade  <dig>  there are  <dig> cacti identifying  <dig> disjoint regions. figure 4b shows a human-centric view of the genome-wide distribution of cacti. this ideogram has been coloured to aid visualisation . clades 2– <dig> and the outlier cacti overlap with the introns or exons of  <dig>  coding  or non-coding  genes . about 33%  of these genes are processed  or unprocessed  pseudogenes, and an additional  <dig> non-coding rnas contain lincrnas , micrornas , and snornas . gene families with more than five members included six synovial sarcoma × genes,  <dig> udp glucuronosyltransferases, eight cytochromes,  <dig> olfactory receptors and two taste receptors,  <dig> keratins and keratin associated proteins and  <dig> prame family members. of the  <dig> zinc finger proteins targeted by this analysis, most were located on chromosome  <dig> where zinc finger clusters are known to have undergone recent expansions  <cit> . interestingly, genes transcribed to form the variable parts of antibodies for immunoglobolin d  and immunoglobolin v  figured prominently, as did immunoglobolin v pseudogenes . other immunology-related findings included immunoglobulin lambda-like polypeptide  <dig> , immunoglobulin superfamily member  <dig> ,  <dig> hla genes located in the major histocompatibility complex, eight interferon alpha genes, and the interferon gamma-inducible protein  <dig> . go-term analysis using ingenuity pa  recovered additional genes involved in inflammatory/immune response . among the top ranked genes  were apol <dig>  apol <dig>  app, casp <dig>  casp <dig>  ceacam <dig>  cr <dig>  crocc, csf2rb, cxcl <dig>  e2f <dig>  gba, ggt <dig>  kir3dl <dig>  mylk, nbn, nos <dig>  parp <dig>  rabgef <dig>  tnfrsf10b, tnfrsf <dig>  ulbp <dig>  and xbp <dig> 
+
+CONCLUSIONS
+while an hmm can accurately segment a stream of features into various patterns, it lacks the ability to a priori hypothesise what these patterns are. conversely, a som will cluster signals into distinct patterns automatically, albeit without a spatial component to allow for determination of signal patterning. through the interleaved application of both algorithms, saguaro allows the strengths of each approach to be exploited. saguaro’s features are nucleotide positions in which genomes are compared, and its patterns, cacti, are matrices that robustly model the phylogenetic relationships between organisms.
+
+we demonstrated that saguaro was successfully able to process two data sets at opposite ends of the spectrum; one with many sequences of short lengths, the other with few but complex and large sequences, and in each case identify local phylogenetic branching patterns that differed from the phylogeny as a whole. in  <dig> strains of dengue virus serotype  <dig>  <cit> , we find a  <dig> nucleotide long region in the 3’utr  previously described to contain functional rna loop structures  <cit> . this region appears to be under constraint in a lineage-specific manner, and does not appear as a strong signal when looking for conservation across all strains. moreover, saguaro found this region when only examining the pattern of five informative nucleotide sites, ignorant to the invariant nucleotide positions in between. in primates, saguaro finds four clades of cacti, including one representing the phylogenetic background of the species . in that major clade, one third of the sequence resided in slightly shuffled phylogenies, which, in keeping with a similar fraction previously reported for the gorilla genome, we attribute to incomplete lineage sorting  <cit> . in addition, saguaro assigns 3% of the aligned genomes to cacti that reside outside of clade  <dig>  many of these regions overlap with non-coding and coding genes, such as olfactory and taste receptors, as well as zinc finger proteins that could be involved in the regulation of a number of cellular processes. however the strongest signal was associated with inflammatory and immune response genes, sequences that are also known to be highly variable in human populations  <cit> . interestingly, a large number of pseudogenes were also identified. assuming that these are the product of duplications, this finding would not be surprising, as pseudogenisation is considered a common outcome of such duplication events. we note that saguaro is agnostic to the underlying mechanisms that give rise to its cacti, and that if the data contains systematic artefacts, it will likely report them as signals represented by their own cacti. this is a particularly relevant caveat in the case of genomic regions that are inherently difficult to assemble correctly from whole genome shotgun reads, and some of these regions identified in our study of primates, e.g. the major histocompatibility complex , fall into this category. we thus manually inspected a number of additional regions assigned to the same cactus as the mhc, and found that the majority showed no obvious reasons as to why those should contain assembly errors.
+
+an organism’s ability to adapt and thrive in a given environment is a product of many complex genetic interactions. we expect that the fields of genomics and population genetics will be able to exploit the novel combination of a hidden markov model and a neural network contained within saguaro to investigate existing and future data sets with a fresh perspective. the examination of phylogenies without the constraint of a priori assumptions may reveal previously hidden relationships, such as those between hosts and their pathogens, or offer insight into previously unknown biological drives.
+
+availability and requirements
+project name: saguarogw
+
+project web site: http://saguarogw.sourceforge.net/
+
+operating systems: gnu/linux
+
+programming language: c++ , perl 
+
+compiler: gcc  <dig> .3
+
+minimum ram: 4gb, 64+gb recommended
+
+license: free to all users under the lgpl license
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+nz, pr, nv, em, and mgg implemented the software. pr provided the mathematical formulation. jrsm, pj, hl, mph, fdp, klt, and mgg designed the dengue and primate experiments. nv designed and performed the simulations. pj provided the biological interpretation for the dengue results. hl provided phylogenies. all authors wrote the manuscript and designed the figures. all authors read and approved the final manuscript.
+

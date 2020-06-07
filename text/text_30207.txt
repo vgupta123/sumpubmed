@@ -1,0 +1,135 @@
+BACKGROUND
+ribosomal rna  marker gene studies remain central in the characterisation of the community structure of uncultured microbes and microscopic eukaryotes in environmental samples. the introduction of high-throughput sequencing has increased the resolution of rrna studies. however, in exchange for high volumes of data, modern sequencing platforms exhibit higher error rates and produce shorter reads than traditional sequencers. when sequencing a single organism, large quantities of data are used to overcome errors, for example, using high coverage in resequencing  <cit>  and k-mer-based error correction in de-novo assembly  <cit> . in the case of community analysis, where species diversity is estimated in-situ, each read could be representative of a unique species or be completely erroneous. failure to account for these issues can result in inflated estimations of species diversity and the errors propagated to subsequent analyses  <cit> .
+
+methodological advances have focused on improving our ability to accurately estimate the level of species diversity given the large number of potential confounders, for example, appropriate techniques for read filtering and quality trimming  <cit> , the identification and removal of artefacts from amplification  <cit>  and pyrosequencing  <cit>  and improved methods for clustering reads into operational taxonomic units   <cit> . many of these advances have been incorporated into integrated pipelines  <cit>  and packaged along with traditional phylogenetic analysis tools. phylogenetics is used to classify sequences of unknown origin based on their evolutionary relationships to all other sequences being considered. the phylogenetic context of a sequence is only reliant on the information content of the actual sequence data and is robust against issues of incompleteness that plague similarity-based classification techniques. unfortunately, while phylogenetic analysis can be appropriate for data from older sequencing technologies, the limited information content of short amplicon sequences constrains our ability to make accurate inferences, leading to topological errors and inappropriate branch lengths.
+
+a recently developed alternative  <cit>  to full phylogenetic analysis is to infer the evolutionary relationships between known species a priori using the full length marker gene and place the shorter sequences from our samples into that reference tree. so-called phylogenetic placement has many advantages:  the tree produced is expected to be more accurate as the overall structure of the tree is based on many more sequences and a greater number of informative sites per sequence,  it is computationally efficient as sequences are placed with respect to a fixed tree topology with fixed branch lengths and  it insulates the user from error as the task of constructing the initial reference tree is effectively outsourced to an expert. one such tool to embody this approach is pagan  <cit> , a phylogeny-aware multiple sequence alignment method capable of extending a reference alignment by placing a query sequence into its correct phylogenetic context. pagan uses partial-order sequence graphs  <cit>  to model non-linear dependencies between characters  and uncertainties in the input data . pagan has been shown to perform well in the phylogenetic placement problem due to maintaining all the information from the original reference sequences and inferred ancestral sequences in this graphical format  <cit> .
+
+in order to take advantage of pagan’s capabilities in the field of metagenetics, we built séance, a community analysis pipeline providing a comprehensive framework integrating phylogenetic placement with several other tools for amplicon-based analyses. the core contributions of this work are: we provide a complete bioinformatics pipeline capable of handling raw data from both 454/roche and illumina platforms and that performs the necessary quality checks, read filtering, denoising and otu clustering for further analysis.
+
+we explore the efficacy of using pagan for amplicon-based marker gene studies, using the modelling of homopolymer errors in clustering and phylogenetic placement of cluster centroid sequences into a reference tree for phylogenetic analysis.
+
+séance is open source software and makes use of the standardised biological observation matrix  file format  <cit>  to allow easy integration with mothur  <cit> , qiime  <cit>  and other conforming pipelines.
+
+
+
+implementation
+a high-level overview of séance’s workflow is shown in figure  <dig>  séance’s capabilities are split into four submodules: preprocessing , clustering, phylogenetic placement and visualisation.figure  <dig> 
+séance workflow overview. overview of the complete séance workflow. input files can be either raw sff files from roche/ <dig> or fastq files from other platforms. the clustering command outputs a biom file and cluster centroids in a fasta file. the phylogenetic placement command outputs a phylogeny and a phylogenetically consistent multiple sequence alignment.
+
+
+
+preprocessing
+the séance pipeline accepts either fastq files or can work directly with raw sff data containing  <dig> amplicon sequences. séance provides support for preprocessing by building on many other tools, e.g. denoising of  <dig> amplicons is performed by ampliconnoise  <cit>  and chimera discovery with uchime  <cit> . séance performs additional filtering based on quality scores , ambiguous base calls, sequence length and the number of errors in barcode and primer sequences. the preprocessing step also includes dereplication, trimming of barcodes and primers, and truncating sequences to a uniform length.
+
+clustering
+séance constructs otus by greedily clustering reads in descending order of abundance. our approach is based on the assumption that the sequences found in highest abundance are error-free and those reads containing pcr or sequencing artefacts are not only lower in abundance but highly similar to the error-free sequences they originated from. taking abundance into consideration during clustering is similar to many other approaches  <cit> . séance differs from these approaches by using pagan’s modelling of homopolymer length uncertainty on sequences from platforms known to produce such errors . this modelling reduces alignment errors around low-complexity regions separated by short spacers and affects the calculation of sequence similarity. figure  <dig> illustrates this approach by showing how skipping the last base from the homopolymer aaaa maximises the alignment score and that this gap should not contribute to the similarity calculation.figure  <dig> 
+homopolymer modelling. the cluster centroid  is higher in abundance than the query sequence . when the query is aligned with the centroid sequence, the alignment score is maximised by the dynamic programming algorithm traversing the red path through the sequence graph defined by the query sequence and pagan’s homopolymer heuristics.
+
+
+
+even for samples that have been denoised, modelling of homopolymers is still useful. denoising is performed on a per-sample basis and low abundance sequences may still contain errors. as clustering is performed across all samples, homopolymer modelling aims to prevent these sequences from being erroneously assigned as new clusters.
+
+séance provides several options for affecting what sequences are used as an input to clustering and what clusters are output. users can choose to only cluster sequences with a copy-number greater than n in a given sample. this can be used to remove singleton sequences  or to reduce the computational burden of clustering. users can additionally output only those clusters that contain sequences from multiple samples. limiting output clusters in this manner has several uses in situations where individuals are sampled multiple times or a large number of samples are analysed. for example, an otu appearing only once may be considered irrelevant from the perspective of a specific analysis, such as the identification of temporal patterns.
+
+phylogenetic placement
+séance does not infer a phylogenetic tree directly from the cluster centroid sequences but rather uses pagan’s phylogenetic placement capabilities to insert these sequences into a fixed reference tree. to maximise accuracy, we suggest that the reference tree is built using the entire marker gene from a representative sample of the clade containing the target species.
+
+in brief, placing a query sequence of unknown origin with pagan involves:  searching for the optimal placement among the set of target nodes ,  aligning the query against the  sequence at the best target, and  adding the query both in the reference tree  and the reference alignment , adjusting the latter for any insertions in the new sequence. pagan can speed up the target search using an external local aligner and allows for considering only a subset of target nodes. in our current implementation of the séance pipeline, we only permit query sequences to be aligned against extant sequences  but pagan can also consider inferred ancestral sequences and add a query sequence as a new evolutionary lineage in the reference phylogeny.
+
+the final output tree is pruned to contain only the placed query sequences and those nodes from the reference tree necessary to ensure a minimum spanning tree. by default, pagan produces an alignment of the full reference data and the newly added query sequences but it can also prune the output; for practical purposes séance outputs an alignment trimmed around the target region and only contains the query sequences together with their closest reference sequences.
+
+visual inspection and graphics
+séance provides several options for visualisation. cluster centroids can be visually inspected with wasabi, a web application integrating evolutionary alignment tools and interactive visualisation . wasabi permits the user to see the sequence alignment resulting from phylogenetic placement comparing how cluster centroids match the closest reference sequence.
+
+for publication figures, phylogenetic trees and cluster abundances are combined in a single heatmap. an example is shown in figure  <dig>  figures can be generated for the complete dataset or a subset of samples.figure  <dig> 
+heatmap and phylogenetic placement derived tree. heatmap showing relative abundances of otus together with corresponding phylogenetic tree generated with phylogenetic placement of otu centroid sequences into complete marker gene alignment and tree. this figure was generated using the séance ‘heatmap’ command.
+
+
+
+RESULTS
+we used séance to analyse all of the samples from a longitudinal study of intestinal parasite communities in wild rufous mouse lemurs  from ranomafana national park in southeast madagascar  the raw sequence data has been submitted to the short read archive under project number srp <dig>  faecal samples containing eggs were collected and analysed as a proxy for the actual parasite communities in mouse lemur intestines. high levels of contamination were expected as flies can lay eggs in the faeces during the time between trapping and collection.
+
+the dataset is composed of  <dig> samples collected during a three year period. a majority of samples are from lemurs that were sampled at multiple time points throughout the collection period. a  <dig> base pair region within the 18s small subunit rrna gene was amplified containing the v <dig> hypervariable region and sequenced using a roche/ <dig> genome sequencer flx. each sample was denoised using ampliconnoise . sequences with ambiguous base calls, more than one error in the barcode or more than two errors in the primer sequence were discarded. barcodes and primers were removed and all sequences truncated to 250bp. putative chimeric sequences were removed using uchime  in de novo mode. preprocessing all  <dig> samples resulted in  <dig>  high-quality reads comprised of  <dig>  unique sequences.
+
+here we focused on the impact of séance’s use of pagan’s homopolymer modelling on identification of otus and phylogenetic placement of centroid sequences into a reference tree.
+
+homopolymer modelling impacts otu identification
+as an input to clustering we excluded sequences with a copy number less than  <dig>  this step filters out all but  <dig> of the  <dig>  unique sequences we started with. due to dereplication, however, these  <dig> sequences were representative of  <dig> % of the total reads that passed quality control. we expect that a great majority of excluded sequences represent unfiltered pcr artefacts and sequencing errors. furthermore, even the true variants potentially lost are either very rare or present in one sample only and therefore uninformative in a longitudinal study focusing on community evolution.
+
+clustering at 99% similarity with homopolymer modelling yielded  <dig> otus but without homopolymer modelling, that resulted in  <dig> otus. a megablast  <cit>  search of the ncbi nr  database was performed using the centroid sequence of each cluster and a taxonomic label was derived from the lowest common ancestor of the top scoring blast hits from the ncbi taxonomy. comparing taxonomic labels from the two approaches, the otus produced using homopolymer modelling are a subset of the otus produced without. of the  <dig> otus that made up the difference,  <dig> were low abundance duplicates of other otus  and  <dig> otus were missed by the homopolymer modelling approach. these unique otus, however, appear suspicious as they are both composed of very few reads and were present in only one or two samples.
+
+as expected, modelling of homopolymers is less important as the similarity threshold for clustering is reduced. clustering the same set of sequences at 97% similarity yielded  <dig> and  <dig> otus when using and not using homopolymer modelling, respectively.
+
+phylogenetic placement reduces topological errors
+case study
+to build a reference phylogenetic tree, we extracted the complete 18s rrna alignment from  <dig> members of the phylum nematoda from the silva database   <cit> . after the removal of columns which contained only gaps, a tree was inferred using raxml   <cit> . raxml was run with the gtr +Γ substitution model for  <dig> repetitions. we are aware that the silva alignment is not perfect and alignment errors may adversely affect results but the use of the original alignment allows for reproducibility. next, we used séance’s phylogenetic placement command to place the cluster centroid sequences into the reference tree with pagan. figure  <dig> shows the result but for the purposes of exposition we have limited it to only those otus that appear in the data for a lemur called malalako. for comparison, we aligned the cluster centroid sequences using mafft   <cit>  and inferred a tree, de novo, using raxml. the tree was manually rerooted and is shown in figure  <dig>  whilst the two phylogenetic trees are very similar, in this example there is a single topological error in the de novo tree in the location of the caenorhabditis cluster, which should be more closely related to strongyloides. we further note that the branch lengths have been underestimated in the de novo phylogeny due to the lower relative proportion of variable to conserved sequence compared to the complete marker gene.figure  <dig> 
+heatmap with
+de novo
+ phylogenetic tree. heatmap showing relative abundances of otus together with corresponding phylogenetic tree inferred using just otu centroid sequences. this figure was generated using the séance ‘heatmap’ command.
+
+
+
+simulation
+the ranomafana national park study only presents anecdotal evidence of the errors séance can avoid thanks to using a phylogenetic placement strategy. we additionally used simulation to better understand how séance performs, not just against de novo phylogenetic inference, but also against maximum likelihood-based placement methods. the methods chosen for comparison are representative of current strategies employed by other community analysis pipelines. both mothur and qiime focus on microbial analysis and so, due to the potential of large numbers of otus, perform phylogenetic analysis using neighbour-joining or distance methods. as we were not simulating large numbers of sequences, we used raxml which has been shown to outperform all other methods in terms of topological accuracy  <cit> . we used pplacer   <cit>  as an example of a phylogenetic placement method based on maximum likelihood. pplacer has been shown to outperform other placement methods and is integrated into numerous analysis pipelines, e.g. phylosift  <cit>  in the analysis of metagenomes and sepp  <cit>  for phylogenetic placement in exceptionally large phylogenetic trees. as input to pplacer we use alignments from both hmmer  <cit>   and pagan .
+
+the simulations proceeded as follows: using the reference tree we built for the ranomafana national park study, we randomly selected  <dig> sequences to serve as a new reference tree. from those sequences not used in the reference, we selected all nematodes that would be amplified by our primer and extracted a 250bp region. we then selected n of these short sequences  and used this as the input data for de novo tree construction  and as query sequences for phylogenetic placement in the new reference tree using pagan and pplacer. the normalised robinson-foulds metric was calculated for both the de novo and phylogenetic placement-derived trees versus the minimum spanning tree for the query sequences from the original reference tree . for the purpose of this experiment, we assumed that the tree generated from the complete 18s gene is correct and that the trees for the target region and the full gene are concordant, though we are, of course, aware that there is no guarantee for this. for each value of n, we performed  <dig> replicates, generating a new reference tree for each replicate. driver scripts for running these experiments can be found in additional file  <dig> 
+phylogenetic placement versus
+de novo
+ phylogeny heatmap. comparison of normalised robinson-foulds metric of different phylogenetic methods performed on short 250bp sequences compared to the ml tree inferred from the complete marker gene: phylogenetic placement of short query sequences produces trees with fewer errors than de novo phylogenetic inference.
+phylogenetic placement methods versus
+de novo
+ phylogeny box plots. for de novo phylogenies the variability of errors narrows with number of query sequences, whereas phylogenetic placement errors increase additively with the number of sequences.
+
+
+
+for all methods of phylogenetic placement, the number of topological errors increased additively with the number of query sequences. errors build up due to the limited information in short amplicon sequences and are made worse as our experiment only selected query sequences not present in the reference tree. this handicap will not necessarily exist in real life.
+
+for lower numbers of query sequences, there was a small improvement using hmmer+pplacer over pagan, but at higher numbers of taxa, the difference became substantial. using pplacer together with pagan, however, on average produced the best results, but at low numbers of taxa the improvement over using just pagan was marginal.
+
+discussion
+modelling homopolymer uncertainty during clustering allows séance to produce fewer low abundance otus with duplicate labels. the process of denoising is reliant on abundance information from within a given sample, using high abundance  reads to correct low abundance ones. it follows that sequences only found in low abundance may not be denoised successfully if they contain errors  <cit> . as clustering is performed across all samples, homopolymer modelling aims to prevent these sequences from being erroneously assigned as new clusters by correctly matching them to existing clusters from other samples. we found this feature to be particularly important when dealing with a large number of samples as they often shared nematode species but in widely varying amounts.
+
+séance uses phylogenetic placement as a proxy for phylogenetic inference on the complete marker gene. de novo inference on the same data infers the tree given the distinct evolutionary processes acting on a single variable region which may not be concordant with the evolutionary history of the complete marker gene. whilst, de novo inference is not incorrect, we argue that an approximation of the phylogenetic history of the gene under study is closer to the experimentalists intentions with the selection of a specific marker gene.
+
+the performance of séance’s phylogenetic placement capabilities is obviously dependent on which program is used. our chosen method, pagan, was outperformed by pplacer for larger numbers of taxa. we believe this deficiency is largely due to the simple placement strategy employed by pagan, which uses a similarity-based criterion to place sequences in the order they appear in the input file. though we believe pagan’s performance can be improved, other non-functional arguments lead to our choice. pplacer can only extend phylogenies produced with maximum likelihood-based programs, but pagan does not have this limitation.
+
+whilst less phylogenetic information is required to place sequences than infer a tree, séance’s accuracy suffers if there is limited resolution in the selected variable region resulting in multiple candidate nodes for placement. in general, we have to assume that the reference data is always incomplete and therefore placing a sequence at all nodes meeting some criterion  can be misleading as we are only able to assess uncertainty in relation to known reference data. faced with the situation of multiple placement candidates, séance will place the query sequence randomly on a single candidate node. the rationale is that such a placement is not wrong, it just does not communicate whether the placement is uniquely appropriate for that sequence. ambiguous placements will generally be phylogenetically proximate and where they are not, this uncertainty is indicated in the cluster labels. we would like to emphasise that this is a design choice we made for séance and that pagan implements several placement strategies. if a user disagrees with this choice, they can rerun pagan using an alternative strategy or use the multiple sequence alignment as input to pplacer.
+
+future work includes supporting newer sequencing technologies and understanding how the approaches described here can be exploited with different data. in addition, séance is currently implemented sequentially, so additional work is required to support multi-threading and computer clusters without adversely affecting results.
+
+CONCLUSIONS
+we have presented séance, a new software package for high-throughput amplicon community analysis. séance exploits features from the pagan multiple sequence alignment program to provide support for modelling homopolymer uncertainty when clustering sequences into otus and for phylogenetic placement of cluster centroid sequences into a reference tree. the reference files currently distributed with séance are specific to the study of nematodes using the 18s marker gene, however, the concepts are generic and a new reference for a different target organism and marker gene can easily be created. to ease adoption of séance, we use the biom file format for cluster abundance data and output cluster centroids sequences in fasta format, this enables users to perform preprocessing and otu clustering in a different pipeline , export the results and start running the séance pipeline from the phylogenetic placement step.
+
+availability and requirements
+project name: séance
+
+project home page:http://wasabiapp.org/software/seance/
+
+operating systems: linux, mac os
+
+programming language: python
+
+other requirements: external programs 
+
+license: gnu gpl v.3
+
+any restrictions to use by non-academics: none
+
+
+
+additional file
+additional file  <dig> 
+archive of scripts and data files used in phylogenetic placement experiments. this file can also be found at http://wasabiapp.org/download/seance/bmc_eb_seance_supplements.tar.gz
+
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+am and al contributed to software design and implementation. data generated by ta. am, ta, al wrote the manuscript. all authors read and approved the final manuscript.
+

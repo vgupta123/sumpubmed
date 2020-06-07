@@ -1,0 +1,146 @@
+BACKGROUND
+medline is a large biomedical bibliographic database that is well known to users around the globe. it contains over  <dig> million citations from over  <dig>  journals. medline is a rich source of biomedical text that lends itself well to research on text mining, information extraction, and natural language processing in biomedical domains. the usual way in which users query medline is through pubmed, the web-based interface and search engine provided by the national library of medicine   <cit> . pubmed allows individuals to conduct searches directly by entering search terms on web pages and viewing results, and supports software-based queries across the internet with programming utilities offered by the nlm  <cit> . because we were interested in developing custom-made programs that query medline, the programming utilities offered by the nlm were an obvious choice to consider. however, due to risks of server overload, the nlm places limits on the number of queries that a user can send in a given time interval, and requests that large-volume queries be done on nights or weekends  <cit> . by contrast, a local version of medline gives software developers greater control over how they use the data, and facilitates the development of customizable interfaces. in this report, we describe the design and implementation of the database schema and database loading tools we have built to enable others to produce similar systems at their sites.
+
+the entire content of medline is available as a set of text files formatted in xml   <cit> . the nlm distributes these files at no cost to the licensee, but the files are large and not easily searched without additional indexing and search tools. for example, in the  <dig> release of medline, there are  <dig> files , and the total uncompressed size of these files is  <dig>  gigabytes . although it is relatively inexpensive to store  <dig>  gb of data, it is not easy to manipulate data of that magnitude without good software support. relational databases are a natural choice for storing medline because they are able to handle large amounts of data, offer built-in approaches to query optimization, and enable the developer to create indexes. additionally, the standard query language for relational databases, sql , enjoys widespread familiarity and can be integrated with text-database queries in some commercial systems.
+
+alternatives to relational databases are xml-based databases, which have recently emerged as another option for storing information transmitted in xml format.xml databases may exist as standalone databases or as add-ons to relational systems. the medline data set would be an excellent test of the capabilities of these databases because of its size and complexity. we focused on relational databases because they are currently more ubiquitous and standardized, and interested users are more likely to be comfortable with relational database technology.
+
+in the remainder of this report, we describe the software tools we developed for converting medline in xml files to medline in a relational database, and provide a few sample queries that demonstrate the flexibility of the resulting system.
+
+implementation
+database schema
+the nlm provides a dtd  that defines the structure of data in the medline xml files  <cit> . from this dtd, we designed a relational database schema. although developers of medline at the nlm maintain their own version of medline in a relational database, the schema they use is not directly applicable to our purposes, because their implementation contains tables and data that are used for maintenance and that are not relevant to external users. thus, it was appropriate for us to design our own schema based on the specific content of the xml files, as defined by the dtd. other groups currently license the same medline xml files and may have implemented all of medline in a relational database, but if so, their database schemas are not well publicized and were not available.
+
+there are multiple ways in which one can design a schema from the same dtd, because dtd elements and attributes can be mapped to tables and fields in different ways. certain design decisions may favor speed at loading time, and others may favor speed and ease of use at query time. loading records associated with  <dig> million citations into a database is very time consuming, and the time can be minimized if lookups to the database are minimized during loading. in general, we aimed to minimize lookups even if that meant repeating information in the database. as developers often do in the design of data warehouses, we chose to de-normalize the schema in order to improve read-only query performance, which is the typical data access pattern in our workload.
+
+the typical table contains a pubmed identifier  in one column, and data related to that pmid in the remaining columns. figures  <dig> and  <dig> show original representation of content from a portion of the dtd and a corresponding table that follows the typical table structure.
+
+our development team included a group of researchers from the university of california at berkeley and another group from stanford university. we shared similar goals in that we all wanted to load medline into a relational database, but because we were in two different departments at two different institutions, we had different project constraints and timelines. thus, our groups were loosely associated in the software development process, but not closely integrated, and therefore, the original schema that we shared diverged.
+
+the result was three medline schemas and three software variants: one schema was used with java code developed at berkeley, another schema was used with berkeley's code modified to run at stanford, and the third schema was used with perl code developed at stanford. here we describe the underlying design that influenced all three of the schemas. 
+
+the main table in the schema is medline_citation. the medline_citation table contains the pmid as the primary key and has additional columns that correspond to single-valued elements in the dtd, where the values of those elements depend on the pmid. the medline_abstract table is similar in that it has a pmid as the primary key and columns of data that depend on the pmid. since document abstracts are larger than the other data types, we placed them in a separate table. however, since abstracts are stored as clobs , they are not stored in the same pages as the rest of the fields in the medline_abstract table. therefore, in a more recent implementation, we removed the medline_abstract table from the schema, and added the abstract_text field as a clob in the medline_citation table. this change reduces the number of tables by one, and eliminates the need for a join between the medline_citation and medline_abstract tables.
+
+some tables in the schema have more than one row corresponding to the same pmid. columns in these tables map to multi-valued elements in the dtd. examples are the table medline_keyword_list, which stores multiple values of keyword for a given pmid, and medline_gene_symbol_list, which stores multiple values of gene_symbol for a given pmid.
+
+the element article in the dtd has a one-to-one relationship between an article and a pubmed identifier. rather than giving article its own table, we put single-valued data from article into the table medline_citation.
+
+to keep track of the name of the file from which data are read for a given citation, we added the field xml_file_name to the medline_citation table. this field does not correspond to any element in the dtd structure, but allows the database administrator to go back to the original xml file if necessary to find the original source of the data.
+
+we could have stored each author only once in a table of its own, and assigned each author a unique integer primary key to serve as an author identifier. an author is represented by a combination of values in fields for last name, forename, first name, middle name, initials, suffix, affiliation, and collective name. another table would have stored the set of author identifiers associated with each pmid, and because integer joins are fast, this design would have facilitated rapid search for all pmids associated with a given author, by joining the author table with the table of author identifiers and citations. however, there are several drawbacks to this approach. generating integer primary keys during loading requires that either a lookup be done to see if each author of each citation already exists or not , or all authors and primary keys must be kept in memory. the former approach is very time consuming during loading; the latter approach strains memory resources. in addition, regardless of how primary keys are managed during loading, it is not possible to determine algorithmically if two different representations of one author are actually the same author, or if one representation is actually two different authors. we therefore avoided generating unique primary keys and repeated all eight fields representing the author for every citation occurrence of that author.
+
+parsing and loading software
+we implemented three versions of software that parses and loads medline. the first was java medlineparser, which was developed at berkeley . the second was the same java code, modified to run at stanford. the third was perl parsemedline, which was developed at stanford.
+
+all versions of the software perform two basic tasks:  they parse the xml files to collect data, and  they load the data into the database. figure  <dig> shows the steps involved. data can be loaded as they are collected, or can be written out to disk initially, and loaded later. all three versions offer these two options to the user. document parsing is processor intensive, data insertion is disk intensive, and if needed, the two tasks can be executed at different times to accommodate other demands on the server.
+
+there are two types of application programming interfaces  for parsing xml files – the tree-based dom  and the event-based sax   <cit> . we chose the latter. a dom parser organizes data from the xml file into a tree of nodes, and requires that the entire document be read in and stored in memory prior to writing out any data. thus, the dom parser is impractical for large documents whose data do not fit in memory. the sax parser, however, receives data through a stream, and recognizes the beginning or end of a document, element, or attribute in an event-driven manner. it writes out data as it proceeds through the parsing process, and there is no need for the entire document to fit into memory. in xml medline, one document is a single xml-formatted medline file, and in the  <dig> release, the majority of files range in size from  <dig> to  <dig> megabytes . using the dom parser would put great demand on resources. in addition, the sax parser is faster because it does not need to create an entire xml tree structure, map that structure to the program's data structures, and then throw out the original tree. instead, it creates its own data structures as events are handled.
+
+the java version uses the java sax parser to parse the xml files, and jdbc  to communicate with the database. the perl version uses the perl sax parser, and perl dbi  to communicate with the database. we provide additional detail about the java implementation here.
+
+the sax parser requires the developer to write code that specifies the data model for objects in the domain. the data model is an object model that represents tables in the schema. the sax parser also requires code that listens for sax events and that maps elements – or nodes in the xml tree – to the object model. we created two main classes upon which our code is based: genericxmlparser and nodehandler. genericxmlparser is responsible for generating events when nodes that correspond to objects in the object model are encountered in the document, and nodehandler provides the event listener. together, these two classes form a generic approach to reading in xml data and writing out those data to tables; they are independent of the dtd or table structure.
+
+as the parser processes the document, it decides how to handle the semantics of data at each node and determines whether to store parsed data at that node or to delegate the event to a child handler. for each node that corresponds to a table, there is a handler class that extends nodehandler. a handler defines metadata for the node, and encodes any non-standard behavior at that node. an example of metadata is shown in table  <dig>  metadata include column names for the table and an xml element associated with each column name. an xml element is represented by a concatenation of the name of the element that holds the data value, and elements higher up in the element stack up to the node that corresponds to the object, or table. this concatenated name gives a unique representation of the element that holds the data. finally, the data type is given for each column. the column names and data types match those specified in the database schema.
+
+since nodehandler and genericxmlparser are generic, they can be used to write similar parsers for other xml documents. we have, for example, used these classes to write a parser for mesh  xml files, which are also distributed by the nlm. the mesh files are small compared to medline. mesh  <dig> comes in three xml files that total less than  <dig> mb.
+
+an optional feature is validation. xml files provided by the nlm are validly formatted, but we provide additional checks to ensure that all element tags in the xml data file have been handled by the parser and that all data have been inserted into the database. a developer who is extending the software to cover new tables can use this feature to ensure that metadata definitions are correct in classes that extend nodehandler.
+
+choice of relational database management systems
+in the course of our work, we applied the software tools we were developing to three different relational database products. our berkeley team initially experimented with postgresql, since postgresql is an open-source relational database and is freely available and modifiable. for the final implementation, however, we chose ibm's db <dig>  <dig>  over postgresql because we found that it could load our data more efficiently and because db <dig> has a text-search extender. our stanford team used oracle 9i, which like db <dig>  offers word-based indexing of text fields. word-based indexing is essential to support keyword search of medline titles and abstracts.
+
+hardware configurations
+at berkeley, we used a pentium iv intel xeon  <dig> -ghz dual-processor system, with  <dig> gb of random access memory . it had an integrated drive electronics  hard disk with a rotational speed of  <dig> revolutions per minute . at stanford, we used a sun fire v <dig> server configured with four 750-mhz processors,  <dig> gb of ram, and storage-area-network  storage for the relational database. we also used a sun enterprise  <dig> server with eight 400-mhz processors and  <dig> gb of ram for reading input files and writing intermediate output files in the perl version.
+
+RESULTS
+in this section, we describe loading time and disk-space utilization for the three implementations, followed by examples of queries, emphasizing differences between our system and pubmed.
+
+the first implementation used the java software, run on an intel system , using ibm's db <dig> database management system. the second implementation also used the java software, run on a sun server , using oracle's 9i database-management system. the third implementation used the perl program, run on networked sun servers, also using oracle 9i. table  <dig> summarizes our results.
+
+loading time and disk space utilization
+it took  <dig> hours  for the berkeley group to run java medlineparser to load medline, and  <dig> hours  for the stanford group to do so in oracle. there were numerous differences between the two systems, and it was not possible to test each variable independently. therefore, we present our data as a range of possibilities, and recognize that other users will have systems that are not the same as either of ours. we believe that differences in processor speed, memory, disk read-write efficiency, and optimization methods employed in commercial database-management systems may have affected loading times. in addition, the code diverged slightly after the initial transfer of code from berkeley to stanford, with the main difference being that the berkeley version used clobs for abstracts, whereas the stanford version used text fields truncated to  <dig> characters . the stanford run was also slower because a log file was generated, whereas this feature was turned off in the berkeley run.
+
+the space requirement for the db <dig> instance of medline at berkeley was  <dig>  gb, of which  <dig>  gb are consumed by the abstract text clobs,  <dig>  gb by the other tables, and  <dig>  gb by indexes. the space requirement for the oracle instance of medline at stanford was  <dig>  gb. the difference in size is primarily due to differences in the number of records that were loaded. the berkeley group loaded data from xml files that included all of  <dig>  but also included additional files through april  <dig>  the stanford group loaded data from  <dig> xml files only. berkeley parsed and loaded  <dig> input files ; stanford parsed and loaded  <dig> input files .
+
+the stanford group used perl parsemedline to load an additional instance of medline. parsing and loading of this instance of the database took place in a two-stage process. in the first stage, perl parsemedline parsed the xml files and wrote the data to disk in comma-separated-value files. to reduce processing time, the  <dig> xml input files were divided into  <dig> sets of about  <dig> files each, and sets were processed in parallel. the maximum time required for processing one set was  <dig> hours . the output comma-separated-value files required  <dig>  gb of disk space. in the second stage, the stanford team loaded data from the comma-separated-value files into the oracle database using sql*loader, a data loading tool provided by oracle. this stage took  <dig> hours  and used  <dig>  gb of space in the oracle database. this version used less space than the other two primarily because it had less indexing and fewer key constraints. relaxation of constraints is reasonable because the data are well curated by the nlm, and we can count on data in the xml files released by the nlm to be of high quality.
+
+the total time required to parse and load the files in this two-stage process is the sum of the time required to parse the largest file if all files are processed in parallel  and the time required to load the resulting comma-separated-value files into the database . alternatively, if the input files are parsed in series, the time for the first stage would be the sum of the input-file processing times. in our case, we overlapped the runs in a way that was convenient for us, given space and user constraints, and therefore mixed the parallel and serial approach. the overall time for our first stage was  <dig> hours ; adding this time to the second stage gave a total time of  <dig> hours . given the length of time to process each of our eight batches, we can estimate a lower limit of  <dig> hours , and an upper limit of  <dig> hours , if we had run the files completely in parallel or in series, respectively.
+
+sample queries
+certain queries that cannot be done easily through the pubmed application programming interface  can be done in a single sql query to our relational database. in this section, we show the results of a several sample queries, run on a version of medline that contains citations through april  <dig> 
+
+timing data is presented in terms of "cold" caches and "warm" cache. the cold cache represents the worst case for timing, assuming the database server has just been restarted and the buffer pool is empty. the warm cache represents the best possible performance: running the same query a second time. a typical timing number should fall somewhere between the two; hence these times represent the range of expected times to run the sample queries.
+
+a very simple query is one that retrieves all pmids in medline, where pmid is a column in table medline_citation .
+
+although typical users of pubmed would not be interested in such a query, we are managing medline as a complete database, and need to have access to all pmids. running this query on the berkeley implementation took  <dig> minutes and  <dig> seconds.
+
+many articles in medline are assigned terms from mesh. another capability of this system that distinguishes it from pubmed is the ability to rank order journals according to how many articles those journals have published that have been assigned a particular mesh term. in the query shown below , the number of publications indexed with the mesh term  "leukemia" is shown for each journal .
+
+the result of this query is a table consisting of journals paired with number of publications ; note that the query does not normalize for the fact that some journals have been publishing for more years than others, and publish more articles than others. this query ran in  <dig> minutes with a cold cache, and in  <dig> seconds with a warm cache.
+
+sql includes the "like" operator which allows for partial matches. by modifying the query above to change the fifth line to read "where msh.descriptor_name like 'leukemia%'," we change the query to match all mesh terms that begin with "leukemia". the query would thus include terms such as "leukemia, subleukemic" and "leukemia, feline." this results in dramatically more results, although the rank ordering is not all that different . this query ran in  <dig> minutes with a cold cache, and in  <dig> seconds with a warm cache.
+
+mesh terms are organized into a hierarchy, and each mesh term has associated with it one or more descriptor tree numbers that indicate its place in the hierarchy. the berkeley group developed additional code to parse mesh xml data files , and added mesh tree data to the medline database. using the additional functionality provided by the mesh hierarchy, we can modify the query above to rank order journals according to how often they have articles that have been assigned the mesh term under a certain tree number, thus eliminating the sensitivity to different spellings of related concepts that was shown in the queries above. in mesh, a child tree number shares its leftmost digits with its parent tree number, and differs in its three rightmost digits therefore, the sql "like" operator can be used to find a mesh term and its descendants, as shown in the query below . the mesh tree number for "leukemia" is "c <dig> .337".
+
+the results of this query are shown in table  <dig> 
+
+this query ran in  <dig> minutes with a cold cache, and in  <dig> seconds with a warm cache.
+
+the db <dig> version of the system implementation makes use of the text index that is incorporated into the rdbms system, using the operator "contains" which is not part of standard sql. the following query asks how many papers in the last three years of medline have been published by authors with affiliations at berkeley or stanford .
+
+this yields the results in table  <dig> 
+
+this query ran in  <dig>  minutes with a cold cache, and in  <dig> seconds with a warm cache.
+
+when we ran a similar query to determine the number of articles published by berkeley, stanford, mit, yale, and harvard, the increase in time to run the query was minimal. this modified query ran in  <dig> minutes and  <dig> seconds with cold cache, and in  <dig> seconds with warm cache.
+
+thus, sql makes it easy to quantify and rank order results, and does not require a post-processing step as would be necessary with queries to the pubmed api. similarly, results retrieved from previous queries can be stored directly in the same database, and reused in later queries by simply joining medline tables with user-created tables. again, the power of sql may alleviate the need for a post-processing step. instead of writing custom code to integrate results from the current query to pubmed with results from previous queries, the user could use sql joins to integrate current and previous results.
+
+although our system offers capabilities that the pubmed api does not, we point out that pubmed offers functionality that is not available in our system. for example, the "related articles" feature found in pubmed is not available, and links to full text are not available. also, pubmed provides a user interface that is more intuitive than sql for an end user who is not a database expert, and will be preferred by users who simply want to look up an article.
+
+the value of our system is that it offers greater flexibility for innovative software developers who want to experiment with novel techniques for searching biomedical text, and for system developers who want to build systems of which medline is a component. if such developers want to offer their systems to end users , they will need to create more intuitive user interfaces. with direct access to the underlying database, developers can create interfaces that are specifically designed to serve the needs of their particular users.
+
+CONCLUSIONS
+in this work, we developed highly customizable java parsing code and a relational database schema that others may be interested in using or modifying. we developed software that uses the java programming language and the sax parser to parse xml-formatted medline files and load the data into a relational database. we loaded one copy into db <dig> and another into oracle, using our java tool.
+
+we also created a similar tool in perl. the perl code is less flexible and not as readily extensible as the object-oriented code of our java software, but the functionality offered by the resulting database implementations is very similar.
+
+differences in loading time among the three installations of medline were due to a multiple factors, including differences in processors, disk storage devices, memory, operating systems, database-management systems, methods implemented in the software, and choices made by the user. factors that affected disk-space utilization included the fact that one group loaded more data than the other, abstracts were stored as clobs at one site and as truncated text at the other, and indexes differed. other groups will have system setups that differ from ours, and may make their own modifications to the code that affect their loading times. by presenting data on three examples, we have demonstrated a range of performance results as a guide to what other users might expect at their sites.
+
+future work includes adding functionality to update the system to new versions of medline, and to accommodate medline update files. the stanford group has begun to use medline to extract drug-gene relationships from the literature, and the berkeley group used the system, augmented with data from mesh and locuslink, to compete in the trec  <dig> genomics track competition  <cit> . as we continue to use these systems for research purposes, we are likely to identify alternative approaches that offer enhancements and improvements over the current design. we encourage others who work in similar areas to contribute to the open-source effort.
+
+an updated version of our java code accepts medline xml input files released in early  <dig> that conform to the latest dtd . the open-source code for this most current version of medlineparser is available at .
+
+availability and requirements
+project name: java medlineparser
+
+project web page: 
+
+operating system: platform independent
+
+programming language: java
+
+other requirements: java  <dig> . <dig> or higher, jaxp, relational database, and jdbc driver appropriate for the particular target database
+
+license: none
+
+any restrictions on use by non-academics: none
+
+project name: perl parsemedline
+
+project web page: 
+
+operating system: platform independent
+
+programming language: perl
+
+other requirements: perl  <dig>  or higher to handle medline unicode data , or earlier version of perl , perl modules dbi and xml::parser::perlsax, relational database, and perl database driver appropriate for the particular database 
+
+license: none
+
+any restrictions on use by non-academics: none
+
+authors' contributions
+do, gb, and as, developed the medline database schemas. gb and as designed and implemented the java medlineparser. gb and as ran medlineparser to install medline in db <dig> at berkeley. do ran medlineparser to install medline in oracle 9i at stanford. do developed perl parsemedline and ran it to install the second version of medline at stanford. do and gb were primary authors of the article, and the remaining authors added their contributions to the manuscript. mh supervised the work at berkeley; rb supervised the work at stanford.
+

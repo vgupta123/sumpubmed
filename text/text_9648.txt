@@ -1,0 +1,138 @@
+BACKGROUND
+over the last two decades, the growth rate of the protein data bank has been exponential. as structural data for biomolecules are increasingly made available, the study of homologous proteins can be performed not only at the level of sequence, but also at the level of three-dimensional structure. this has led to the development of numerous sophisticated methods, concerning, among others, the analysis of structural evolution  <cit>  and the structure-based design of new drugs  <cit> .
+
+for the comparison of protein surfaces in particular, a family of methods is based on the reduction of the dimensionality of the system. the concept of projecting a three-dimensional protein structure to two dimensions was first introduced by fanning et al. under the term ‘molecular cartography’  <cit> . they presented this notion as a novel method for studying the entire surface of a protein, emphasizing on the topography of antigenic sites. it involved conversion of the protein structure into a triaxial ellipsoid, followed by its transformation into a graticule . pawłowski and godzik later expanded on this approach by annotating protein surface maps according to the physicochemical properties of the exposed residues , as a means to compare evolutionarily related proteins  <cit> .
+
+even though a number of modifications to the aforementioned methodologies for two-dimensional protein representation have been proposed , molecular cartography has not found much use in the literature. this may be partly due to the significant amount of effort that is required to manually convert the atomic coordinates of a pdb file first into a spherical structure and then into a map. visualizing the distribution of a particular physicochemical property on the surface further increases the complexity and the overall approach becomes increasingly tedious. a few applications that implement molecular cartography algorithms are available , but the range of supported physicochemical descriptors for visualization is typically limited to charge and hydrophobicity. integrating other predictors is either unfeasible or not straightforward for the end user, creating an obstacle for specialized analyses. moreover, an application that harnesses the power of multiprocessor systems to simultaneously render multiple protein surface maps is not to this day available. this would be very useful, for example, when visualizing entire molecular dynamics simulations or comparing the members of a large protein family.
+
+to fill these gaps, we introduce structuprint, a new tool for visualization of protein surfaces in two dimensions. its name is a combination of the terms ‘structure’ and ‘fingerprint’, alluding to the fingerprint-like figures that it generates . structuprint can produce single 2d maps starting from a pdb file, or gif animations from multiple files. it is designed with a focus on scalability and extensibility. the tool can utilize multiple cpu cores on gnu/linux and os x machines and can easily incorporate any physicochemical predictors provided by the user, other than those in its own default set. the following sections describe the design choices behind its algorithm, present the results from a benchmark and show three characteristic examples of use.fig.  <dig> the main steps of the algorithm executed by structuprint. here, a mould of the surface of the 3d structure of the leporine serum albumin  is first generated. the property values  of the amino acids below the mould are retained. then, the dummy atoms consisting the mould are mapped onto a sphere. finally, the sphere is projected onto a map using the miller cylindrical transformation and a smoothing of the property values is performed. the elements of the upper half of the figure were rendered with ucsf chimera
+
+
+
+implementation
+amino acid properties database
+values for  <dig> properties/descriptors were calculated for the  <dig> common amino acids with moe  <dig>   <cit>  and were stored within an sqlite database. in particular, the database contains  <dig> categories of descriptors: i)  <dig> adjacency and distance matrix descriptors  ; ii)  <dig> atom/bond count descriptors  <cit>  ; iii)  <dig> conformation dependent charge descriptors  <cit>  ; iv) the  <dig> kier and hall connectivity and kappa shape indices  <cit>  ; v)  <dig> mopac descriptors  <cit>  ; vi)  <dig> partial charge descriptors ; vii)  <dig> pharmacophore feature descriptors ; viii)  <dig> potential energy descriptors ; ix)  <dig> physical properties  ; x)  <dig> subdivided surface areas; xi)  <dig> surface area, volume, and shape descriptors . a detailed explanation of each descriptor is provided in the properties codebook which accompanies the tool. by drawing values from this database, structuprint can visualize the distribution of a property across protein surfaces. users can extend it by adding measurements for more chemical components or provide their own custom sqlite database in order to incorporate novel descriptors.
+
+algorithm
+generation of a mould of the surface of a protein
+the main steps of the algorithm implemented by structuprint are shown in fig.  <dig>  the tool first produces a mould of the protein structure’s surface in two steps. the structure is initially placed within a 3d grid with cell dimensions of 1 × 1 × 1 Å. then, one dummy atom is inserted in each empty grid cell that neighbours a single protein atom. this process was previously described by vlachakis et al.  <cit>  and is extended here, with dummy atoms being assigned the identity of the amino acid to which their neighbouring protein atom belongs. this results to a quite accurate approximation of the underlying protein surface at the level of residue atoms.
+
+transformation of the mould into a sphere
+the next step involves the conversion of the dummy atoms mould to a sphere. to this end, the algorithm calculates the coordinates of the centre of mass of the mould c - i.e., the average position of all atoms -, and the maximum distance of any atom vi from the centre of mass :  <dig> c=xc,yc,zc=∑i=1nxin,∑i=1nyin,∑i=1nzin   <dig> radius=max1≤i≤nxi−xc2+yi−yc2+zi−zc <dig> 
+
+the coordinates of each atom are normalized with respect to the centre of mass:  <dig> vi'=xi',yi',zi'=xi−xc,yi−yc,zi−zc 
+
+then, to transfer the dummy atoms onto the surface of a sphere, each vector vi' is scaled to a length equal to the radius:  <dig> wi=xi'',yi'',zi''=radiusxi'2+yi'2+zi'2⋅vi' 
+
+projection of the sphere onto a map
+the cartesian coordinates of each wi are converted to latitude/longitude values  using the following set of equations:  <dig> latitudei=tan−1zi''xi''2+yi''2longitudei=tan−1yi''xi'' 
+
+for the two-dimensional projection, several techniques were initially tested , before deciding on the miller cylindrical projection  <cit> :  <dig> mi=longitudei,54⋅lntanπ4+25⋅latitudei 
+
+this projection was selected on the basis of its simplicity and ease of understanding. it is one of the most popular projections in cartography, as it can depict the entirety of the sphere, including the poles. latitude and longitude lines are parallel and straight. projection-induced distortion is zero at the equator, increases gradually towards higher latitudes, and becomes maximal at the poles. this leads to significant overestimation of the distance among atoms at the upper and lower parts of the figure , similarly to the areal exaggeration of greenland and antarctica. nevertheless, the miller cylindrical projection introduces less polar distortion than the mercator projection, on which it is based.
+
+map smoothing
+the previous step resulted in a map of the protein surface with data points coloured by a property of choice. however, this ‘primary’ map is not suitable for detecting areas with an overall concentration of atoms with high or low property values, which is one of the main benefits of this cartographic approach. for instance, a small area with both negatively and positively charged residue atoms would not appear as almost neutrally charged, but as a tiny dipole. to prevent the appearance of small ‘hot spots’ and redistribute the property values among neighbouring data points, the algorithm includes a smoothing step. the map is iteratively divided in grid squares of varying dimensions, from  <dig> ° ×  <dig> ° to  <dig> ° ×  <dig> °, with a step increase of  <dig> °. in each iteration of this process, grid cells are assigned the average value of all data points within them. finally, the value of every data point is defined as the average value of its corresponding grid cell across all iterations. this smoothing method ensures that areas with pronounced accumulation of high or low values are easily discernible from those with a mixed population.
+
+user interfaces
+the default interface of structuprint is a cross-platform, command-line interface . it consists of two executables: structuprint_frame and structuprint. the structuprint_frame executable produces a tiff figure from a single input pdb file, using the r package ggplot <dig>  <cit>  for plotting. the structuprint executable is responsible for processing multiple superimposed pdb files - either serially or in a parallel manner -, generating a tiff figure per input file and a final gif animation, rendered with the imager perl module  <cit> . most parameters of the underlying algorithms can be modified by the user, such as the delay between animation frames, the background colour, and the appearance of id numbers on final figures. a full descriptive list of the available parameters for both executables can be found in structuprint’s manual, distributed along with the application and also available from its website.
+
+other than the cli, structuprint also comes with a graphical user interface , available by default only on gnu/linux systems. the gui is built with the gtk <dig> toolkit and offers a user-friendly interface to all the command line arguments and options. as an example of its capabilities, in fig.  <dig> structuprint’s gui is producing an animation on a multiprocessor machine using  <dig> cores.fig.  <dig> structuprint’s graphical user interface. the main window is split between two tabs for preparation of 1) animations and 2) single static maps. the default parameters of the algorithm can be modified using the ‘advanced options’ popup window. when structuprint is rendering a figure, its progress is shown in a temporary terminal
+
+
+
+parallelism
+on unix-like systems , structuprint supports task parallelism when generating animations. using the parallel::forkmanager perl module  <cit> , structuprint can take advantage of multiple cpu cores by assigning each input pdb file to a different processor. the simultaneous rendering of multiple individual frames considerably reduces the total execution time, allowing for visualization of entire molecular dynamics simulations within a reasonable time frame.
+
+RESULTS
+benchmark
+to understand how execution time and memory consumption scale with the number of atoms in an input pdb file, we ran structuprint against  <dig> randomly selected structures from the protein data bank . for simplification purposes, multi-model pdb entries were excluded, as a large proportion of the atoms would overlap in 3d space, being essentially indistinguishable. the benchmark was performed on a gnu/linux system with an intel xeon e5- <dig> v <dig> cpu at  <dig>  ghz and  <dig>  gb of memory. structuprint was launched  <dig> times per pdb file and the execution time was measured as the median time for completion. memory usage was measured similarly. we then performed linear regressions using execution time and memory consumption as dependent variables and number of atoms as the independent variable. in both regressions, we applied a box-cox transformation  <cit>  to the dependent variable to ensure that the residuals were normally distributed. the final fitted models are shown in fig.  <dig>  execution time increases linearly with the number of atoms, whereas memory consumption only increases with the square root of the atom count. for example, on the aforementioned system it took 88 seconds and 211 mb of ram to generate a structuprint figure for a relatively small protein with  <dig>  atoms .fig.  <dig> execution time  and memory consumption  of structuprint, as a function of the atom count . the runtime complexity is o, whereas the memory complexity is on. the uneven distribution of atom counts reflects the composition of the protein data bank. as of march  <dig>  ~ <dig> % of entries in the pdb had an atom count of  <dig>  or less, with the overall mean being  <dig>  atoms
+
+
+
+examples of usage
+to illustrate the utility of this tool, we present three different examples of usage in this section. two-dimensional visualization with structuprint enhances the representation of protein surfaces and facilitates the interpretation of the results in all three cases.
+
+visualization of molecular dynamics simulations
+a seldom explored application of molecular cartography involves the generation of 2d animations from a series of pdb files. here, we visualized a portion of a folding simulation of a variant of the chicken villin headpiece subdomain  from the folding@home project  <cit> . the part of the input simulation was 50 ps long, with one frame being extracted every  <dig>  ps. each frame was structurally superimposed to the previous one with ucsf chimera’s matchmaker tool  <cit> . then, two separate animations were produced: one of the simulation frames in ribbon representation and one of the corresponding 2d maps, with the topological polar surface area - a measure of polarity - as the property of choice. for comparison purposes, these two animations are jointly shown in additional file  <dig>  this approach simplifies the detection of conformational changes during the course of the simulation, along with fluctuations in the distribution of physicochemical variables.
+
+depiction of surface conservation
+the evolution of protein surfaces and the conservation - or lack - thereof is another domain in which structuprint can be applied. as an example, we performed a brief phylogenetic analysis of three orthologs of plastocyanin - a protein involved in electron transfer in photosynthesis  <cit>  - for which crystallographic structures were available. the amino acid sequences of spinach plastocyanin  and those of two green algal species  were retrieved from the uniprot database, along with the sequence of the spinach chloroplastic fructose  <dig> -biphosphatase  that would be later used as an outgroup. the sequences were aligned with probcons  <dig>   <cit>  and the best model of amino acid substitution was determined with raxml  <dig> . <dig>  <cit> . ten maximum likelihood trees were then inferred with raxml using the biphosphatase as the outgroup sequence, and the best scoring tree was selected. next, 2d protein surface maps of the corresponding 3d structures  were produced with structuprint, after performing a structural superposition. for this example we used a more complex descriptor, fasa_h:  <dig> fasa_h=wateraccessiblesurfaceareaofhydrophobicatomswateraccessiblesurfaceareaofallatoms 
+
+the results are shown in fig.  <dig>  there is significant conservation of both surface structure and hydrophobicity patterns among all three species, with the algal orthologs  exhibiting greater similarity, as expected. finally, the representation of the chloroplastic fructose  <dig> -biphosphatase  is vastly different from the others, highlighting the long sequence distance among these proteins.fig.  <dig> evolution of protein surfaces, as represented via structuprint figures. a–c: plastocyanin orthologs from spinacia oleracea, ulva pertusa, and ulva prolifera, respectively. d chloroplastic fructose  <dig> -biphosphatase from spinacia oleracea. the colour depth denotes the fasa_h value across each map, with darker areas having higher values of the descriptor. despite the obvious conservation of surface shape and hydrophobicity, 2d maps can distinguish even slight differences among evolutionarily related proteins. inset: the maximum likelihood phylogenetic tree of the proteins in panels a–d
+
+
+
+
+comparison of conformational changes, e.g., due to mutations
+a third proposed application of structuprint involves visually contrasting protein surfaces before and after events such as mutations, ligand binding, ph or temperature alterations. we exemplify this case using a mutant of rop, a small regulatory protein from escherichia coli with a native tertiary structure of a homodimeric four-helix bundle. the native structure has been shown to be disrupted by a single amino acid substitution  in the turn region  <cit> . to show the consequences of this mutation, we generated structuprint maps of the wild type protein  and the a31p mutant  after superposition. figure  <dig> illustrates the mutation-induced conformation change, comprising different surface shape and grouping of negatively charged residues.fig.  <dig> three- and two-dimensional depiction of the native rop structure  and the a31p mutant . in the 3d representation, the amino acid side chain of the 31st residue - in the turn region - is shown in stick style. positively charged residues are shown with blue colour, negatively charged ones with red, and non-charged residues with white. with the 2d representation generated by structuprint, large differences can be observed not only in the shape of the surface, but also in the location of exposed negatively charged residues
+
+
+
+CONCLUSIONS
+we have developed a user-friendly application for two-dimensional visualization of protein surfaces, optionally supporting multicore processing and user-provided physicochemical descriptors. structuprint provides an alternative view of molecular surfaces, which - as shown in the previous section - could be of great use to a variety of researchers, including biochemists, structural biologists, and biophysicists.
+
+availability and requirements
+project name: structuprint
+
+project home page:http://dgkontopoulos.github.io/structuprint/
+
+operating systems: prebuilt packages and installers are available for gnu/linux distributions , windows, and os x. for all other operating systems, installation from the source code is required. the gui is available by default only for gnu/linux systems.
+
+programming languages: perl  <dig>  r
+
+license: gnu gplv3+
+
+any restrictions to use by non-academics: none
+
+availability of data and materials
+the datasets supporting the conclusions of this article are included within the article and its additional files.
+
+additional files
+additional file 1: 
+table of pdb entries used in the benchmark. accession codes and atom counts of  <dig> random, non-multimodel pdb entries that were included in the benchmark. 
+
+additional file 2: 
+conventional and molecular cartographic visualizations of a molecular dynamics simulation of the chicken villin headpiece subdomain . comparison between animations produced with conventional rendering methods , and with 2d maps generated by structuprint. the right half shows the movement of exposed amino acids with high topological polar surface area values  during the course of the simulation. 
+
+
+
+abbreviations
+2dtwo-dimensional
+
+3dthree-dimensional
+
+a31pala31 → pro mutant
+
+clicommand-line interface
+
+cpucentral processing unit
+
+fasa_hfractional water accessible surface area of hydrophobic atoms over all atoms
+
+gbgigabyte
+
+guigraphical user interface
+
+hp- <dig> nlenlevillin headpiece subdomain double norleucine mutant 
+
+mbmegabyte
+
+moemolecular operating environment
+
+mopacmolecular orbital package
+
+pdbprotein data bank
+
+ramrandom-access memory
+
+raxmlrandomized axelerated maximum likelihood
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors' contributions
+
+dgk contributed to the conception of the software, designed, developed and packaged the software, ran benchmarks, prepared the figures, and drafted the manuscript. dv, gt, and sk conceived of and designed the software, reviewed and revised the draft. all authors read and approved the final manuscript.
+

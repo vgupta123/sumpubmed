@@ -1,0 +1,451 @@
+BACKGROUND
+the ever-increasing computational capacity of modern computer architectures  has enabled the simulation of realistic biochemical models with thousands of reactions . despite this capability, computational analysis of stochastic biochemical systems remains a challenge, as techniques like parameter estimation and sensitivity analysis typically require the simulation of multiple ensembles of hundreds to thousands of system trajectories. most existing parameter estimation algorithms for biochemical systems identify one or more sets of reaction rate parameters giving rise to trajectories that closely mimic observed data . in contrast, stochastic parameter search for events   <cit>  was developed to efficiently sample biochemical reaction rate parameter values that confer a user-specified target event with a given probability and error tolerance. its conception was inspired by acknowledging the usefulness of such an event-based approach to parameter estimation. as executing sparse with different initial conditions will identify non-overlapping sets of parameter values that satisfy the target event equally well , these results can be used to evaluate various cost functions for scientific and economic purposes. for example, many intervention strategies exist in malaria control: mass drug administration, mass screen and treat, focal mass drug administration, and snowball reactive case detection  <cit> . knowing all combinations of system parameters in an epidemiological model that result in eradication of malaria is extremely beneficial for making the most cost-effective policy decisions. similarly, learning different parameter combinations that result in cell polarization in a mechanistic model of the yeast saccharomyces cerevisiae can aid in our understanding of cell polarization in other organisms as well as contribute new insights to yeast polarization  <cit> . in general, sparse outputs from the solution hypersurface may be filtered using user-defined cost functions or constraints to further refine the event characterization.
+
+sparse is comprised of three main components: the multi-level cross-entropy  method, exponential parameter interpolation, and the inverse biasing method   <cit> . as introduced in  <cit> , performance of the multi-level ce method depends on the existence of a sufficient amount of intrinsic stochasticity in the system of interest. for systems with low levels of intrinsic stochasticity , the multi-level ce method can exhibit slow convergence properties, especially when initial parameter values are far from the solution hypersurface. furthermore, experiments conducted in  <cit>  demonstrated that the accuracy of exponential interpolation significantly decreases when parameter estimates rapidly pass through the solution hypersurface. taken together, these two limitations greatly hamper our ability to characterize target events in important classes of stochastic systems.
+
+to overcome these limitations, we developed sparse++, a substantially improved algorithm for characterizing target events in terms of system parameters. sparse++ makes use of several algorithmic improvements to sparse that lead to faster and more accurate performance, particularly in the presence of low intrinsic system stochasticity. sparse++ utilizes a novel method called cross-entropy leaping  that accelerates the convergence rate of the multi-level ce method. upon detecting slow convergence, ce leaping uses past parameter estimates to intelligently “leap" forward in parameter space rather than continue using the standard ce method. furthermore, we have defined special leaping cases to improve accuracy in situations when parameter estimates rapidly pass through the solution hypersurface. finally, sparse++ features a more robust parameter interpolation method that further accelerates the algorithm convergence rate. to demonstrate superior performance of sparse++, we apply the method to the three example systems featured in  <cit> : a birth-death process, a reversible isomerization model, and a system exhibiting sirs disease dynamics. in addition, we include an eight-reaction model of yeast polarization featured in  <cit> . in each example, sparse++ shows substantially improved computational efficiency over sparse, with the largest efficiency improvements resulting from analysis of events with the strictest error tolerances.
+
+methods
+the algorithms developed in this work make use of gillespie’s stochastic simulation algorithm   <cit> —a monte carlo simulation method that produces exact trajectories of a well-stirred system obeying the chemical master equation . such systems can be described in the following manner. given a biochemical system consisting of n molecular species {s
+ <dig> ⋯,s
+n} and m reaction channels {r
+ <dig> ⋯,r
+m}, let x
+i denote the population of s
+i at time t, x≡,⋯,x
+n) the state vector at time t, and x
+0≡x the population at initial time t
+ <dig>  the time evolution of x in a fixed volume at constant temperature is governed by sequences of two random variables: τ, the time elapsing between the current and next reaction firings, and j
+′, the index of the next reaction firing at time t+τ. after each selection of τ and j
+′, x advances by x=x+νj′, where ν
+j≡[ν
+1j,⋯,ν
+nj], and j∈{ <dig> ⋯,m} is the state change  vector. each component in the state change vector, ν
+ij, denotes the change in population x
+i induced by single firing of reaction r
+j.
+
+sampling τ and j
+′ requires computation of reaction propensity functions, a
+j, where k represents the system reaction rates , defined such that a
+jdt is the probability that one r
+j reaction occurs in the next infinitesimal time interval [t, t+dt). denoting the propensity sum as a0≡∑j=1maj, each time to the next reaction τ is exponentially distributed with mean 1/a
+ <dig>  and each index of the next reaction j
+′ is categorically distributed with probability a
+j/a
+ <dig> j∈{ <dig> ⋯,m}.
+
+our goal in simulating system trajectories is to characterize the probability of reaching a target event e before some final time t
+f. thus, during simulation we update each trajectory’s state until either t
+f is reached or the target event e occurs . after simulating n
+s trajectories, the monte carlo estimate for e can be expressed as 
+  <dig> p^=1ns∑i=1nsi{f)∩e}, 
+
+
+where f) is the value of the event function f evaluated on the i
+th trajectory at times ti≡{t <dig> ti <dig> ⋯,tinti− <dig> ti}  simulated with reaction rates k. two requirements for f are that it takes the system state as an input and can be used to evaluate the distance between this state and e. the indicator function i{f)∩e} thus returns a value of  <dig> if the distance between f) and e is zero and  <dig> otherwise.
+
+sparse—stochastic parameter search for events
+in this section, we briefly describe the original sparse algorithm. we refer the reader to  <cit>  for details concerning the algorithm. the objective of sparse is to find reaction rates k
+∗ that satisfy 
+  <dig> pe−p^≤εpe, 
+
+
+where pe and εpe are the user-defined target probability of observing event e by time t
+f and user-defined absolute error tolerance, respectively. starting with γ
+0≡ <dig> and k
+ <dig>  sparse advances the system toward e by iteratively updating k
+ by 
+  <dig> kj=kj×γj,j∈. 
+
+
+the multi-level cross-entropy  biasing parameters γ
+ are computed by 
+  <dig> γj=∑i′nij∑i′∑k=1ntiaj,k)τik, 
+
+
+where n
+ij is the total number of times reaction j fires in the i
+th trajectory, ∑i′ iterates only over the subset of n
+s trajectories that return  <dig> for i{f)∩e}, k indexes the nti reaction firings occurring in the i
+th trajectory, and t
+ik and τ
+ik represent the absolute time and time elapsed since the last firing for the k
+th reaction firing in the i
+th trajectory. computation for γ
+ and k
+ terminates when eq.  is satisfied, or when l≥ℒ for some ℒ∈ℕ .
+
+besides the multi-level ce method, sparse is comprised of two other components: exponential parameter interpolation and the inverse biasing method. both the multi-level ce and the inverse biasing methods proceed by picking a set of intermediate events ξ that are close to e and reachable with the current reaction rates. sparse chooses ξ at each iteration by selecting the top ⌈ρ
+n
+s⌉ simulated trajectories that evolve farthest in the direction of e. the values of ρ are chosen based on the distance between the current estimate and pe. denoting the distance as δ≡pe−p^,e;tf), ρ is chosen by
+
+for sgn)==ϕ
+type
+  <dig> ρ= <dig> , <dig> if <dig> <|δ| <dig> , <dig> , <dig> if <dig> <|δ|≤ <dig> . <dig> . <dig> .2otherwise 
+
+
+for sgn)≠ϕ
+type  
+  <dig> ρ=if <dig> <|δ| <dig> , <dig> , <dig> if <dig> <|δ|≤ <dig> . <dig> . <dig> .2otherwise, 
+
+
+where ϕ
+type is  <dig> if f≤e and - <dig> otherwise. in the above two cases, sgn)≠ϕ
+type corresponds to the case where the current reaction rates over-perturb the system with respect to pe. the conventional multi-level ce method cannot be used here, as the top trajectories evolving in the direction of e surpass the target event more than the desired amount. these trajectories, however, can be used to reverse the direction of bias . instead of terminating a simulated trajectory when e is reached , we run all n
+s trajectories until t
+f and record the maximum values reached in the direction of the target event. these values are then used in eq.  to determine intermediate target events. as with eq. , the smaller the distance, the less extreme intermediate events are chosen to avoid excessive biasing. the inverse of the biasing parameters corresponding to these events are then multiplied by the current reaction rates to compute the next estimates p^. while inverse biasing effectively reverses the direction of bias in the case of over-perturbation, estimates computed in this way may not be accurately characterized by exponential interpolation. thus, we choose more conservative ρ values for inverse biasing than for the multi-level ce method.
+
+for target events that require high accuracy , the multi-level ce method may ‘step over’ k
+∗, resulting in both under- and over-perturbing γ values. in this case, sparse performs fine-tuning by exponential interpolation, which computes parameters q and r that satisfy 
+  <dig> minqj,rj×ns)−qj×exprj×γj,j={ <dig> ⋯,m}, 
+
+
+where γ
+ are the values of the past multi-level ce method biasing parameters normalized with respect to γ
+ <dig>  denoting k
+ as the reaction rates for the current iteration of sparse, each γj can be expressed as kj/kj <dig>  the resulting estimate from employing γ
+ is denoted p^. since interpolation is initiated only after both under- and over-perturbing estimates are obtained, γ
+ is guaranteed to have at least two entries. when there are more than five entries, sparse picks the five estimates closest to pe while requiring that both under- and over-perturbed values are present. once the optimal exponential curve in eq.  is found, sparse returns up to seven sets of candidate biasing parameters. three of the seven correspond to estimates that are slightly less than pe×ns, one corresponds to the exact value, and the rest to estimates slightly greater than pe×ns. interpolation starts with the candidate set from the exact target value, and it shifts to over- or under-perturbing parameters depending on the resulting estimate. for example, if the resulting estimate is greater than pe×ns+εpe, sparse chooses the next under-perturbing biasing parameters to compute the next estimate. sparse assumes failure in interpolation and exits if it is unable to find k
+∗ in a user-defined number of iterations, i, which is set to  <dig> by default.
+
+accelerating convergence with cross-entropy leaping
+we now describe the enhancements made to create sparse++, a substantially improved algorithm for identifying k
+∗ for a given event and target probability. the first enhancement introduces cross-entropy  leaping, an algorithmic technique enabling accelerated convergence.
+
+given a set of initial reaction rates, the sparse convergence rate depends on the intrinsic stochasticity of the system with respect to the target event, which we simply refer to as ‘stochasticity’ in the remainder of this section. denoting ξimax as the value of f)) closest to e reached by the i
+th trajectory, the next intermediate events ξ are chosen as the closest ⌈ρ
+n
+s⌉ values of ξimax to e, where ρ is chosen by  or  and i∈{ <dig> ⋯,n
+s}. for systems and target events exhibiting low stochasticity, the variance among the ξimax values is small. as a result, even small values of ρ will generate subsequent intermediate events that are very close to current ones, causing sparse to converge slowly, if at all.
+
+to accelerate convergence for low stochasticity cases, we developed a method called cross-entropy  leaping that computes γ using exponential extrapolation from past biasing parameters and probability estimates. starting with l= <dig>  sparse++ records p^,e;t) and initiates ce leaping if neither of the following two conditions are true: 
+inequality  is satisfied. in this case the objective of sparse++ is met, and the algorithm exits,
+
+
+p^·ns≤pe·ns· <dig> ,forpe≤ <dig> p^·ns≤·ns· <dig> ,for <dig> <pe
+
+
+
+
+
+condition  <dig> is enforced to ensure the signal from k
+ is reliable; at least 1% of the fraction of trajectories equal to pe  are required in order to qualify for leaping. sparse++ repeatedly clears the memory of past estimates until two qualifying probability estimates are observed consecutively, at which point algorithm  <dig> is executed to determine leaping eligibility and magnitude.
+
+
+
+
+
+here, input variables p^ and γ denote consecutive probability estimates and their corresponding biasing parameters, respectively. ce leaping utilizes the mean rate of convergence calculated from p^ to determine how far in biasing parameter space to leap forward . to compute the convergence rate of the first probability estimate, we include the estimate computed immediately before the first eligible p^ when possible. the only instance when this cannot be done is when two eligible values from p^ are the very first two estimates computed for a given k
+ <dig> 
+
+the states from which ce leaping are triggered can vary greatly. for example, the distance to the target probability pe, rate of change in p^, and the magnitude of pe can all differ substantially, even for the same systems using different values of k
+ <dig>  the amount of leaping used should thus depend on all of these factors, in order to avoid grossly over-perturbing the system. to handle different rates of convergence, two pre-defined variables leapprojs and leapfactors are used to adjust the amount of leaping based on the average change in p^·ns  and the minimum distance to the target event probability . the largest leaping multiplier  is chosen when the estimated number of steps to reach pe , is greater than  <dig> . in contrast, when stepproj is less than  <dig> the standard multi-level ce method is used instead of ce leaping. the value for stepproj is computed assuming linear convergence with rate meanstep. as this assumption may not be valid for certain systems and target event functions f, leaping multipliers  are chosen conservatively to prevent over-perturbation.
+
+when ce leaping is triggered, sparse++ skips the computation of intermediate target events and their associated biasing parameters, as γ
+ is set to γ
+ce.
+
+special leaping cases
+the ce leaping algorithm is designed to accelerate the rate of convergence of the multi-level ce method when it is stuck on a “plateau” in parameter space. the opposite scenario can also pose a problem to sparse—in a “steep” region of parameter space, the multi-level ce method may pass through the solution hypersurface too quickly. this can lead to erroneous interpolants or even solution divergence when computed estimates do not meet the thresholds required for interpolation and leaping. three cases of this scenario are identified and handled in sparse++. starting from the least severe instance and moving to the most severe, we explain each case in detail. as with ce leaping, new biasing parameters are computed from past estimates; thus, description of the second stage of the multi-level ce method  is omitted below.
+
+last leaping prior to interpolation
+in a quickly-changing parameter region, sparse may enter the interpolation stage with as few as two estimates, one on either side of pe. even when more than two estimates exist, their values may be far from pe if only two iterations of the multi-level ce method are run prior to interpolation. lack of p^ values near pe can significantly degrade interpolation quality. this case can be avoided by first obtaining another estimate near pe. to do this, sparse++ computes an additional estimate prior to entering the interpolation stage using γ
+wa, the values of which are generated using algorithm  <dig> 
+
+
+
+
+
+here n
+s and pe denote the total number of simulated trajectories and the user-defined target probability, respectively. the least under- and over-perturbing biasing parameters  are guaranteed to exist, since algorithm  <dig> is run immediately prior to the interpolation stage, which is only triggered when both under- and over-perturbing estimates have been computed. the weights w
+u and w
+o for γ
+u and γ
+o reflect how close p^u and p^o are to pe. supposing p^u is closer to pe than p^o, then δ
+u  will be smaller than δ
+o. since w
+u is defined as δ
+o normalized by the total distance, w
+u will be greater than w
+o. thus, the weighted averaging method gives more weight to biasing parameters from the better estimate. when characterizing target events with a larger error tolerance, the final leaping performed with γ
+wa may satisfy eq.  and thus eliminate the need to run interpolation.
+
+leaping on low-signal region
+near a quickly-changing region of parameter space, one iteration of sparse++ can alter biasing parameters so much that the next estimate does not qualify for interpolation or ce leaping. in this case, the multi-level ce method may take many iterations to escape this “low-signal” region. algorithm  <dig> can also be used to improve performance in this case, provided that all three of the following conditions are met: 
+at least three previous estimates exist
+
+at least one estimate is located on either end of pe
+
+
+at least one estimate on one side of pe is eligible for interpolation, and every estimate on the other side does not qualify
+
+
+
+
+the last condition corresponds to the case where estimates on one side of pe contain a sufficient signal for interpolation, while estimates on the other side do not. we note that although algorithm  <dig> is executed both here and in the previous special case, the conditions that trigger the algorithm as well as its purpose are very different. in the previous section, algorithm  <dig> is used to compute an estimate close to the target probability before beginning the interpolation stage. here, the same method is used to escape a low-signal region in an efficient manner.
+
+bisection to obtain sufficient signal
+the final case occurs when all past estimates exhibit insufficient signal for interpolation. although expected to occur rarely, the multi-level ce method can produce estimates that either reach the target event too few or too many times. if the corresponding under- and over-perturbation are severe, these estimates will not be considered for ce leaping or interpolation. when all recorded estimates do not meet the interpolation threshold yet exist on both sides of the target event probability pe, sparse++ executes bisection on previous biasing parameters in an attempt to move the system closer to pe. using algorithm  <dig>  we compute the biasing parameters with bisection, γ
+bs.
+
+
+
+
+
+unlike algorithm  <dig>  we do not measure distances of p^u and p^o with respect to pe. since these estimates exhibit insufficient signal, their distances to the target event probability do not contain useful information for computing weights of γ
+u and γ
+o.
+
+we note that this final case was not observed in any of the examples evaluated in the next section. however, the event functions used with the four example systems are simply the states of a single species. for more complicated event functions, we expect this case to occur more frequently, and algorithm  <dig> will thus reduce the incidence of solution divergence.
+
+improved interpolation
+exponential interpolation in sparse plays an integral role when the multi-level ce method alone is unable to deliver the target event probability with acceptable precision. once both under- and over-perturbed estimates are observed that do not satisfy the desired probability range , sparse employs exponential interpolation on previous estimates to compute candidate biasing parameters. acknowledging that the computed interpolant may still not produce an estimate within the required accuracy, sparse returns up to seven sets of biasing parameters that correspond to slightly perturbed target event probabilities. using these candidate parameter sets, sparse computes the first new estimate using the biasing parameters corresponding to the exact target event probability pe. if the estimate is too high , sparse picks a set of candidate biasing parameters corresponding to the least under-perturbing probability to compute the next estimate. if the estimate is too low , sparse picks the least over-perturbing probability instead. this process continues until k
+∗ is found or no more candidate biasing parameters remain, whichever occurs first. the default limit on the number of interpolation rounds is set to  <dig> . if the algorithm does not find γ
+∗ at the end of the third round of interpolation, sparse assumes failure to converge and exits.
+
+the motivation behind working with multiple candidate biasing parameter sets in the sparse interpolation stage is that the candidate set corresponding to pe may not produce a sufficiently accurate estimate, whereas a set corresponding to interpolant values near pe might. thus, sparse has as many as six alternate biasing parameter sets to be chosen should the first set fail to satisfy eq. . we note that this approach is only helpful if γ
+∗ falls within the range of candidate biasing parameter values. in the worst case when this is not true, sparse must run four additional ssa ensembles to produce an estimate before computing a new interpolant.
+
+sparse++ greatly improves the efficiency in this worst case scenario by modifying the process of exponential interpolation. first, it computes up to three different exponential interpolants: one as in sparse, one without the farthest under-perturbing γ , and one without the farthest over-perturbing γ . for each reaction, sparse++ then chooses the interpolant with the highest r
+ <dig> statistic. r
+ <dig> statistics are commonly used to assess goodness of fit of statistical models to observed data  <cit> . for our purposes, the r
+ <dig> value, which is between  <dig> and  <dig>  indicates the fraction of the total variance of output  that is explained by variation in input . computing the three interpolants and their corresponding r
+ <dig> statistics incurs a negligible computational cost, as no additional ssa simulations are required. pseudocode for computing the next reaction rates using sparse++ exponential interpolation is listed in algorithm  <dig> 
+
+unlike in sparse, the chosen interpolant in sparse++ returns only a single set of biasing parameters corresponding to the exact value of pe, and new interpolants are only computed if the corresponding estimate does not satisfy eq. . the computational cost of repeatedly generating new interpolants and r
+ <dig> scores in each stage is trivial compared to the cost of simulating a single ssa trajectory for most systems. if the projected biasing parameters γ¯ from algorithm  <dig> are out of range for any reaction r
+j, a weighted average is used to replace γ¯j, where the weights are normalized distances between pe and estimates corresponding to the least under- and over-perturbing biasing parameter sets for r
+j.
+
+
+
+
+
+RESULTS
+in this section we compare the performance of sparse++ to that of sparse using the same three models—a birth-death process, a reversible isomerization model, and a susceptible-infectious-recovered-susceptible  disease transmission system—described in  <cit> , as well as an additional eight-reaction system modeling yeast polarization  <cit> . for the first three models, all possible combinations of pe∈{ <dig> , <dig> , <dig> } and εpe∈{ <dig> , <dig> , <dig> } are analyzed by simulating ensembles of n
+s=5× <dig> trajectories. for the birth-death process, we also simulated an ensemble of n
+s=2× <dig> for pe= <dig>  and εpe= <dig>  in order to illustrate the robustness of sparse++ on a low probability target event. similarly, we explored the high probability target event pe= <dig>  and εpe= <dig>  with the reversible isomerization model using ensemble size n
+s= <dig>  lastly, the yeast polarization model is studied with pe= <dig> , εpe= <dig> , and n
+s=5× <dig> 
+
+in order to minimize output differences resulting from stochasticity , we used the same random number generator seeds and initial reaction rates for sparse and sparse++. for fairness of comparison, we treat each of the following computations as a single iteration: estimation using the multi-level ce method, computing biasing parameters for intermediate events, estimation using interpolation, and estimation using any type of leaping . although the exact costs of these computations differ depending on the values of reaction rates and the type of simulations , the complexity in terms of the number of trajectories simulated is the same, i.e., o. overall, this procedure ensures that the net computational gain or loss in terms of the total number of trajectories generated is properly quantified. using this measure we define gaini:=no. iterations sparse−no. iterations sparse++no. iterations sparse× <dig> to assess the performance of sparse++ compared to sparse for a specific combination of pe and εpe values. the numerator is the difference between the number of iterations employed by the two methods, while the denominator is the total number of iterations sparse required. this fraction is multiplied by  <dig> to create a percentage. similarly, we define gaint:=sparse runtime−sparse++ runtimesparse runtime× <dig> for comparison of absolute runtime . both variables gaini and gaint measure the relative computational ‘gain’ from using sparse++ over sparse. all simulations were run on intel®; xeon®; cpu e5- <dig> v <dig> at  <dig>  ghz workstation with  <dig> gb ram, 64-bit windows  <dig> enterprise os, using matlab and its parallel computing toolbox™.
+
+lastly, we note that sparse++ achieved 100% success on all examples tested and therefore omit explicitly listing the success rate in any of the tables. for examples where sparse observed failure  <cit> , we examine the role of new features in sparse++ that enabled the algorithm to successfully converge to the solution hypersurface.
+
+birth-death process
+our first example is the birth-death process, which is defined as follows: 
+ ∅→k1s, <dig> ≤k1≤ <dig> s→k2∅, <dig> ≤k2≤ <dig> , 
+
+
+with x
+0= <cit>  and e the population of s reaching  <dig> before t
+f= <dig>  table  <dig> summarizes the results for the  <dig> test cases. we note that sparse++ attained 100% convergence as well as significant computational gains for problems that required high accuracy. figure  <dig> illustrates ensemble results from running sparse  and sparse++  for pe= <dig>  and εpe= <dig> , a problem specification on which sparse++ achieved the highest computational savings, with gaini= <dig> % and gaint= <dig> %. for the  <dig> initial reaction rates, sparse computed a total of  <dig> estimates , whereas sparse++ computed only  <dig> estimates . we can see that the estimate density in fig. 1
+a is higher than  near the solution surface , indicating the improved efficiency of sparse++. the difference of  <dig> iterations is equivalent to a savings of over 8× <dig> simulated trajectories.
+fig.  <dig> ensemble result comparison between sparse a and sparse++ b performance for birth-death process with pe= <dig>  and εpe= <dig> . for given thirty initial reaction rates, sparse required  <dig> estimates while sparse++ required 122
+
+
+
+pe
+εpe
+the first column denotes the target probability, the second column absolute error tolerance, the third column the total number of sparse samples computed for the  <dig> initial parameter sets, the fourth column the total number of sparse++ samples computed for the  <dig> initial parameter sets, the fifth the total number of iterations gained by running sparse++ compared to sparse, and the sixth the total number of iterations lost by running sparse++ compared to sparse. n
+s=5× <dig> for all configurations except pe= <dig> , where n
+s=2×105
+
+
+
+
+
+roh and eckhoff  <cit>  reports that two of the thirty sparse samples, k30= and k270= , failed to converge in the interpolation stage for pe= <dig>  and εpe= <dig> . the reason for the failure in both cases is due to the poor agreement between past parameter estimates and their corresponding exponential interpolants. specifically, the parameters computed by the inverse biasing method over-perturbed the system and yielded an estimate far from pe. figure 2
+a summarizes the progression of sparse with k <dig>  qualitatively, the behavior with k <dig> is similar and is thus omitted from illustration. each over-lapping rectangular pair lists the reaction rates at stage l  and its corresponding estimate p^. the large amount of change in p^  from p^ despite the absolute magnitude of change in k
+ being similar to the iteration prior indicates that the probability shifts rapidly around k
+. because p^ are far from pe and γ
+ are obtained by the inverse biasing method, the resulting interpolant is poor and sparse is unable to find k
+∗. this problem is resolved in sparse++ by applying weighted average leaping prior to entering the interpolation stage. instead of continuing with the remaining biasing parameter candidates as in sparse, i.e., computing p^, sparse++ stops the multi-level ce method, as both under- and over-perturbing estimates are obtained. using the biasing parameters computed in algorithm  <dig>  sparse++ places the third estimate p^ at  <dig> , near pe= <dig>  . when the sparse++ interpolation stage begins, the interpolant without the most under-perturbing estimate is chosen, as its r
+ <dig> score is highest. the removal of this outlier significantly improves the interpolant quality, and sparse++ reaches the solution hypersurface in the first interpolation stage ).
+fig.  <dig> flow chart of sparse simulation on the birth-death process with pe= <dig> ,εpe= <dig> , and k
+0=  for sparse  and sparse++ 
+
+
+
+
+reversible isomerization model
+our second example is a reversible isomerization model, which is defined as follows: 
+ a→k1b, <dig> ≤k1≤ <dig> b→k2a, <dig> ≤k2≤ <dig> , 
+
+
+with x
+0= <cit> , i.e., all molecules are initially in the a form. the target event e is set to the population of isomer b reaching  <dig> before t
+f= <dig> 
+
+results from  <dig> test cases are given in table  <dig>  although sparse achieved 100% convergence for the first nine cases, one of the  <dig> reaction rates for pe= <dig>  failed to converge  <cit> . in contrast, sparse++ attained perfect convergence for all  <dig> test cases, required many fewer iterations than sparse on average, and achieved up to  <dig> % in gaini  and  <dig> % in gaint . the largest gaini achieved for a single set of initial reaction rates is  <dig> iterations; two reaction rates  accomplished this for pe= <dig>  and εpe= <dig> . for each of these two sets, sparse required  <dig> iterations of interpolation before reaching the solution hypersurface. the reason sparse employed such a high number of interpolations is the same reason the two reaction rates from the birth-death process failed to converge: past estimates from the inverse biasing method did not form an exponential trend. running algorithm  <dig> in sparse++ eliminated this problem and required one and zero iterations of interpolation for k <dig> and k <dig>  respectively. figure  <dig> compares the states at which interpolation is initialized for the two methods with k <dig>  sub-figures – illustrate three successive interpolants computed by sparse, while sub-figure  illustrates the behavior of sparse++. when exponential interpolation is initiated for the first time , we see that past estimates do not form a smooth trend that can be well-characterized by a single exponential function. after exhausting all candidate biasing parameters from the first interpolant, another interpolation is initiated , this time exhibiting a much smoother trend and narrower range of estimates . however, the candidate biasing parameters from the second interpolation stage still over-perturbed the system more than the allowed error tolerance εpe= <dig> , and a third interpolation stage was required. the first candidate from the third interpolant satisfied eq. , and sparse found k
+∗ after computing a total of  <dig> estimates from interpolation. in contrast, sparse++ converged to the solution hypersurface with the first candidate biasing parameters from interpolation . although the range of η in  is similar to that of sparse in  when interpolation is initiated, the range used to compute the final interpolant is similar to that of sparse in . this is because the interpolant yielding the highest r
+ <dig> score was obtained by removing the most over-perturbing parameters. furthermore, this removal was possible because the estimate computed with biasing parameters from weighted average leaping is very close to, but slightly above, the target probability.
+fig.  <dig> interpolation comparison between sparse and sparse++ for the reversible isomerization model with pe= <dig> ,εpe= <dig> , and k
+0=. sub-figures a-c display three successive interpolation attempts made by sparse, where the solution hypersurface is reached by the ninth candidate biasing parameter set. sub-figure d represents interpolation by sparse++, whose first output successfully finds k
+∗. blue and green circles denote counters  from past biasing parameters for r
+ <dig> and r
+ <dig>  respectively. blue and green dashed lines represent interpolants corresponding to past counters. yellow horizontal line is the target counter . red triangles represent counters corresponding to candidate biasing parameters
+
+
+
+pe
+εpe
+column identities match those of table  <dig>  n
+s=5× <dig> for all configurations except pe= <dig> , where n
+s=105
+
+
+
+
+
+sirs disease transmission system
+our third example is a susceptible-infectious-recovered-susceptible  disease transmission system, which consists of the following three reactions: 
+ s+i→β2i, <dig> ≤β≤ <dig> i→γr, <dig> ≤γ≤ <dig> r→ωs, <dig> ≤ω≤ <dig> , 
+
+
+with x
+0= <cit> , where x=[s
+i
+r]. this model describes an epidemiological compartment where members of s become infected by members of i, who recover from the infection at rate γ and transition to r. once recovered, members of r lose immunity at rate ω, and this transition from recovered to susceptible replenishes the population of s. the target event for this system is set to the population of i reaching  <dig> before t
+f= <dig>  unlike the two previous examples, this model contains a non-linear reaction r
+ <dig>  and there is no closed-form solution for computing k
+∗. therefore we use the same numerical solution obtained using the ssa in  <cit>  to evaluate accuracy of sparse and sparse++ estimates.
+∗ and evaluate the corresponding performance of sparse++ . for each initial set of reaction rates , sparse iterations are divided into computation of intermediate events , biasing parameters for ie , inverse biasing from over-perturbation , and interpolation . the final column  contains the sums of iterations for the given reaction rates k
+ <dig>  for sparse++ results, we also add the number of iterations due to leaping . figure  <dig> displays the eight reaction rates in a probability plot with the solution hypersurface .
+fig.  <dig> visualization of the target event probability for sirs model. solution hypersurface is represented by cyan mesh grid. eight sets of initial reaction rates that correspond to the slowest convergence in sparse are represented by red squares
+
+
+
+
+pe
+εpe
+column identities match those of table  <dig>  n
+s=5× <dig> for all configurations
+
+
+
+k
+0
+p^0
+γ
+γ
+initial probability estimate, number of intermediate event  computations, number of biasing parameter computations, number of over-perturbation  stages, and number of interpolation stages for sparse simulations are given in columns 2- <dig>  respectively. column  <dig> contains the total number of sparse iterations  for the initial rate in column  <dig>  sparse++ statistics are listed in columns  <dig> to  <dig>  including the number of times the leaping method was used in column  <dig>  the number of iterations saved by employing sparse++ over sparse is given in column  <dig> 
+
+
+
+
+from table  <dig> and fig.  <dig>  we see that some initial reaction rates are not far from pe= <dig>  in absolute distance . this illustrates that the initial distance from pe cannot be reliably used to predict the speed of sparse convergence to the solution hypersurface; if the initial estimate lies in a low-variance parameter region, the multi-level ce method may take many iterations to reach k
+∗. we also note that the occurrence of over-perturbation alone is not highly correlated with the speed of convergence in sparse. three of the eight sets did not show any over-perturbation yet converged slowly to the solution hypersurface. the same holds for the number of interpolations; half of the eight reaction rates employed either  <dig> to  <dig> interpolation iterations to find k
+∗ . these varying behaviors demonstrate that no single modification to the sparse algorithm would have significantly accelerated the convergence rates for all eight worst-case examples; rather, a collection of enhancements like those implemented in sparse++ is required.
+table  <dig> detailed breakdown of sparse++ applied to sirs disease dynamics leaping usage on eight initial reaction rates that exhibited slowest sparse convergence
+
+
+k
+0
+columns 2- <dig> list the number of times ce leaping, weighted average  leaping prior interpolation, wa leaping on one-sided low signal region, and the bisection method were employed, respectively, for k
+ <dig> in column  <dig>  the total number of leaping methods employed for each initial set of reaction rates is given in column  <dig>  lastly, the number of iterations saved by running sparse++ over sparse is listed in column 7
+
+
+
+
+we note that the use of leaping often yields slightly different points in the solution hypersurface than those identified without any leaping methods. figure  <dig> compares the estimate progression of sparse and sparse++ for k
+0=, which corresponds to the initial reaction rates requiring the greatest number of sparse iterations to converge . in this instance, sparse ran the multi-level ce method exclusively until the very last iteration, at which point it identified ksparse∗= using interpolation. in contrast, sparse++ employed three rounds of leaping and three rounds of interpolation in addition to the multi-level ce method and obtained ksparse++∗=. we see from fig.  <dig> that the first two estimates are almost identical between the two methods. this is expected, since both methods used the multi-level ce method to compute these estimates. however, sparse++ initiates ce leaping on the third estimate upon detection of slow convergence. as a result, the third sparse++ estimate is positioned close to but slightly below the ninth sparse estimate. the fourth and fifth sparse++ estimates closely parallel the 10th and 11th sparse estimates, after which sparse++ again employs ce leaping for the final estimates.
+fig.  <dig> visualization of sparse and sparse++ estimates converging to k
+∗ for k
+0=. blue squares represent sparse++ estimates, two of which are obtained from biasing parameters computed with ce leaping. red squares represent sparse++ estimates
+
+
+
+
+yeast polarization
+for our final example, we modified a model of the pheromone-induced g-protein cycle in saccharomyces cerevisiae given in  <cit>  in a similar fashion as  <cit>  so that it does not start in nor reach stochastic equilibrium within t
+f= <dig>  our modified system consists of seven species x=[r
+l
+rl
+g
+g
+a
+g
+bg
+g
+d] and is characterized by the following eight reactions: 
+ ∅→k1r <dig> ≤k1≤ <dig> r→k2∅ <dig> ≤k2≤ <dig> l+r→k3rl+l <dig> ≤k3≤ <dig> rl→k4r <dig> ≤k4≤ <dig> rl+g→k5gα+gβγ <dig> ≤k5≤ <dig> gα→k6gd <dig> ≤k6≤ <dig> gd+gβγ→k7g <dig> ≤k7≤ <dig> ∅→k8rl <dig> ≤k8≤ <dig> , 
+
+
+with x
+0= <cit> . in this yeast polarization process, the subunit g
+βγ is thought to play an important role of signaling for the downstream cdc <dig> cycle. here we aim to discover reaction rates that yield target event e of x reaching  <dig> by t
+f= <dig> with probability pe= <dig>  and error tolerance εpe= <dig> .
+
+aggregated results from employing sparse and sparse++ on thirty initial reaction rates are given in table  <dig>  sparse++ achieved gaini of  <dig> % and gaint of  <dig> %. we note that sparse++ either outperformed or performed equally well as sparse for all sets of initial reaction rates except for two, where it had a loss of only one iteration. distribution of gain and loss in the number of total iterations per initial reaction rates is shown in fig.  <dig>  we see from this figure that twelve of thirty sets  performed equally well with sparse++ as with sparse. upon further inspection, we discovered that these twelve sets required the least number of interpolations  using sparse. all other sets required a nonzero number of interpolations . for  <dig> out of  <dig> initial reaction rates, sparse++ did not require any interpolation; weighted average leaping prior to interpolation carried the system to the solution hypersurface within the error tolerance of  <dig> . we also note that sparse++ required at most two leapings for any given set of initial reaction rates, where the majority of leaping was initiated prior to interpolation rather than from slow convergence. for systems that suffer from low stochasticity and thus slow convergence to the target event, we expect higher gains in efficiency from employing sparse++. a list of all  <dig> initial reaction rates and the number of iterations required for each set by both sparse and sparse++ are given in additional file 1: appendix section c.
+fig.  <dig> distribution of number of iterations gained by using sparse++ over sparse for the yeast polarization process with pe= <dig>  and εpe= <dig> . a total of  <dig> data points are displayed. the magenta bar represents two instances of a loss of one iteration, while the remaining blue bars represent either no change or gains of iterations
+
+
+
+pe
+εpe
+column identities match those of table  <dig>  n
+s=5×104
+
+
+
+
+
+in order to identify possible linear relationships among different reaction rate parameters that correspond to the solution hypersurface, we computed correlation coefficients between each pair of reactions for all k
+∗ values from sparse++ simulations . we observed two correlations which were greater than  <dig>  in magnitude: between reactions r1-r <dig> and r3-r <dig>  table  <dig> displays details from running the correlation analysis. both identified pairs are involved in controlling the population of species rl. since the ligand  population is constant in our model, the population of rl plays a crucial role in production of g
+βγ. the presence of too many molecules of rl would result in over-perturbation, while too few would result in under-perturbation with respect to the target probability . the negative correlation coefficient value for r3-r <dig>  implies that when k
+ <dig> is set to a large value to produce many rl molecules, sparse++ reduces the value of k
+ <dig> to compensate for the increase in population, and vice versa. for r1-r <dig> , when k
+ <dig> is high and many molecules of species r are produced, these molecules interact with l to produce rl. the resulting over-population is controlled by simultaneously increasing the degradation rate of species rl . reactions r <dig>  r <dig>  r <dig>  r <dig>  and r <dig> all directly participate in controlling the populations of the r and rl species. running the correlation analysis identified two key reaction pairs that sparse++ jointly perturbed to confer the target event of g
+βγ reaching a population of  <dig> by t
+f= <dig>  such insights into the yeast polarization system may be useful for guiding future experiments in a laboratory setting.
+the first column denotes the correlation coefficient, the second column a lower bound from a 95% confidence interval, the third column an upper bound, and the last column the corresponding p-value
+
+
+
+
+CONCLUSIONS
+we have developed sparse++, a substantially more computationally efficient enhancement of sparse for identifying parameter configurations that confer a user-defined probabilistic event. sparse++ features novel parameter leaping methods for accelerating convergence as well as a more principled interpolation approach. each class of leaping methods in sparse++ has a set of prerequisite conditions. when these conditions are met, the algorithm “leaps" through parameter space, resulting in a marked reduction of the number of iterations required for convergence. this cross-entropy leaping approach, based on exponential extrapolation, permits the algorithm to converge much more rapidly for low stochasticity problems than the traditional multi-level ce method employed by sparse. in addition, by computing a weighted average of previous estimates, sparse++ improves the accuracy of interpolation. we note that all the merits of sparse—high parallelizability, robustness of pe values, and concurrent updates on all reaction parameters—are retained in sparse++.
+
+the four examples featured in this paper demonstrate that performance gains are largest for problems requiring high accuracy. in terms of total number of iterations required, sparse++ outperformed sparse in  <dig> out of  <dig> test problems. for the birth-death process with pe= <dig>  and εpe= <dig> , sparse and sparse++ performed equally well. this is not surprising, as most  of the initial reaction rates did not require any interpolation in sparse and converged rapidly to the solution hypersurface. for this problem configuration, each set of initial reaction rates required only  <dig>  iterations on average to converge to the solution hypersurface. similarly, sparse++ outperformed sparse on  <dig> out of  <dig> test problems when comparing the total runtime. for the remaining five problems, the differences in runtime are negligible . we also note that three sets of reaction rates that failed to converge using sparse  successfully reached the solution hypersurface with sparse++.
+
+as computational researchers continue to model events of interest in realistic biochemical systems, the need for efficient methods to identify compatible reaction rate parameters will grow. we expect that the algorithmic advancements provided by sparse++ will fulfill this need and enable characterization of increasingly more computationally intensive biochemical events in the future.
+
+additional file
+
+additional file  <dig> appendix. in this file, we present a list of variables and definitions used in the manuscript . detailed pseudocode for the sparse++ driver, multi-level ce method, and inverse biasing method are given in section b. section c contains two tables regarding the yeast polarization process. the first table  lists thirty randomly generated initial reaction rates that were used to run the sparse and sparse++ algorithms. the second table  contains an algorithmic breakdown for each of the initial reaction rates. 
+
+
+
+
+abbreviations
+cecross entropy
+
+opover-perturbation
+
+sparsestochastic parameter search for events
+
+ssastochastic simulation algorithm
+
+waweighted average
+
+the authors thank bill and melinda gates for their active support of this work and their sponsorship through the global good fund.
+
+funding
+this was has been funded by the global good fund.
+
+availability of data and materials
+sparse++ was coded using matlab r2015a and simulated using parallel computing toolbox. matlab files that run sparse++ on the three examples included in the paper are available on for download at https://github.com/institutefordiseasemodeling/paper-repository/tree/master/sparse-publication. psuedocode for all components of sparse++—multi-level ce method, inverse biasing method, ce and wa leaping methods, and interpolation process—is included in the additional file along with the manuscript.
+
+authors’ contributions
+mr developed the method, coded the algorithm, and prepared figures and tables. bd participated in the design of the methods and edited the manuscript. both authors read and approved the final manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+not applicable.

@@ -1,0 +1,313 @@
+BACKGROUND
+targeted sequencing  is a routine method that enables sequencing of specific genome regions that are of interest to researchers. in comparison with whole genome  or whole exome sequencing  the ts has lower analysis cost, provides deeper target regions coverage and reduces storage and analysis infrastructure requirements  <cit> . in contrast, variability in efficiency of amplification during library preparation leads to uneven amplicon coverage from one experiment to another. this limits the usage of existing coverage-based cnv detection tools for a ts data. well-known paired-end algorithms that use insert size and reads’ orientation are unapplicable for analysis of data produced with amplification-based sample preparation techniques  <cit> .
+
+cnv corresponds to the deletions and duplications of some large  portions of the genome  <cit> . many known cnvs are associated with genetic disorders and thus are classified as pathogenic mutations . several approaches for cnv detection are used in clinical diagnostics, but most of them use wgs or wes data and cannot be applied for amplification-based ts  <cit> .
+
+the cnv detection tools that work with ts data usually use one of three approaches or combination thereof, which are on-target read depth , b-allele frequencies  or off-target read depth . the examples are adtex  <cit>  , exomecnv  <cit>  , cnvkit  <cit>  . however, baf and or approaches have several limitations. at first, baf approach is typically used in case-control studies for the detection of long cnvs while the probability of having at least one point mutation for cnv covered with small amount of short targets is low. or approach is suitable only under the assumption that significant portion of reads are off-target so they provide a low-coverage sequencing of whole genome which is not always the case – there can be only negligible amount of reads that did not map on targets per sample. another issue of or approach in respect of amplification-based sequencing is a non-uniform coverage of off-target reads across the genome that arises due comparatively frequent non-specific amplification. thus we conclude that rd is the most appropriate method for detection of cnvs that can be intersected with small number of targets.
+
+usually rd cnv detection methods evaluate the ratio between reads aligned to the target dna segment and the total number of aligned reads  <cit> . if read count for the selected dna segment in a sample differs from the value estimated for the control set of samples lacking cnvs, the testing sample is considered to carry cnv corresponding to the dna segment  <cit> . this works well with wgs that provides somewhat uniform read distribution along the target region , but cannot be directly applied to pcr or hybridization enriched data since they are characterized by a substantial coverage variability due to the differences in dna fragments capture or amplification efficiencies. exponential growth of pcr product quantity further reduces the coverage uniformity. therefore, existing cnv detection algorithms in wgs data are poorly applicable for ts data.
+
+we have found several tools for cnv detection in pcr-enriched ts data . as was described in papers, these tools were designed for detection of long variants intersected with substantial number of targets thus the sensitivity and/or specificity are expected to be low in case of ts data analysis that contain cnvs of regions covered with small  number of amplicons. below we provide analysis that supports this conclusion.
+
+we present a novel approach to the problem of cnv detection in ts data. in contrast to the vast majority of coverage based cnv detection tools for wgs/wes data, we do not use library size normalizations. at the heart of the algorithm is the idea of biochemical similarity of some amplicons in the large pool of sequences in multiplex pcr and machine learning techniques. we also present the tool named convector that implements this approach. to evaluate tool efficiency we performed verification using large dataset of more than  <dig> sequencing results and made a comparison with existing tools. the tool is open source and is deposited on github.
+
+methods
+implementation
+algorithm presented is implemented in convector software package that uses python for user input collection and data preprocessing and java  for data analysis. source code is licensed under gplv <dig> and is deposited on github: https://github.com/parseq/convector.
+
+model description
+amplification-based enrichment strategy is widely used for targeted sequencing. commercially available enrichment systems, such as ampliseq , provide the way to selectively amplify genomic regions of interest. number and location of targets are determined by the analysis aim and varies from hundreds to thousands in one sequencing library thus making analysis highly multiplex. quantity of pcr-product from certain target region  generally depends on the initial amount of target dna segment in the sample , number of pcr cycles , amplification efficiency , and is typically modelled as 
+  <dig> n=n0×c. 
+
+
+the main principle of coverage-based cnv detection is to estimate n
+0s from ns and to compare estimated n
+0s of targets to find the underrepresented  or overrepresented  sequences. the task of homozygous deletion detection is trivial since in case of n
+ <dig> equals to zero the n is also a zero. such condition can be detected by the lack of target sequence in the sequencing results. other cases such of heterozygous deletions and homo- and heterozygous duplications require deduction of n
+0’s from n’s that can be done by counting reads from corresponding amplicons. the number of reads , i.e. amplicon coverage, is highly dependent on amplification efficiency that is influenced by amplicon structure, primer characteristics and reaction conditions. in highly concurrent multiplex pcr environment the amplification balance can be shifted by even minor condition changes that are beyond the control of the researcher. resulted imbalance leads to an inability to directly compare target region absolute or relative coverages between samples to perform cnv detection, except of cases when analyzed genome region is covered by large number of amplicons . nevertheless, detection of relatively small portions of the genome, up to a single exon that is covered by one or few amplicons, may have biological or clinical importance.
+
+to get cnv detection with an amplicon scale resolution we imply the idea that in large amplicon population, which is the case of target pcr, it is possible to find amplicons with similar respond to reaction conditions. therefore to detect changes in the initial amount of targets we can compare coverages of targets which have similar amplification behavior in series of samples catching the anomalies , i.e. cnvs. since the described approach accounts for any factors affecting amplification efficiency , it is expected to be more efficient than the normalization just on amplicon or primer characteristics.
+
+the analysis consists of two steps: grouping amplicons with highly correlated coverages in the series of samples and cnv detection by multiple coverage comparison between amplicons within a group. from this perspective, cnv detection can be formulated as anomaly detection using methods of robust statistics.
+
+the analysis requires aligned reads from samples sequenced with the same set of primers and under the same reaction conditions. the goal of analysis is to determine zygosity state for each amplicon in each sample of the dataset. the model suggests that if two amplicons have similar amplification efficiencies and the influence of stochastic effects is small enough, the coverages of these amplicons in set of samples are correlated. the analysis of intersection of confidence intervals for λ obtained using box-cox transformation applied to the pairs of correlated amplicons and model  <dig> suggests that log transformation of amplicons coverage should be used to stabilize the variance and to make the variables homoscedastic. we propose two algorithms, unsupervised and supervised, that can be used separately or in combination. first  algorithm operates with amplicons while the second one  operates with cnv sites that may include one or more amplicons. since cnv breakpoints are usually located in intronic regions, it is useful to describe cnvs sites in terms of affected exons  <cit> . we assume that the dataset may contain a number of samples carrying cnvs, but each particular target is affected by cnv just in some subset of samples for the first algorithm. the prerequisite for the second algorithm is the presence of at least  <dig> samples that are free of cnvs in test dataset which can be satisfied with a priori known control dataset or be assumed based on low previously estimated populational frequency of cnvs in the particular genes of interest. the frequency of cnvs’ presence in the dataset and the dataset size influence on the robustness and effectiveness of the statistical model. presented model is based on the assumption that each particular cnv is present in no more than  <dig> % of samples in the dataset, which is in consistence with holds for majority of real-life cases. we used the robust linear regression model to estimate the linear relationships between amplicons.
+
+for cnv zygosity determination, we assumed that the amplification starts from the equal numbers of maternal and paternal copies of targets. the result of amplification, i.e. coverage, is a sum of independent random variables so we can build a linear model for any zygosity state, except of homozygous deletion , by multiplication of coverage with corresponding factor:  <dig>  for heterozygous deletion,  <dig>  for wild type,  <dig>  for heterozygous duplication and  <dig>  for homozygous duplication and so on. using the linearity of the sum of independent random variables’ variances, we can conclude that the variance is decreased when multiplier is equal to  <dig>  and increased when it is greater than  <dig> . this limitation results in the difficulty of duplication detection relatively to a deletion’s detection due the lower power of corresponding statistical tests. however, it is possible to build a statistical model for cnv statuses detection inside the group of correlated amplicons and use the likelihood considerations of certain cnv status for each amplicon in each sample, but the power to detect the exact number of copies is decreasing with the higher ploidy states.
+
+our algorithms use several robust statistical techniques that require comparatively large test dataset size for accurate cnvs’ detection. using the real sequencing data  we determined the lower threshold for the number of samples in the test dataset as  <dig>  however, the tool can be used for datasets of smaller size in case the control dataset of sufficient size is available.
+
+cnv detection algorithms
+the detection pipeline consists of two stages: unsupervised and supervised . the unsupervised algorithm takes coverages of amplicons in the samples as an input and does not require a priori assumptions about the potential presence of cnvs except the maximum cnv frequency at any particular site . the next algorithm  requires a control  dataset. control dataset can be made using the results of the unsupervised algorithm or alternative methods.
+fig.  <dig> pipeline scheme
+
+
+
+
+we use following notations: a
+j means j-th amplicon in the dataset, c
+o
+v denotes the a
+j’s vector of coverages across the samples, a
+jk denotes amplicon which vector of coverages is correlating, i.e., has correlation is higher than fixed threshold t, with c
+o
+v . t can be choosen as biggest number from  <dig>  to  <dig>  such as all analysed exons have at least one amplicon that passes quality control procedure . c
+o
+v denotes coverage of amplicon j in the sample i. in order to exclude cases when both a
+j and a
+jk can be affected with cnv we restrict selection by setting minimum physical distance between a
+j and a
+jk. in cases when target regions spread across genes it is possible to select a
+jk from the set of target regions that are located on genes other than a
+j is located on. also we denote m
+normal,m
+hetdel,m
+dup as statistical models for number of copies  <dig>   <dig> and greater or equal to  <dig>  respectively.
+fig.  <dig> . linear model of amplicons coverage. axes: logarithms of coverages of two different amplicons for one run . dots: wild type amplicons, triangles: heterozygous deletions. dash lines: ols regression for wild type amplicons and  <dig>  prediction interval. dot line: the regression line for heterozygous deletion
+
+
+
+
+we impy the idea that standard correction on features such as gc-content and read length removes a large part of variation, but there are many other sources for amplification-based sequencing  and it is not usually possible to infer all of them. thus we use different type of normalisation: we construct statistical models within clusters of correlated amplicons. they explain large proportion of variation in response variable which makes standard corrections unnecessary. pearson’s correlation coefficient used as an effective non-robust estimator of explained variance for the situations where we are sure that there are no outliers. robust estimators of correlation and regression’s parameters used as less effective robust alternative for the case where the possible presence of outliers is unknown. finally, normalisation on correlated random variables makes covariance matrix more close to diagonal, consequently, robust to overfitting, which makes usage of regularized classification methods possible.
+
+unsupervised algorithm
+cnv states are determined by building linear models using a c
+o
+v as the response and c
+o
+v as predictors .
+
+if c
+o
+v can not be recognized as an outlier for linear model m
+normal, we will consider that this amplicon is in wild type state for sample i.
+
+if c
+o
+v is lower than detection threshold , the amplicon is in homozygous deletion state for sample i.
+
+if c
+o
+v is lower than we can expect for wild type amplicon and it is closer to the linear model for heterozygous deletion m
+hetdel |mhetdel)p|mnormal) for this models is greater then one), but were not recognized as the homozygous deletion, we can conclude that it is a heterozygous deletion .
+
+if c
+o
+v is detected as an outlier for sample i, but it is higher that the regression line and it is closer to the linear model for heterozygous duplication, it can be considered that it is a duplication.
+
+our approach was developed for single-copy germline cnvs’ detection so this set of models covers vast majority of real-life cases, but number of models can be increased for detection of complex rearrangements involving quantitative change of higher order . such ploidy states are not considered as a separate case because the prediction intervals of the models for different types of duplications intersects largely. it is possible to determine the exact ploidy of the region only in case the region is large, but we considered the detection of cnvs with the highest possible resolution  as more important than detection of regions with higher possible ploidy with necessarily low resolution.
+
+in order to avoid the influence of errors in predictors we determine the cnv state of an amplicon a
+j by constructing l linear models that explain variance in c
+o
+v better than others. to do this, we use l other amplicons a
+jk, which vector of coverages in series of samples being analyzed shows the highest correlations with c
+o
+v in the same series of samples. then we assume that if the coverage of a
+j in a particular sample was detected as cnv in n of l such models, then it indicates the presence of cnv. l and n were empirically choosen as equal to  <dig> and  <dig> for our experimental data since larger or smaller numbers gave us worse performance on the train dataset.
+
+
+s
+n-correlation coefficient is used as a measure of similarity  <cit> : 
+ rsn=sn2−sn2sn2+sn <dig>   where u and v are the robust principal variables: u=x−med2mad+y−med2mad,v=x−med2mad−y−med2mad. here and below s
+n means rousseeuw and croux’s estimator of standard deviation  <cit> .
+
+we used theil-sen estimator  <cit>  as a robust linear model because of its high breakdown point , satisfactory effectiveness and simplicity.
+
+we used the standard formula for internally studentized residuals with the standard deviation replaced with its robust analogue. we used empirical level of significance for the student’s quantile as a threshold for outliers detection . the formula of calculating i-th studentized residual is: 
+ ε^isn1−1n+xi−x¯∑j=1n <dig>   where ε^i means the i-th residual, x¯ means mathematical expectation of the random variable. algorithm’s pseudocode is available in additional file  <dig> 
+
+supervised algoritm
+using the output from the unsupervised stage samples can be grouped using the following rule: if at least one of the amplicons is marked as outlier the sample is suspected of carrying cnv and added to test dataset, and if there is no outlier, the sample is added to control dataset. also it can be performed using control dataset with a priori known absence of cnvs.
+
+in general, we should search cnvs in any possible cnv site, which can be reformulated as a classification problem. we use ideas of linear discriminant analysis, however, the decision making is divided into  <dig> separate steps in order to make it configurable for the particular purposes.
+
+given that cnv site can be considered as a multivariate random variable and in practice we may have up to  <dig> samples per dataset , the direct usage of robust covariance matrix consisting of thousands of predictors is useless because of overfitting. to handle this we normalize the coverage values and use the block covariance matrix. in the presented work, we used the size of block one times one.
+
+the algorithm contains several steps: 
+for each amplicon a
+j we determine cluster c of k other amplicons a
+jk. algorithm uses pearson’s correlation coefficient as an estimator of correlation in case the control set is big enough  and robust correlation estimator otherwise.
+
+normalisation of amplicons’ coverages: xj=log)−|c|). in order to reduce variance we use a group of highly correlated amplicons located far enough from each other so they can not be affected by the same cnv  and then normalise on its average instead of normalisation on total amount of reads. for datasets with large number of genes and possible cnvs more robust normalisation procedure can be applied. for example, instead of raw coverages a sampled distribution of coverages, predicted by linear models on the first step, can be created and considered as normalisation factor .
+
+we construct several probabilistic models for each amplicon, respectively: m
+normal,m
+hetdel,m
+dup. assuming that all x
+j are distributed normally, we calculate the robust mean estimations for models using vectors log), log), log) and robust scale estimation s
+n for x
+j. for simplicity, we assume that number of reads produced from a fragment is distributed as p
+o
+i
+s, where n was described in  <dig>  since we applied log transformation that is much stronger than square root transformation , we have to use correction factors for variances. we can estimate the correction factors using simulation procedure as σ^2=2·σ^2),σ^2=23·σ^2), where x
+jdel and x
+jdup denote expected transformed coverages for m
+hetdel,m
+dup, respectively.
+
+for each region we ask three questions consequently: a) can region’s vector of coverages be produced by probabilistic models m
+hetdel or m
+hetdup? b) is it highly probable that the region was produced by m
+normal? c) is m
+hetdel or m
+hetdup the most probable explanation for the observed coverage of the region?
+
+in order to answer the first question a), we test if each amplicon’ coverage can be produced by these models, using χ
+ <dig> statistics with low level of significance α . if all amplicons located inside cnv site can be produced by one of this models, we then mark this site as “suspicious”.
+
+next, we are trying to reject the hypothesis that the normalised coverages within each “suspicious” cnv site can be produced by m
+normal. we use normalised euclidean distance as a test statistic  it follows χ
+2-distribution because we can assume that the estimated covariance matrix is approximately diagonal after the normalisation step. false discovery rate is controled using benjamini–hochberg procedure. obtained adjusted p-values are qualified as an answer for the second question.
+
+finally, we check if region’s coverage bayes factor  is bigger than some constant value. using prior knowledge of cnvs frequency in our dataset we chose the value of  <dig> as a threshold and assumed equal prior probabilities of models. the graphical representation is depicted on .
+
+the larger size of control set leads to more accurate statistical estimations and increase the quality of output so if it was found that some of samples from test set are free of cnvs, we include them in the control set and repeat the procedure from the first step. otherwise, we provide the final report about cnvs on cnv-site resolution .
+
+
+fig.  <dig> . top: duplication of exons 7– <dig> in cftr gene , bottom: deletion of exons 2– <dig>  cftr . y-axis: distance from  <dig> in terms of standard deviations, x-axis: amplicons from cftr gene. horizontal lines ± <dig> standard deviations, vertical lines shows the exons’ structure. top line : distance to m
+hetdel, middle line : distance to m
+norm, bottom line : distance to m
+dup. distances inside each region are combined into one ned per model
+
+
+
+
+normalised euclidean distance  can be defined as: 
+  <dig> d=∑i=1n2si <dig> 
+
+
+where we used s
+n estimator of standard deviation for x
+i−y
+i values as s
+i and y is a vector of the location estimations. we used the median of walsh averages due its robustness and effectiveness as the estimation of location.
+
+input data quality control
+low covered samples may lead to an unreliable results due the high influence of stochastic effects on amplification and sequencing therefore we filtered out samples that contain less than  <dig> reads. we use the quality control procedure for amplicons as well: in case if amplicon has average coverage less than  <dig> or does not have the required number of correlating amplicons for the prediction on the unsupervised algorithm, we mark this amplicon as qc failed and do not consider. in case the whole exon is covered only with amplicons that did not pass qc control, we do not include this exon into analysis in all samples.
+
+after initial filtering the algorithm defines all amplicons which coverage is close to zero as homozygous deletions. we use coverage  <dig> as a threshold for homozygous deletion since in practical cases the coverages for homozygous deletions do not exceeded this limit. then it filters out samples that are not similar to other samples in the dataset. we call such samples “irregular” because they have no analogues in amplification behavior expressed in coverage. statistical estimation on irregular samples and determination of their cnv states are inaccurate. the presence of large cnv leads to abnormal coverage ratios therefore only samples deviated by more than n/ <dig> genes, where n denotes the overall amount of genes, n> <dig>  are considered irregular. the assumption is that the presence of n/ <dig> large scale cnvs in n genes in one sample is rare.
+
+the algorithm can be divided into several steps. after read counting, we perform library size normalisation taking into account that the total number of reads can be influenced by the large cnv and lead to bias in normalised data. to solve this problem, normalisation is performed within the genes: we divide each amplicon’s coverage by the total number of reads aligned to corresponding gene. for simplicity, we assume that logarithms of obtained values are normally distributed.
+
+next we calculate ned  using this normalised log-transformed data for each gene separately. working with real data, we found the significant proportion of amplicons can have extreme values which leads to unrealistically high ned for the whole gene. due the fact that the presence of small proportion of outliers does not corrupt the further analysis due the used estimators’ robustness, we use only  <dig> % of coordinates  with smallest values for ned calculation.
+
+we compare obtained ned value with χ
+2-distribution and degrees of freedom equal to  <dig> % of initial number of amplicons within the gene. the sample does not pass quality control if test statistics for more than n <dig> genes exceed pre-defined level of significance.
+
+RESULTS
+basic data analysis
+tools from life technologies torrent suite™ version  <dig>  with parameters recommended by manufacturer were used for reads’ alignment. we developed approach for mapping reads to target regions and describe it in additional file  <dig> 
+
+convector evaluation by experimental datasets
+to test our model we used  <dig> experimental datasets generated on the ion pgm™ platform using varifind™ neoscreen assay  with three different sequencing panels targeting cftr, pah and galt genes. panels iad <dig>  iad <dig> and iad <dig> consisted of  <dig>   <dig> and  <dig> amplicons correspondingly . each dataset comprised about  <dig> samples . sequencing data from healthy individuals and patients diagnosed with cystic fibrosis, phenylketonuria and galactosemia were obtained from parseq lab biobank . total number of analyzed sequencing results was  <dig>  total number of unique samples was  <dig>  we used sequencing data generated by four independent labs, in order to evaluate robustness and reproducibility of the developed tool.
+
+for panels iad <dig> and iad <dig> cnv detection was performed using unsupervised algorithm only, because  <dig> exons were covered with only one amplicon. for panel iad <dig> we used both algorithms in the single pipeline since the panel was designed in such a way that each exon was covered with more than  <dig> amplicons or has at least  <dig> flanking amplicons. convector evaluates coverage correlation between amplicons within a sample and within a run. pcr amplification biases result in deviations in amplicons behavior and decreased correlation. datasets with highly correlated amplicons coverage are good quality and unbalanced datasets are poor quality. poor quality may be the result of pcr bias or differences in sample preparation procedures. we revealed that the variance of amplicon relations varies greatly from experiment to experiment that makes cnv detection within set of samples sequenced in one run is more effective therefore, we analyzed each dataset separately.
+
+among  <dig> analyzed samples,  <dig> samples have successfully passed qc filter and  <dig> have carried cnvs detected by convector. interestingly that only  <dig> of them have been previously found in corresponding samples using convinient methods. yet four of previously known cnvs have not been detected by convector . all newly detected cnvs have been confirmed by mlpa method . one of the detected cnvs, pahdele  <dig>  is described for the first time in pku patient carrying l48s on the other allele. detected cnvs included deletions and duplications of the cftr gene and deletions of the pah gene. we did not detect cnvs in the galt gene. all cnvs, except one homozygous cftrdele <dig>  detected in one analysis, have been heterozygous. cnvs size is been ranged from one exon to the whole gene. thus, we can conclude that applied algorithm is suitable for targeted sequencing data and allows accurate detection of different types of cnvs .
+
+in order to calculate sensitivity we have selected  <dig> analyses of  <dig> unique samples carrying different types of previously known cnvs  and analyzed them with the convector tool . analysis was performed on data generated during  <dig> sequencing runs . we defined sensitivity as the proportion of true positives among all positive results. sensitivity of the developed tool comprised  <dig>  % . false negative results were mainly obtained for cnvs affecting one exon that is covered by one amplicon, such as pahdele <dig> in iad <dig> panel. we achieved better results for this cnv using panel iad <dig>  where this exon is covered by three amplicons. thus, sensitivity of the detection may be increased by appropriate panel design with increased number of amplicons covering the exons. this is confirmed by the result, calculated only for exons that are covered by more than one amplicon. the sensitivity comprised  <dig>  % . in order to calculate specificity we have analyzed  <dig> unique clinical samples from compound heterozygous patients diagnosed with cystic fibrosis or phenylketonuria. all patients are carriers of two previously known pathogenic snps located in trans . we assumed that the probability of appearing cnv in cis with pathogenic snp is extremely small therefore we considered such samples as not carrying cnvs in corresponding genes, i.e. cftr or pah. we did not found false positive cnvs thus specificity calculated as the proportion of true negative among all negative results is comprised  <dig> % .
+
+we also provide the result of analysis of the whole dataset of  <dig> sequencing results that passed qc procedures, sequenced by panels described above and consisted of biological and technical replicates. every reported result of one sample’s analysis is called positive. in case the reported result has intersection of at least  <dig> % with true cnv, we called it true positive, otherwise false positive. when convector does not detect cnvs detected previously, we consider it as a false negative. duplications that affect only one exon were not considered as a call since, as was shown above, models for normal and duplicated data intersects largely, comparatively to deletion and normal models’ intersection.
+
+sensitivity and specificity of convector using  <dig> samples were equal to  <dig>  %  and  <dig>  %  for the unsupervised algorithm and  <dig>  %  and  <dig>  %  for the supervised one. as can be seen from the design of algorithms, they differ in detection sensitivity of short and long cnvs . large part of the false positive cnvs that covered only one or two amplicons arise recurrently in technical replicates, but was not confirmed by alternative methods. we suggested that they can be caused by technological artifacts such as inability of primers’ binding. all  <dig> false positively detected deletions covered with more than ≥ <dig> amplicons also happen recurrently in technical replicates and were detected by other tools, but each of them has at least several heterozygous mutations inside so we consider these results as caused by wrong library preparation. the analysis of these cnvs with multiplex ligation-dependent probe amplification also showed the presence of large deletions .
+fig.  <dig> barplots of cnvs’ lengths detected by two algorithms. x-axis: lengths of cnvs, in amplicons , y-axis: cnvs’ frequencies. top: unsupervised algorithm , bottom: supervised algorithm 
+
+
+
+
+convector’s computational time for the dataset of  <dig> samples and panel of  <dig> amplicon is approximately  <dig> hour for coverage calculation and up to half a minute for quality control and two stages of algorithm on a laptop with  <dig> ghz intel core i <dig> and  <dig> gb ram. other tools’ computational time is less than one minute , however, the most time consuming step  can be replaced with simple, but less precise counting procedure, making tools’ computational time approximately equal.
+
+comparison with other tools
+in order to evaluate convector algorithm performance we have compared our tool with ion reporter  cnv analysis tool  developed by life technologies, oncocnv   <cit> , cn.mops   <cit>  and conifer  <cit> . due the fact that first two tools has prerequisites such as presence of control samples with confirmed absence of cnvs in targeted regions and high quality of sequencing, we analysed them using comparatively small dataset sequenced with one panel, while the comparison with cn.mops was performed on the whole dataset and all  <dig> panels.
+
+ir tool is optimized for ion torrent sequencing technology. the algorithm finds the most likely copy number segmentation and ploidy state based on the comparison with control set of samples  and using hidden markov model. ir can be run on the ion ampliseq data however its sensitivity depends on the panel size. the smallest ampliseq panel that has been tested is comprised of  <dig> amplicons. we have run this tool on the panel iad <dig> consisted of  <dig> amplicons. we have tested ir on  <dig> positive and  <dig> negative samples, selected as described above and randomly. only samples containing cnvs spanning of at least two exons or covered by at least six amplicons were selected as positive samples for sensitivity evaluation since none of the examined tools were able to detect single amplicon cnvs. the tool was run with the default settings and the medium sensitivity. cnv baseline was generated from  <dig> control samples, not carrying cnvs . sensitivity of the ir tool is comprised  <dig>  % ; specificity –  <dig> % . analytical characteristics of the ir cnv detection established in this study is much lower than it was shown previously ). therefore, we can assume that the ir cnv detection algorithm is much more useful for large cnvs covered by dozens of amplicon while convector algorithm allows detecting even small cnvs starting from hundreds bases and covered of at least few amplicons. detection of such variations in targeted sequencing data is important since many of small cnvs are responsible for human diseases diagnosed with ngs panels  <cit> .
+
+we also made comparisons with oncocnv tool. we have choosen  <dig> control samples  that were free of cnvs. we used the same dataset as before for performance evaluation. sensitivity of the oncocnv is comprised  <dig>  % , specificity –  <dig>  % . six samples, sequenced in one experiment, were detected as having a duplication of whole gene, whereof we concluded that oncocnv’s performance may be improved with batch effect correction or quality control filtering as a preliminary step.
+
+the comparison with cn.mops was of our special interest because cn.mops is also using matrices of coverages as an input so we evaluated this tool using exactly the same datasets as we used for convector testing. we tested cn.mops on  <dig> samples with the same preliminary qc steps as we used for our tool, but did not take samples that contained single-amplicon cnvs into account. we have choosen the threshold that allow us to have comparatively high sensitivity. after the filtration of samples that have single amplicon cnvs, we had  <dig> out of  <dig> cnvs as true positives and  <dig> false positives. the sensitivity was equal to  <dig>  % , specificity:  <dig>  % .
+
+the comparison with conifer v <dig> . <dig> was made using only the subset of available data due the technical issues of conifer that we were not able to solve. conifer also uses the whole cohort of available samples as an input, removes several singular values for batch effects removal and detects cnvs that are covered with at least  <dig> targets. qc control procedure was described in the paper, but were not implemented, however, all our samples would be removed using qc thresholds suggested by authors and there was no clear way to establish a new threshold suitable for all available experiments’ results. we decided to use basic qc procedure and removed all samples that were covered with less than  <dig> reads per target. we removed only  <dig> singular values from the data because after removal more the sensitivity dropped dramatically. we considered all variants covered with less than  <dig> targets as true negatives. we had  <dig> samples from  <dig> experiments that passed quality control. we were able to detect  <dig> true positive results among  <dig> possible while having  <dig> false positive results. the sensitivity was equal to  <dig>  % , specificity:  <dig>  % . raw output files  generated by convector and other tools used for the comparison  are available in additional files  <dig>   <dig>   <dig> and  <dig>  described in additional files section.
+
+we also have tried to compare the performance of convector with other tools. this comparison is described in additional file  <dig> and was not included into the main comparison section because of low quality of results, different requirements for the input data or technical problems we faced launching several tools.
+
+CONCLUSIONS
+we described the new high resolution approach for cnvs detection that enables detection of cnvs with the size comparable to single exon . the tool is based on novel approach that relies upon a fact of pcr efficiency correlations for subsets of amplicons in highly multiplex pcr. this approach can be also extended to hybridization based library preparation techniques. we also created convector – open-source tool designed for targeted sequencing cnvs detection. the tool has minimal requirements to input data, poses no limitations on cnv site size which can be as small as a single pcr amplicon, and does not requires control datasets or any a priory knowledge on potential cnvs sites location. we evaluated convector with the large dataset and made limited comparison with the analogs that showed superior specificity and sensitivity.
+
+additional files
+
+additional file  <dig> auxiliary procedures and descriptions. this pdf file contains details on counting of coverages procedure, illustration of non-uniformity of coverages across samples sequenced within one experiment, explanation of assumption of cnvs absence in the dataset where we did not make direct check with alternative methods, description of potential source of false positive results, description of comparison with cn.mops and oncocnv. also cnv verification procedure is described here and pseudocode of the first algorithm provided in the end. 
+
+
+
+
+
+additional file  <dig> description of panels. xlsx file with bed files, containing: target’s chromosome, start coordinate, end coordinate, id of target, target’s region . 
+
+
+
+
+
+additional file  <dig> description of datasets. xlsx file with description of experiments: panel used for sequencing, internal id of experiment, number of samples within the experiment, laboratory where sequencing was performed, average robust variance , number of detected cnvs. 
+
+
+
+
+
+additional file  <dig> supplementary table with comparison of convector, oncocnv, ir. xlsx file with data about samples: panel used for sequencing, id of experiment, internal sample’s code, laboratory, name of cnv, results of three methods. status field denotes if particular variant was confirmed before analysis or was found by convector and validated. 
+
+
+
+
+
+additional file  <dig> archive with cn.mops results. zip archive with large pdf file  with the results of cn.mops  and short summary of calls. 
+
+
+
+
+
+additional file  <dig> archive with oncocnv results. set of files  in zip archive that were provided by oncocnv after specificity and sensitivity testing. 
+
+
+
+
+
+additional file  <dig> final reports on cnvs analysis of whole dataset by convector. tab delimited xls files with final reports of convector and short summary of calls. 
+
+
+
+
+
+additional file  <dig> archive with conifer results. txt files with cnv calls made by conifer. 
+
+
+
+
+
+additional file  <dig> results of comparison with other tools. xls table with short summary of methods and performance  of  <dig> tools which we have tried to compare with convector. 
+
+
+
+
+abbreviations
+bafb-allele frequencies, proportion of total allele signal  explained by a single allele b
+
+cnvgermline copy-number variant
+
+mlpamultiplex ligation-dependent probe amplification
+
+nednormalised euclidean distance, explained in the main text
+
+ordoff-target read depth
+
+pcrpolymerase chain reaction
+
+qcquality control
+
+rdread depth of enriched target regions
+
+tstargeted sequencing
+
+weswhole-exome sequencing
+
+wgswhole-genome sequencing
+

@@ -1,0 +1,133 @@
+BACKGROUND
+let s ∈ rm×n be a stoichiometric matrix that represents a biochemical network consisting of m species interacting via n reactions. flux balance analysis  predicts steady state reaction rates  of such a biochemical network by solving the linear program 
+
+  maximizevctvsubject tosv= <dig> vl≤v≤vu, 
+
+where vl,vu ∈ rn are lower and upper bounds on the fluxes and c represents a biologically motivated objective function. we refer to  <cit>  for details about fba.
+
+recently, thiele et al.  <cit>  described the first genome-scale integrated reconstruction of e. coli metabolism and macromolecular synthesis that represents the function of almost  <dig> genes. this metabolic-expression model explicitly accounts for the demands of macromolecular synthesis at single nucleotide resolution. to enforce consistency between the state of metabolism and macromolecular synthesis, thiele et al. introduce coupling constraints on certain pairs of fluxes : 
+
+  cmin≤v1v2≤cmax, 
+
+where cmin,cmax >  <dig>  each coupling constraint can be formulated as a pair of linear inequality constraints, as described later. we predict the steady state reaction rates of such integrated networks by solving the linear program 
+
+  maximizevctvsubject tosv= <dig> cv≤d,vl≤v≤vu, 
+
+where cv ≤ d includes constraints equivalent to  for many pairs of fluxes.
+
+given the inherent multiscale nature of integrated reconstructed networks, the constraint matrices of the fba linear programs  and  often contain entries that vary over many orders of magnitude. we say that the problems are poorly scaled. conducting fba for such networks has been unsatisfactory because even state-of-the-art linear programming solvers can produce inaccurate  results. in particular, for the e. coli metabolic-expression model, applying cplex  <cit>  and gurobi  <cit>  to  with default settings  has produced results with large constraint violations.
+
+implementation
+scaling techniques
+in the context of the simplex method for linear programming, the constraints  form a polytope in n-space. the condition of a basis matrix associated with a vertex of the polytope provides a quantitative measure of either the “sharpness” or the “flatness” of the vertex. poorly scaled constraints tend to create a polytope with very sharp and/or very flat vertices. to alleviate numerical difficulties for problem , linear programming systems typically compute row and column scaling matrices dr ∈ rm×m and dc ∈ rn×n such that the nonzero entries of the scaled constraint matrix drsdc are of order  <dig>  scaling can improve the condition of many bases, but it may be at the expense of making other bases more ill-conditioned . for some problems, such as , the scaled constraints drsdcv¯= <dig> may be satisfied accurately by the scaled solution v¯, but when the solution is unscaled, v=dcv¯ may violate sv =  <dig> significantly. we refer to  <cit>  for a comprehensive study of scaling and its effects on the performance of the simplex method.
+
+lifting techniques
+lifting techniques are commonly used in optimization to create an efficient representation of a feasible set. by using auxiliary variables to “lift” the feasible set into a higher-dimensional space, they can dramatically reduce the computational expense . the canonical application is for efficiently representing the cross-polytope, i.e., the set 
+
+ x∈rn∣∑i=1n|xi|≤ <dig>  
+
+to represent this set in n-dimensional space requires 2n constraints of the form 
+
+ ±x1±⋯±xn≤ <dig>  
+
+by introducing n new variables yi, thereby lifting the set into 2n-dimensional space, we can represent the cross-polytope using 2n +  <dig> constraints: 
+
+ −yi≤xi≤yi,i= <dig> …,n,y1+⋯+yn≤ <dig>  
+
+here we apply lifting techniques to poorly scaled constraints to make the vertices of the “lifted” polytope more regular. note that small entries in s and c do not constitute poor scaling unless all entries in a row or column are small.  our explicit aim is to reduce the magnitude of the largest matrix entries so that the reformulated constraints do not need scaling.
+
+mass balance constraints
+in problem , the mass balance constraints sv =  <dig> often contain poorly scaled reactions such as 
+
+  a+10000b→c+d, 
+
+which may represent the synthesis of a macromolecule in a reconstruction. we can decompose such reactions into sequences of reactions involving dummy metabolites with reasonably scaled coefficients. for example,  is equivalent to two reactions involving a dummy metabolite b^: 
+
+  a+100b^→c+d,100b→b^. 
+
+coupling constraints
+in problem , the constraints cx ≤ d include equivalents of the coupling constraints . these enforce consistency between the states of the metabolic and macromolecular synthesis reactions and are often poorly scaled because reaction rates can vary over many orders of magnitude. for example, two fluxes could be related by 
+
+   <dig> ≤v1v2≤ <dig>  
+
+as before, we can decompose these constraints into sequences of constraints involving auxiliary variables with reasonable coefficients. if the second inequality in  were presented to our implementation as v1 ≤ 10000v <dig>  we would transform it to two constraints involving an auxiliary variable s1: 
+
+  v1≤100s <dig> s1≤100v <dig>  
+
+if the first inequality in  were presented as v1 ≥  <dig> v <dig>  we would leave it alone, but the equivalent inequality 10000v1 ≥ v <dig> would be transformed to 
+
+ v2≤100s <dig> s2≤100v <dig>  
+
+hierarchical lifting
+our implementation of lifting techniques uses a parameter τ, set to  <dig> in our experiments. constraints containing entries larger than τ are reformulated.
+
+very large entries might require more than one auxiliary variable and constraint. in these cases, we choose the reformulated constraint coefficients to be equally spaced in logarithmic scale. for example, the poorly scaled reaction 
+
+ a+109b→c+d 
+
+ would be reformulated as 
+
+ a+1000b1→c+d,1000b2→b <dig> b→b <dig> 
+
+.
+
+comment
+unlike traditional scaling, the above lifting techniques transform poorly scaled constraints without affecting other constraints. the linear program does become larger , but the added constraints are extremely sparse and should have little impact on the performance of a typical large-scale solver . indeed, the time per iteration for the simplex method could well decrease because smaller “large” entries in the basis matrices typically lead to sparser basis factorizations.
+
+iterative refinement
+after a simplex solver has returned an allegedly optimal basic solution, the accuracy of satisfying the general linear constraints ) could be improved by applying a single step of classical iterative refinement  <cit> , especially if extended precision were available. however, the refined basic solution could well lie outside its bounds, and further simplex iterations would be necessary. ideally this difficulty would be handled by the simplex solver itself.
+
+we note that more elaborate forms of iterative refinement have been used to improve the accuracy of linear programming solutions. gleixner et al.  <cit>  describe an incremental precision-boosting procedure that solves a sequence of linear programs, each attempting to correct the error in the previous optimal solution. the zoom procedure of saunders and tenenblat  <cit>  is an analogous strategy for interior methods.
+
+implementation in the opencobra toolbox
+lifting techniques for poorly scaled reactions and coupling constraints have been implemented in the opencobra toolbox  <dig>   <cit> , a matlab package for constraint-based reconstruction and analysis of biochemical networks. algorithm  <dig> summarizes the main steps. our implementation makes efficient use of auxiliary variables by reusing them if possible. suppose metabolite a participates in more than one reaction with large stoichiometric coefficients. we can use the same auxiliary variable to decompose all reactions involving metabolite a, thereby keeping problem size to a minimum.
+
+to benefit from solving the reformulated problem, we must disable scaling and any “presolve” option that would permit reaggregation of constraints. our implementation automatically sets these options for cplex and gurobi.   
+
+RESULTS
+we use our implementation of lifting techniques to conduct fba on two metabolic-expression models of e. coli <cit> . the models  represent the function of almost  <dig> e. coli genes and involve  <dig> metabolites, with  <dig> coupling constraints cv ≤ d to enforce consistency between the predicted steady states of both metabolism and macromolecular synthesis. the first model  accounts for  <dig> reactions, and the second  accounts for  <dig> reactions. because of the dependencies between pairs of metabolic reactions and macromolecular synthesis reactions, the resulting flux balanced steady state v has reaction rates that vary by four orders of magnitude  <cit> . both models have about  <dig>  large matrix entries , with  <dig> entries exceeding  <dig> and biggest entry 8× <dig> 
+
+conducting fba on me <dig> using the cplex and gurobi simplex and barrier solvers with default settings  resulted in erroneous reports of infeasibility or “optimal” solutions that were significantly infeasible. our own simplex solver sqopt  <cit>  with scaling activated would solve the scaled problem well, but unscaling would magnify the infeasibilities.
+
+with the cplex solvers, our lifting techniques eliminate infeasible reports and significantly reduce the infeasibility of the computed steady states; see table  <dig> and table  <dig>  note that most of the “barrier iterations” are really simplex iterations required by crossover . these do not alter the optimal objective value and may not be essential in practice.
+
+fba results for the e. coli metabolic-expression model me <dig> using cplex primal simplex and barrier solvers. iterations, time, and sum of infeasibilities before and after lifting. the iterations in columns  <dig> and  <dig> include about  <dig> for the barrier solver and the remainder for the simplex crossover.
+
+fba results for the e. coli metabolic-expression model me <dig> using cplex primal simplex and barrier solvers. again, most of the barrier iterations are for the simplex crossover.
+
+we also used lifting to conduct flux variability analysis   <cit>  for the me <dig> model and obtained biologically consistent results . we compared the flux span of each metabolic reaction in me <dig> with the flux span of the corresponding reaction in the e. coli metabolic model   <cit> . the chief difference between these two models is that in me <dig> the metabolic building blocks  are used to synthesize the metabolic enzymes, which in turn catalyze the metabolic reactions, while in iaf <dig> the building blocks are collected in a static biomass reaction. artifacts with fba on metabolic models, such as thermodynamically infeasible flux around stoichiometrically balanced reaction cycles, are eliminated for all enzyme-catalyzed reactions in me <dig>  as the coupling constraints penalize high flux rates. these constraints also restrict the maximum possible flux rates through enzyme catalyzed reactions due to the demand-supply challenge for the building blocks, thus limiting the set of possible transcriptomes and proteomes of the model. overall, the feasible steady state solution space is substantially reduced in me <dig> compared to the metabolic model alone.
+
+tables  <dig> and  <dig> summarize  <dig> fva runs using the cplex simplex and barrier solvers. for the simplex method  we see that lifting reduces the infeasibilities of the computed steady states and also stabilizes the number of simplex iterations. for the barrier method  the effects of lifting are much more varied. the feasibility of the computed steady state is sometimes improved but the lifted problem can take much longer to solve. evidently the cplex barrier solver  does not perform reliably on me <dig> with or without lifting.
+
+fva results for the e. coli metabolic-expression model me <dig> using the cplex simplex solvers. iterations and sum of infeasibilities for dual simplex  before lifting and for primal simplex after lifting. the first column lists which variable is being maximized. lifting helps the cplex simplex solvers.
+
+fva results for the e. coli metabolic-expression model me <dig> using the cplex barrier solver. iterations and sum of infeasibilities before and after lifting. the first column lists which variable is being maximized. columns  <dig> and  <dig> list the total iterations for the barrier solver and the simplex crossover . cplex barrier appears less reliable than the cplex simplex solvers on this model.
+
+CONCLUSIONS
+we described techniques that enable off-the-shelf optimization software to be applied to multiscale network reconstructions, such as integrated networks that represent both metabolism and macromolecular synthesis. the techniques enable accurate fba and fva of an integrated model of metabolism and macromolecular synthesis in e. coli, previously impossible because of numerical difficulties encountered by solvers.
+
+as in silico biologists create increasingly complex models that capture more of the multiscale nature of biological systems  <cit> , the optimization problems that arise during the analysis of these models will also become increasingly poorly scaled. we are aware of researchers resorting to specialized packages such as  <cit>  that rely upon rational arithmetic to obtain exact solutions to the fba and fva linear programs. such solvers are likely to be prohibitively slow for analyzing larger, more comprehensive reconstructed networks. a more practical approach is to employ quadruple-precision arithmetic, which is increasingly available in fortran and c compilers and is valuable even when implemented in software. in the meantime, our techniques enable the constraint-based modeling community to analyze increasingly sophisticated and comprehensive models of biological systems with improved efficiency and reliability. they could also be combined with the refinement approach of gleixner et al.  <cit> .
+
+availability and requirements
+lifting techniques for poorly scaled reactions and coupling constraints have been implemented in the opencobra toolbox  <dig>   <cit> , a matlab package for constraint-based reconstruction and analysis of biochemical networks.
+
+project name: opencobra toolbox
+
+project home page:http://opencobra.sourceforge.net/
+
+operating system: platform independent
+
+programming language:matlab
+
+other requirements:matlab 2008a or higher
+
+license: gnu gplv3
+
+any restrictions to use by non-academics: a separate license must be acquired.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+ys developed and implemented the lifting techniques. ys and mas wrote the manuscript. rmtf and it provided examples, interpreted results, and edited the manuscript. all authors read and approved the final manuscript.
+

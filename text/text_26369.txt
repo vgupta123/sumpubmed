@@ -1,0 +1,487 @@
+BACKGROUND
+approximately 75% of microbial organisms are unculturable  even as we can fully sequence their genomes  <cit> . determination of proper laboratory growth conditions presents a significant barrier to a comprehensive understanding of the microbial world.
+
+given the high cost of evaluating laboratory growth conditions and the relative abundance of powerful genome sequencing resources, it makes sense to ask whether we can use the metabolic network inferred from an organism’s genome sequence to predict the media that will support the growth of the organism. we have previously shown that the biochemical reactions and metabolic pathways of an organism can be inferred from its annotated genome  <cit> . we have also shown that the completeness of a metabolic network can be evaluated using a “forward propagation” approach  <cit> . this purely qualitative modeling approach treats each reaction as a rule that will “fire” if all of its reactants are present. when a reaction fires, its products are added to the metabolite pool. this process is then repeated using the new, larger metabolite pool, until no more reactions fire. for example, a model of the escherichia coli metabolic network could be “fed” the constituent compounds of m <dig> minimal medium, and the expectation would be that all the biomass compounds should be present in the final, fixed set of compounds generated via forward propagation.
+
+this qualitative analysis method is a good starting point for deriving minimal nutrient sets, but it has a major limitation. it treats the organism as an empty factory lacking everything except the provided nutrients. but cells do not start as empty bags of metabolites — they contain a wide variety of compounds that “prime the pump” for their own syntheses — “omnis cellula e cellula”   <cit> . consequently, the forward propagation approach cannot properly analyze cycles in which an organism begins with some amount of a compound c and uses c in combination with other nutrients to generate more c. such cycles do occur in practice . modeling these cycles requires the handling of stoichiometric reactions and the tracking of relative rates of production and consumption of compounds, and is addressed herein.
+
+flux-balance analysis  methods can also be used to predict whether a given nutrient set supports growth. however, to permit computational tractability, fba approaches begin with a starting “seed” medium and generate new media in which only one nutrient at a time is changed, to vary the source of one element, e.g., nitrogen. thus, the method does not evaluate all combinations of nutrients — it assumes that if a given nitrogen source supports  growth with one carbon source, it will exhibit the same behavior for all carbon sources . we show that this assumption of orthogonality of element sources is not guaranteed to hold, and argue that metabolic network algorithms should be designed to analyze networks with unusual properties, or we take the risk of finding only those nutrient sets that our algorithms expect to see.
+
+we address the challenge of predicting growth media from genome data by developing a novel constraint-based algorithm that infers minimal nutrient sets for an organism based on its metabolic network. the algorithm requires  a set r of metabolic reactions for the organism,  a set of transportablest that are potential nutrients , and  a set of biomass compoundsb that must be produced for growth. a subset n⊆t of transportables is a nutrient set if the set b is producible from n where producible may have different definitions, depending on assumptions. a nutrient set n is minimal if no proper subset of n is a nutrient set. in other words, a nutrient set n is a minimal nutrient set if we cannot form a new nutrient set by removing one or more compounds from n.
+
+because our algorithm sometimes infers thousands of minimal nutrient sets, which are difficult to comprehend and to evaluate, we also developed an algorithm that computes nutrient equivalence classes from minimal nutrient sets. two nutrients a and b belong to an equivalence class if for every minimal nutrient set containing a there also exists a minimal nutrient set in which b is substituted for a, and vice versa. in e. coli we find that these equivalence classes often correspond to compounds that supply a given element . we can communicate all computed minimal nutrient sets to the user more effectively by presenting the nutrient equivalence classes, plus a reduced set of minimal nutrient sets in which we retain only those minimal nutrient sets that contain one representative from each equivalence class.
+
+we apply our algorithm to e. coli by using the manually curated reaction network stored in ecocyc  <cit>  and validate the algorithm by comparison with prior phenotype microarray data.
+
+methods
+the prediction pipeline
+the pipeline from metabolic network to evaluated results proceeds via four steps . first, we define a constraint-based model . this model is then solved to identify minimal nutrient sets . these minimal nutrient sets are then distilled into a smaller and easier-to-evaluate set of compound equivalence classes . finally, these equivalence classes are evaluated by comparing them to previous experimental growth data and laboratory growth experiments .
+
+building constraint-based models
+our starting point is the organism’s metabolic network. we analyze the properties of this network by using a constraint-based approach. these constraints are expressed over the flux of the reactions in the network. we describe the method for generating constraints from the metabolic network below in two parts. first, we build a naïve steady-state model that allows metabolites that are in neither the nutrient set nor the biomass set to have zero net production. second, we show why this naïve, steady-state model is an unrealistic model of growing and dividing cells and then propose a more sophisticated model that can be shown to be more accurate by using a purely molecule-counting argument. this more sophisticated model  is what we then use for our predictions.
+
+the steady-state model
+we start with the following hypothetical metabolic network:
+
+
+example  <dig>  letrconsist of the two unidirectional reactions:
+
+  a+b→c+d 
+
+  c+f→b+e 
+
+letb={e}.
+
+suppose a and f are available as nutrients. using forward propagation, neither of the reactions can fire because both b and c are unavailable. however, we can assume more realistically that the cell is not an empty bag and that n molecules of b are initially available. then reaction  could fire n number of times, creating c, which could be used to fire reaction  n times recreating the n molecules for b. within this framework, we are no longer reasoning about a monotonically increasing set of compounds, but instead about relative reaction rates and the rate of the net production or consumption of compounds.
+
+the reactions above can be written as a stoichiometric matrixm in table  <dig> 
+
+here, mi,j records the net production  of the ith compound by the jth reaction. we represent the rates of the reactions or flux by the column vector of variables r=t , where r <dig> is the rate of reaction  and r <dig> is the rate of reaction . the rate of production of compounds by the system is given by the column vector p=mr.
+
+given a putative nutrient set n and a set b of biomass compounds, we place constraints on the compound production rates , as follows: 
+
+ <dig>  if the ith compound is in b and not in n then we require pi> <dig> 
+
+ <dig>  if the ith compound is not in b and not in n then we require pi≥ <dig> 
+
+in our example b={e} and n={a,f}. the compound b is consumed by reaction  with rate r <dig> and created by reaction  with rate r <dig> so it has a net production of −r1+r <dig> and thus b yields a constraint: 
+
+ −r1+r2≥ <dig>  
+
+ similar analysis yields the constraints 
+
+ r1−r2≥0r1≥0r2> <dig> 
+
+for compounds c, d, and e, respectively.
+
+because reactions are not allowed to run in reverse, we must add the additional constraints that r1≥ <dig> and r2≥ <dig>  we say that n is a steady-state nutrient set if there exists a vector r that satisfies the above constraints. in our example, r1=r2=k for any k> <dig> satisfies all the constraints. all the generated constraints are linear; thus, checking whether n⊆t is a steady-state nutrient set reduces to checking the feasibility of a linear program.
+
+based on a simple molecule-counting argument and linear algebra, we make the following claim relating the steady-state model to experimental observations.a
+
+
+claim  <dig>  assume the setrincludes all reactions available to the organism. this set may also include extraneous reactions that are not actually available to the organism, due to errors in the available data. assume that setbonly contains compounds that the organism must produce to grow . then the steady-state model over-approximates observable behaviors in the following sense: if the steady-state model predicates that some setn⊂tof transportables is not a nutrient set then organism will be unable to grow on nutrient setnin the laboratory.
+
+
+justification  <dig>  for a contradiction, suppose we observe our organism to grow on n in the laboratory. because everything in b must be produced by the organism and it has only the reactions in r and the nutrients in n at its disposal, it must have found a set of fluxes for r that yield positive net production of each compound in b and non-negative net production of each compound not in n. however, because our system of linear constraints does not have a solution with putative nutrient set n, such set of fluxes does not exist.
+
+notice that although we need the set t of transportables in order to form putative nutrient sets, the critical parameters of our model are the set r of reactions and the set b of biomass compounds. for a pair 〈r,b〉, we call the assumption that r includes at least all reactions available to the organism and b contains only compounds that the organism must produce to grow the perfect data assumption. though possibly unrealistic in practice, unless we are studying modeling methods that explicitly model errors and omissions in the data, making formal comparisons without an assumption of this kind is difficult on paper.
+
+informally, claim  <dig> says that under the perfect data assumption, the steady-state model can produce only one-sided errors: false positives. if it predicts growth on a putative nutrient set n then although there exists a flux that produces b, growth may not be observed in the laboratory for a number of reasons including negative interactions such as toxicity, competitive reactions, or gene regulation that we do not attempt to model. but under the perfect data assumption, false negatives are impossible; if the model predicts failure to grow on a putative nutrient set n then it is arithmetically impossible for the organism to grow on n. however if growth is indeed observed in the laboratory, then barring experimental error, at least one of our initial assumptions about the completeness of r or the necessity of producing all the compounds in b must be incorrect.
+
+the machinery-duplicating model
+the steady-state model described above is somewhat unsatisfactory. we have assumed a set b of compounds as a proxy for growth. however, if a growing cell eventually divides into two daughter cells that are identicalb to the original cell, then all of the intermediate metabolites that were used along active pathways to produce compounds of b from putative nutrients n must also be duplicated ; in essence a dividing cell must at the very least be able to duplicate the active part of its metabolic machinery in addition to producing b.
+
+informally, we account for the need to duplicate the active part of the metabolic machinery by adding additional constraints to the steady-state model to require that if a compound c is used as a reactant in a reaction with nonzero flux and c∉n∪b then c must have strictly positive net production, thus explicitly requiring that more of c will be produced as the organism grows and divides.
+
+how we frame this constraint mathematically is rather subtle. suppose for some compound cj∉n∪b, the set of indices of reactions that use it as a reactant is ij. then for a given flux r, c is clearly used if and only if there exists i∈ij such that ri> <dig>  since we have constrained the rates to be non-negative, that is equivalent to the test ∑i∈ijri> <dig>  this suggests formulating a constraint in terms of the sum of reaction rates, 
+
+ sj=∑i∈ijri. 
+
+ suppose the net production of cj is given by the linear combination pj. we would like to require pj to be strictly positive whenever sj is strictly positive. the question is how to frame this as a linear constraint.
+
+one approach is to require that pj≥αsj for some fudge factor α, thus constraining pj to be strictly positive when sj is strictly positive. the problem is in determining what fudge factor α to use, since too large a value might lead to an unsatisfiable constraint even though there exists a flux producing a positive amount of cj.
+
+requiring pj≥sj/ would work because sj/ is always less than one and thus any flux producing a positive amount of cj can be “scaled up” to satisfy this constraint. unfortunately, however, when multiplied out, this constraint turns out to be quadratic.
+
+our solution is to relax the requirement that our linear system be a conjunction of linear constraints and instead allow a monotone boolean combination of linear constraints. thus, we add the constraint 
+
+  pj>0∨∧i∈ijri= <dig> 
+
+that is, either production of cj is positive, or all the reactions that use it as a reactant have zero rate. we call such constraints “make it if you use it” constraints. a nutrient set solution that satisfies these additional constraints will be called a machinery-duplicating nutrient set.
+
+notice that the system of linear constraints produced by this new model is not a simple conjunction of linear inequalities but a more general boolean combination of linear inequalities. checking the feasibility  of such systems falls beyond the capabilities of a regular linear programming  package and instead requires the use of a more recent development in computer science called a satisfiability modulo theories  solver <cit> . this newer kind of solver has the added advantage of working with exact  arithmetic that sidesteps the issues of round-off error and numerical stability. these issues can be a problem with linear programming packages that typically use inexact floating-point arithmetic.
+
+as with the steady-state model, we claim that our more sophisticated machinery-duplicating model over-approximates observable behavior and justify the claim with a molecule-counting argument.
+
+
+claim  <dig>  given a pair〈r,b〉that satisfy the perfect data assumption for some organism, if the machinery-duplicating model predicates that some setn⊂tof transportables is not a nutrient set then the organism will be unable to grow on nutrient setnin the laboratory.
+
+
+justification  <dig>  for a contradiction, suppose we observe our organism to be growing on n in the laboratory. thus, the cells must be dividing, and the metabolic machinery that is active to produce b from n must itself be duplicated. the growing colony of cells must, considered as a single system, have found a set of fluxes for r that yield positive amounts of each compound in band for the reactants of every reaction with nonzero flux that are not members of n. however, because our system of boolean combinations of linear constraints does not have a solution with putative nutrient set n, such set of fluxes does not exist.
+
+notice that like the steady-state model, under the perfect data assumption, the machinery-duplicating model can produce only false positives; if it predicts growth on a putative nutrient set n then growth is arithmetically possible but, due to the considerations previously mentioned, may not occur in the laboratory. as with the steady-state model, under the perfect data assumption, false negatives are impossible. if the model predicts failure to grow on a putative nutrient set n, then it is arithmetically impossible for the organism to grow; if growth is indeed observed in the laboratory, then we must look for errors in our choice of r and b.
+
+also notice that the machinery-duplicating model is more heavily constrained than the steady-state model: while both models may predict false positives, and neither can predict false negatives, any nutrient set predicted by the machinery-duplicating model must necessarily be predicted by the steady-state model while in general, the converse will not be true. we formalize this idea in the following lemmas:
+
+
+lemma  <dig>  for all reaction setsr, biomass compound setsb, and subsetsn⊂tof transportables, ifnis a machinery-duplicating nutrient set with respect to〈r,b〉thennis a steady-state nutrient set with respect to〈r,b〉.
+
+
+proof. if n is a machinery-duplicating nutrient set with respect to 〈r,b〉 then there must exist a flux r that satisfies the constraints generated by the machinery-duplicating model. because the constraints generated by the steady-state model are a subset of those generated by a machinery-duplicating model, they must also be satisfied by r. □
+
+
+lemma  <dig>  there exists a reaction setr, a biomass compound setb, and an⊂tsuch thatnis a steady-state nutrient set with respect to〈r,b〉butnis not a machinery-duplicating nutrient set with respect to〈r,b〉.
+
+
+proof. let 〈r,b〉 be defined by the hypothetical metabolic network in example  <dig>  we have already established that n={a,f} is a steady-state nutrient set with respect to this 〈r,b〉. we now show that {a,f} cannot be a machinery-duplicating nutrient set with respect to this 〈r,b〉. for a contradiction, suppose we could satisfy the constraints of the machinery-duplicating model with the flux r=t. first, because c∉n, the net production of c is constrained to be non-negative, and thus r1−r2≥ <dig>  likewise, because b∉n, the net production of b is constrained to be non-negative, and thus r2−r1≥ <dig>  combining these two inequalities we can deduce that r1=r <dig>  furthermore, because we must make biomass compound e at a strictly positive rate, we have r2> <dig>  now the “make it if you use it” constraints come into play. because r2> <dig> we are required to make c at a strictly positive rate and thus r1−r2> <dig>  but this contradicts our previous deduction that r1=r <dig>  □
+
+under the perfect data assumption we claim that the machinery-duplicating model is strictly more accurate than the steady-state model, in the following sense: neither model can predict a false negative . however, the following relation exists between false positives predicted by the two models:
+
+
+claim  <dig>  under the perfect data assumption: 
+
+ <dig>  there exists a dataset 〈r,b〉 and n∈t where the steady-state model predicts a false positive and the machinery-duplicating model predicts a true negative; and
+
+ <dig>  there does not exist a dataset 〈r,b〉 and n∈t where the machinery-duplicating model predicts a false positive and the steady-state model predicts a true negative.
+
+
+justification  <dig>  part  follows from lemma  <dig> because any negative prediction by the machinery-duplicating model must be a true negative by claim  <dig> and thus the positive prediction by the steady-state model must be a false positive. part  follows directly from lemma  <dig> as the machinery-duplicating model can never predict a positive when the steady-state model predicts a negative.
+
+because the machinery-duplicating model is a theoretically more accurate model than the steady-state model, we consider only the machinery-duplicating model for the rest of this paper, except briefly in discussion, where we compare our constraint-based modeling techniques to related work.
+
+bidirectional reactions
+the constraint systems described above handle all reactions as unidirectional. in practice, some metabolic reactions are reversible and will flow in either direction depending on the needs of the metabolic network as a whole. one way to model this situation is to replace a bidirectional reaction with a pair of complementary unidirectional reactions. this approach has the advantage of conceptual simplicity, but having a pair of reactions requires two variables rather than one. although replacing a full range variable with a pair of non-negative variables is a common approach in naïve expositions of linear programming, smt solvers such as yices  <cit>  and, indeed, modern lp solvers, handle a single full-range variable much more efficiently than two non-negative variables.
+
+suppose, instead that a bidirectional reaction is handled by removing the non-negativity constraint on its variable. this requires revising the growth constraint  to account for reactions running backward.
+
+for some compound cj∉n∪b, let uj be the set of indices of reactions that have cj as a reactant or a product. we now enforce a “make it if you mention it” constraint: 
+
+  pj>0∨∧i∈ujri= <dig> 
+
+this expression yields a constraint that is symmetric with respect to reactants and products.
+
+
+theorem  <dig>  for bidirectional reactions, the “make it if you mention it” constraint  is equivalent to the “make it if you use it” constraint .
+
+
+proof. clearly constraint  is at least as strict as constraint . to see that it is not more strict, consider a feasible solution to a system where bidirectional reactions are represented by pairs of unidirectional reactions and the original constraint  is enforced on reactants. for some reaction r with a positive reaction rate in the original system, the new constraint  enforces the additional requirement that pk> <dig> for each product compound ck. if there is some reaction r′ with positive reaction rate that uses ck, then the original constraint  for r′ subsumes this new requirement. otherwise, because r produces ck with a positive rate and it is not used by another reaction, the system as a whole must produce ck with a positive rate satisfying the new requirement. □
+
+simplifying the constraint-based models
+the inputs for a constraint-based model can be simplified to remove compounds that will not be involved in any potential solutions. the two major classes of compounds that can be removed in this way are impossible compounds and useless compounds.
+
+for clarity we define the simplification rules on a unidirectional system where any bidirectional reaction can be split into a pair of unidirectional reactions. complementary reactions in the simplified system can then be turned back into bidirectional reactions before constructing the system of linear constraints.
+
+a compound c is impossible if it is not a potential nutrient and there is no reaction to make it. such compounds can be deleted, together with any reactions that mention them. because no reaction has c as a product, any reaction that mentions it must use it as a reactant. any reaction that uses c as a reactant could not have a positive rate without violating the non-negativity condition for non-nutrient compounds. the deletion of reactions may enable more compounds to be recognized as impossible, so this search for impossible compounds must be iterated to fixed-point .
+
+a compound c is useless if it has no downstream biomass compounds. the search for useless compounds proceeds by finding the complement set of useful compounds. the biomass compounds are considered useful by definition. a non-biomass compound is considered useful if it is a reactant for a reaction that produces a useful compound. this test is iterated on the compounds not currently classified as useful until a fixed point is reached, such that all compounds not currently classified as useful have been checked without adding one of them to the useful set. at this point, all compounds not in the useful set are considered useless. such compounds are eliminated from the reactions containing them, as are any reactions whose products are all useless. this leaves the possibility that a reaction will become unbalanced by losing one or more products without being deleted. however, from a constraint-solving viewpoint, this is simply the removal of a redundant non-negativity constraint.
+
+computing minimal nutrient sets
+we have presented a scheme for inferring whether a given set n of transportables is a nutrient set by checking the satisfiability of a boolean combination of linear inequalities. for a transportable c∈t its existence in n can be represented by a boolean value, true or false; likewise, the prediction of whether n is a nutrient set, determined by checking the satisfiability of the linear system constructed for n, can also be represented by a boolean value, true or false. we are now interested in systematically generating all minimal nutrient sets with respect to our scheme and it is perhaps not altogether surprising that we can exploit well-understood technology for computing with boolean functions to assist us.
+
+however, the technique that we present is quite general and, mathematically, depends on just one property of nutrient sets: adding a transportable to a nutrient set produces another nutrient set. this property is called monotonicity and arises in our scheme because adding a transportable to a nutrient set removes one or more constraints from the linear system. more generally, monotonicity will arise whenever all negative effects  are ignored. note that without monotonicity, the notion of a minimal nutrient set is much more subtle.
+
+our technique is based on translating the problem of computing minimal nutrient sets into the language of boolean algebra. we then use a novel algorithm for computing a representation of all minimal nutrient sets. this new algorithm is built on top of standard tools for computing with boolean functions.
+
+in the following subsections, we introduce all of the concepts needed and sketch the basic technique. but, the reader should be aware that obtaining reasonable runtime performance on realistic data sets, such as ecocyc, requires a number of algorithmic refinements and implementation details  that are beyond the scope of this paper.
+
+boolean functions
+in the following discussion, we denote the set {true, false} of boolean values by b and the set of vectors of boolean values of length n by bn. we now give some elementary definitions concerning functions on booleans.
+
+
+definition  <dig>  given a boolean functionf:bn→b, a vectorv∈bnis animplicantoffif and only iff=true.
+
+
+definition  <dig>  a boolean function ofnvariables,f:bn → b, ismonotoneif and only if for anyv∈bnsuch thatf = true, making a new vectorv′fromvby converting afalsecomponent totrueguarantees thatf=true.
+
+
+definition  <dig>  given a monotone boolean functionf:bn→b, a vectorv∈bnis aprime implicantoffif and only if
+
+ <dig>  vis an implicant off; and
+
+ <dig>  for every vectorv″constructed from v by converting a true component to false, we have f = false.
+
+the method of constructing boolean combinations of linear constraints proposed above defines a function nutset:p→b that maps each subset n of transportables t into a true or false result, depending on whether or not the system of constraints constructed for n is satisfiable.
+
+suppose |t|=n. we represent the subsets of t by the boolean vectors bn in the following way. we pick some linear ordering on t and represent a subset n⊂t by a vector vn∈bn where the ith component of vn is true if n contains the ith member of t  and false otherwise.
+
+under this change of representation, nutset becomes a monotone boolean function nutset:bn→b, and the minimal nutrient sets that we seek correspond exactly to the prime implicants of nutset.
+
+computing prime implicants
+we now consider the problem of computing all the prime implicants of an arbitrary monotone boolean function f:bn→b, solely by evaluating f on chosen inputs without making assumptions about how f is defined.
+
+suppose we have some vector v such that f=true. the obvious approach to finding a single prime implicant is to systematically go through the components of v, setting true components to false whenever this can be done without f becoming false. this procedure turns out to be a key step in our algorithm which we call minimization of v with respect to f.
+
+
+definition  <dig>  letf:bn→bbe a monotone function andv∈bnbe a vector such thatf=true. we define the following procedure for minimizingvwith respect tof:
+
+•we keep a vector variableu= that we initialize tov.
+
+•forifrom1up tonifui=true, then
+
+iff=truethen setui:=false, and continue with the updated vector.
+
+otherwise we continue with the value ofuunchanged.
+
+returnuas a minimization ofvwith respect tof.
+
+
+theorem  <dig>  the result of the minimization procedure onvreturns a prime implicant off.
+
+
+proof. note that u=v initially and v is an implicant of f by definition. at each step we update the value of u only if the new value is also an implicant of f so the result of the minimization procedure must be an implicant of f. to see that it must be a prime implicant, suppose it were not. thus, some component ui currently set to true could be changed to false and the new vector would also be an implicant. but in this case we would have set ui to false when it was its turn to be considered in the loop because f is monotone. □
+
+assuming that f is not false everywhere, we can find a first prime implicant by starting with the all- true vector and applying the minimization procedure. the tricky part is finding subsequent prime implicants.
+
+given a set of prime implicants of a monotone boolean function f, the problem of deciding if the set is complete is known to be conp-complete even when f is explicitly given in some quite natural representations  <cit> , so an efficient algorithm for finding a next prime implicant in the general case, where f is only accessed by evaluation, is unlikely.
+
+although the problem of finding the complete set of prime implicants appears theoretically intractable, we can solve it on the instance we care about, namely, where f is the function nutset, defined by our linear constraint system instantiated from the ecocyc dataset.
+
+our method is to compute successive prime implicants using minimization, where at each step we look for a new starting point based on previously found prime implicants that guarantees minimization will find a prime implicant not previously seen.
+
+choice vectors
+given that we have found one or more prime implicants of some monotone boolean function f:bn→b we want to test if further prime implicants exist.
+
+
+definition  <dig>  given a collection of vectorsv <dig> …,vk∈bn, a vectoru∈bnis achoice vectorforv <dig> …,vkiff for alli∈{ <dig> …,k}, u∧vi≠, where ∧ denotes point-wise conjunction.
+
+informally a choice vector is a vector that shares one or more true components with each of the original vectors. let ⊏ be the partial order on bn that corresponds to the subset relation and let ⊑ be its reflexive closure. we denote the vector obtained by the point-wise negation of the components of u by ¬u.
+
+
+theorem  <dig>  given a monotone boolean functionf:bn→bwith prime implicantsv <dig> …,vk∈bn, there exists another prime implicant iff there exists a choice vectoru∈bnforv <dig> …,vksuch thatf=true.
+
+
+proof. suppose there exists a choice vector u∈bn for v <dig> …,vk such that f=true. we can get a prime implicant v′ by minimizing ¬u. furthermore, v′ cannot coincide with a known prime implicant vi because u shares a true component with vi and thus ¬u has false in some component where vi has true and thus v′ will have false because minimization never converts false to true.
+
+in the other direction, suppose f has a prime implicant v′ that does not coincide with one of v <dig> …,vk∈bn. now for each vi there must exist some component where vi has true and v′ has false, because if v′ has true in each component that vi has true, either v′=vi  or v′⊐vi and thus v′ cannot be a prime implicant . thus, ¬v′ is a choice vector for v <dig> …,vk. □
+
+the problem is that for a given collection of vectors v <dig> …,vk∈bn there are many choice vectors and searching among them for a choice vector u such that f=true is prohibitively expensive.
+
+
+definition  <dig>  given a collection of vectorsv <dig> …,vk∈bn, a vectoru∈bnis aminimal choice vectorforv <dig> …,vkiff
+
+ <dig>  uis a choice vector forv <dig> …,vk; and
+
+ <dig>  there is nou′⊏usuch thatu′is a choice vector forv <dig> …,vk.
+
+
+theorem  <dig>  given a monotone boolean functionf:bn→bwith prime implicantsv <dig> …,vk∈bn, if there exists a choice vectoruforv <dig> …,vk∈bnsuch thatf=truethen there exists a minimal choice vectoru′⊑usuch thatf=true.
+
+
+proof. if u is not already a minimal choice vector then there must exist a minimal choice vector u′⊑u. every component that is false in u must also be false in u′. thus evey component that is true in ¬u must also be true in in ¬u′. since f=true and f monotone it follows that f=true. □
+
+thus we can limit our search to minimal choice vectors.
+
+recall that a choice vector for v <dig> …,vk has at least one true component in common with each of v <dig> …,vk. let ti be the set of indices of the true components of vi.
+
+given a vector x=∈bn we can determine if it has at least one true component in common with vi by forming the disjunction: 
+
+ ∨j∈tixj 
+
+ and we can determine if it has at least one true component in common with each of v <dig> …,vk by forming the conjunction of disjunctions: 
+
+ g=∧i= <dig> …,k∨j∈tixj 
+
+ the function g:bn→b thus defined is necessarily monotone as no negations are involved. thus the choice vectors of for v <dig> …,vk correspond to the vectors x that make g=true .
+
+in order to compute a new prime implicant of a monotone function f we still need to examine the prime implicants u of another monotone function g to find one on which f=true. at first sight it might appear that we have come full circle and are back where we started, trying the find the prime implicants of a monotone boolean function. however, recall that f is considered to be a black box and can be accessed only by evaluating it on each input vector whereas g is defined as a conjunction of disjunctions formed from previously computed prime implicants of f. as we will see, this symbolic representation is much more amenable to prime implicant extraction.
+
+binary decision diagrams
+the binary decision diagram  is a popular data structure for representing and manipulating boolean functions  <cit> . although any such scheme necessarily requires exponential space on average, bdds exploit the regularity often present in boolean functions of interest to yield compact representations. moreover, algorithms exist for performing many common operations on functions represented as bdds whose running time is polynomial in the size of the input bdds. free bdd libraries are readily available  <cit> . the technical details of bdds are beyond the scope of this paper; however, one important feature of a bdd is that the complete set of implicants can be recovered by tracing the paths from its root node to its true terminal.
+
+recall that the search space has been restricted to minimal choice vectors or, equivalently, the prime implicants of g. we can construct the bdd for g by incremental updates each time that we find a prime implicant of f. however, to find the prime implicants of g at any given point, we construct a new bdd for the function pig:bn→b defined by 
+
+ pigx <dig> …,xn=gx <dig> …,xn∧∧i∈ <dig> …,n¬xi∨¬gx <dig> …,xi− <dig> false,xi+ <dig> …,xn 
+
+intuitively, pig=true if g=true and for all x′ formed by changing a true component in x to false, g=false. the new bdd is constructed by applying standard bdd operations to the bdd for g.
+
+we can systematically enumerate the prime implicants u of g by enumerating the implicants of pig which is done by tracing the paths in the bdd for pig from the root node to the true terminald. as soon as we find u such that f=true, we can stop, find a prime implicant of f by minimizing ¬u, update g with the new prime implicant, and start over. if we cannot find such a u in the implicants of pig we are done.
+
+nutrient equivalence classes
+how can we help a biologist user interpret a collection of hundreds or thousands of computed minimal nutrient sets? at least in the case of ecocyc, we observe that the complete collection of predicted minimal nutrient sets has a very regular structure, and that elucidating this structure yields both a compact representation of the large collection of predicted minimal nutrient sets and, in many cases in e. coli, a classification of nutrient compounds into equivalence classes that correspond to biological intuitions. specifically, computed nutrient equivalence classes often contain all compounds that supply one element .
+
+
+definition  <dig>  given a collectionnof nutrient sets, we want to capture the notion of two transportablesc <dig> c2∈tbeing equivalent ifc1can always substitute forc2in any nutrient set wherec2occurs and vice versa.
+
+formally, we sayc <dig> c2∈tare equivalent with respect tonif and only if
+
+ <dig>  for alln∈nsuch thatc1∈n:n∖{c1}∪{c2}∈n; and
+
+ <dig>  for alln∈nsuch thatc2∈n:n∖{c2}∪{c1}∈n.
+
+this relation is trivially reflexive and symmetric, and can easily be shown to be transitive. it is therefore an equivalence relation on the compounds occurring in members of n and can be used to factor this subset of transportables into equivalence classes where each such compound ends up in exactly one equivalence class.
+
+for each equivalence class of compounds we can choose a representative compound. given some n∈n we can form n′ by replacing each compound c∈n by the representative compound of the equivalence class of c. because of the mutual substitutability of compounds within an equivalence class, n′ must necessarily be a member of n. we call n′ the canonical form of n .
+
+if we convert each n∈n to its canonical form, we will end up with many duplicates. after removing duplicates we are left with a reduced collection n^ of minimal nutrient sets that will likely be much smaller and more comprehensible to the biologist — especially if the representative compound for each equivalence class was chosen to be one of the more familiar compounds from those available in the class.
+
+of course, the question naturally arises: what is the connection between our original collection of minimal nutrient sets n and this new reduced collection n^ of minimal nutrient sets?
+
+the answer is that n^ along with the equivalence classes we used to compute it exactly encode n in the following sense: if n∈n, then there must exist some n′∈n^ such that n can be obtained from n′ by substituting for each c∈n′ some compound from the equivalence class of c. conversely if n′∈n^ and we form a set n by substituting for each c∈n some arbitrary compound from the equivalence class of c then n must be a member of n.
+
+thus, we have a very elegant compression scheme that reduces the size of our collection of predicted minimal nutrient sets and at the same time increases the comprehensibility of our results with zero loss of information.
+
+instantiation of generic reactions
+the metabolic reaction sets found in pathway/genome databases such as ecocyc include many generic reactions whose substrates include metabolite classes to capture the broad substrate specificity of their catalyzing enzymes. for example, ecocyc contains four enzymes that are described as “sugar phosphatase” , for which the official substrate is “sugar phosphate” and the product is “sugar”.
+
+for each generic reaction, our software generates the set of corresponding instantiated reactions containing solely metabolite instances. for each compound class in the left and right sides of generic reactions, the software generates new potential reactions by substituting for the compound classes all combinations of instances of those classes. relationships between a compound class and its instances are stored explicitly in the ecocyc compound ontology. new reaction equations are added to r only when a given substitution resulted in a mass balanced equation. new reactions are not added in ambiguous cases where more than one instance has the same chemical formula.
+
+RESULTS
+the e. coli constraint-based model
+this section describes the inputs we provided to the minimal nutrient prediction algorithm to compute the minimal nutrients of e. coli under anaerobic conditions. the e. coli constraint-based model used for this work was obtained from the manually curated ecocyc database  <cit> . the set of e. coli biochemical reactions r was taken from an ecocyc development version, slightly beyond the  <dig>  release from june  <dig>  we extracted all reactions whose metabolites were all small molecules, plus all reactions within metabolic pathways .
+
+four hundred and forty one ecocyc generic reactions with classes yielded at least one instantiated reaction. furthermore, unbalanced reactions were removed programmatically from r. the final r used in this work consisted of  <dig>  reactions, of which  <dig> were transport reactions.
+
+to refine and correct the reactions in the model, over the course of this work, numerous changes were made to ecocyc as a result of our analysis of executions of the minimal nutrient algorithm. they included fixing erroneous compound structures and reaction equations, adjusting the protonation state of the compounds and reactions to ph  <dig> , adding missing reactions, reversing reaction directions, changing reactions from unidirectional to reversible or from reversible to unidirectional, and adjusting cell compartment assignments of reactions. in addition, we added compound instances or reclassified existing instances under appropriate classes in our compound ontology, to allow more instantiations of generic reactions to be inferred.
+
+one interesting example was the reaction pyruvformly-rxn, which was labelled as reversible in ecocyc, due to a literature reference describing the in vitro characterization of an enzyme catalyzing the reaction. we found that some false positive predictions were apparently utilizing this reaction in the physiologically implausible reverse direction. changing pyruvformly-rxn to unidirectional, in accordance to usage of the reaction in two in vivo pathways, suppressed several false positive predictions and increased the overall accuracy from  <dig> % to  <dig> %.
+
+a set of  <dig> transportable metabolites t were supplied to the algorithm. t consisted of all carbon sources from the carbon-source biolog phenotype microarray plate, plus the other element sources provided on this plate  <cit> . t also included  <dig> additional metabolites: instances of those carbon sources that were classes, plus some metabolites resulting from conversions by reactions in the periplasm of supplied metabolites into metabolites that can be transported. oxygen  was not supplied as a nutrient.
+
+we have tried running the algorithm with all metabolites transportable by known e. coli transporters. some such executions have terminated, predicting approximately  <dig>  minimal nutrient sets. an execution based on the current metabolic network in ecocyc has not terminated after two months of run time. runs larger than the  <dig> transportable metabolites cannot be validated because of a lack of experimental data.
+
+the set of biomass metabolites used in our model was similar to that used in  <cit> . it contains  <dig> compounds, including the amino acids and nucleotides, and several cell-wall building blocks that lead to lipid a disaccharide. however, the lipids leading to cardiolipin have been omitted, because at this time, the generic reactions involved in those pathways could not be instantiated properly, due to a lack of appropriate compound instances.
+
+r and t are available in additional files  <dig> and  <dig>  respectively. additional file  <dig> contains the set b of biomass metabolites. additional file  <dig> contains “auxiliary compounds” that must be present for the model to run, but that are not synthesized by reactions in the model, either because the reactions are unknown, or because the reactions that synthesize these compounds are beyond the scope of the model .
+
+predicting e. coli minimal nutrient sets
+we ran the bdd-based minimal-nutrient-set-generation algorithm using the machinery-duplication constraint model on ecocyc data to predict at each evaluation of a nutset whether or not e. coli would grow on a given n⊂t. a total of  <dig> minimal nutrient sets were found  after three days of execution on a 24-core   <dig>  ghz intel x <dig> xeon cpu-model processor.
+
+given the combinatorial process by which nutrient sets are constructed from individual nutrients, this abundance of minimal nutrient sets was not surprising. however, this large solution set does not lend itself to evaluation and validation of the results, especially via laboratory experiment. to facilitate human comprehension and testing of our predictions, we used the notion of equivalence between compounds with respect to a collection of nutrient sets  to factor the set of compounds occurring in predicted minimal nutrient sets into equivalence classes. by picking a representative compound within each such equivalence class and discarding minimal nutrient sets that contain equivalence-class members other than those chosen representatives, we obtained a reduced group of representative minimal nutrient sets from which each original minimal nutrient set could be generated by the appropriate substitution of equivalent compounds . the reduced set of solutions is much smaller and easier to inspect than the full solution set.
+
+the equivalence classes of compounds generated from our original minimal nutrient sets are shown here. all the compounds in an equivalence class are interchangeable in their roles in predicted minimal nutrient sets. for example, alpha-d-glucose  can substitute for glycerol, d-mannose, and so forth. column one shows the class’ number, column two shows the elements that we believe it provides as part of predicted minimal nutrient sets, and column three lists all or a representative part of the compounds contained within the class.
+
+we determined  <dig> nutrient equivalence classes , which are used in  <dig> reduced minimal nutrient sets . this reduction provided an approximately 9-fold decrease in the number of solution nutrient sets to facilitate review by the user.
+
+evaluating predicted nutrients
+we compared our predictions against published data on anaerobic e. coli metabolism, which were generated using biolog phenotype microarray  technology  <cit> .
+
+pms evaluate the metabolic activity of an organism on multiple distinct sets of nutrients in parallel, allowing high-throughput analysis. although pm technology measures respiration rather than growth, it usually represents a reasonable proxy for growth.
+
+one important limitation of pm data is that it typically tests a single element axis at a time. for example, one pm 96-well plate tests a wide array of carbon sources while providing fixed sources of all other elements. in contrast, some of our computed minimal nutrient sets include single metabolites that are predicted to source multiple elements.
+
+the anaerobic pm data we had access to  <cit>  tested solely for carbon sources. we compared our computational results to these pm results as follows. each pm well is considered to be a nutrient set npm consisting of four metabolites, each of which sources one of the elements c, n, p, or s. if an exact match of npm can be found with one of the predicted minimal nutrient sets, npred, then we count this predicted nutrient as a correct prediction . because our method predicts some nutrients that provide more than one element, we also count subset matches as true positives, i.e., npred⊂ npm. as an example, alpha-d-glucose-1-phosphate occurs in a predicted nutrient set together with ammonium and sulfate. however, this nutrient set does not exactly match any pm nutrient set, because every pm well in the carbon-source plate also includes phosphate as a separate metabolite. but our method predicted that alpha-d-glucose-1-phosphate can also serve as a phosphorous source, and that it is thus redundant to add phosphate explicitly to the nutrient set. by allowing subset matches, we can correctly score the npred consisting of alpha-d-glucose-1-phosphate, ammonium, and sulfate as a true positive.
+
+if an npm demonstrated growth experimentally and matches an npred, we score a true positive prediction; if no matching npred was found, we score a false negative. if npm demonstrated no growth, and did not match any predicted nutrient set, a true negative is scored; if it does match an npred, then a false positive is scored. a table with all results is provided in additional file  <dig> 
+
+when evaluated in this way, the overall prediction accuracy of our method was  <dig> % based on  <dig> experimental data points . the inconclusive  <dig> data points showing low growth were ignored.
+
+for each element, the table lists how many compounds were predicted to provide that element , how many of those had experimental evidence against which they could be evaluated , and the results of that evaluation. a compound is a true positive  if it was predicted to provide that element and did so. a compound is a true negative  if it was predicted to not provide that element and actually did not. false positives  and false negatives  are also reported. the accuracy is obtained by dividing tp + tn by ev and multiplying by  <dig> 
+
+six of the eight false-negative predictions are due to missing knowledge regarding the fate of the nutrients in e. coli. for some nutrient in these nutrient sets, no known transport reactions or consuming metabolic reactions could be found in the literature. if these six false negative predictions are removed from the comparison, the prediction accuracy of our method was  <dig> %.
+
+discussion
+the increasing ease with which complete genomes can be sequenced should be accompanied by the ability to make predictions about the growth requirements of the corresponding organisms. we have previously shown that the metabolic network and transporter suite for a given organism can be inferred from its annotated sequence. we have shown here that using such databases to predict a large number of nutrient sets that should support growth of the organism is both possible and practical. these predictions can be distilled into a testable set of compound equivalence classes.
+
+strengths and limitations of our method
+as explained earlier , given a complete set of reactions, and a set of biomass compounds without extraneous members, our model for predicting whether an organism can grow on a putative nutrient set can produce only false positives; false negatives are impossible. thus, when used to compute minimal nutrient sets, our method can find sets of compounds that allow the possibility of growth  but offers no guarantee that such growth can actually occur in reality. this occurs because of a number of potential negative effects on growth that our model does not attempt to account for.
+
+our method cannot predict the relative concentrations of nutrients, because our method does not account for enzyme reaction rates or regulation at the level of enzyme abundance and activity. thus, some of the predicted minimal nutrient sets that work on a “parts” level by providing increasing amounts of all the correct metabolites would possibly not lead to viable growth. for example, it is known that growth of e. coli with glucose as the carbon source suppresses expression of several nitrogen-assimilation enzymes. as a consequence, even though the metabolic network may suggest that glucose and certain nitrogen sources should be able to work together to provide the organism’s carbon and nitrogen needs, genetic regulatory interactions mean that these combinations will prove inviable in the laboratory.
+
+in the future, extending our method to incorporate many of these factors may be possible, but we can also learn a great deal from the differences that we see between our current minimal nutrient predictions and experimental reality.
+
+a special and fascinating case of this difference between prediction and reality is toxicity. it is possible for a nutrient to simultaneously be a correct growth solution and a toxin. “the dose makes the poison,” and even typical nutrients such as glucose are naturally toxic at high concentrations. other nutrients, however, have a surprisingly narrow gap between viability and toxicity. thus, predicting a growth solution that is both correct and potentially difficult to apply in the laboratory is possible. the upshot of this effect is that in many cases a laboratory researcher operating without the guidance of a prediction might accidentally discard interesting, experimentally useful growth conditions based on a test that was performed using nutrient concentrations outside this “viable band”.
+
+one key caveat about predicting “growth” for an organism based on its metabolic network arises from an increasing pool of experimental evidence that many microbes will grow only in the presence of signaling molecules. in nature, many microbes can thrive only in the presence of appropriate quorum-sensing signals from their community. when these signals are absent, they will fail to grow despite the presence of all required nutrients  <cit> . although our present approach does not capture this phenomenon, a failure to grow on any of the predicted nutrients may be a sign that a signal should be sought.
+
+related work in nutrient set prediction
+the main axes of differentiation between various nutrient set prediction methods are the 
+
+ <dig>  mathematical model used to define growth
+
+ <dig>  algorithmic solving technique used to find solutions that fit that definition
+
+ <dig>  procedure for enumerating all possible sets of minimal growth media
+
+defining growth
+there are different notions in the literature for how a nutrient set is defined to support growth.
+
+the simplest definition is based on reachability — a nutrient set supports growth if there is a path from available nutrients to every biomass metabolite  <cit> . in this definition, special care is taken sometimes to deal with “bootstrapping” or “self-regenerating” compounds  <cit> . this simplified definition sets aside stoichiometric information, which significantly limits the accuracy of its predictions. however, reachability is a necessary condition for model correctness. if an experimentally validated minimal nutrient set cannot generate every biomass metabolite, then there is a gap in the metabolic model that must be fixed.
+
+the more commonly used definition of growth is based on flux-balance analysis , which is a classical approach for performing structural  analysis of metabolic networks  <cit> . if m is the stoichiometric matrix and r is a vector of reaction fluxes, then fba defines r to be a steady state of the network if mr= <dig>  the set of reactions includes uptake reactions that encode the availability of given nutrients. furthermore, a special reaction that uses all metabolites required for biomass production is also added to the set of reactions. in fba, the given nutrient set is said to support growth if there is a solution r for reaction fluxes such that mr= <dig> and the growth reaction has nonzero flux.
+
+in our approach, we also use a different definition where we require a net positive production  for every metabolite that is involved in a reaction with nonzero flux. there are two reasons for considering this alternate formulation. first, fba is highly sensitive to missing reactions in the metabolic network. for example, if no reactions that use a metabolite, say d, exist, then mr= <dig> forces the flux on all reactions that produce d to be zero. we now illustrate this scenario. recall example  <dig> from methods; here we have two reactions: 
+
+ a+b→c+d,c+f→b+e 
+
+ and e is the sole biomass compound. we now add the following exchange reactions, 
+
+ →a,→f,e→ 
+
+ that capture the information that a,f are available as nutrients and e is a biomass compound that we need to synthesize. because d is not consumed by any reaction, it follows that the flux on the first reaction must be zero and that all steady-state fluxes must be zero. . thus, fba will conclude that no steady-state solutions exist because the model is missing some reactions. if we add dummy reactions that consume compounds such as d , then fba is more likely to generate steady-state solutions. this shortcoming of standard fba is overcome by having a manual curation step that adds  import, export, or spontaneous, reactions  <cit> . the generalization from mr= <dig> to mr≥ <dig> in our approach partly solves the problem of missing reactions. specifically, we do not need dummy export reactions  because d can have a net positive production in a solution of our constraints.
+
+the second reason for proposing an alternate definition of growth concerns the case when the metabolic network has cycles, a common scenario. as we claimed earlier , a growing and dividing cell must be able to duplicate the metabolic machinery it uses to grow on a given nutrient set, and this is not accounted for in fba. in our approach, cycles are handled by introducing disjunctive constraints. a side effect of our solution is that each individual constraint in our approach is a disjunction of linear inequalities. in contrast, in flux-balance analysis, each individual constraint is a linear equation or linear inequality. table  <dig> shows the constraints arising from reactions of the running example for fba and our approach.
+
+for a reaction network consisting of two reactions, r1:a+b→c+d and r2:c+f→b+e, nutrients {a,f} and essential compound e, fba generates the constraints in the second column  and determines growth by maximizing r <dig> subject to these constraints and subject to bounds on influx of nutrients, 0≤r3≤r3max and 0≤r4≤r4max. we generate four constraints, shown in the third column, out of which three are disjunctive. note that we do not use the dummy reactions r3:→a, r4:→f and r5:e→.
+
+although the fba approach does not account for possible problems induced by cycles, it seems to give good results. an interesting problem for future work is to understand what features of a metabolic network suppress the effects of cycles on the space of solutions.
+
+solving technique
+when plain reachability is used to define growth, a simple forward propagation procedure — based purely on qualitative reasoning — suffices for deciding if a given medium supports growth  <cit> . such a procedure is efficient, but makes an unrealistic assumption that reactants of a reaction are not used up when that reaction is used.
+
+flux-balance analysis uses standard linear programming  solvers for finding the maximum flux for the biomass generation reaction subject to the constraint mr= <dig>  in our approach, we generate disjunctions of linear constraints, and hence we cannot use lp solvers. we instead use modern and highly efficient solvers, called satisfiability modulo theory  solvers  <cit> . not only do smt solvers handle more general constraints, they also support a rich interface that enables incremental addition and retraction of constraints. this feature allows the exhaustive search for minimal nutrient sets to be made more efficient, by sharing computation between the individual evaluations of nutset.
+
+enumerating all nutrient sets
+the problem of enumerating all minimal nutrient sets has not been widely studied. handorf et al.  <cit>  and cottret et al.  <cit>  are the only works that attempt to analyze all minimal nutrient sets. handorf et al.  <cit>  state that enumerating all minimal sets is “impossible” and hence, a random  sampling process is used to enumerate some  of the minimal nutrient sets. the sampled minimal nutrient sets are used to perform additional analysis, such as identifying exchangeable resource metabolites and essential clusters. the authors have to manually pick threshold values for classification and to also manually merge equivalence clusters  <cit> .
+
+cottret et al.  <cit>  perform a straightforward exhaustive enumeration of possible nutrient sets by building an  tree representing the backward reachable sets starting from the target biomass compounds. stoichiometry information is not used in this process and reactants are not “used up” when they are fired; for example, given the two reactions 2a→b, b→a, they will conclude that the network can synthesize b starting from an empty bag of nutrients. the scalability of the approach on large reaction networks, such as from ecocyc, is a concern: cottret et al.  <cit>  show that the forward reachability can be performed on large networks, but the enumeration of all nutrient sets is done on only small networks.
+
+feist et al.  <cit>  and maranas et al.  <cit>  use fba-based techniques to determine all carbon, nitrogen, phosphorous, and sulfur sources that could support simulated growth. but rather than considering all minimal nutrient sets, their method selects a “seed” minimal medium and then varies one of its nutrient sources  at a time, and predicts if growth is possible. this approach, which we call single-element variation, assumes that the choice of nutrient source for a given element  is independent of the other choices . seeing that this assumption might be false is easy, for example, consider a trivial metabolic system involving only carbon and nitrogen. suppose we have two carbon sources c <dig> and c <dig> and two nitrogen sources n <dig> and n <dig>  with compound m representing biomass. consider the reactions: 
+
+ c1+n1→mc2+n2→m 
+
+clearly, c <dig> and c <dig> cannot substitute for one another. the single-element variation method might choose nutrient set {c <dig> n1} as its seed nutrient, and vary the n source to produce nutrient set {c <dig> n2}. if this nutrient set failed to support growth, the method would erroneously conclude that n <dig> could never function as a nitrogen source.
+
+another problem with the single-element variation method is that it assumes exactly one nutrient is needed for each element, which might be false. consider a metabolic system that is configured such that one set of nutrients can supply nitrogen to amino acids only, and an orthogonal set of nutrients can supply nitrogen to nucleotides only, with no possible flow of nitrogen between the amino acids and the nucleotides.
+
+one might argue that such metabolic systems have never been observed in the natural world, so why should we build algorithms to detect them? we argue the converse: that if we do not build algorithms to detect them, we will never discover them from sequenced genomes, and given the incredible diversity of nature, such systems may well exist. for example, many genome sequences are in hand for parasitic microbes that have lost major components of their metabolic machinery. by using a novel algorithm built on top of a classical data representation , we can systematically search an otherwise intractably large space without making any assumptions about the independence of elemental sources. the full pool of  <dig> known e. coli transportable instance metabolites would expand to on the order of  <dig> potential four-compound combinations . if we consider that two distinct compounds might source c together, on the order of  <dig> five-compound combinations would be obtained. since in general an organism might require more than one source of a given element, we cannot decide a priori the upper bound on the number of nutrients to consider.
+
+other efforts to use genome-scale metabolic models to determine minimal nutrient sets include  <cit> . each of these efforts uses an fba approach to check viability of nutrient sets, only selectively varying single nutrients once a starting minimal nutrient set has been found. the range of variation is mainly constrained to compounds available in biolog phenotype microarrays, so the predictions can be readily checked against experimental results.
+
+in contrast to all work described above, we present a technique for computing all minimal nutrient sets. we demonstrate that the computation is feasible for large genome-scale models.
+
+moreover, our approach for enumerating all nutrient sets is generic — it is independent of the underlying definition of growth and the solver used.
+
+unlike fba, our approach does not need an objective function because it is not based on solving an optimization problem.
+
+the various methods described above, including our approach, predict growth on minimal nutrient sets based on structural analysis of the metabolic network. all these methods are limited by the accuracy of the compounds and reactions modeled in the metabolic network, by their list of transportable nutrients, and by the specification of biomass compounds.
+
+CONCLUSIONS
+we have described a method for computing alternative minimal growth media for an organism based on its metabolic network and transporter complement. the method combines linear constraint solving with binary decision diagrams. whereas previous approaches to this problem did not consider all possible combinations of nutrients, our method does consider all such possibilities. previous approaches assumed that all element sources are independent from one another, and that one source of each element only is required, whereas we show that in general these assumptions are invalid. science is unlikely to detect organisms whose metabolic networks violate those assumptions unless we have computational methods that do not depend on those assumptions. a key aspect of our approach is the machinery-duplicating constraint, namely that all metabolites used in active reactions must be produced in increasing concentrations to prevent cell divisions from diluting these metabolites to the point that they are not available to the cell’s metabolic network. we validated our method by predicting alternative minimal nutrient sets of e. coli k– <dig> mg <dig> under anaerobic conditions. these minimal nutrient sets were predicted with  <dig> % accuracy as evaluated by comparison with data from  <dig> growth experiments.
+
+future goals and methods
+the method that we present in this paper must next be applied beyond e. coli to aid researchers who are trying to study uncultivatable pathogens and environmentally sampled organisms, and to develop effective synthetic biology platforms. the ability to rapidly sequence and annotate such research targets must necessarily be complemented by the ability to quickly address potentially enormous research challenges such as “how do we grow this organism?” into tractable questions.
+
+clear areas for future enhancements to our method exist, beginning with developing a better understanding of the source of the differences between our predictions and biological reality. the goal will be to develop tools to identify when discrepancies represent a problem with the method or a potential area of new study. these improvements will be built on the back of enhancements that make the method itself more computationally efficient, opening up the opportunity to include knowledge of regulation, metabolite concentrations, and other factors that will become more readily available as new high-throughput methods are developed.
+
+endnotes
+anote that this cannot be formulated as a theorem since a theorem can only state properties about models of the real world rather than about the real world itself. justification of claims in this section tacitly rely on a model of the world that is often implicitly assumed in biology and where the notion of discrete biochemical reactions makes sense. in particular organisms are assumed to be composed of molecules and a molecule is considered to be a discrete assemblage of atoms. molecules are only transformed by biochemical reactions and those reactions must be balanced with respect to counts of each kind of atom. atoms themselves are assumed to be indivisible, immutable, and conserved. we will maintain this fiction for the rest of this paper.bwe make the simplifying assumption that a given cell divides into two daughter cells that are identical at the molecular level. of course in practice this is extremely unlikely; however, we really only require that the daughter cells are sufficiently similar in terms of their molecular composition. this vague notion of sufficiently similar could be made precise by the development of a formal mathematical measure of fission similarity based on the exact molecular composition of the cells in question and then we could formally prove the validity of our model for organisms that have fission similarity above a certain threshold. however, since determining the exact molecular composition of a given cell is well in advance of current experimental technique, the development of such a mathematical theory at the present time seems to us to be superfluous, and is certainly beyond the scope of this paper.cthe word feasibility is the standard terminology in the field of linear programming, while the word satisfiability is the standard terminology in the field of computational logic, where smt solvers were developed.dbecause pig encodes the prime implicants of a monotone function it can never happen that we have two prime implicants that differ only on the value of a single component. consequently, every variable must occur as the label for some node on every path from the root node to the true terminal, which slightly simplifies the extraction of the implicants of pig.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+se designed and implemented the minimal-nutrients algorithm and authored sections of the manuscript. mk contributed to the design of the algorithm; he ran the algorithm and analyzed its results; he updated the ecocyc metabolic network to incorporate new information that was found as a result of analyzing algorithm runs; he authored sections of the manuscript. ags contributed to the design of the algorithm and the analysis of its results, and authored sections of the manuscript. at contributed to the design of the algorithm and authored sections of the manuscript. imk contributed to the analysis of runs and updating of the ecocyc metabolic network. ct contributed to the design of the algorithm. pdk contributed to the design of the algorithm and the analysis of its results, and authored sections of the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+the set of ecocyc biochemical reactions, r.
+
+click here for file
+
+ additional file 2
+the set of transportable compounds, t.
+
+click here for file
+
+ additional file 3
+the set of biomass metabolites, b.
+
+click here for file
+
+ additional file 4
+the set of auxilliary compounds that must be present for the model to run.
+
+click here for file
+
+ additional file 5
+all minimal nutrient sets computed by our program.
+
+click here for file
+
+ additional file 6
+the nutrient equivalence classes.
+
+click here for file
+
+ additional file 7
+the reduced minimal nutrient sets.
+
+click here for file
+
+ additional file 8
+growth status for each compound.
+
+click here for file
+
+ acknowledgements
+we thank dr. ian paulsen for sharing some experimental results with us, involving biolog microarrays. this work was supported by award number u24gm <dig> from the national institute of general medical sciences, grant number iis- <dig> from the national science foundation, and by sri international. the content of this article is solely the responsibility of the authors and does not necessarily represent the official views of the national institute of general medical sciences, the national institutes of health, or the national science foundation.

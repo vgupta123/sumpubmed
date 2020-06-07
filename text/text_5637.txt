@@ -1,0 +1,254 @@
+BACKGROUND
+parameter estimation is a major task that paves the way for building predictive models of intracellular regulation processes. experimental data used for fitting these models however, often do not contain enough information to identify parameter values uniquely. especially for parameter estimation of quantitative dynamic models such as ordinary differential equations  biological experiments usually do not have the required time resolution, rendering the estimation particularly challenging. sparse data often lead to ill-posed optimization problems with multiple solutions that are indistinguishable in terms of fit quality, but might differ substantially when used for the prediction of new scenarios. faced with these problems, optimization based point estimates are generally not appropriate, since an analysis of the parameter space around such points of high quality fits is often needed. sampling-based bayesian methods are advantageous in these settings as they offer an insight into the surroundings of local objective function minima and facilitate the uncertainty analysis of predictions. consequently, statistical methods are being used more and more frequently for parameter estimation in systems biology . in the bayesian approach, parameters are considered random variables and inferences are formulated in terms of probability densities.
+
+a major hindrance is the time required to generate samples from the resulting posterior distributions. evaluation of the posterior can be computationally expensive; this is particularly the case for ode models, where each sampling step requires numerical calculation of model trajectories. metropolis-hastings  <cit>  algorithms are among the most popular choices for this task . variants of these core algorithms are also widely available in parameter estimation software packages, e.g. gnu mcsim <cit> , or the mcmcstat matlab toolbox  <cit> .
+
+the speed of convergence of the markov chain is crucial for the efficiency of the mcmc approach. finding a good tuning of the markov chain’s transition distance can be time consuming and difficult  <cit> , and it has been recognized that high correlations between the parameters can substantially slow down the convergence speed of standard mcmc algorithms  <cit> . in these cases the step size must often be chosen to be very small in order to obtain a reasonable acceptance rate, resulting in highly auto-correlated samples. a larger number of samples are then required to obtain low variance estimates of the inferred quantities.
+
+various strategies are employed to increase the distance of transitions in the sampling space, yet at the same time maintain a high acceptance rate. several adaptive versions of the metropolis-hastings algorithm have been suggested in this context . these adaptation processes however only make proposals based on a global gaussian approximation of the posterior, which can be a disadvantage when the posterior density has a complex lower scale structure.
+
+hybrid or hamiltonian monte carlo  algorithms , can dramatically increase the acceptance rate while still providing samples with low auto-correlation. this is accomplished by an elaborate transition step that requires the integration of a secondary ode system describing dynamics in parameter space that depend on the gradient of the target distribution. in this way, the hmc algorithm uses the structure of the ode model more exhaustively. at first glance this approach increases the computational costs, but this is often compensated by the improved sample quality compared to the simpler algorithms. the advantage of low auto-correlations in typical hmc samples is that the sample size need not be as large to compute summaries to a satisfactory precision. a wasteful algorithm might provide a sample with high auto-correlations very quickly but at the expense of requiring a much larger number of samples to obtain low variance monte carlo estimates. of course, these larger samples also need to be stored and empirical estimates of posterior predictive distributions using a larger number of sampled points will be computationally slower.
+
+the statistical superiority of hmc has already been demonstrated on a variety of examples, e.g. using a 100-dimensional multivariate gaussian distribution as target density ; it seems to be a very promising approach, however hmc has so far rarely been used to infer parameters for nonlinear ode models. a recent simple example is given in  <cit> , where it is shown that the sample quality and convergence of hmc to the posterior can be improved even further by using an appropriate metric to define a riemannian geometry over the parameter space. this approach employs the local sensitivity of the model at each step to inform the proposal distribution, leading to more efficient sampling in cases where the posterior has a complicated covariance structure.
+
+the major difficulty that arises generally for hmc type algorithms when dealing with ode models is that the model outputs and their sensitivities have to be simulated at every point along trajectories in parameter space. we address this computational issue by proposing an extension to hmc algorithms especially designed to sample efficiently from models with steady state data under multiple perturbations. in particular, we use sensitivity analysis within a newton-raphson approach to efficiently track the steady states across each of the hamiltonian trajectories, instead of calculating them explicitly, thus drastically reducing this additional cost.
+
+steady state observations are typically not as informative as time series data, but can be obtained at comparatively low cost. they can be used in the first cycle of modeling where a qualitative model is validated via parameter fitting. if the model is not invalidated, dynamic data should be gathered for further analysis to narrow down model parameters further. the posterior parameter density from previous analysis cycles may be employed to inform the prior density of future experiments, and herein lies one of the benefits of the bayesian approach. the properties of steady states offer the possibility to use analytical calculations to obtain output sensitivities. this is a lot faster than the numerical integration of dynamic sensitivities and improves sampling performance. we describe this further in section ‘efficient calculation of geometry’. typically, the steady state data will not be sufficient to uniquely identify all parameters; however issues of unidentifiability may also occur for dynamic time series data. bayesian model analysis is designed to deal with precisely this case and allows full characterisation of the uncertainties that arise when making predictions.
+
+we evaluate our approach on three different steady state models with real data: a model for erk phosphorylation in the mapk signaling pathway, and two alternative models for the phosphorylation of insulin receptor substrate irs after insulin stimulation. we also provide standard hmc sampling speeds as reference.
+
+approach
+our modeling framework is motivated by real biological experiments: measurements on systems subject to long term or permanent perturbations, such as gene expression regulation via different promoters, silencing of genes or the stable transfection with variants of the system’s enzymes with altered reactive properties. these types of experiment, among others, provide steady state responses to perturbations. in the following, we assume data is accumulated by observing the steady state under different conditions u.
+
+model structure
+intracellular processes are often described as biochemical reaction networks, i.e. ode models with vector fields that are based on chemical reaction kinetics. here we consider systems of the following form:
+  <dig>  
+
+where the state  describes molecular concentrations,  denotes the model parameters,  is an input vector which describes experimental conditions such as the suppression of certain reactions or the introduction of mutants, and ne denotes the number of performed experiments, i.e. the number of different input vectors. we consider constant inputs, the initial conditions x  = x <dig> are assumed to be known and unparameterised and the function f shall be smooth. if the model exhibits complex bifurcations, special care has to be taken when dealing with initial conditions and basins of attraction. we do not address these issues here.
+
+in this study we assume that the system converges to a steady state characterised by  for any available input w, which is the generic behaviour of such models  <cit> . measurements are taken only after the system has reached steady state:
+  <dig>  
+
+where  is the observable model output when input uj is applied, and  is the steady state of the respective trajectory φ. we assume linear output functions characterized by the real matrix c.
+
+standard hmc methods and the proposed newton-raphson variants differ in the way the steady states are calculated, but are both initialized with a numerical solution to the initial value problem. the parameters ρ are always positive in chemical reaction networks. in order to avoid dealing with borders of the positive orthant it is advantageous to sample in logarithmic space θ = log . since we operate on θ we will drop ρ from all subsequent expressions and consider it implicitly understood that the model functions f and h will perform the transformation .
+
+measurements are obscured by noise δij, that is, the observed data
+  <dig>  
+
+relates to the measurement model in this way,
+  <dig>  
+
+gaussian noise is important for a vast amount of biological applications. however, the noise model is not of crucial importance to the sampling algorithms and can be changed as needed  <cit> . we assume that variances  are available, e.g. from empirical variance estimates of different experimental replicates.
+
+bayesian parameter estimation
+equipped with our model and a data set , we define the likelihood function , as a measure of plausibility for each θ. in the case of a gaussian error model, the likelihood given all experimental measurements follows as
+  
+
+we note that we often employ the log-likelihood in many calculations, which we denote . the likelihood of a set of parameters therefore requires the steady state solution  of the ode model, which is usually calculated by numerical integration of  until convergence is achieved. in a bayesian approach, prior knowledge regarding the plausible values of p  is incorporated via bayes’ theorem:
+  <dig>  
+
+where p  and  are the prior and posterior distributions, respectively. in this work we assume gaussian priors . the evidence  is a normalization constant that is independent of θ and is not needed during markov chain monte carlo sampling, since this term cancels in the calculation of the metropolis-hastings acceptance ratio. expected values of a function f with respect to the posterior,
+  <dig>  
+
+may be estimated using monte carlo integration given posterior samples,
+  <dig>  
+
+riemannian structure of parameter space
+exploration of the posterior distribution for models defined by systems of odes is often severely hampered by the strong correlation structure present in the parameter space, which makes it difficult to propose mcmc moves that are far from the current point and accepted with high probability. recent advances in mcmc attempt to circumvent these issues by utilising the underlying geometric structure induced by the sensitivity of a statistical model  <cit> . in addition to exploiting gradient information, we can construct mcmc algorithms based on higher order geometric structure by considering the expected fisher information, which  <cit>  noted satisfies all the mathematical properties of a metric tensor and hence induces a riemannian geometry on the parameter space. the use of this geometry allows us to define a measure of distance between sets of parameters in terms of the change in posterior probability, rather than changes in the values of the parameters themselves. in other words, mcmc algorithms based on riemannian geometry make local moves according to a local coordinate system that automatically adapts based on the local sensitivity of the model, taking small steps in directions of high sensitivity and bigger steps in directions of lower sensitivity, while also taking into account local correlation between pairs of parameters. such approaches have been shown to work incredibly well on a variety of complex statistical models  <cit> , although computational expense often remains an issue for some classes of models.
+
+the main quantity of interest here is the metric tensor. from the metric tensor, gradient and log-likelihood, we can define a hamiltonian monte carlo algorithm using riemannian coordinates, rather than the standard euclidean coordinate system which is typically used. both of these algorithms are given in the next section, and we refer the reader to  <cit>  for an introductory exposition of riemannian geometry for mcmc. we may define the th element of a metric g based on the posterior distribution in the following manner,
+  
+
+where gy is the expected fisher information and Ξ is the covariance of the prior. we note that the normalising factor of the likelihood, and prior for that matter, is a constant with respect to θ and vanishes in the derivative of its logarithm. one of the advantages of employing riemannian geometry is that the calculation of gy requires only first order sensitivities . for steady state ode models, we can calculate a general expression for the expected fisher information based on a likelihood derived from gaussian measurement errors with a linear observation model, as defined in  and :
+  <dig>  
+
+this calculation yields, taking the prior’s contribution into account, the overall metric tensor g comprised of an inner product of the sensitivity matrices and the a-priori covariance matrix:
+  <dig>  
+
+where .
+
+methods
+we have named the algorithms presented in this work using the prefix nr for newton-raphson and the prefix rm for riemannian manifold, which will be further explained in this section. when we define the variants of hamiltonian monte carlo, we restrict our description to those aspects of the algorithm that are impacted by the modifications we make. we note that the modifications do not affect the correctness of the algorithms, and we therefore refer the reader to the original hmc and rmhmc publications for proofs of correctness and convergence  <cit> .
+
+the original hmc algorithm is defined on euclidean space and performs well in practice for probability distributions that do not exhibit strong correlations between parameters. the state of the art rmhmc performs far better for correlated distributions, however the algorithm is computationally more complex to implement. we consider both hmc and rmhmc on our variety of examples, and then present an approach for significantly decreasing the computational cost of implementing both algorithms for steady state systems.
+
+hamiltonian monte carlo
+the hamiltonian monte carlo algorithm can be constructed by introducing an auxiliary variable to extend the state space. we may interpret the auxiliary variable as a momentum variable and the negative log joint distribution may be interpreted as a hamiltonian system  <cit> . the main idea is that the induced dynamics of this system may then be used for proposing moves within an mcmc scheme. this is desirable since the dynamics may propose points that are far from the current point and accepted with high probability.
+
+we begin by rewriting the posterior probability as
+  <dig>  
+
+where
+  
+
+the sampling space is then extended by introducing the momentum variable η, and we may write the joint distribution as
+  <dig>  
+
+we note that the hamiltonian function h  is simply the negative log joint distribution of our extended state space and can be used to calculate hamiltonian trajectories according to the differential equations defined in the algorithm below. given current values for the parameter and momentum variables, we can simulate the hamiltonian dynamics to propose a new pair of parameter and momentum variables, which are then accepted according to a metropolis-hastings ratio to ensure convergence to the correct stationary distribution. the advantage of this approach is that this ratio may be close to 100%, far higher than the typical optimal acceptance ratios for other mcmc algorithms, which are typically between 20% and 60%. the standard hmc algorithm is given by, 
+
+ <dig>  transition step
+
+starting at θ = : θ  = θ <dig>  solve the differential equations,
+  <dig>  
+
+for  with initial conditions:
+  <dig>  
+
+where the proposed parameter and momentum variables at time  are given on the right. the above equations are hamilton’s equations of motion for a particle with momentum η in a potential field .
+
+ <dig>  acceptance step
+
+accept θ′ and η′ with probability
+  <dig>  
+
+the numerical solution of  must be calculated using a symplectic integrator  <cit> , which is exactly time reversible and volume preserving; these properties are required for ensuring convergence to the correct stationary distribution. since the hamiltonian laws of motion conserve energy, an analytic solution would provide sample points with perfect acceptance. however the required numerical integrators introduce a small amount of error and typically sample at very high but lower than 100% acceptance.
+
+this standard version of hmc also profits from efficiently calculating the sensitivities and steady states along hamiltonian trajectories using our approach based on a multivariate newton-raphson method, which we explain in section ‘efficient calculation of geometry’. we call this version nr-hmc and include it in our performance evaluation.
+
+riemannian manifold hamiltonian monte carlo
+hamiltonian monte carlo can also be defined using the induced riemannian geometry, rather than the usual euclidean geometry. the rmhmc algorithm may be derived in a similar manner to hmc, except now the momentum variable η is defined to be a gaussian distribution with position specific covariance matrix, such that the joint distribution follows as,
+  <dig>  
+
+where Σ  = g . in other words, the dynamics now take into account the second order sensitivities of the statistical model of interest, since the covariance of the momentum variable is based on the expected fisher information at each point.
+
+this hamiltonian system is however harder to integrate numerically, since its equations of motion are now defined implicitly due to the dependence of the momentum on the position parameter θ. the generalised leapfrog integrator is the simplest such algorithm for this task, however its use may significantly add to the computational expense of simulating proposals, since a much larger number of likelihood evaluations are generally necessary to solve the equations of motion compared to standard hmc  <cit> . in addition to the state sensitivities, we require the gradients of g  for solving the hamiltonian system, which necessitates the calculation of second order sensitivities, denoted from now on by . this provides the motivation for the next subsection, in which we propose a computationally efficient approach to evaluate the required geometric quantities for enabling faster inference in steady state ordinary differential equation models.
+
+efficient calculation of geometry
+practical implementation of hamiltonian monte carlo samplers depends critically on the ability to efficiently calculate the required geometric quantities. here we show how this may be done for steady state systems.
+
+output sensitivities   occur in several places in the rmhmc algorithm. for ode models, they are needed to construct the metric tensor g and the gradient of . in the case of steady state data, the sensitivities can be obtained from the steady state condition:
+  <dig>  
+
+we will drop the arguments of  to shorten notation. in  we see that the steady state sensitivity is obtained by solving the following linear algebraic equation,
+  <dig>  
+
+where . we denote the solution to  as , which is easy to obtain when the jacobian is invertiblea. similarly, we can write the following equation for the second order sensitivity,
+  <dig>  
+
+leading to a linear equation for the second order sensitivity ,
+  <dig>  
+
+again, the existence of a solution depends on the invertibility of the jacobian . we note that the same lu-decomposition of jf can be used for the first and second order sensitivities. usually all derivatives of f appearing in  and  can be calculated analytically; for large systems, a symbolic calculation package will do the job, e.g. ginac, gnu octave’s symbolic package or matlab’s symbolic toolbox. a particularly convenient way of storing the models and doing the symbolic calculations is vfgen <cit>  which provides matlab output.
+
+equipped with these instructions for sensitivity calculations we can easily calculate the metric g  and the gradient of the log-likelihood for a given value of θ,
+  <dig>  
+
+although hmc algorithms make large transitions across the parameter space, the transitions are constructed using multiple small integration steps of the hamiltonian dynamics . since these parameter changes in the integration are gradual, the sensitivity can be used directly to estimate the steady state  after each small parameter step Δ,
+  <dig>  
+
+for this reason, it is very convenient and efficient to recalculate the steady states using a newton raphson method, where we begin with  at the estimate ,
+  <dig>  
+
+and for any input w,  is iterated until satisfactory precision is reached, otherwise we proceed exactly as in the original hmc algorithm. we call these variants nr-hmc and nr-rmhmc.
+
+sampling efficiency
+for the estimation of the auto-correlation we employed the matlab script uwerr documented in  <cit> . by measuring the execution time te of the sampling we can calculate an effective sampling speed, corrected for auto-correlations:
+  <dig>  
+
+where n is the sample size and τint.,l the integrated auto-correlation length with respect to the estimation of the mean log-likelihood.
+
+large auto-correlations reduce the effective speed v: the sampled points strongly depend on their predecessors and many markov chain moves are required to obtain independent information about the posterior distribution. a sampling method with increased cost per markov chain transition might outperform a simple-but-cheap method if the returned points are sufficiently less correlated. the effective speed v takes the purpose of sampling into account. when comparing algorithms we also list a relative speed vr, where we normalize each vi using the lowest observed speed.
+
+RESULTS
+in this section we apply the bayesian parameter estimation framework to three examples from literature, which feature the type of data and modeling approach described in section ‘methods’. a comparison of the performance of all algorithms is provided in additional file 1: figure s <dig> 
+
+all simulations were done in matlab. we used the sbpop toolbox bundle  <cit>  to store the models and solve the ode () for rmhmc. the implementation makes use of the symmetry of the second order sensitivity: , and reuses appropriate fluxes, nevertheless the integrator used by the toolbox has to integrate an initial value problem with n + nm + nmm state variables .
+
+the models are stored as symbolic variables for the newton-raphson type algorithms, symbolic calculations of the required derivatives of f then yield a standard matlab function for the jacobian and the sensitivities. all linear equations are solved using matlab’s backslash operator. we provide matlab code for easy reproduction of all of the results in this section.
+
+since the methods we used are not restricted to the rmhmc algorithm, we also tested the simplified metropolis-adjusted langevin algorithm   <cit> . we applied the same modifications to smmala and measured the relative sampling speed, which can be inspected in table  <dig> table  <dig> 
+effective sampling speed measurements for smmala and the modified nr-smmala
+
+
+v in s
+-1
+τ
+int.,l
+v in s
+-1
+τ
+int.,l
+v in s
+-1
+τ
+int.,l
+
+
+example: erk phosphorylation in mapk signaling
+we consider a modification of the model for erk phosphorylation in the mapk signaling cascade introduced in  <cit> , who investigated robustness of steady state phosphorylation of erk with respect to changes in the total erk amount erk t= u :
+  <dig>  
+
+where x = t are the once and twice phosphorylated modifications of erk.
+
+according to the conclusions in  <cit>  the robustness of this system with respect to varying erk t is due to negative feedback from erk to raf and mek; this was not investigated by the authors using an ode model but directly in experiment and by modifying the steady state solution of the open loop system. to account for this negative feedback we modified the phosphorylation rate of the original model by multiplying it with u/. this modification of the model does provide negative feedback, though we do not suggest any specific mechanism or interpretation for it, but rather we aim at illustrating how a modeling hypothesis can be tested. the two different erk variants can be knocked out individually, but have a very similar function. this enables the experimentalists to reduce the amount of erk to several intermediate levels. for more details on the biological system we refer to  <cit> .
+
+the normalized data provided in the supplementary material of  <cit>  contains  <dig> steady state measurements of x <dig> obtained with western blots under different perturbation conditions in which erk  <dig> and/or erk  <dig> were knocked down, resulting in different erk t concentrations. the data point belonging to the experiment in which no knockdown was performed serves as control experiment with u= <dig> in normalized units.
+
+unfortunately these measurements are not acompanied by information about standard deviations in the publication. for the purposes of an illustrative example we suggest that the value σij=  <dig>  seems reasonable. the corresponding measurement model reads
+  <dig>  
+
+we used a normal prior in the logarithmic parameter space which covers several orders of magnitude for both parameters. this example has two parameters, making it convenient to compare the kernel density estimate of the posteriors to an evaluation of the posterior on a regular grid, which removes any sampling related errors. this comparison can be seen in figure  <dig>  all posteriors look very similar, which indicates proper convergence for all three algorithms.figure  <dig> 
+mapk posterior comparisons fltr.  posterior inferred from rmhmc sample.  newton raphson driven rmhmc posterior inferred from sample.  posterior inferred from nr-hmc sample  exact posterior on a grid. we used a kernel density estimator  to infer densities from samples.
+
+
+
+when looking at additional file 1: figure s <dig>  we see that the effective sampling speed of nr-rmhmc is  <dig>  times higher than that of the original rmhmc, while nr-hmc is better still.
+
+example: insulin dose response
+a larger example is provided in  <cit> , in which the authors analyze the insulin pathway in eukaryotic cells . different models were tested in their ability to describe phosphorylation of the insulin receptor substrate  after insulin stimulation. the data sets provided in their supplementary material consist of dose response curves, which we interpret as steady state data, as well as dynamic responses, which we disregard here.
+
+from the set of models provided, we chose one of the least complex models  with m= <dig> parameters, which was nevertheless sufficient to fit the steady state data, as well as the best fitting model . the interaction graph of mma is shown in figure  <dig>  the model comprises  <dig> molecular species: the insulin receptor , phosphorylated ir , ir substrate , and phosphorylated irs . these reactants form two groups with built in conservation relations. since the sums
+  <dig>  figure  <dig> 
+interaction graph of the mma model of
+ <cit> 
+for irs phosphorylation after insulin stimulation.
+
+
+
+
+do not change over time, we only require n= <dig> independent state variables to write down the ode model:
+  
+
+which defines the initial value problem  for
+  
+
+with measurement model
+  <dig>  
+
+we have used the value for the output parameter c <dig>  reported in the publication and will not estimate it during sampling.
+
+the larger mifa model, which comprises  <dig> independent state variables and  <dig> parameters and is capable of fitting dynamic responses as well, is treated similarly and included as sb model in the supplement.figure  <dig> shows a comparison of fits using different models and samplers, illustrated as box plots. the boxes fit the observed experimental data well . it was not computationally feasible to sample the  <dig> parameter mifa model on our desktop machine using the unmodified rmhmc algorithm.figure  <dig> 
+comparison of five different fits for the insulin dose resonse data. the data is shown as error bars , the fits are shown in boxplot style in the order:  mifa model and nr-rmhmc sampler,  mifa model nr-hmc sampler,  mma model nr-rmhmc sampler,  mma model nr-hmc sampler,  mma model and unchanged rmhmc sampler with numerical ode solutions using sbtoolbox <dig>  all algorithms succeeded in fitting the data.
+
+
+
+as shown in additional file 1: figure s <dig>  the effective speed of nr-rmhmc was about  <dig> times higher than that of standard rmhmc for the 3× <dig> mma model, indicating a significant speed up. the largest observed correlation coefficient of the posterior was ϱ56≈ <dig> . since the posterior does not exhibit strong enough correlations between the parameters, the flat  metric used in nr-hmc was of no disadvantage and hence nr-hmc performed best. with the larger mifa model rmhmc came to its limits, while the modified nr-rmhmc was still able to generate samples in an acceptable time. the use of a newton-raphson approach for this model resulted in two orders of magnitude improvement in sampling performance for the nr-hmc algorithm. although nr-hmc was superior in cases with uninformative priors, the advantage of nr-rmhmc becomes evident in the case of an informative prior. the informative prior was built by assigning smaller variances to some of the parameters θi while keeping the rest vague . see the setup files in the supplement for details.
+
+CONCLUSIONS
+we have demonstrated on three real world examples of different sizes how hamiltonian monte carlo methods may be implemented in an efficient manner for the class of steady state dynamical systems. using sensitivity analysis to track the steady states during each hmc trajectory calculation in the proposal step leads to a significant improvement in terms of effective sampling speed in all examples. furthermore, the speed up was even more pronounced for larger problems comprising more parameters.
+
+the proposed approach is also applicable to other riemannian manifold mcmc algorithms like smmala. figure  <dig> shows that there are significant albeit less dramatic benefits for the introduced techniques for this algorithm as well. once again, we can use the comparatively inexpensive steady state sensitivity analysis to obtain the metric tensor g as well as the newton-raphson method for the calculation of steady states to great effect.figure  <dig> 
+relative speed for the simplified manifold metropolis-adjusted langevin algorithm  using the same modifications as in the rmhmc code. we calculate the sensitivities using systems of linear equations, we use the sensitivities to obtain the metric and the starting point for the newton raphson method which is used to calculate steady states. we tested the relative speed of both the modified and unmodified smmala on all three example models with uninformative priors. in all cases, the modified version of smmala was faster than the reference implementation.
+
+
+
+there remains the question of whether to employ nr-hmc or the more complicated nr-rmhmc algorithm for performing inference over steady state systems. in most cases, steady state data is not sufficient to uniquely fit the parameters to specific values, and we are unable to know a priori whether the parameters in the system will exhibit strong correlation structure. in practice, one might therefore start with the simpler nr-hmc scheme, and resort to the riemannian version of it if the need arises. in cases where the prior may be well specified, the differences in scale between different parameters may require nr-rmhmc for improved efficiency, as we observed in the example section.
+
+we conclude that the use of newton-raphson methods for calculating the steady states within hmc algorithms is a valuable contribution to the field of numerical parameter estimation for this special class of ode models and improves scalability of statistical sampling-based approaches for these models in general. the success of this approach motivates further development of hmc algorithms for the more general case of dynamic time series data, which would broaden its utility.
+
+endnote
+a we note that this is not always the case: whenever conservation relations are present, for example, the jacaobian is not invertible anywhere. however, in such cases it is sufficient to use these conservation relations to reduce the number of state variables, as we do in the examples.
+
+electronic supplementary material
+additional file 1: figure s <dig> :
+performance analysis for the original rmhmc for ode models and two steady state data adapted hmc algorithms. 
+
+ competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+bc developed the rmhmc methodology and co-wrote the manuscript. ak implemented the changes for effective sensitivity calculations using the newton-raphson method and co-wrote the manuscript. nr co-wrote the manuscript. all authors read and approved the final manuscript.
+

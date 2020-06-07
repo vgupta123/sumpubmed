@@ -1,0 +1,82 @@
+BACKGROUND
+flux balance analysis   <cit>  is concerned with the following linear program 
+
+  maxvctvsubject tosv = 0vl≤ v ≤ vu 
+
+where the matrix s is an m × n stoichiometry matrix with m metabolites and n reactions and c is the vector representing the linear objective function. the decision variables v represent fluxes, with v ⊆ ℝn and vectors vl and vu specify lower and upper bounds, respectively. the constraints sv =  <dig> together with the upper and lower bounds specify the feasible region of the problem.
+
+flux variability analysis   <cit>  is used to find the minimum and maximum flux for reactions in the network while maintaining some state of the network, e.g., supporting 90% of maximal possible biomass production rate.
+
+applications of fva for molecular systems biology include, but are not limited to, the exploration of alternative optima of   <cit> , studying flux distributions under suboptimal growth  <cit> , investigating network flexibility and network redundancy  <cit> , optimization of process feed formulation for antibiotic production  <cit> , and optimal strain design procedures as a pre-processing step  <cit> .
+
+let w represent some biological objective such as biomass or atp production. after solving  with c = w, fva solves two optimization problems for each flux vi of interest
+
+  maxv/minvvisubject tosv = 0wtv ≥ γz0vl ≤ v ≤ vu 
+
+where z <dig> = wtv <dig> is an optimal solution to , γ is a parameter, which controls whether the analysis is done w.r.t. suboptimal network states  or to the optimal state . assuming that all n reactions are of interest, fva requires the solution of 2n lps. while fva is clearly an embarrassingly parallel problem and is therefore ideally suited for computer clusters, this note focuses on how fva can be run efficiently on a single cpu. a multi-cpu implementation of fastfva can be done in the same way as for fva, i.e., by distributing subsets of the n reactions to individual cpus. it is expected to give almost linear speedup for sufficiently large problems.
+
+implementation
+a direct implementation of fva iterates through all the n reactions and solves the two optimization problems in  from scratch each time by calling a specialized lp solver, such as glpk  <cit>  or cplex  at iteration i, i =  <dig>   <dig>  ..., n all elements of c are zero except ci =  <dig>  since the only difference between each iteration is a change in the objective function, i.e., the feasible region does not change, solving the lps from scratch is wasteful. each time a lp is solved, the solver has to spend some effort in finding a feasible solution. once a feasible solution is found, the solver then proceeds to locate the optimum. the small changes in the objective function suggest that, on average, the optimum for iteration i does not lie far away from the optimum for iteration i +  <dig>  with simplex-type lp algorithms, this property can be exploited by solving problem  from scratch and then solving the subsequent 2n problems of  by starting from the last optimum solution each time . it should be noted that the default behavior of some simplex-type solvers is to use warm-starts when a sequence of lps is solved within the same application call. however, current implementations of fva do not make use of this option . furthermore, for increased efficiency, model preprocessing  should be disabled after solving the initial problem p. given a value of  <dig> <γ ≤  <dig>  fastfva performs the following procedure
+
+setup problem , denote it by p
+
+solve p from scratch to get v <dig> and z0
+
+add the constraint wtv ≥ γz <dig> to p
+
+for i =  <dig> to n
+
+   let ci =  <dig> and cj =  <dig>  ∀j ≠ i
+
+   maximize p, starting from vi-1
+
+                     to get vi and zi
+
+   maxfluxi = zi
+
+once all maximization problems have been solved, the minimization problems are solved in the same way, starting from v <dig> = vn.
+
+an important difference between the various lp solvers available is their ability to exploit multiple core cpus or multi-processor cpus to increase performance. the glpk solver, for example, is a single threaded application. when running on a quad-core machine with hyperthreading enabled, the cpu load is only at 12-13%. on multi-core machines, a significant speedup can often be achieved by simply running multiple instances of fastfva, each working on a different subset of the n reactions.
+
+the fastfva package runs within the matlab environment, which will facilitate the use of fastfva by users less experienced in programming. in addition, many biochemical network models can be imported into matlab using the systems biology markup language  and the cobra toolbox  <cit> .
+
+the fastfva code is written in c++ and is compiled as a matlab executable  file . matlab's parfor command is used to exploit multi-core machines. two different solvers are supported, the open-source glpk package  <cit> , and the industrial strength cplex solver from ibm.
+
+RESULTS
+we evaluated the performance of fastfva on six biochemical network models ranging from approx.  <dig> up to  <dig>  reactions .
+
+performance evaluation
+four metabolic networks and two versions of a genome-scale network of the transcriptional and translational  machinery of e. coli were used for testing the fastfva code . the biomass reaction was used as an objective in the metabolic models, while the demand of ribosomal  <dig> s subunit was used as the objective in the tr/tr models. in all cases, flux distributions corresponding to at least 90% of optimal network functionality were sought.
+
+the fastfva code was tested on a dell t <dig> desktop computer with a  <dig>  ghz quad core intel i <dig>  <dig> processor with hyperthreading enabled and windows  <dig> 
+
+running times
+the running times are given in table  <dig> where fastfva is compared to the direct implementation of fva found in the cobra toolbox  <cit> . the observed speedup is significant, ranging from  <dig> to  <dig> times faster for glpk and from  <dig> to  <dig> times faster for cplex. the minimum and maximum flux values obtained with fastfva were essentially identical to the values obtained with the direct approach .
+
+other uses of fastfva
+the fastfva code can be used to compute the flux-spectrum  <cit> , a variant of metabolic flux analysis, simply by setting γ =  <dig> in . the α-spectrum  <cit> , which has been used to study flux distributions in terms of extreme pathways, can also be computed with fastfva. in this case, the parameter γ in  is set to zero and the s matrix is replaced by a matrix p containing the extreme pathways as its columns.
+
+CONCLUSIONS
+with this efficient fva tool in hand, new questions can be addressed to study the flexibility of biochemical reaction networks in different environmental and genetic conditions. it is now possible to design computational experiments requiring hundreds or even thousands of fvas.
+
+availability and requirements
+the fastfva package is freely available at http://notendur.hi.is/ithiele/software/fastfva.html together with pre-compiled binaries for linux and microsoft windows. the fastfva code runs under matlab and relies on third-party solvers to solve linear optimization problems. two such solvers are supported, the open source glpk  <cit>  and the industrial strength cplex  the fastfva code is written in c++ and is compiled as a matlab executable function . it is released under gnu lgpl.
+
+authors' contributions
+it conceived and designed the study. sg implemented fastfva and carried out the experiments. both authors wrote the manuscript and approved its final version.
+
+supplementary material
+additional file 1
+this file contains the c++ source code, the pre-compiled binaries, an example on how to use fastfva and scripts for carrying out the experiments described above.
+
+click here for file
+
+ additional file 2
+this file contains the six metabolic networks used in the experiments.
+
+click here for file
+
+ acknowledgements
+we want to thank the authors of glpk, glpkmex and cplexint for making their code publicly available. we would like to thank the anonymous reviewers for their helpful comments. the authors are also grateful to ronan m.t. fleming for valuable discussions.
+
+this study was supported by the office of science , department of energy, under award number de-sc <dig> .

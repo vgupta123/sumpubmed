@@ -1,0 +1,262 @@
+BACKGROUND
+multiple sequence alignment  is often the first step for evolutionary analyses of protein families. its role is to detect homologous characters and to reconstruct the evolutionary history relating a set of sequences.
+
+prographmsa combines the advantages of several state-of-the-art methods
+ <cit>  with an efficient implementation to provide fast and accurate multiple sequence alignments. this tool includes methods like progressive partial order alignment
+ <cit>  combined with phylogeny-aware gap placement
+ <cit> , which causes the gaps in the multiple sequence alignment to principally follow the branching pattern of the guide tree, but still allows for exceptions to account for alternative splicings and errors in the guide tree. this work was motivated by discussions with dr. löytynoja, the author of prank who is also working on a graph-alignment algorithm combined with phylogeny-aware gap placement
+ <cit>  with a focus on the placement of sequenced data onto a reference alignment/sequence.
+
+to account for the uncertainty in pair-wise distance estimates a bionj
+ <cit>  guide tree is used. prographmsa achieves competitive execution times thanks to alignment-free distances
+ <cit>  for constructing an approximate initial guide tree.
+
+as evolution is not uniform along a sequence, a site-independent markov model is often not able to account for specific substitution patterns and evolutionary rates in e.g. secondary structure elements, low complexity regions, or intrinsically disordered proteins. several specific substitution matrices have been proposed for these structures
+ <cit> , which could be combined into e.g. a hidden markov model , but adding states to the alignment hmm would significantly affect the execution time.
+
+instead, we implement context-specific profiles <cit>  which directly infer the substitution pattern of a site from the site's context. the method uses a library containing  <dig> context profiles covering a large spectrum of possible evolutionary scenarios. to our knowledge, prographmsa is the first software to apply context-specific profiles to the alignment of multiple sequences and thereby significantly increasing alignment accuracy.
+
+implementation
+prographmsa is based on progressive alignment as this has the advantage of having a linear time complexity with respect to the number of sequences and implies phylogenetically sensible evolutionary events. unfortunately, this can also be a disadvantage, as errors in the guide tree or unexpected events such as alternative splicings might induce errors in the alignment. a graph-based sequence representation is able to store the whole history of indel events and thus allows for handling these cases by reverting an indel introduced by an earlier step of the progressive alignment.
+
+graph-based alignment
+ancestral sequences at internal tree nodes are represented as directed acyclic graphs
+ <cit>  with explicit start and end nodes . all internal nodes correspond to sequence characters and the edges are used to track the indel history in the alignment along the corresponding sub-tree. every path through the graph can be interpreted as a possible ancestral sequence.
+ <cit>  , which selects homologous paths during backtracking . double lines indicate matched nodes . in our example the selected homologous paths indicate that the additional edge in grapha is a deletion and the "t" in graphb is an insertion. for new indels  new edges are added to the graph representing the ambiguity, that these new indels might be either insertions or deletions. finally, the graphs are merged according to the homologies defined by the alignment . the paths through graphsab represent the possible ancestral sequences in which unused paths  are annotated with a penalty score and are less likely to be reused in subsequent alignments.
+
+the knowledge of all past indel events prevents the repeated penalization of insertions and alternative splicings
+ <cit> . further, the graph-based representation is able to attenuate a weak point of progressive alignment. this allows for wrongly inferred indels to be revoked
+ <cit>  rendering the algorithm more robust against small errors in the guide tree.
+
+at each step of the progressive alignment two graphs are aligned using a variant of the needleman-wunsch algorithm
+ <cit>  with affine gap penalties
+ <cit> . these algorithms are instances of the viterbi dynamic programming algorithm
+ <cit>  and are originally designed for the alignment of sequences. the alignment score in each cell of a dynamic programming matrix is computed as the maximum of possible transitions from three adjacent cells in diagonal, horizontal or vertical direction. these transitions correspond to either matching two homologous characters of the sequences or a gap in one of the sequences.
+
+the leaves of the guide tree are assigned linear graphs corresponding to the input sequences where every graph node but the start node has exactly one predecessor. in general, the inner nodes of the guide tree can contain arbitrary directed acyclic graphs where graph nodes can have multiple predecessor nodes. thus for graphs the alignment algorithm has to be extended to consider all combinations of preceding graph nodes for each cell in the dynamic programming matrix. while the alignment of sequences considers three preceding cells, the alignment of graphs has to consider n*m + n + mpreceding cells, if the corresponding graph nodes have n and m preceding nodes, respectively. this is n + m for the diagonal direction, when matching two nodes, and n or m for horizontal or vertical gaps.
+
+analogous to sequence alignment, the alignment algorithm identifies a homologous path in each graph by backtracking in the dynamic programming matrix. new gaps are created for unmatched nodes along the homologous paths in both graphs but are not immediately distinguished into insertions and deletions. instead, for each indel two alternative paths are added to the ancestral graph and the decision is postponed. in the original phylogeny-aware gap placement this procedure corresponds to flagging unresolved gap positions in the ancestral sequence
+ <cit> .
+
+unlike e.g. in ortheus
+ <cit> , the distinction between insertions and deletions is not optimized over all ancestral sequences. instead the decision is made with the help of the closest outgroup i.e. in the alignment at the next guide tree node towards the root of the tree. whichever of the alternative paths is aligned to the outgroup graph is considered part of the ancestral sequence . thus, aligned paths are considered deletions and unmatched paths are considered insertions.
+
+in principle we implement the progressive partial order alignment algorithm
+ <cit>  augmented with edge weights. these are used to realize a "relaxed" variant of phylogeny-aware gap placement by penalizing paths, which are believed not to be part of the ancestral sequence
+ <cit> . thus, unmatched paths in a graph are penalized with a cost proportional to the evolutionary distance separating the current internal tree node from the last use or the introduction of the path. this corresponds to an exponentially declining probability of the insertion/deletion having been inferred incorrectly. therefore all indels from previous alignments can be reused, however with an increasing penalty if they have not been matched in a recent alignment.
+
+model of evolution
+unlike in the progressive partial order alignment algorithm
+ <cit> , we model the evolution of indels using a pair-hmm , which is used at each internal node of the guide tree for the alignment of the graphs representing the ancestral sequences of the left and right sub-trees. the states x and y correspond to gaps with affine penalties in the corresponding graph, m is a state matching two homologous graph nodes, and h is a silent transient state. the default parameters of the alignment pair-hmm were estimated on balibase version  <dig> 
+ <cit>  or taken from the pair-wise alignment implementation in darwin
+ <cit> . these estimated parameters include gap opening rate δ, gap extension probability ε, and a terminal gap probability α. the latter special parameter has been introduced due to the observation that insertions and deletions occur more frequently at the terminal regions of proteins
+ <cit>  or that often different criteria are used to determine the ends of the sequence . this can be achieved without the introduction of additional states in the pair-hmm and thus not increasing the execution time by adjusting the transition scores from/to the hmm start/end states.
+
+the pair-hmm is then transformed into a set of recurrence equations for dynamic programming
+ <cit>  . in general  the following equations are used for the computation of the four scores hmxy in a dynamic programming cell corresponding to the alignment of nodes i and j, where pred denotes the predecessor nodes of node i.
+
+  m=max∈pred×predh+match_init+s+e+e 
+
+  x=maxj′∈predh+gap_init+ex+gap_ext+e 
+
+  y=maxi′∈predh+gap_init+ey+gap_ext+e 
+
+  h=maxmxy 
+
+here, match_init, gap_init, and gap_ext are computed from the transition probabilities in the pair-hmm, depending on the specific evolutionary distance separating the aligned graphs as defined by the guide tree
+ <cit> . e is a matrix with edge penalties and s is a pre-computed matrix of match scores for each pair of graph nodes computed using probabilistic ancestral sequences.
+
+probabilistic ancestral sequences
+we define the emission probabilities of msa columns in the pair-hmms match and gap states as the likelihood of a sub-tree based on the column's characters at the leaves
+ <cit> . for the substitution model we use either the gonnet matrix
+ <cit>  or wag
+ <cit>  with an option to estimate amino acid frequencies from input data . this likelihood is computed using felsenstein's tree-pruning algorithm
+ <cit> . therefore for each msa column c and each possible ancestral character x we store the conditional likelihood of the tree t based on this column, given that the ancestral character is known to be x: 
+
+ ℒ 
+
+ for the amino acid alphabet a we need to store  <dig> likelihood values in each graph node. for inner guide tree nodes likelihood values are computed recursively from the partial likelihood values of the left and right sub-trees: 
+
+ ℒ=∑yl∈apdlℒt,rootl=yl;c×∑yr∈apdrℒ, 
+
+ where pd is the conditional mutation probability from x to y at evolutionary distance d. for leaf nodes with corresponding sequence character y this likelihood is
+ℒ=δxya. let Πx be the equilibrium probability of character x, then the total likelihood of the tree based on the column c can be computed as: 
+
+ ℒ=∑x∈aΠxℒ 
+
+guide tree estimation
+profiling prank
+ <cit>  showed that most of its execution time is spent during the all-against-all alignment for the estimation of distances for the initial guide tree. similar to muscle
+ <cit>  we overcome this limitation by using alignment-free distances
+ <cit>  and simple estimates of variances for the initial bionj
+ <cit>  guide tree. these distances and variances are re-estimated by maximum-likelihood from the resulting msa using the induced pair-wise alignments. this estimation of distances, guide tree, and alignment is iterated until convergence or until a maximum number of iterations is reached. for typical problem sizes this procedure is still much faster than an all-against-all alignment.
+
+context-specific profiles
+context-specific profiles are a method to generate position-specific substitution matrices from a sequence
+ <cit> . the method is based on the assumption that the substitution pattern of a site may depend on the neighbouring sites. originally, the computation and the alignment of context-specific profiles has been applied to pair-wise sequence alignment and homology search, effecting in increased sensitivity especially for distant homologs. in the following we will briefly describe the original algorithm
+ <cit>  to compute a context-sensitive profile from a sequence and our adaption of this algorithm for the alignment of multiple sequences.
+
+for each position in the sequence the surrounding sequence window is matched against all profiles in the context profile library. this context profile library was built from a large set of alignments and represents typical profile windows observed in alignments of homologous sequences. the default profile library  distributed with cs-blast
+ <cit>  consists of  <dig> profiles with a width of  <dig> columns. for a given sequence window =xi around the i-th position of the sequence, the probability of matching profile pk is computed by 
+
+  p∝p∏j=−77pkwj. 
+
+this is the probability of the characters in the sequence window xi + j being emitted by profile column pk. this product is multiplied with the prior p of the profile. as the match probability is to be representative for the center column xi of the sequence window xi, this product is weighted by wj according to the declining importance of a site with increasing distance to the center column. as suggested by the authors we use
+wj= <dig> * <dig> |j| <cit> .
+
+the expected probability of the center character xi, mutating to residue y is given by 
+
+  p∝∑k=1kpkp, 
+
+i.e. the mutation probabilities are a weighted average of the center columns ) of all profiles in the profile library. a context-specific profile is obtained by applying equation  <dig> to each position of a sequence.
+
+prographmsa adopts this method and computes context-specific profiles for the input sequences which are placed at the leaves of the guide tree. in this way the expected context-specific evolution along the terminal branches is encoded in the leaf sequences. however, prographmsa's scoring function relies on probabilistic ancestral sequences. using bayes' theorem, context-sensitive profiles can be converted into probabilistic ancestral sequences:
+ℒ∝pΠxiΠy. again,
+Πxi and Πy denote the equilibrium amino acid frequencies.
+
+alignments at internal tree nodes are computed using these probabilistic ancestral sequences at the leaves with the exception that terminal branch lengths are ignored  with respect to the substitution model as the expected evolution along those branches is already encoded in the terminal probabilistic ancestral sequences.
+
+adjusting expected divergence in context-specific profiles
+the original algorithm
+ <cit>  allows for the adjustment of expected sequence divergence in context-specific profiles via the parameter τ: 
+
+  p=δxi,y+τp. 
+
+here τ= <dig> means the amino acid is fully conserved and τ= <dig> corresponds to the average divergence achieved by matching the context library to the sequence window around the current amino acid. to account for specific terminal branch lengths, first we estimated the average divergence achieved with τ= <dig> when using the k <dig> profile library. for this, we combined equations  <dig> and  <dig>  while only considering the center columns , and averaged over the equilibrium amino acid frequencies Πc: 
+
+  ∑c∈aΠc∑k=1kppk2≈ <dig>  
+
+then we can adjust the parameter τfor generated profiles to match the expected sequence divergence δaccording to branch length d: 
+
+  τ=δ/ 
+
+the expected sequence divergence
+δ^ can be computed either directly from the substitution model or by inverting kimura's formula
+ <cit>   for estimating evolutionary distance from sequence divergence: 
+
+  d^=−log⇒δ^=−5ed−45e2d−20ed2ed. 
+
+RESULTS
+we evaluated the alignments produced by mafft
+ <cit> , muscle
+ <cit> , clustalw
+ <cit> , prank
+ <cit> , poa
+ <cit> , and variants of prographmsa using the balibase
+ <cit>  collection of reference alignments and two simulated data sets. further, the quality of the msas is measured by analyzing phylogenies reconstructed from these msas
+ <cit> . for this we built maximum likelihood and gap phylogeny trees from msas of orthologous protein groups with known phylogenetic relations and compared them to reference species trees.
+
+command line parameters
+two versions of prographmsa with different evolutionary models were evaluated: 
+
+• prographmsa d based on the indel parameters, stationary amino acid frequencies and markovian substitution model implemented in darwin
+ <cit>  .
+
+• prographmsa using wag
+ <cit>  as substitution model with indel parameters fitted on balibase  <dig> .
+
+in general guide trees are built with maximum-likelihood distances (). for non-simulated data sets we further enable context-specific profiles () and empirical amino acid frequencies () as those parameters are intended to aid alignment of real sequence data. for the balibase benchmark and for the simulated data sets we disable special terminal gap probabilities () and forced alignment of m  () at the beginning of the sequences. these two parameters are enabled by default to improve the alignment of whole protein sequences. table
+ <dig> summarizes the particular versions and command line parameters used for the other msa programs.
+
+versions and additional parameters of the msa tools used for comparison with prographmsa.
+
+balibase  <dig> 
+from the balibase  <dig>  benchmark suite we only use the subset of tests that are compatible with the evolutionary models of the tested tools, namely we use the trimmed  tests in rv <dig> , rv <dig> , rv <dig>  and rv <dig> . all others involve evolutionary events like duplications and rearrangements which are not accounted for in any of the tools in our benchmark and would lead to an arbitrary ranking.
+
+benchmarking results  reveal that among purely progressive alignment methods muscle  and prographmsa perform best. while prographmsa d, which is using the gonnet matrix
+ <cit>  and an indel model implemented in darwin
+ <cit> , exhibits a performance similar to clustalw, the version of prographmsa, optimized on balibase, outperforms it. mafft-i and muscle-i, which both perform iterative refinement, outperform all purely progressive methods, while without refinement these tools perform worse or similar to prographmsa.
+
+displayed are the average true column scores  for the truncated  alignments of the rv <dig>  rv <dig>  rv <dig>  and rv <dig> sets as well as the average over all these sets. apart from a few exceptions the listing order of the tools implies significantly improving performance. between each pair of subsequent scores for two different tools we perform a wilcoxon signed-rank test. stars indicate a significant difference at a p< <dig> ,p< <dig> ,p< <dig>  level, respectively. in particular, the use of context-sensitive profiles significantly improves prographmsa d's alignments, whereas our optimized version of prographmsa significantly outperforms clustalw  but does scarcely not outperform muscle without refinement  at the defined significance level.
+
+simulation
+for further means of ranking the performance of prographmsa,  <dig> protein msas with  <dig> taxa were simulated using alf
+ <cit> . to represent a realistic evolutionary scenario, we chose gamma distributed sequence lengths with a mean length of  <dig> amino acids and used the wag model
+ <cit>  with gamma rate variation among sites. the maximum distance between two sequences was  <dig> expected substitutions/site. insertions and deletions were each inserted with a rate of  <dig> /substitution and having zipfian distributed lengths
+ <cit>  with a mean of  <dig>  amino acids and a maximum of  <dig> 
+
+the reconstructed msas were compared to the reference alignments by means of relative alignment length, true column score 
+ <cit> , as well as developer score  and modeler score 
+ <cit> , which denote the fraction of correctly aligned residue pairs relative to the number of pairs present in the reference msa  or in the tested msa , respectively .
+
+again, mafft and muscle produced more precise alignments than either version of prographmsa, but prographmsa outperforms its forefathers poa and prank. on this simulated data set prographmsa d performs worse than the other variant and in terms of alignment length prographmsa's results are closest to the reference alignments. surprisingly, prank significantly over-estimates alignment length, which is also reflected in its fm score. this might be an artefact of errors in the reconstructed guide trees or of prank not detecting distant homologies due to using p-distances for its guide-tree construction and alignment, and thus underestimating evolutionary distances.
+
+further, we simulated a second data set comprising  <dig> alignments with known ancestral sequences using the same parameters as before and reconstructed ancestral sequence alignments using prank and prographmsa. this time the true trees are provided to both tools and they are run with either default parameters or with an option to keep insertions forever . the tools are compared using indel statistics similar to those used for evaluating prank
+ <cit>  but not relying on a possibly biased reconstruction of indel events by parsimony. instead, the ancestral sequences inferred by both tools are used to determine the reconstructed indel events .
+
+overall, both tools exhibit a similar performance in indel reconstruction, with prographmsa+f on average reconstructing alignments with the most accurate length and prographmsa notably reconstructing more indel events than the other tools. the latter can be best explained by prographmsa's feature to revoke erroneous inferences of indel events which appear in the alignment as multiple independent events in the same column leading to a higher error rate.
+
+these combined results indicate that prographmsa is indeed able to compensate errors in the guide tree  while maintaining a comparable precision under ideal conditions, where the true guide tree is provided and gap patterns are congruent with the phylogeny .
+
+phylogeny benchmark
+the real-data phylogeny reconstruction test
+ <cit>  uses the precision of phylogenetic tree reconstruction as proxy for msa quality. the test set consists of more than  <dig> groups, each having six sequences sampled from orthologous groups
+ <cit>  according to established reference topologies of bacteria, fungi, and eukaryota. a msa program is evaluated by computing an alignment for each of these groups. as indirect quality measure of the alignments, the robinson-foulds
+ <cit>  distance of the reference tree to a phyml tree reconstructed from the msas in question is used.
+
+in all three data sets  prographmsa d is among the best tools . the darwin model appears to perform slightly  better than the parameters estimated on balibase. this is probably because balibase's core blocks contain only confident alignments with little uncertain gappy sites. such training data causes an underestimation of the amount of gaps in the alignment.
+
+in figure
+ <dig> we consider parsimony trees built only on gap information. prank and prographmsa clearly outperform the other tools  indicating that phylogeny-aware gap placement
+ <cit>  actually produces phylogenetically more sensible gap patterns.
+ <cit>  indeed produces phylogenetically more sensible gap patterns.
+
+prank on eukaryota seems to be a special case as it significantly outperforms all the other tools. incidentally, on this data set the p-distances used by prank in conjunction with the nj algorithm improve the chances of finding the correct topology. a similar effect can be obtained by e.g. taking the square root of ml distances and thus similarly compressing them . when using p-distances in prographmsa we achieve a similar precision and we observe that the internal guide trees of both prank and prographmsa are significantly better than even the reconstructed phyml trees . both other data sets favor ml distances.
+
+the authors of the above phylogeny reconstruction test further propose a minimum-duplication test based on larger groups
+ <cit> . here, a msa tool is considered better, if the reconstructed phylogenies explain the evolution of the leaf sequences with less gene duplications. this test did not yield any significant results and the results have been included in additional file
+1: figure s <dig> 
+
+alternative splicing
+in a simulation based example  we demonstrate prographmsa's advantages in aligning sequences with alternative splicings and independent insertions at the same sequence position, compared to prank. again, both tools were provided with the correct guide trees to exclude guide tree reconstruction as a potential source of alignment errors.
+
+all methods exhibit the usual problems of placing characters at the correct side of long insertions . due to its heuristic, prographmsa correctly aligned the methionines  at the beginning of the sequence, and the graph-based representation allows for a correct alignment of the alternative splicings  including the insertion inside the alternatively spliced region. prank+f enforces phylogenetic gap patterns and was thus not able to correctly reconstruct the alternative splicing. without this feature the regions c and d were aligned almost correctly except for a single aspartic acid  from region c which was aligned with region d. prographmsa aligns this region consistently because it maintains a history of all indel events in its graph structure.
+
+in region a, prank+f and prographmsa reconstruct the two independent insertions correctly whereas prank merges these two events. here it is the penalization of unused graph paths that prevents prographmsa from merging these insertions.
+
+execution time comparison
+the execution time of prographmsa is dominated by the generation of context-specific profiles. without this feature the execution time of prographmsa is in the same order of magnitude as the other tools . with an increasing number of taxa, we expect distance and tree estimation to consume an increasing share of time due to its quadratic time complexity.
+
+average execution times of the tested msa tools estimated on the balibase  <dig>  benchmark. with a small number of sequences, as in this case, prographmsa spends most of its execution time in the generation of context-specific profiles. with an increasing number of taxa we expect distance and tree estimation to consume an increasing share due to its quadratic time complexity.
+
+in comparison, prank's performance is dominated by pair-wise alignment and distance estimation for the initial guide tree. we avoid this performance bottleneck by using alignment-free distances
+ <cit>  for the initial guide tree and compensate for the slightly lower alignment quality by performing an additional iteration of guide tree estimation and progressive alignment.
+
+CONCLUSIONS
+prographmsa is a progressive multiple sequence alignment method that combines phylogeny-aware gap placement
+ <cit>  with a graph-based sequence representation to produce phylogenetically sensible gap patterns while maintaining the flexibility to handle alternative splicings and errors in the guide tree. our benchmarks reveal that prographmsa presents an unprecedented combination of accuracy on balibase and simulated data, phylogenetically sensible gap patterns, and quality of trees built from the resulting msas.
+
+we have successfully applied context-specific profiles
+ <cit>  to the alignment of multiple sequences. although the profile generation has only linear time complexity with respect to sequence length, due to the size of the context library the execution time is significantly increased. nevertheless, we recommend using this feature in prographmsa by default, as context-specific profiles significantly improve alignment quality and the execution time remains competitive in comparison to other tools.
+
+in the future we are planning to implement codon and dna models and to explore methods of iterative refinement for our alignments. the graph representation allows for adding additional information to the sequences which we intend to adopt for the alignment of proteins with tandem-repeats.
+
+availability and requirements
+• project name: prographmsa
+
+• project home page:http://www.inf.ethz.ch/personal/sadam/prographmsa
+
+• operating system: platform independent
+
+• programming language: c++
+
+• other requirements: eigen  <dig> , tclap  <dig>  or higher
+
+• license: gnu gplv3
+
+endnote
+aδxy= <dig> if x=y  else 0
+
+competing interests
+the author declares that he has no competing interests.
+
+supplementary material
+additional file 1
+figure s <dig>  minimum-duplication test. due to lack of data the minimum-duplication test does not provide a reliable and significant ranking of the tested tools.
+
+click here for file
+
+ acknowledgments
+i would like to thank ari löytynoja for discussing his preliminary results on graph-based alignment with phylogeny-aware gap placement. further, i thank the reviewers, and daniel dalquen, manuel gil, and maria anisimova for giving me feedback on the manuscript.
+
+this work was partially supported by the swiss national science foundation grant to maria anisimova . the author is also funded by the eidgenössische technische hochschule  zürich. the funders had no role in study design, data collection and analysis, decision to publish, or preparation of the manuscript.

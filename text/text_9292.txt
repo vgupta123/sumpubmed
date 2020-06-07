@@ -1,0 +1,340 @@
+BACKGROUND
+rna editing refers to co-transcriptional rna base modifications that increase transcript sequence diversity without changing the underlying genome. two types of single base modifications, namely adenosine to inosine conversions  and cytidin to uridine  conversions, have been characterised in detail over decades of research  <cit> . both conversions are executed by two specific classes of rna binding proteins  that interact with their respective rna targets: adenosine deaminase acting on rna  catalyses a→i conversions, whereas apobec <dig> family members catalyse c→u conversions.
+
+adar mediates the more frequent a→i editing by binding to double-stranded rna and subsequent hydrolytic deamination of adenosine residues  <cit> . most functional editing sites described so far are found in transcripts for neuronal transporters and channel proteins in the brain  <cit> . herein, editing is critical for normal brain development and function. specifically, adar-mediated editing of the glua <dig> subunit of the mammalian ampa receptor is an essential event  <cit> . generally, inosine is interpreted as guanosine by the translation machinery, which may lead to codon substitutions in protein-coding sequences. almost 100% of the human glua <dig> transcripts are edited at codon position  <dig> which leads to a substitution of glutamine  with arginine  in the polypeptide chain. the introduction of a positive charge reduces calcium permeability in the mammalian ampa receptor. in human, aberrant editing of the q/r sites has been associated with death of motor neurons  <cit> .
+
+however, the vast majority of editing events takes places outside of coding regions  <cit> . repetitive elements as well as 5’ and 3’ untranslated regions  are the most frequent targets of rna editing  <cit> . especially alu elements are targets of positionally unspecific abundant editing events  <cit> . alu repeats are short  mobile elements that are widespread in primates. alu elements often co-occur in inverted pairs and form double-stranded rna molecules after transcription, which constitute a favourable substrate for adar family members.
+
+taken together, site-specific rna editing events may lead to amino acid substitutions by changing codons in coding sequences. apart from its role in coding regions, rna editing may also influence transcript splicing and structure and could have an effect on mrna stability and nuclear export  <cit> .
+
+identification of rna editing sites
+the previously introduced rna editing events are single nucleotide variants that can be detected from comparing genomic and transcriptomic sequencing data. rna-dna differences  of the nucleotide frequency spectrum at a given location are the most direct way of identifying editing sites, whereas rna-rna comparison may pinpoint differential editing events across samples and conditions . the availability of deep next-generation sequencing data enabled the transcriptome-wide discovery of rna editing events. a direct comparison of gdna and cdna sequencing data has been proposed early on  <cit> . however, these early attempts suffered from the inherent artefacts of short read sequencing data and ambiguities in read mapping. for example, a re-analysis of the primary data of  <cit>  revealed that close to 90% of the reported sites were false positives due to mapping and sequencing artifacts  <cit> . it was noted specifically that false editing calls were predominantly originating from base calls close to the start or end of reads, whereas true positives did not show this positional bias. sequencing errors, read mapping errors and library preparation biases, which were introduced by ligation or amplification steps, all contribute to the high false positive rate. it is therefore essential to take these confounding factors into account or to remove them in a pre-processing step.
+
+several software solutions have been suggested for calling snv sites: samtools/bcftools  <cit> , reditools  <cit>  and others . one particular common procedure for the identification of rna editing is based on arbitrary thresholds for the number of minimal variant reads and minimal variant frequency  while at least a coverage of  <dig> reads is required  <cit> .
+
+based on our previous experience from developing accusa <dig>  <cit> , we implemented a new software package, the java framework for accurate snv assessment . jacusa is a fast and precise solution for quantitative single nucleotide variant detection in rna-dna or rna-rna comparisons. jacusa is primarily designed for the detection of position-specific editing events and readily integrates information from replicate experiments.
+
+in the next sections, we will present our statistical framework and data processing steps in detail. we benchmark jacusa on simulated data sets and compare its performance to other available and popular variant callers: reditools  <cit> , mutect  <cit> , and samtools/bcftools  <cit> . we will then discuss the performance of jacusa and the other tested variants callers in a controlled biological setting using sequencing data from adar knockdown experiments with human embryonic kidney  cells. herein, several gdna and cdna libraries were sequenced to facilitate rna-dna and rna-rna comparisons based on illumina sequencing data. moreover, we made use of published rna-seq data from drosophila melanogaster fly brains that either originate from a wild type strain or a strain with a genetically ablated dadar gene. with the drosophila samples, we specifically look at the identifiability of editing events in protein coding exons in neuronal tissue where they have been reported previously  <cit> .
+
+implementation
+in the following, we present the jacusa software in detail, discuss the test statistics that supports replicate experiments and a set of positional filters that enable the pruning of false positive variants for a more accurate detection of snvs. equally important, we have implemented parallel and memory-efficient read processing routines for better performance and usability.
+
+objective
+the jacusa software predicts single-nucleotide variant positions from head-to-head comparisons of read stacks/pileups from illumina sequencing. in this manuscript, we focus on identifying nucleotide-level differences in rna-dna and rna-rna comparisons . our method is robust to differences in read coverage, takes replicate information into account and avoids false calls by removing typical artifacts from short read data. we discuss the power of our approach specifically in the context of rna editing.
+fig.  <dig> possible nucleotide comparisons and implemented jacusa filter. a graphical representation of rna-dna differences  and rna-rna-differences  in head-to-head comparisons of sequencing data. b possible sequencing artifacts and their respective jacusa filters
+
+
+
+
+statistical model
+previously, it has been shown that allele frequencies/counts are not accurately modeled by over-simplistic statistical models   <cit> . typically, the observed variance will be higher than the theoretically expected variance in a multinomial model. this phenomenon is called overdispersion and will lead to false positive calls in variant detection. therefore, we model dna and rna sequencing data with the dirichlet-multinomial distribution that accounts for overdispersion  <cit> . in the following, we use formulas and nomenclature defined in  <cit>  adjusted to the alphabet of nucleotides Σ={a,c,g,t}. we define p= to be a random probability vector, such that p
+k:k∈Σ represents the base or allele probability for base k and the elements sum to  <dig>  we can model p with a dirichlet distribution d that has the parameter vector α=: 
+  <dig> p∼d 
+
+
+
+  <dig> =Γ∏kΓ∏kpkαk− <dig> 
+
+
+
+  <dig> wherepk> <dig> 
+
+
+in  <cit> , we estimated α from base calls and their respective base call quality score using an empirical bayesian method. the dirichlet distribution d is a conjugate of the multinomial distribution ℳ. let x= represent the sum of base calls at some location and let x follow a multinomial distribution ℳ=p where n=∑kxk is the total number of observed bases. by integrating over p we can combine x and p into the compound distribution that is called the dirichlet-multinomial: 
+  <dig> dirmult:=p=∫ppdp=ΓΓ∏k∈ΣΓΓΓ, 
+
+
+where α0=∑k∈Σαk.
+
+an alternative interpretation of the dirichlet-multinomial is that of a hierarchical model: 
+ p∼dx∼ℳ 
+
+
+let d={x
+ <dig> x
+i,…,x
+n}:i∈{ <dig> ⋯,n} represent the base count vectors in n replicates and let x
+i be identically and independently distributed. then α can be estimated from d by maximum likelihood estimation of ℒ: 
+ ℒ=p=∏ip 
+
+
+in order to model uncertainty of α we add a pseudocount term x
+p to the base call count vector: x~=x+xp. the pseudocount term x
+p is calculated as a sum from observed quality score q
+bc  and a fixed noise term ε  which models sequencing independent errors, which were derived empirically. q
+bc is reported per base call as phred quality score q
+bc, which is logarithmically related to the base-calling error probability e
+bc  <cit> : 
+  <dig> ebc=pr{wrong bc} 
+
+
+
+  <dig> qbc=−10log10ebc 
+
+
+
+  <dig> 1−ebc=pbc=pr{called base} 
+
+
+in jacusa, we assume that the error probability e
+bc is independent of the called base. that is why, the error probability of an uncalled base is given by: 
+  <dig> ebc3=pr{uncalled base} 
+
+
+using these considerations and referring to a specific base call by l, we define x
+p as: 
+  <dig> xp=∑1≥l≥nε+ebcl3for each uncalled base0otherwise. 
+
+
+statistical test
+we define our test statistic as a likelihood ratio of two samples j∈{i,i
+i} where the data of each sample is defined as the pseudocount adjusted base call vectors d~j=x~1j,x~ij,…,x~njj. we use the dirichlet-multinomial distribution to model dj~ and estimate α
+j as explained in the previous section. we test against the null hypothesis h
+ <dig> that both samples originate from the same underlying distribution. the log-likelihood score function z  will have higher values, the better each of the parameter vectors α
+i and α
+ii represent the underlying data implying that each sample i and ii has a different underlying distribution. 
+  <dig> z=logdirmult·dirmultdirmult·dirmult 
+
+
+the coverage between two pileups may differ extremely between rna-seq samples. this will sometimes lead to an overestimation of confidence in the base call vector x~ for the sample with higher coverage. we mitigate this phenomenon by adjusting the underlying read stacks. in essence, large coverage differences between a single nucleotide count vector d~homo and count vectors with two or more nucleotides d~hetero are evened out by replacing the original d~homo with a copy of d~hetero where all variant positions have been replaced by the reference nucleotide. depending on the encountered read stacks, jacusa automatically switches to the optimal comparison mode.
+
+implemented filters
+many false positive rdd calls in rna editing studies are related to mapping artefacts  <cit> . short read mappers tend to produce incorrect alignments around indel positions that may be falsely identified as variant sites. tools such as gatk  <cit>  allow to adjust for this effect by sensitive local realignment of reads that contain indels. other false variant calls originate from uneven base call error distributions along short reads. this may be related to sequencing technology where base calls at read ends are less reliable. in jacusa, we have implemented a panel of simple threshold based filters to remove the aforementioned and other artefacts . our filters  monitor the distance d of a given candidate site to relevant read features such as start/end, indel positions, homopolymeric regions, and splice sites and remove the candidate site from further consideration if a proportion r of all reads falls below the given distance cutoff ≤d.
+
+generally, it is common practice to define rdds for homozygous genomic positions  and with less than three distinct base types . moreover, we strongly recommend to remove pcr-duplicate reads from the input read sets to minimize biases, which are introduced by pcr amplification biases, before the actual jacusa run .
+
+in silico benchmark
+we define two benchmark scenarios : 1) gdna vs. cdna simulates data for the identification of rna-dna differences  and 2) cdna vs. cdna generates data for the identification of rna-rna differences . the gdna vs. cdna represents the typical setup for the detection of rna editing sites. in this scenario, editing sites have been only implanted into the cdna bam file. in the cdna vs. cdna data setup, both data sources may contain base substitutions at different frequencies. this scenario can be interpreted as allele-specific expression or dynamic rna editing changes. herein, variants with pairwise different base frequencies  have been implanted into each corresponding cdna bam file. additionally, to make the identification of variants more challenging, snps with pairwise similar base frequencies have been included into each cdna bam file . we use the human reference genome  as a template to simulate genomic dna  and rna-seq reads. in total,  <dig>  non-overlapping sites have been randomly chosen based on sufficient read coverage 5≥c≥ <dig> and read mapping quality ≥ <dig> in all simulated bam files. the initial candidate set of non-overlapping sites has been divided into  <dig>  variant and snp sites, respectively. each site is modeled with a variant target frequency as shown in tables  <dig> and  <dig> 
+fig.  <dig> summary of data generation for in silico benchmark. description of the data generation for in silico rdd and rrd detection. in total  <dig> dna sample and 2x <dig> rna samples  are simulated. dna and rna reads are simulated from chromosome  <dig> of human genome. candidate snps and variant sites are created in regions that are covered by all simulated bam files. depending on the comparison, snps and variant sites are inserted into bam files. snps are only implanted in the cdna vs. cdna setup and function there as noise
+
+
+
+
+
+
+
+
+
+moreover, we introduce additional variability by sampling the target variant frequencies from a beta-distribution with concentration parameter β∈{ <dig> ,100} representing sites with high, medium, and low variability around the expected target frequencies. another parameter of our benchmark is the number of rna-seq replicates. we benchmarked all scenarios with cdna samples from  <dig> to  <dig> replicates. each replicate setup is simulated  <dig> times, which amounts to  <dig> rna-seq fastq files per benchmark .
+
+
+
+additional details on the benchmark setup are given in additional file 1: section  <dig> and table  <dig> 
+
+athe reditools package supplies multiple methods to identify rnaediting sites. we employed the reditooldenovo.py script because it provides a test-statistic. this method only utilizes rna-seq reads
+
+
+
+
+sequencing the hek- <dig> genome and transcriptome
+hek- <dig> genome sequencing
+genomic dna was isolated from flp-in t-rex hek- <dig> cells  using the genelute mammalian genomic dna miniprep kit . dna was fragmented in the bioruptor plus , with  <dig> cycles  in a  <dig> °c water bath, including a brief centrifugation after  <dig> cycles. the resulting fragmented dna was converted to a sequencing library using the truseq dna kit  with pcr enrichment and sequenced on a illumina hiseq  <dig> machine. in total > <dig> reads have been sequenced . the gdna-seq data have been deposited in the ncbi sra under accession srp <dig> 
+
+hek- <dig> transcriptome sequencing
+hek- <dig> strand-specific rna-seq data from  <cit>  has been downloaded and processed as explained in fig.  <dig>  we used the hg <dig> human genome and ensembl  <dig> annotation for mapping. the tophat <dig>  <cit>  mismatch parameter was set to  <dig> and reads with more than  <dig> mismatches were filtered subsequently . alu regions have been download and extracted from repeatmasker annotation ver.  <dig> . <dig>   <cit> .
+
+rna-seq data from drosophila fly heads
+we obtained published replicate paired-end rna-seq data from drosophila fly heads  <cit>  . the drosophila melanogaster genome carries only a single copy dadar gene. two replicate rna samples were generated from flies with wildtype and null alleles of dadar . we processed the data in the same way as the hek- <dig> data sets using the ensembl  <dig> drosophila genome and annotations.
+
+RESULTS
+in silico benchmark
+we use two benchmark scenarios  to compare jacusa with other popular variant callers: reditools, samtools/bcftools, and mutect. the gdna vs. cdna scenario works with all variant callers while the cdna vs. cdna comparison scenario could be only tested with samtools/bcftools and jacusa. equally important, samtools/bcftools and jacusa are the only two variant callers that support replicates in our benchmark. more details on the benchmark setup and how others and our software were used are given in section  <dig>  of the additional file  <dig> 
+
+detection of snvs in rna-dna comparisons
+when no replicates are used, jacusa shows a 6−10% higher true positive rate  as compared to the other tested methods while being competitive at the level of precision . the single replicate scenario is highly relevant in practice, as rna-seq replicate counts are typically low in rdd studies in the clinics. we specifically used the accuracy measure and the f-score to evaluate the balance between precision and true positive rate . the main difference between these performance measures is that the accuracy measure includes the number of true negatives.
+fig.  <dig> benchmark results for in silico rdd detection. a true positive rate, b precision, c accuracy plot, and d f-measure
+
+
+
+
+of all tested methods, jacusa scores the highest in terms of accuracy and f-score . the tradeoff between tps and fps can be nicely observed for the comparison of mutect and reditools. while reditools shows a higher tpr , the precision is slightly higher for mutect . samtools/bcftools scores third in terms of tpr and achieves together with mutect the highest precision of  <dig> %.
+
+jacusa takes advantage of replicate information and shows a steady increase in performance with the number of employed replicates. samtools/bcftools on the other hand displays only growing precision with increasing number of replicates and the remaining performance measures are decreasing. the drop in performance is highest for  <dig> replicates and amounts to more than 15% of trp. jacusa consistently performs better than samtools/bcftools in terms of tpr, f-score, and accuracy .
+
+additional results and details are given in additional file 1: section  <dig> .
+
+detection of snvs in rna-rna comparisons
+in the cdna vs. cdna scenario we replace the single gdna sample by one or more cdna samples with variant sites where the target frequency differs by more than 10% between both cdna pools. we introduce polymorphic positions of equal target frequency into both samples. the goal of this benchmark is to test the ability of the respective variant caller to distinguish between variant sites with a target frequency difference of Δ> <dig>  and polymorphic positions with equal target frequency.
+
+as before, we evaluate the variant callers by comparing overall performance measures such as f-score and accuracy. a general observation is the lower accuracy in fig. 4
+a for calling variant sites in cdna vs cdna comparisons. in essence, it is a much harder task than contrasting gdna vs. cdna samples. in terms of true positive rate, jacusa outperforms samtools/bcftools in this scenario by at least 40% when replicates are available and by over 35% when no replicates are available .
+fig.  <dig> benchmark results for in silico rrd detection. a true positive rate, b precision, c accuracy plot, and d f-measure
+
+
+fig.  <dig> analysis workflow to identify rna editing sites in matched gdna and cdna hek- <dig> samples. a sequenced reads are mapped and pcr-duplicates are removed. b single nucleotide variants are called for all sensible combinations of gdna vs. cdna and cdna vs. cdna bam files
+
+
+
+
+next, we combined true positives  and false positives  into composite measures and observed 10−16% better average accuracy for jacusa . this is even more pronounced for the f-score measure, where jacusa is performing at least 20% better in all tested replicate scenarios .
+
+additional results and details are given in additional file 1: section  <dig> . a general overview on the single thread runtime of each tested software is shown in additional file 1: section  <dig> .
+
+editing in hek- <dig> cells
+to assess the performance of jacusa in practice, we designed a controlled experiment to generate sequencing input data from cell culture experiments . briefly, we resequenced the genome of hek- <dig> cells to an average coverage of 30x . we obtained matching cdna data from our previously published study  <cit> . cells were either untreated or have been subjected to sirna knockdown experiments targeting either adar 1+ <dig>  or apobec <dig> b,c, and f . the adar and apobec <dig> family members have been previously observed as mrna-binding proteins in a transcriptome-wide proteomics screen of the same cell type  <cit> . however, the apobec <dig> familiy members did not show significant c-to-u rna editing activity in our assays.
+
+subsequently, we conducted gdna vs. cdna comparisons on the aforementioned data sets and predicted rna editing sites with samtools/bcftools, mutect, and jacusa. for each variant caller, we selected optimal thresholds for the hek- <dig> data set based on our results from the in silico data set: gdna vs. cdna score threshold is  <dig>  and cdna vs. cdna threshold is  <dig> . additional details on selecting score thresholds are given in additional file 1: section  <dig> .
+
+for mutect and reditools we adopted a strategy presented in  <cit>  to utilize replicate information by first calling variants on pooled biological replicates and finally filtering and requiring that the primarily identified variants are present in all replicates. we used jacusa as explained in fig. 5
+b to detect rna editing sites utilizing replicates. additional details on the workflow and results are given in additional file 1: section  <dig> and following. all editing site predictions are listed in additional file  <dig> 
+
+calling rdds from hek- <dig> data
+in total,  <dig> biological replicates have been created per condition and were sequenced twice to assess the biological and technical variability. by computing rdds on each replicate with jacusa, we could show an excellent agreement among replicates from the same condition . subsequently, we merged all technical replicates and identified our definite list of rdds from comparing one gdna vs. two biological replicate samples for each condition.
+fig.  <dig> results for rdd predictions in hek- <dig> cells. a comparison of editing frequency between biological and technical replicates of all samples. b detected snvs stratified by base changes in the hek- <dig> rdd comparison. c same as b but dominating a→g base transitions have been removed to focus on other lower-level base changes
+
+
+
+
+our comparison of gdna vs. rna from untreated cells yielded  <dig>  variant sites for jacusa . this number drops to  <dig> for the siapobec <dig> rna samples  and, as expected, to  <dig> sites for the siadar rna samples.
+
+
+
+the siapobec <dig> transfection experiment  already leads to a reduction of editing sites. editing levels are further reduced by targeting the correct enzyme class .
+
+interestingly, the non a→g sites identified by jacusa  consist mainly of three base substitutions: c→t  editing is a known but rare modification that is mediated by apobec <dig>  <cit>  and t→c and g→a variants , which are the reverse complement versions of the canonical editing events.
+
+jacusa identified the highest number of rdds  and showed a comparable fraction of a→g sites  among all tested variant callers .
+
+mutect identified far fewer rdds  in comparison to the other variant callers while achieving second highest fraction of a→g sites . this is in line with the in silico benchmark results on mutect indicating a high precision but a lower recall. in summary, all variant callers identify rdds with a fraction of a→g sites in the range of  <dig>  and  <dig> %, while the total number of variants varies greatly from  <dig>  up to  <dig>  .
+
+agreement between rdd calls
+all four software solutions report a set of  <dig> shared rdd sites for the untreated rna sample, which show a high proportion of a→g sites  . the second largest overlap of  <dig> rdd predictions is seen for samtools/bcftools, reditools, and jacusa . strikingly, jacusa identifies  <dig>  additional rdds, which are not reported by any other software tool and yet attain a proportion of  <dig> %
+a→g sites. this is far more than for sites that were exclusively reported by samtools/bcftools , reditools  or mutect .
+fig.  <dig> comparison of variant callers in hek- <dig> cells. a overlap of rdd variants identified on hek- <dig> untreated cells by all tested variant callers. the fraction of a→g is given in the parenthesis in each segment. b distribution of average editing level of a→g sites that are exclusively identified by tested variant caller. c distribution of average rna coverage at exclusively predicted a→g sites
+
+
+
+
+moreover, a detailed assessment of rdds sites, which have been exclusively reported by jacusa, shows a low mean editing level and mean coverage .
+
+response of rdd calls in adar knockdown
+to control the effect of any sirna knockdown treatment on rna editing levels , we contrast editing levels of rdds between siapobec <dig> and siadar samples. as mentioned earlier, jacusa had identified  <dig> rdds in cells treated with siapobec <dig>  of which  <dig> were a→g substitutions. we classify these a→g sites as true positives if they show a drop in their editing frequency in an siadar vs. siapobec <dig> knockdown.
+
+as shown in table  <dig>  we could assess editing level changes on  <dig> rdd sites that had sufficient read coverage in both sirna knockdown data sets . jacusa identifies the highest number of rna editing sites  out of which ≈98% show lower editing levels in siadar samples than in samples from siapobec <dig> treated cells. this means that jacusa reports  <dig> true positive a→g sites out of a set of  <dig>  predicted sites, the highest among all tested variant callers. figure 8
+a and c depict this important result for each individual site. the clear shift of editing frequency was specific to a→g and could not be observed for any other base substitution . in summary, jacusa identifies at least >20% more editing sites than any tested variant caller while its editing sites show an equal responsiveness to adar knockdown treatment.
+fig.  <dig> properties of rdds in hek- <dig> cells. a comparison of editing frequency of siadar samples and rdds detected in siapobec <dig>  treated cells.  correspond to regression line) b editing frequency of sites that are identified as divergent in rrd comparison of treatments. tables c + d show details of editing frequencies statistics for scatterplots a and d, respectively
+
+
+a→g
+
+
+
+detection of differential rna editing from rna-rna comparisons
+another jacusa application is to detect sites of differential rna editing from rna-seq data only. this could be effected through a direct assessment of rna-rna differences  in the absence of genomic sequencing data. we reasoned that one way to validate rrd site detection and ultimately differential a→g editing is to use our available rna/dna-seq data in the following way:
+
+we screen our samples from siadar and siapobec <dig> knockdowns for rrds. our assumption is that apobec <dig> family members do not influence a→g editing and sirna transfection effects cancel out in this comparison. “true” a→g editing sites should show a lower editing frequency in the siadar knockdown. for the siadar vs. siapobec <dig> comparison, samtools/bcftools predicts  <dig> rrd sites and jacusa predicts  <dig> rrd sites . out of these,  <dig> rrds are predicted by both samtools/bcftools  and jacusa  .
+fig.  <dig> properties of rrds in hek- <dig> cells. a overlap of rrds identified on siadar and siapobec <dig> treated hek- <dig> cells. b fraction of rrds that are non homozygous in gdna. c gene location and repeat annotation of identified variants. d fraction of a→g sites among identified variants
+
+
+
+
+
+subsequently, we retained rrds that had at least 10x read coverage in the gdna sample and checked if predicted sites are homozygous in the genome.
+
+sites that are not homozygous in dna represent putative snps and are typically removed from the candidate set when identifying rna editing sites in rdd comparisons. as this information is not visible to samtools/bcftools and jacusa, we reasoned that a lower fraction of snp sites among identified rrds would indicate a better performance on calling differential rna editing events. in essence, jacusa precision is at  <dig> %  table  <dig> while samtools/bcftools attains only  <dig> % .
+a→g
+
+
+
+we compared the fraction of rrds that after coverage filtering were potential snps and found that samtools/bcftools predictions contained 15% more putative polymorphic sites than jacusa .
+
+in summary, rrds predicted by jacusa showed a lower overlap with potential polymorphic sites and the fraction of a→g editing sites was higher than the candidates called by samtools/bcftools. the editing frequency of  <dig>  a→g sites was smaller in siadar treated cells whereas only  <dig> would show a higher editing frequency in siadar treated cells . the clear shift of editing frequency was specific to a→g and could not be observed for any other base substitution .
+
+editing events across genomic features
+another important aspect is the genomic distribution of our editing predictions. we stratified our rdd and rrd predictions by gene-centric  and repeat-centric categories . as expected, most rdd predictions are made in regions that are annotated as alu repeats. prediction accuracy drops dramatically for non-alu repeat regions and even more so for non-repeat regions. for details see additional file 1: tables s5-s <dig>  this holds true for all four tested snv callers. this effect seems to be independent of gene-centric features and strongly correlates with repeat type. we observed that most rdd sites in non-repeat regions cannot be explained by a→g editing. we also cannot exclude the possibility that hek- <dig> cells generally show very little rna editing in non-alu regions. nevertheless, jacusa identifies most a→g sites in absolute numbers.
+
+the same phenomenon becomes more evident for the rrd comparisons . herein, hardly any a→g sites are predicted in non repeat regions, by both samtools and jacusa.
+
+differential editing in drosophila fly heads
+we reasoned that our hek- <dig> cell data sets could be complemented by an independent data set with a controlled experimental design for testing rrd site discovery. to this end, we analysed published rna-seq data from drosophila fly heads  <cit> . rodriguez et al. use a genetic approach to ablate the activity of the single copy dadar gene in the fruit fly . this is a favorable system for fine-mapping editing sites as editing activity depends only on a single enzyme in the fruit fly. moreover, editing in coding exons, which are expressed in the fly brain, has been described previously  <cit> . in summary, jacusa detected  <dig> rrd candidate sites  while samtools/bcftools predicted  <dig> rrd candidates. however, while the vast majority  of jacusa rrd sites are a→g sites, just  <dig> % of all samtools/bcftools predictions are . overall, jacusa predicted  <dig> rdd sites in coding exons. a closer inspection showed that  <dig>  of these are bona fide a→g sites . this analysis demonstrated that jacusa is able to accurately predict editing events in rna-rna comparisons on an independent data set as well. all editing site predictions are listed in additional file  <dig> 
+fig.  <dig> properties of rrds identified in drosophila melanogaster samples by comparing dadar-/- and wildtype strains. a gene location and repeat annotation of rrds. b fraction of a→g sites among identified rrds
+
+
+
+
+CONCLUSIONS
+in this manuscript, we have presented jacusa as an accurate and fast one-stop solution to identify site-specific snv events in matched sequencing samples. jacusa outperformed other snv callers in an in silico benchmark that assessed snv calling performance in terms of identifying site-specific rna-dna differences  and rna-rna differences . while the first benchmark is the typical scenario for identifying rna editing sites from homozygous genomic positions, the second benchmark represents another interesting case of identifying condition specific changes in editing frequencies.
+
+jacusa shows the best recall and competitive precision in comparison to all tested software solutions. the performance gain over its competitors is especially visible for the detection of rna-rna differences. in terms of recall, jacusa outperforms samtools/bcftools in the rrd scenario by at least 40% when replicates are available and by over 35% when no replicates are available. intriguingly, this is not at the expense of precision which is at least 10% better over all tested number of replicates.
+
+in practice, we tested jacusa in a controlled experimental setup where we generated dna and rna-seq data from hek- <dig> cells. similar to the in silico benchmark, we first identified candidate sites of rna editing via rdd comparisons and checked if their editing frequency would respond to changes in adar protein levels by sirna knockdown experiments. with this setup, we could nicely demonstrate that jacusa has a better recall and comparable precision to other tested variant callers in identifying a→g editing sites in rna-dna comparisons.
+
+subsequently, we assessed the rrd or differential editing scenario by predicting snvs between replicate siapobec <dig> and siadar rna samples. again, jacusa overall predicts more sites in homozygous dna positions and a greater proportion of a→g editing sites than samtools  in this rna-rna comparison scenario on hek- <dig> rna-seq data.
+
+these results were further corroborated by looking at an independent rna-seq data set from drosophila melanogaster heads. herein, jacusa reports the highest number of rna editing sites  with much higher precision .
+
+in summary, jacusa is a versatile software for the precise and sensitive detection of single nucleotide level differences in dna-rna as well as rna-rna comparisons from illumina sequencing data. in this manuscript, we have specifically explored its excellent ability to detect site-specific rna editing events.
+
+availability and requirements
+gdna-seq data have been deposited in the ncbi sra under accession srp <dig>  
+
+project name: jacusa
+
+
+project home page:
+https://github.com/dieterich-lab/jacusa
+
+
+
+operating system: n/a
+
+
+programming language: java  <dig> 
+
+
+other requirements: none
+
+
+license: gpl- <dig> 
+
+
+
+
+additional files
+
+additional file  <dig> supplementary text. 
+
+
+
+
+
+additional file  <dig> excel spreadsheet with predictions on hek- <dig> dna and rna sequencing data. 
+
+
+
+
+
+additional file  <dig> excel spreadsheet with predictions on fly head rna sequencing data. 
+
+
+
+
+abbreviations
+adaradenosine deaminases that act on rna
+
+rddrna-dna-differences
+
+rrdrna-rna-differences
+
+rbprna binding protein
+
+snpsingle nucleotide polymorphism
+
+snvsingle nucleotide variant
+
+all authors would like thank all members of the dieterich and landthaler labs for numerous valuable discussions.
+
+funding
+cd and mp acknowledge funding by the max planck society.
+
+authors’ contributions
+cd conceived and designed the study. mp implemented jacusa. mp and cd performed data analyses and wrote the manuscript with input from all other authors. ew carried out all experiments in hek- <dig> cells. ml and uo provided materials and valuable feedback in the course of this project. all authors read and approved the final manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+not applicable.

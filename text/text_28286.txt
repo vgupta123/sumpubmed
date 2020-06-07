@@ -1,0 +1,84 @@
+BACKGROUND
+our program admixture estimates individual ancestries by efficiently computing maximum likelihood estimates in a parametric model. the model  <cit>  posits that genotype nij for individual i at snp j represents the number of type "1" alleles observed. given k ancestral populations, the success probability  in the binomial distribution nij ~ bin depends on the fraction qik of i's ancestry attributable to population k and on the frequency fkj of allele  <dig> in population k. admixture maximizes the biconcave log-likelihood   
+
+of the model using block relaxation. the alternating updates of the parameter matrices q =  and f =  both rely on sequential quadratic programming. convergence is accelerated by applying a quasi-newton extrapolation algorithm  <cit> . further details of our core algorithm are documented elsewhere  <cit> . the performance of admixture is compelling. an admixture analysis is typically three to four orders of magnitude faster than a comparable structure  <cit>  analysis.
+
+the advanced features of admixture described here allow the user to automate the choice of the number of underlying populations k and to exploit known ancestral populations in a supervised learning mode. our penalized estimation mechanism can provide many of the benefits of a bayesian analysis at a fraction of the computation time. these features make admixture a suitable replacement for structure in most practical applications. given the ever-increasing size of genotype datasets, the inherent speed of our optimization algorithm, coupled with the parallel-processing mode described here, may render admixture the only viable model-based ancestry analysis tool for many users.
+
+ <dig> implementation
+cross-validation
+the choice of the number of ancestral populations k can prove difficult when the underlying population genetics of a species is poorly understood. structure provides a means of estimating the best value of k by computing the model evidence for each k from a range of choices. the model evidence is defined as   
+
+where f represents the data likelihood and π represents a prior density on the parameters. structure approximates the integral via monte carlo methods. our optimization framework is not well suited to evaluating this integral. as an alternative, we employ cross-validation. in cross-validation, we aim to identify the best k value as judged by prediction of systematically withheld data points. a similar tactic is also employed by the haplotype analysis program fastphase  <cit>  and is inspired by wold's method for cross-validating pca models  <cit> .
+
+our v-fold cross-validation procedure partitions the non-missing genotypes into v roughly equally sized subsets . at each of v iterations, the members of one of the folds are masked  to yield a new data matrix  analysis of the masked data matrix  poses no new challenges. in computing the log-likelihood, score, and observed information matrix of , we simply ignore the entries  with missing values. maximization of the log-likelihood readily yields new estimates  and  for the masked data. we then predict each masked value nij by . prediction error is estimated by averaging the squares of the deviance residuals for the binomial model  <cit> ,   
+
+across all masked entries over all folds. minimizing this estimated prediction error on a grid of k values then suggests the most suitable k.
+
+supervised learning of admixture coefficients
+admixture's strategy of simultaneously estimating individual ancestry fractions q and population allele frequencies f is ideal when nothing is known about the contributing ancestral populations. in many scenarios, however, these populations are known and several reference individuals from each population are available. here it is of interest to estimate the potentially admixed ancestries of the remaining individuals. we term this supervised analysis, as the reference individuals furnish training samples in a supervised learning context. to perform supervised analysis in admixture, an .ind file mapping individuals to populations must be provided, and the flag --supervised must be attached to the command line.
+
+ancestry estimates can be estimated more accurately in supervised analysis because there is less uncertainty in allele frequencies. interpretation of results is simplified, and run times are shorter owing to the reduced number of parameters to estimate. both the number of iterations until convergence and the computational complexity per iteration decrease. however, we caution that supervised analysis is only suitable when the reference individuals can be assigned to ancestral populations with certainty and ancestral populations are fairly homogeneous. for exploratory analyses, unsupervised analysis is more appropriate and therefore remains the default in admixture.
+
+penalized estimation and model parsimony
+as noted in our later comparison of supervised and unsupervised learning, datasets culled from closely related populations typed at a modest numbers of snps can pose substantial challenges in ancestry estimation. for instance, overfitting tends to yield ancestry estimates with inflated amounts of admixture. the bayesian solution to this problem is to impose an informative prior to steer parameter estimates away from danger when data is sparse. thus, structure imposes dirichlet prior distributions on ancestry parameters and estimates a hyperparameter α that controls the strength of the prior distributions.
+
+a suitable alternative in our optimization framework is to perform penalized estimation. rather than maximizing the log-likelihood, we maximize an objective function  consisting of the log-likelihood minus a penalty . the penalty is designed to discourage the undesirable biases in the estimated ancestry matrix  just mentioned. the tuning constant λ controls the strength of the penalty. while it is tempting to consider the negated logarithm of the dirichlet prior density appearing in structure as a penalty, the dirichlet density is unbounded above in the parameter regime α < 1--arguably the most useful setting for the α parameter--and is therefore unusable in our optimization framework. a better alternative is the approximate ℓ <dig> penalty  <cit>   
+
+which encourages not only shrinkage but also aggressive parsimony. in particular, the approximate ℓ <dig> penalty drives small admixture coefficients to zero. parsimony is desirable because it leads to more easily interpretable and probably more realistic parameter estimates. estimation is performed by maximizing  over its arguments. increasing λ or the second tuning constant γ elevates the extent of shrinkage and parsimony in the resulting estimates  and .
+
+determination of the penalty tuning constants λ and γ is nontrivial. in our hands cross-validation has proved effective on simple simulated datasets. the tuning constants λ and γ are user-defined options, so users can explore different settings consistent with cross-validation or their own heuristics.
+
+exploiting multiple processors
+very large datasets  can reduce even admixture's efficient algorithms to a crawl. since our original publication, we have tuned our core algorithm and improved its speed by a factor of two. we have also implemented a parallel execution mode that lets admixture exploit multiple processors. this new option employs the openmp  <cit>  framework designed for simple parallelization using compiler #pragma directives. to perform analyses with, for example, four threads, the user need only add the flag -j <dig> to the command line. hence
+
+$ admixture data/hapmap <dig> bed  <dig> -j4
+
+analyzes the data file hapmap <dig> bed using  <dig> threads, assuming k =  <dig> ancestral populations. analyses of our hapmap <dig> dataset with k =  <dig> were accelerated by 392% on a four processor machine.
+
+RESULTS
+the effectiveness of cross-validation
+supervised analysis can yield more precise estimates
+to explore the benefits of supervised analysis, we generated a number of artificial datasets and evaluated the empirical precision of parameter estimates compared to the true q and f. the ancestral allele frequencies f were first generated using the balding-nichols model  <cit>  for  <dig>  markers in each of two populations differentiated by an fst value of . <dig>  and with ancestral allele frequencies drawn uniformly from  <cit> . then, for each of  <dig> datasets,  <dig> individuals were simulated using ancestries fixed as follows: one hundred individuals with ancestry entirely from population  <dig>  one hundred individuals from population  <dig>  and the remaining two hundred with admixed ancestries spaced uniformly on a grid between population  <dig> and population  <dig>  supervised and unsupervised admixture analyses performed on these datasets revealed several interesting patterns. first, supervised analysis more accurately recovered the underlying allele frequencies. on average the root-mean-squared error in estimating the vector f <dig> of reference allele frequencies for population  <dig> was . <dig> for unsupervised analysis but . <dig> for supervised. in general, it appears that errors in estimating f cause overestimation of the fst between the ancestral populations. indeed, here the average fst estimate of . <dig> for unsupervised analysis fell to . <dig> for supervised analysis .
+
+the flip-side of the systematic overestimation of the separation between populations is that ancestry fraction estimates suffer from bias. in particular, individuals will be ascribed a greater degree of admixture than they actually possess. figure  <dig> illustrates this effect. individuals with low qi <dig>  reflecting a small degree of ancestry from population  <dig>  have upward-biased estimates , while estimates for those with high qi <dig> exhibit a downward bias. the net effect is an apparent bias towards ancestry fractions of . <dig>  supervised analysis appears not to suffer from this bias.
+
+in our opinion the apparent bias in unsupervised ancestry estimates should not be cause for alarm. the bias becomes much less prominent for larger datasets or datasets where the ancestral populations are better differentiated. performing the same simulation with an fst of . <dig>  the bias in q estimates is mitigated substantially, as seen in figure 2b. a similar effect is apparent when we increase the number of markers j to  <dig>  or more.
+
+hence, it is evident that supervised analysis, when applicable, can yield more precise estimates that are less susceptible to the biases seen in unsupervised analysis. another benefit of supervised analysis is that it runs considerably faster. for the  <dig> simulated datasets with  <dig>  markers, supervised analysis took an average of  <dig>  seconds, while unsupervised analysis averaged  <dig>  seconds.
+
+the effects of penalized estimation
+the bias in ancestry estimates observed in figure  <dig> is principally a problem for small datasets with closely related ancestral populations. nevertheless, we designed our penalized estimation procedure partly to reduce this bias. to demonstrate the effectiveness of penalization, we explored penalized estimation in the context of the previous simulation of admixed individuals from two populations differentiated by fst = . <dig>  fixing γ = . <dig> and performing cross-validation on a single one of these simulated datasets for λ values spaced between  <dig> and  <dig>  we identified λ =  <dig> as the value minimizing cross-validation error . comparing the ancestry estimates with those from maximum likelihood unsupervised and supervised analyses  reveals that penalized estimation mitigates bias substantially.
+
+CONCLUSIONS
+admixture is a fully-featured, highly efficient, and easy-to-use tool for ancestry estimation from snp datasets. the four enhancements described here promote great flexibility in both exploratory and focused studies of genetic ancestry. cross-validation enables rational choice of the number of ancestral populations. supervised analysis mode can yield more accurate ancestry estimates when the number and makeup of contributing populations are certain. parallelizing the code reduces run times and allows more ambitious analyses involving more people and snps. finally, penalizing weak evidence for admixture promotes model parsimony and yields ancestry fractions more in line with users' expectations.
+
+availability and requirements
+project name: admixture
+
+project home page: http://www.genetics.ucla.edu/software/admixture; snapshot of software available as additional file  <dig> 
+
+operating systems: linux, mac os x
+
+programming languages: c++
+
+other requirements: none
+
+license: binaries freely available; source code proprietary
+
+any restrictions to use by non-academics: none
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+dha and kl devised the algorithms for penalized estimation, cross-validation, supervised analysis, and parallel execution. dha implemented the software. dha and kl designed the experiments, which dha then executed and analyzed. dha and kl composed the manuscript. the authors have approved the final manuscript.
+
+supplementary material
+additional file 1
+software.zip, a zip archive containing mac os x and linux executables, is a snapshot of the admixture software at the time of submission of this manuscript. the current version is maintained at http:///www.genetics.ucla.edu/software/admixture.
+
+click here for file
+
+ acknowledgements and funding
+we thank john novembre and marc suchard for helpful suggestions. this work was supported by grant t32gm <dig> to d.h.a. from the national institute of general medical sciences and by grants gm <dig> and mh <dig> to k.l. from the united states public health service.

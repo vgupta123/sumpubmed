@@ -1,0 +1,340 @@
+BACKGROUND
+biochemical processes in isogenic cells exhibit substantial heterogeneity  <cit> . understanding the latter demands experimental techniques that can resolve such processes at the single-cell level. in contrast to bulk measurements, these techniques provide not only access to the average behavior of intracellular dynamics, but also its variability across cells and over time. most single-cell techniques, however, reveal only very few components simultaneously that are often multiple steps away from the actual quantities of interest. the dynamics of a promoter, for instance, may not be accessible directly, but only indirectly through a fluorescent reporter that is expressed upon activation of this promoter  <cit> . statistical inference in combination with mathematical models provide a means to reconstruct inaccessible parameters from available measurements, making them instrumental for studying biochemical processes based on single-cell data.
+
+how such inference can be performed depends strongly on the way the data has been collected: flow cytometry measurements, for instance, reveal fluorescence values across a population but individual cells cannot be tracked over time. consequently, measurements at two different time instances are considered statistically independent. time-lapse microscopy techniques permit tracking of single-cell trajectories over the duration of a whole experiment  <cit> , which in turn provides a handle also on the temporal correlation of the underlying process. this additional degree of information can dramatically improve the inference of unknown process parameters  <cit> .
+
+most existing inference approaches consider single-cell trajectories to be statistically independent of each other . this way, however, important information stemming from the ancestry of a cell is lost: shortly after cell division, for example, two daughter cells are likely to exhibit substantial correlations, which cannot be captured by a model that assumes independence among cells. this can yield incomplete and biased results, especially when the time scale of the process under study is slow compared with the cell cycle duration.
+
+in addition, stochastic processes of interest such as epigenetically regulated phase variation in bacteria are often driven by dna replication just before cell division. examples in this category are the regulation of agn <dig>  <cit>  and pap  <cit>  systems in e.coli, and the glucosyltransferase  gene cluster in salmonella  <cit> . due to the non-reversibility of the epigenetic modifications, gene replication  is crucial for phase variation to happen. cell lineage information has to be therefore taken into account in single-cell studies of these systems.
+
+until recently, there existed little work on statistical inference using tree-based single-cell data. in  <cit> , the authors proposed a method for parameter inference from single-cell trajectories based on approximate bayesian computation . their approach is applicable to tree-structured data as well, although it requires all trajectories to have the same length and sampling resolution. in  <cit>  the authors proposed an observer-based method for state and parameter estimation in stochastic chemical reaction networks, which is also able to handle lineage tree data. however, its applicability is limited to small systems since it requires the full probability distributions from the solution of the chemical master equation. another alternative was proposed in  <cit> , which presented an inference algorithm for hidden markov trees using variational bayesian expectation maximization. this class of models is similar to the one considered here, but cannot incorporate dynamic readouts or dynamically evolving single-cell states.
+
+in more recent work, the authors of  <cit>  presented a method for inferring transition dynamics from cell lineages that is best suited to slowly evolving cell states  and makes use of end-point smfish measurements for each cell. finally, feigelman et al.  <cit>  proposed a method for exact bayesian parameter inference from cell lineage data that uses particle filtering to approximate the full joint state and parameter posterior distribution. the method was successfully applied to a stochastic gene expression system that is critical for stem cell differentiation and clearly demonstrated the strengths of lineage-based inference. on the downside, the computational burden of the method seems to be substantial, while particle degeneracy may arise when trees longer than just a few generations are used because of the way particle sampling and reweighing are carried out.
+
+in this work, we propose an approximate bayesian parameter inference framework for lineage tree data. the method relies on a combination of sequential monte carlo for likelihood approximation and pseudo-marginal markov chain monte carlo for parameter sampling. to achieve scalability of our method with the number of generations, we make use of a plausible simplifying assumption in the likelihood decomposition which is shown to work well in practice. in contrast to  <cit> , our method allows efficient likelihood calculation and smaller particle degeneracy with increasing tree lengths, which allows us to extract information out of longer lineages. furthermore, parameter sampling and likelihood approximation are carried out separately from each other, which permits the use of more powerful samplers  for the efficient exploration of high-dimensional parameter spaces.
+
+the rest of the manuscript is structured as follows: in ‘methods’ section we give a mathematical description of the inference problem and the class of models we consider and we present a detailed description of our method. in ‘results and discussion’ section we demonstrate the application of our method to two different example models and in ‘conclusions’ section we give some concluding remarks.
+
+methods
+the model class
+to introduce the inference problem and the class of models considered here, we refer to the illustration in fig.  <dig>  let us consider an intracellular biochemical process of interest modeled by a continuous-time dynamical system s. the system behavior within each cell can be monitored with the help of a dynamic readout, such as the abundance of a fluorescent reporter protein. through time-lapse microscopy, we assume that a growing population of single cells and their progeny can be tracked over time and measured at multiple time points , giving rise to a hierarchical tree data structure that describes the time evolution of the population.
+fig.  <dig> graphical illustration of the observed and unobserved system dynamics in the lineage tree setting. a hypothetical time-lapse microscopy experiment, in which time-lapse microscopy images of a growing e.coli colony are obtained. the strain contains a fluorescent reporter gene. after the cells are segmented and tracked, the fluorescence intensity in each of them can be extracted, giving rise to a fluorescence lineage dataset . the continuous blue curve represents the unobserved state trajectory of each individual cell. subscripts on measurements and states denote the generation number, while superscripts index the cells of each generation
+
+
+
+
+we assume that each tree starts with a single mother at generation  <dig> and that the population is followed until the final generation n. without loss of generality we assume that a single mother always gives rise to two daughter cells after division, leading to 2n cells at generation n. the system s describes the evolution of a set of internal states x . these states can be accessed indirectly at discrete time points through experimental techniques yielding a corresponding readout y. each cell is assigned a separate time index and a separate time of division, t, which can either be assumed known from the single-cell tracking data, or be inferred based on these data. we denote by x the whole trajectory {x,t∈} from the time of birth of a cell  until its division . the dynamics of s may evolve on a continuous, discrete or hybrid space, and similarly be stochastic, deterministic, or involve components of both types. in any case, we assume that s depends on a set of parameters Θ, which are either assumed to be the same across the population or allowed to vary within the population according to a population-wide distribution.
+
+from this point on, we will distinguish each cell by its generation number, n, and an index i, that ranges from  <dig> to 2n . the i
+th cell of the n
+th generation gives rise to two daughters, indexed by 2i− <dig> and 2i, in generation n+ <dig>  henceforth, all quantities related to a certain cell in a given lineage will be indexed by these two numbers.
+
+following this notation, we denote by xni the state trajectory of the i
+th cell in the n
+th generation; that is, 
+ xni:={xni,t∈}. 
+
+
+the state trajectories of the daughters originating from a mother cell with state trajectory xni will therefore be denoted by xn+12i− <dig> and xn+12i respectively. the corresponding discrete set of measurements associated with xni is denoted by yni. more specifically, 
+ yni:={yni,k= <dig> …,kni)}. 
+
+
+this notation reflects the fact that the i
+th cell of the n
+th generation is observed at a total number of kni time points  during its lifetime, and that the number and location of observation time points will in general be different for every cell.
+
+we will further denote by p,xn+12i|xni,Θ) the distribution of the daughter initial conditions given the state of the mother just before division, and call this the transition probability from one generation to the next. it is reasonable to assume that, once their respective initial conditions are determined based on their mother cell, the two daughters evolve independently of each other. as defined above, the transition probability mechanism may itself contain unknown parameters that need to be estimated from the data.
+
+the inference problem
+our goal is to infer the posterior distribution of Θ given:  <dig>  the set of measured cellular readouts over the whole lineage,  <dig>  our prior knowledge about Θ encoded in a prior distribution π and  <dig>  a measurement noise model that describes the likelihood of observing yni given xni . the latter is given by the density f|xni,Θ). with this measurement model, and assuming that measurements at individual time points are independent from each other, the likelihood of the whole measurement set for a single cell can be defined as 
+ p=∏k=1knifynitn,ki)|xni=px01∣πxx01py01∣x <dig> Θ×∏n=1n∏i=12npxn2i− <dig> xn2i∣xn−1i,Θ×∏i=12npyni∣xni,Θ, 
+
+
+where πx is the initial distribution of x <dig>  the likelihood of the measured outputs given Θ can therefore by obtained by marginalization of  over all possible unobserved states: 
+  <dig> p=∫pdxtree. 
+
+
+as can be seen from the above equations, an additional difficulty of our inference problem in comparison to inference based on independent cell trajectories, is the fact that the likelihood p does not factorize over the readouts of individual cells, since the tree structure of the population introduces dependencies among the observations coming from different generations. the dependencies are generated through the unobserved state dynamics, which must therefore be taken into account.
+
+moreover, due to the dependencies introduced by the tree structure of the population, the integral in  is analytically intractable already for very simple state dynamics and its numerical evaluation scales exponentially with the number of generations in the tree. to address these difficulties, we employ a sequential monte carlo  scheme as described below to approximate the marginal likelihood .
+
+recursive likelihood and state posterior propagation
+the joint likelihood over states and observations given by  can be recursively computed, for example by first iterating over generations and then over the individuals of each generation. however, the same cannot be immediately said for , where the marginalization complicates the calculation. here we propose an iterative calculation of this likelihood that again proceeds sequentially through the tree generations and the daughter pairs of each generation. the dependencies between different daughter pairs of the same generation add to the complexity of the numerical approximation of the likelihood, but, as we will see at the end of the section, this computation can be sped up considerably by making a reasonable simplifying approximation.
+
+before we derive the exact formulas, we need some additional notation. let 
+ yn <dig> …,2n:=yn <dig> …,yn2n  denote the whole dataset of generation n and 
+ 𝕐0:n:=ym <dig> …,2m,m= <dig> …,n  the dataset of all generations up to generation n. similarly, 
+ xn <dig> …,2n:=xn <dig> …,xn2n  and 
+ 𝕏0:n:=xm <dig> …,2m,m= <dig> …,n. 
+
+
+to arrive at the exact formula for the likelihood, we first break up the total likelihood over the generations as follows : 
+ p=p∏n=1npyn <dig> …,2n|𝕐0:n− <dig>  
+
+
+assume now that p  is available, and so is p . consider the first two individuals of generation n+ <dig>  with state trajectories xn+ <dig> and xn+ <dig>  descending from the mother cell with state trajectory xn <dig> 
+
+adding the information of this daughter pair to the posterior of the previous generations, we get 
+  <dig> pxn+ <dig> xn+ <dig> 𝕏0:n|yn+ <dig> yn+ <dig> 𝕐0:n=pyn+ <dig> yn+ <dig> 𝕐0:n|xn+ <dig> xn+ <dig> 𝕏0:npxn+ <dig> xn+ <dig> 𝕏0:npyn+ <dig> yn+ <dig> 𝕐0:n=pyn+11|xn+11pyn+12|xn+12pxn+ <dig> xn+12|𝕏0:npyn+ <dig> yn+12|𝕐0:n×p𝕐0:n|𝕏0:np𝕏0:np𝕐0:n=pyn+11|xn+11pyn+12|xn+12pxn+ <dig> xn+12|xn1pyn+ <dig> yn+12|𝕐0:np. 
+
+
+the denominator of eq.  extends p with the daughter pair of the next generation: 
+  <dig> p=∭pyn+ <dig> yn+12|xn+ <dig> xn+12×pxn+ <dig> xn+12|xn1dxn+11dxn+12×pdxn <dig> 
+
+
+equations.  and  allow us to update the starting posterior and likelihood with the first daughter pair from generation n+ <dig>  however, to add the second daughter pair , we need to take into account the information provided by the first pair. to see this, we proceed as above  to arrive at: 
+  <dig> pxn+ <dig> ,xn+ <dig> ,𝕏0:n|yn+ <dig> ,yn+ <dig> ,𝕐0:n=pxn+ <dig> ,𝕏0:n|yn+ <dig> ,𝕐0:n×pyn+ <dig> |xn+ <dig> pxn+ <dig> |xn+ <dig> ,𝕏0:np. 
+
+
+the above expression can be simplified by noting that pxn+ <dig> |xn+ <dig> ,𝕏0:n=pxn+ <dig> |𝕏0:n, i.e. daughter pairs of the same generation are conditionally independent given the parent states. however, the term pxn+ <dig> ,𝕏0:n|yn+ <dig> ,𝕐0:n implies that, by taking into account the measurements of the first daughter pair, our posterior belief about the n-th generation states also needs to be updated before proceeding to the next pair. this leads to the creation of dependencies between the tree branches and means that they cannot be treated independently of each other, a feature than can create computational difficulties when one attempts to approximate the joint posterior by simulation. we thus make the simplifying assumption that 
+  <dig> p≈p 
+
+
+in words, we assume that the additional state information transferred from the measurement of a daughter pair at generation 
+n+ <dig> to their corresponding mother at generation n is negligible in comparison to the information provided by the previous generations to the mother. this is especially the case when frequent observations of a cell population are available. in such a setting, the state of the mother can already be well constrained by measurements of itself and its ancestors, making the additional information provided by the daughters less significant. in case of very sparse measurements which are only available for the daughter cells right after cell division it is not certain to what extent the assumption will hold, since these measurements will also carry information about the state of the mother cell. however, frequent observations of the cells in the lineage can be easily achieved with currently used time-lapse microscopy methods.
+
+as we will show below, the aforementioned assumption allows us to treat each mother-daughters triplet within a generation independently from the rest. continuing the analysis of the first two daughter pairs from above, we have that 
+  <dig> pxn+ <dig> ,𝕏0:n|yn+ <dig> ,𝕐0:n=pxn+ <dig> |𝕏0:n,yn+ <dig> ,𝕐0:np𝕏0:n|yn+ <dig> ,𝕐0:n≈pxn+ <dig> |𝕏0:n,yn+ <dig> ,𝕐0:np𝕏0:n|𝕐0:n=pxn+ <dig> |𝕏0:n,yn+ <dig> p𝕏0:n|𝕐0:n. 
+
+
+this fact therefore leads to a simplification of the conditional likelihood, p: 
+  <dig> p=∭pyn+ <dig> |xn+ <dig> pxn+ <dig> |xn2dxn+ <dig> ×pxn+ <dig> |xn <dig> yn+ <dig> pxn2|𝕐0:ndxn+ <dig> dxn2=∬pyn+ <dig> |xn+ <dig> pxn+ <dig> |xn2dxn+ <dig> pxn2|𝕐0:n×dxn2=pyn+ <dig> |𝕐0:n, 
+
+
+and the total likelihood of generation n+ <dig>  can be decomposed as a product of likelihoods over the individual daughter pairs.
+
+finally, the joint posterior  can be also decomposed as: 
+  <dig> pxn+ <dig> ,xn+ <dig> ,𝕏0:n|yn+ <dig> ,yn+ <dig> ,𝕐0:n=pxn+ <dig> |yn+ <dig> ,𝕏0:npxn+ <dig> |yn+ <dig> ,𝕏0:np𝕏0:n|𝕐0:n. 
+
+
+these facts will be put in use in the next section, where a sequential monte carlo algorithm for the approximation of the tree likelihood will be presented.
+
+recursive likelihood approximation
+our smc scheme is used to approximate p, i.e. the likelihood of a set of measurements over a tree starting from a single individual, given a set of parameters Θ, under the simplifying assumption presented above. our algorithm uses this assumption to exploit the conditional independence structure of the tree dynamics it generates in order to break down the likelihood computation. more concretely, the idea is to start at the root of the tree  and recursively propagate the data likelihood from one generation to the next, treating the mother-daughter triplets of each generation independently from each other. this can be understood as a generalization of recursive filtering for tree-structured data. to illustrate the idea better, we present the treatment of a single mother-daughter triplet in detail.
+
+given data up to generation n, assume that l samples  from the already estimated posterior p∣𝕐0:n) of the i-th mother in the n-th generation are available. first, a pair of daughter cells is generated according to the transition probabilities pxn+12i− <dig> xn+12i|xni,Θ for each particle. given the daughters’ initial conditions, we next simulate each daughter until its own division time and calculate the likelihoods pyn+12i−1∣xn+12i− <dig> l,Θ and pyn+12i∣xn+12i,l,Θ for l= <dig> …,l.
+
+by assigning to the l-th particle a weight 
+ wn+1i,l=pyn+12i−1∣xn+12i− <dig> l,Θpyn+12i∣xn+12i,l,Θ,  we next compute the marginal likelihood of the i
+th mother-daughter triplet by averaging the weights for all the particles: 
+ pyn+12i− <dig> yn+12i|Θ=1l∑l=1lwn+1i,l.  after normalizing the particle weights to sum up to one, we have obtained weighted samples from the posteriors p and p. the samples are subsequently unweighted by resampling l particles from each posterior according to the normalized weights. these samples will serve as starting points for the daughters of the next generation. the same process is repeated for the rest of the n
+th generation mothers, before moving on to generation n+ <dig>  this very general procedure is summarized in algorithm  <dig>  in which for simplicity we assume x <dig> to be known.
+
+
+
+
+
+
+notes
+to simplify the presentation of the algorithm, the state trajectory of the initial mother cell was assumed known. in practice it is not and the initial conditions for the particles {x <dig> l}l=1l would be drawn from a prior distribution. then, a classical filtering step  <cit>  can be employed to obtain the final particle conditions for the first mother.
+
+the most computationally intensive step of the algorithm lies between lines 5- <dig>  where the marginal likelihood of each mother-daughter triplet needs to be computed. depending on the type of the unobserved state dynamics, accurate marginalization may require the use of very large particle numbers and greatly increase the computational cost of the algorithm. typically, the situation is worse when the hidden state contains components driven by stochastic dynamics. this challenge has already been recognized and addressed in the literature, since it also appears in the parameter inference problem from independent single-cell trajectories  <cit> . one can thus employ one of the several available alternatives at this step, such as sequential computation of the likelihood  <cit> , or the use of approximating dynamics  <cit> .
+
+since we assume that the measurements from individual trees are independent from each other, the joint likelihood of a dataset consisting of several trees is simply a product of the likelihood of the individual trees. the likelihoods of individual trees can be thus estimated in parallel. moreover, looking at the algorithm structure for a single tree, the likelihood calculation can be parallelized at two levels: 1) the mother cells of a given generation can be treated independently of each other 2) individual particle calculations for a given mother-daughter triplet can be done in parallel.
+
+
+
+
+a pseudo-marginal mcmc sampler for parameter inference
+the goal of bayesian inference is to compute or approximate via sampling the posterior distribution of the parameters of the system Θ, p∝pπ. to this end, we follow the “pseudo-marginal” mcmc approach  <cit> , according to which a markov chain monte carlo  sampler makes use of the noisy marginal likelihood estimates provided by the smc algorithm of the previous section to generate samples from the posterior of Θ .
+
+
+
+
+
+it should be noted that the use of very noisy smc estimates may considerably slow down the mixing of the sampler, since the chain may get trapped at a point with artificially large likelihood value. however, as the variance of the estimator decreases , it is expected that the mixing speed of our sampler will converge to that of a sampler with perfect  marginal likelihood information.
+
+RESULTS
+in the following sections we will consider two possible examples for the dynamical system s and demonstrate the application of our inference method on these cases. we use the first example primarily to verify and characterize the performance of our algorithm and the second example to convincingly demonstrate its application on a more complex problem. in both examples, we assume that a cell is characterized by a discrete state, x
+d. over time and across generations, cells stochastically adopt a certain type  determined by x
+d. the cell type in turn determines the evolution of a continuous state vector, which may for example correspond to the immature and mature molecule types of a fluorescent reporter. in abstract terms, x
+d may be thought of as the state of a gene, whose activity affects the cell phenotype.
+
+in the first example, the discrete state dynamics is described by a generalized two-type branching process. according to this scenario, the type of a cell is fixed throughout its lifetime and may change only at cell division, since the types of the daughters depend probabilistically on the type of the mother. in the second example, the cell type may stochastically vary throughout the cell lifetime according to a two-state continuous-time markov chain , while the two daughters are assumed to inherit the type of the mother. to test the performance of our inference framework, we generated simulated datasets for the two example systems  and used them to infer parameters of interest in each case. details about some of the parameters used in the data generation process are provided in additional file 1: table s <dig>  the results for each example system are summarized below.
+
+example 1: a two-type branching process with dynamic readouts
+in this example, cells can adopt one of two possible types  and maintain their type throughout their lifetime, which, for simplicity, we assume to be the same and equal to t for every cell. at cell division, the daughter cell types are determined based on the type of the mother cell, according to a set of transition probabilities, as illustrated in fig. 2
+a. in turn, the type of each cell is assumed to determine the production rate of a fluorescent reporter protein  which can then be observed using fluorescence time-lapse microscopy.
+fig.  <dig> graphical illustration of the two systems considered. a model 1: all possible daughter pairs from a single mother and the corresponding probabilities of obtaining those pairs. the cells can be found in two possible states off  and on . note that the probability of the first daughter cell being off and the second on is equal as the probability of the first daughter being on and the second off. b model 2: cell types switch during the cell lifetime according to a two state continuous-time markov chain with rates q
+ <dig> and q
+ <dig>  c model 2: an example of the evolution of a cell type during its lifetime. the blue crosses on the time axis indicate switching point from on-off or vice versa
+
+
+
+
+the state vector of each cell is thus defined as x=xddf, where x
+d contains the cell type, while d and f correspond to the concentrations of the immature  and mature  forms of the fluorescent reporter, respectively. out of these, we assume that we can only obtain noisy measurements of f at discrete points in time. contrary to the cell type, the concentrations of the two reporter species are carried over from the mother to the daughters unchanged. that is, dn+12i−1=dni, fn+12i−1=fni and similarly for the second daughter. this is a reasonable modeling assumption, given that a daughter cell has half the volume of the mother and receives roughly half of its protein content as well.
+
+the fluorescent reporter dynamics of every cell evolves according to the following set of linear odes: 
+  <dig> d˙=α)−δ·d−m·d 
+
+
+
+  <dig> f˙=−δ·f+m·d, 
+
+
+where α), δ and m are reporter protein production, dilution and maturation rates respectively. the production rate is determined by the cell type: for an off-type cell, α=α
+off, while a cell of the on type has α=α
+on>α
+off.
+
+as described above, we assume that noise-corrupted measurements proportional to the f species are available at m points, t
+ <dig> ...,t
+m, during the life of every cell. the readout of a single cell at a given time is therefore assumed to be a scaled and noisy version of the f concentration: 
+ y∼n,σ2·f), 
+
+
+where the scaling constant c and the measurement variance σ
+ <dig> are known. the intuition behind this noise model is that a single concentration unit of mature gfp emits fluorescence which is normally distributed with mean c and variance σ
+ <dig>  therefore, for f concentration units of mature gfp, the overall fluorescence emitted will be normally distributed with mean c·f and variance σ
+2·f. the issue of mapping from protein concentrations to fluorescence intensities is still not well-established in the literature, but several possible approaches have been proposed. the method presented in  <cit>  exploits the deviations in daughter cell fluorescence levels from the average at each cell division. an alternative approach, suggested in  <cit>  is based on recording a calibration curve with several proteins of known abundance fused to the same fluorescence tag.
+
+given that individual measurements for each cell are independent from each other, the expression for the likelihood p, where yni={yni,m= <dig> …,m}, is given by 
+  <dig> pyni∣xni=∏m=1mpyni∣fni. 
+
+
+using this type of reporter measurements for every cell belonging to a fully observed tree, our goal is to infer the transition probabilities that govern cell type switching .
+
+if the type of each cell was readily measurable, the use of simple maximum likelihood estimators for branching processes would suffice to obtain all the necessary discrete state statistics from a fully observed tree, making the use of the reporter model unnecessary. however, the intervening reporter maturation step, the slow dilution dynamics and the sparse, noisy sampling, make inference much more challenging and require the use of the sophisticated computational machinery presented in this work.
+
+to test the performance of our algorithm on this system we simulated a synthetic dataset comprising of a single tree seven generations long . the lifetime of each cell in the dataset was fixed at  <dig> min and the measurement interval was  <dig> min. we generated the daughter types according to the transition probabilities shown in table  <dig>  the rest of the parameters used for the data generation are summarized in additional file 1: table s <dig> 
+
+θ
+θ
+θ
+2
+1−2θ
+2
+θ
+θ
+θ
+4
+3−2θ
+4
+
+
+
+note that due to symmetry, the second and third entries of each row are equal. moreover, the values of the first and second entries in each row determine the rest of the entries, since every row sums to one. we therefore considered θ
+ <dig>  θ
+ <dig>  θ
+ <dig> and θ
+ <dig> as unknown.
+
+we ran the pseudo-marginal mcmc sampler  to generate samples from the posterior distribution of Θ=[θ
+1
+θ
+2
+θ
+3
+θ
+4]. the transition probabilities θ
+ <dig> and θ
+ <dig> were sampled with the help of a dirichlet distribution  and similarly for θ
+ <dig> and θ
+ <dig>  for all of the parameters we considered flat priors supported on the interval  <cit> . the initial values of θ
+1−θ
+ <dig> were chosen to be all equal to  <dig> , with the initial assumption that there are equal probabilities for all of the four possible transitions from a single mother. the number of smc particles used for the inference procedure was  <dig> 
+
+the estimated posterior distributions p based on  <dig> mcmc samples are given in fig.  <dig>  where it can be clearly seen that the inferred posterior means  are located close to the true parameter values . on additional file 1: figure s <dig> we can see that the sampler takes very few iterations to find the high-log-likelihood region. the movement of the chain is shown in additional file 1: figure s <dig>  the autocorrelation of the samples is given in additional file 1: figure s <dig>  while their pairwise scatter plots are given in additional file 1: figure s <dig>  sufficient number of independent samples  need to be obtained in order to be confident that they are representative of the true posterior distribution. to check this, we also thinned the chain by using every 10th sample, after discarding the first  <dig> burn-in samples. while the thinned chain exhibits much lower sample autocorrelation than the original chain , the obtained posteriors in additional file 1: figure s <dig> are visually identical to those in fig.  <dig>  the raw data files generated by the sampler, which were used to generate some of the aforementioned figures, are given in additional file  <dig> 
+fig.  <dig> the proposed algorithm successfully infers parameters involved in the cell division process. posterior distributions of the inferred parameters described in example  <dig>  the posteriors were obtained using  <dig>  samples, after  <dig> burn-in samples had been discarded. the red vertical bar is positioned at the true parameter value , while the black dashed line is positioned at the estimated posterior mean. the blue curves are obtained by smoothing of the normalized histograms of the samples
+
+
+
+
+to assess the variability of the likelihood smc estimator as a function of the number of particles we estimated the log likelihood p of the same dataset with different numbers of particles, given the true parameter values Θ
+true. as it can be seen on fig.  <dig> , the average of  <dig> log-likelihood estimates converges as the particle number increases. with the increase of the number of particles the coefficient of variation of the log-likelihood calculations also drops quickly ). to avoid negative values we computed the coefficient of variation by dividing the standard deviation by the absolute value of the mean of the log-likelihood. we used the convergence properties of the estimator to get an initial sense of the order of magnitude for the particle number in the smc algorithm. the particle number choice was refined empirically, based on the mixing and convergence behavior of the pseudo-marginal mcmc sampler. it can be seen in fig.  <dig> that the estimator starts converging when around  <dig> particles are used. for the above-mentioned inference run we used  <dig> particles.
+fig.  <dig> convergence of the smc likelihood estimator with increasing numbers of particles. mean  and coefficient of variation  of the log-likelihood vs. number of particles used in the our likelihood estimation algorithm. to avoid negative values, the coefficient of variation was calculated by dividing the standard deviation by the absolute value of the mean, and plotted in log <dig> scale for better visualization. the results were based on  <dig> repetitions of the likelihood estimation for each particle count
+
+
+
+
+to verify computationally that the simplifying assumption we employ in eq.  <dig> does not lead to considerable bias in the estimated posteriors, we performed an inference run in which the assumption was not employed and the full likelihood was calculated using a particle filter based on the exact formulas presented above. the obtained posterior distributions  are visually identical to the ones in fig.  <dig>  indicating that the simplifying assumption does not create significant bias of the inference results for the example considered here. the mean, variance and the median of the two sets of marginal posterior distributions of each inferred parameter are compared side-by-side in additional file 1: table s <dig>  their similarity indicates that by employing the approximation the basic features of the distributions are maintained.
+
+example 2: stochastic cell type switching
+in the second example, we assume that the cell type evolves according to a two-state ctmc with rates q
+ <dig> and q
+ <dig> for the off-to-on and on-to-off transitions respectively. at division, each daughter inherits the type of its mother , but subsequently evolves independently from other cells according to the ctmc dynamics, as shown on fig. 2
+b and c. in this case, during the cell lifetime the reporter production rate alternates between α
+on and α
+off in accordance with the cell type.
+
+furthermore, to simulate a more biologically realistic scenario, we also incorporated extrinsic variability in our model by considering different gfp production rates for different cells. when a single cell was born, the gfp production rates α
+off and α
+on were drawn in a correlated fashion from lognormal distribution with log-mean at . the value of the log-standard deviation of each marginal distribution σ
+ext  was chosen to be  <dig> . more concretely, the production rates were drawn by first drawing z from logn and then defining α
+off and α
+on as described below. these production rates were subsequently used throughout the cell lifetime. 
+  <dig> z∼lognαoff=μαoff·zαon=μαon·z 
+
+
+for the inference, the production rates were drawn at the beginning of the cell lifetime in a similar fashion for each particle.
+
+using the same type of reporter model dynamics and readouts as in the previous example, our goal in this case was to infer the ctmc transition rates q
+ <dig> and q
+ <dig> , the production rate log-mean of the on cells μαon, the dilution rate δ, the extrinsic noise σ
+ext and the measurement variance σ
+ <dig>  assuming the rest of the parameters to be known .
+
+while in the first example system the tree-structure information was essential for inference as the cell type can only change at cell division, it was not equally obvious that our method would outperform traditional inference on independent single-cell trajectories in this example system, where each daughter inherits the state of its mother and then evolves independently. to verify this, we additionally performed parameter inference  by breaking up the tree into individual cell trajectories and considering each cell independently from the others , as is usually done in conventional inference based on single-cell data.
+
+to ensure that the mcmc chains converge to the same region of the parameter space, we performed several independent inference runs for each type of data by using the same sampler settings. after obtaining sufficiently long mcmc chains  we thinned the chains as described in additional file  <dig>  the posterior distributions obtained from the thinned chains from a single tree-based and trajectory-based inference run are plotted and compared in fig.  <dig>  the posterior distribution sets obtained from the multiple independent mcmc runs are overlayed in additional file 1: figure s <dig>  it can be easily seen that posterior distributions based on individual cell trajectories are in several cases biased, which indicates a potential disadvantage of the traditionally used trajectory-based inference. more details about the inference runs, including the prior distribution for the parameters and the proposal kernels used in the mcmc are given in additional file  <dig>  along with the running log-likelihoods, autocorrelation plots and the pairwise scatter plots of some of the samples. the raw data files produced by some of the mcmc runs  are given in additional file  <dig> 
+fig.  <dig> the proposed tree-based inference method outperforms the traditionally used inference on independent cell trajectories. posterior distributions of the six unknown parameters presented in example  <dig>  obtained both with tree-based  and trajectory-based inference . the red bars are positioned at the true parameter values , while the dashed lines indicate the estimated posterior means. the curves are obtained by smoothing of the normalized histograms of the mcmc samples. one can clearly observe the bias in the parameter estimates when trajectory-based inference was used
+
+
+
+
+the advantage of using lineage data instead of individual trajectories for inference is that the uncertainty regarding the initial conditions of the system states ,d,f) of each cell is greatly reduced, since the prior of each daughter state is based on the posterior of its mother. on the contrary, when the cell trajectories are assumed to be independent, the state of every cell has to be independently initialized according to an assumed prior . moreover, when the switching rates correspond to mean holding times that exceed the lifetime of a single cell, inference based on a relatively small number of single-cell trajectories will tend to produce biased estimates, as our results show.
+
+CONCLUSIONS
+in this work we proposed a parameter inference method for stochastic single-cell dynamics from tree-structured data. more specifically, we considered a class of systems with one or more unobserved states and fluorescent reporter readouts, observed through time-lapse microscopy, which allows tracking individual cells and their progeny over time. our goal was to estimate the posterior distribution of the unknown system parameters given such readouts. to calculate the likelihood of the data for a given parameter set, the hidden state trajectories had to be integrated out. this marginalization was accomplished with the help of a sequential monte carlo method, which recursively computes a sampling-based estimate of this analytically intractable quantity. to sample the system parameter space, we employed an mcmc scheme, which was able to target the correct parameter posterior despite the noisy likelihood estimates. the application of our method to two simple examples showed that it can correctly infer the parameters of interest and approximate their posterior distribution. our algorithm is currently implemented in c++ and an inference run for the second example presented, consisting of  <dig>  mcmc iterations, took about  <dig> h.
+
+our inference framework extends to more complex applications in a straightforward manner , although its computational complexity increases with the state and parameter dimensionality. more complex networks will require heavier stochastic simulations, which take a crucial part of the computations carried out in our method. they will also require a larger number of particles to achieve a reasonable accuracy of the smc-based likelihood estimator. if the latter is too noisy, one may observe slow mixing of the mcmc sampler and in turn poor posterior estimates.
+
+the choice of the mcmc sampler is also a critical issue and depends on the features of the problem at hand, such as the complexity of the target distribution. the metropolis-hastings sampler was sufficiently well-suited for the examples presented in this study, but may not be the best choice for every problem. to apply our inference framework on more complex problems, different samplers might need to be employed, with better and more effective convergence and parameter exploration properties. in some cases the model structure might also not be completely known a priori and model selection should be performed to discriminate among several candidate model structures. bayesian model selection requires the computation of the evidence  for each candidate model, which will demand much more powerful and sophisticated samplers than the mcmc sampler presented here. model selection is, however, beyond the scope of this work.
+
+the inference framework presented here could be very useful in the case of systems where accurate tracking of single-cell dynamics across cell lineages plays an important role. these are, for example, systems involved in stem cell fate decisions, or stochastic phenotype switching in bacteria  <cit> . in many such cases, stochastic fluctuations of key factors over long timescales and/or stochastic events taking place at cell division create strong mother-daughter and daughter-daughter correlations that play a crucial role in determining the overall behavior of a colony. in such cases, treatment of the measured single-cell trajectories independently from each other will result a large loss of information and biased parameter estimates. we believe that proper incorporation of the population lineage information into the parameter inference problem will thus provide the right framework for treating this type of systems and may reveal important insights into their function.
+
+additional files
+
+additional file  <dig> further details about the examples presented. 
+
+ 
+
+
+
+additional file  <dig> a zip file containing the raw datasets obtained from the mcmc runs presented. 
+
+ 
+
+
+abbreviations
+abcapproximate bayesian computation
+
+ctmccontinuous-time markov chain
+
+mcmcmarkov chain monte carlo
+
+smcsequential monte carlo
+
+not applicable.
+
+funding
+not applicable.
+
+availability of data and materials
+the simulated datasets generated during the current study are not publicly available because the cell-lineage data format used in this study has not been published yet. the raw datasets that were obtained from the mcmc runs and upon which the summary statistics in the manuscript are based are provided in additional file  <dig> 
+
+authors’ contributions
+ik and mk conceived the study. ik, am and cz designed the method and examples presented in the manuscript. jm assisted in the design of the examples, implemented the method and carried out the inference runs for the first example presented. ik and jm carried out the inference runs for the second example presented. ik, am and cz wrote the manuscript. mk supervised the study in all of its stages. all authors read and approved the final version of the manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+not applicable.
+
+publisher’s note
+springer nature remains neutral with regard to jurisdictional claims in published maps and institutional affiliations.

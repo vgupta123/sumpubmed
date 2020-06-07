@@ -1,0 +1,201 @@
+BACKGROUND
+nuclear magnetic resonance  chemical shift prediction has developed into a valuable tool for computational structural biology and biomolecular nmr spectrometry. while the high dependency of nmr chemical shifts on structural details renders their prediction a formidable task, it simultaneously makes them a very valuable source of structural information for applications like structure determination and optimization  <cit> , and the scoring of protein-protein docking results  <cit> . hence, a variety of fields profit from efficient and accurate chemical shift estimation from a three-dimensional model of the molecule under consideration – in docking, for instance, predicted shifts for the candidate complexes are compared to the experimentally observed ones as a measure of reconstruction error.
+
+the development of novel nmr chemical shift prediction techniques is a challenging task. previous approaches either focus on full quantum mechanical models  which are computationally very expensive, or settle for so called semi-classical approximations borrowed from classical physics  <cit> . as a third option, prediction techniques can use statistical models based on semi-classical, structural, or sequential features of the proteins . for high-throughput applications, the most successful approaches today offer good prediction accuracy with relatively low computational cost by combining semi-classical and statistical approaches. these techniques are known as hybrid methods.
+
+developing a new hybrid method, or extending an existing one, is a hard and complex task for which three questions have to be addressed: which features should be included into the model, which statistical technique should be employed, and which data set can be used.
+
+the question of data set generation in particular is a very difficult one. the required information for creating such a data set is spread over several data bases, such as the biological magnetic resonance bank   <cit>  and the protein data bank   <cit>  and is stored in different, notoriously hard-to-parse, file formats. to make matters worse, real-life data sets often contain serious syntactical, semantical, and logical errors or inconsistencies. consequently, a number of publications  <cit>  discuss the necessity of checking and correcting the given data, bmrb nmr data and pdb coordinates alike. typical issues for creating nmr chemical shift prediction data sets are the completeness and quality of pdb files, the chemical re-referencing problem for nmr data, and the exclusion of homologs within the data set. for bmrb files, a number of approaches  have been developed to detect and correct assignment and referencing errors. mainly due to these complications, most former approaches rely on hand-curated data sets created by the application of unstandardized sequences of restriction and correction methods.
+
+another challenge when training prediction models is the computation of the semi-classical terms, or the structural and sequential features to learn from. computing these terms and molecular features correctly, reliably, and efficiently requires complex molecular data structures and algorithms. further technical challenges are the computation and the choice of a statistical model.
+
+in this work, we present an extensible automated framework called nightshift for data set generation and training of hybrid nmr chemical shift prediction methods. most importantly, typical semi-classical terms for shift prediction are implemented and readily available. as of now, we include random coil contributions, aromatic ring current effects, electric field contributions, and hydrogen bonding effects. in addition, the feature set for the training of the statistical term encompasses sequential, structural , force-field based, as well as experimental properties. all features are computed using our open source library ball  <cit> , and can be easily extended.
+
+due to its modular nature, the framework can employ data for both, protein structures and chemical shifts, from a variety of sources. as long as the input is available in the form of one of several recognized standard file formats , nightshift can easily train and evaluate models on it. as demonstrated in this paper, this freedom can, e.g., be helpful in addressing some of the current controversies in shift prediction. for instance, the user can freely decide on a shift reference correction method of his choice, or validate models trained on non-reference corrected data sets on rereferenced ones, or study the difference of models trained on x-ray-derived protein structures to those based on nmr-derived ones.
+
+to demonstrate that the data collected by the framework is indeed of use for nmr shift prediction, we train and evaluate a simple hybrid prediction model. the whole training and evaluation process is completeley automated and does not require human intervention. based on recent research  <cit> , we choose a random forest model for the statistical contribution of this proof-of-concept predictor which is known for its prediction quality and efficiency, and in our experiments has demonstrated to yield very accurate and stable results. in general, however, the pipeline is model-agnostic and can be used with any regression technique implemented in r  <cit> .
+
+methods
+a framework as complex as nightshift depends on a reasonable data model that can be easily accessed during all stages, as well as be easily extended.
+
+to this end, we store all accumulated information that is needed for the training of our chemical shift prediction model in later stages, namely the experimental shifts of the atoms, the corresponding atomic features, and the filter or quality scores, in an sqlite data base .
+
+the underlying data model consists of two tables: a pdb-bmrb-chain mapping and an atomic property table, focusing at individual chemical shifts and the computed atomic features.
+
+data sources
+in principle, a number of data sets for nmr protein chemical shift prediction is available, e.g., the recent shiftx <dig>  <cit>  training and test set, the refdb  <cit> , the proshift set  <cit> , the talos+ set  <cit> , or the general pdb to bmrb mapping of the bmrb  <cit>  itself. apart from the refdb and the bmrb mapping tables, the data sets were hand crafted in a time-consuming manual process. to the best of our knowledge, all previously proposed prediction approaches created such a data set manually, using many individually chosen filtering criteria. this, however, has three major disadvantages: first, it is a very cumbersome and time-consuming process that is usually not repeated when new experimental information becomes available. second, the manual curation of the data set may impose a certain bias into the final models. and third, cutting away much of the input space might remove valuable information. the first problem could be circumvented by using one of the available data sets . however, all of these suffer from the other two mentioned problems.
+
+the third and fourth columns show the size of the data set, measured as the number of proteins contained within. the camshift publication reported only the overall number of shifts, which we denote in parentheses. note that for the nightshift set, we already excluded homologous proteins. the table only includes methods for which these numbers could be reliably determined.
+
+thus, we decided to approach the problem differently in our pipeline: we want to make use of all available data with the ability to easily retrain the model. to obtain the largest possible data set available at any given moment, we make use of the official mapping between pdb and bmrb entries provided by the bmrb.
+
+former approaches to nmr chemical shift prediction typically rely on x-ray resolved structures as input while neglecting nmr resolved ones. this might seem unintuitive at first: if we have access to experimental shift information for a given protein, we typically also find a protein structure that was resolved using nmr, based on exactly those shifts under the exact same experimental conditions. this structure, though, is typically ignored in training a shift prediction method, and instead replaced with an alternative x-ray resolved one for the same – or, more typically, a highly homologous – protein. the main reason for this choice is structure quality: if both, x-ray and nmr structures exist for the same protein, the x-ray resolved ones typically feature better resolution, which is considered crucial for shift prediction.
+
+on the other hand, the physico-chemical conditions in a protein crystal differ strongly from those encountered in the nmr experiment in which the chemical shifts were measured. in fact, there is evidence for statistically significant deviations between nmr and x-ray structures for the same protein that often exceed experimental uncertainties and rmsds within the nmr ensemble  <cit> . in addition, proteins are often modified for crystallisation purposes, including amino acid mutations. in many instances, the sequence of the protein studied in the nmr experiment differs from that used during crystallisation.
+
+hence, the usage of x-ray resolved structures in combination with experimental chemical nmr shifts as a training set for a prediction technique is at least debatable: while x-ray typically yields higher general structure quality and resolution, the crystallized conformation may differ from the one seen in the nmr experiment by an amount exceeding the difference in resolution.
+
+an automatic framework such as the one described in this work is obviously ideally suited to study questions such as these: the modular design allows to exchange the protein data source, such that the user can easily switch between x-ray and nmr-resolved structures, can compare the generated models, or evaluate models trained on the one set on the other. as a first step, and a proof-of-concept, we hence decided to study whether nmr-derived data sets support the training of predictors of comparable performance to those trained on x-ray derived ones.
+
+in addition to the intrinsic consistency, the choice of nmr resolved structures relieves us from deducing missing hydrogen positions in many cases. hydrogen placement not only affects and biases the hydrogen prediction but also the predictions for other atom types, since hydrogen atoms are present everywhere and form hydrogen bonds, an important feature in most prediction approaches. instead of deducing them from other algorithms, nmr resolved structures directly contain this information.
+
+an alternative source for the shift data with similar advantages to the bmrb is the refdb, which is essentially a referencing-corrected version of the bmrb. as discussed in  <cit> , there is sufficient reason to believe that a non-negligible percentage of chemical shifts in the bmrb have been misreferenced, which can obviously lead to spoiled shift prediction. to demonstrate the versatility of our framework, we decided to train a model on both, raw and reference corrected data. the model trained on raw data can help to assess how well automated predictor generation from non-rereferenced data can perform as a lower bound for the achievable accuracy. by comparison to the results on referenced data, our framework can then additionally be employed to study the influence of reference correction on prediction quality, or to analyze the question of potential bias in the reference corrected data. comparative studies such as these are greatly simplified by the modular design of our pipeline, where the data download step can be easily adapted to query the data from varying sources.
+
+restricting the data
+to create a reasonable data set from the primary data sources, we apply two types of filters: type- <dig> filters restrict the initial bmrb to pdb mapping, while type- <dig> filters evaluate individual molecule files.
+
+when creating a protein-only model, we want to skip all pdb entries containing additional ligands or dna , but this is out of scope of this work). to reliably decide whether a pdb entry contains a ligand before downloading and parsing the file itself, we query the pdb restful web service  to parse its results.
+
+furthermore to exclude mismatches, mutations, and improbable structural data we demand an alignment score of 100% between the residue sequence in the bmrb and the pdb file. to this end, we employ clustalw  <cit> .
+
+to avoid overfitting through homolous structures in test and training set, we cull the mapping by sequence similarity with a cutoff of 10% by applying the standalone pisces package provided by the dunbrack group  <cit> .
+
+to restrict the data set to reasonable and trustworthy data, we apply type- <dig> filters, namely the structure’s amber energy  <cit>  with a default cutoff value of  <dig> kj/mol.
+
+data mapping
+reading the bmrb data correctly can be challenging. for mapping atomic to experimental data we follow a two step procedure. first we employ clustalw  <cit>  to map the residues between pdb and bmrb, followed by ball’s pdb-to-nmrstar name converter to identify corresponding atoms. while computing the atom mapping we encountered the following problems: first, both data bases employ different naming and index conventions and second, both use non-unique chain identifiers.
+
+we solve the problem of non-unique chain identifiers by using the results of our alignment procedure to re-index the chains. if multiple chains can be matched with equal best alignment score, we simply choose the first match.
+
+choice of statistical models
+this work focuses more on the creation of a pipeline for automated predictor generation than on fine-tuning the parameters of the resulting predictors themselves. hence, we relied on former research for the choice of a statistical model.
+
+ <cit>  studied different learning techniques for protein nmr chemical shift prediction based on sequential and structural features, and both suggested bagging learners. we thus decided to apply random forests  <cit> , which combine bagging with feature selection and belong to the class of bootstrap aggregating machine learning techniques. a key feature of random forests is the randomized generation of subset training data for each tree in the forest, which protects the final model from suffering high error variance. thus, the random forest method is a variance reduction technique and as such considered to be resistant to overfitting.
+
+for training the prediction models, we decided to use r  <cit> , the de-facto standard for open source statistical computing. random forests were trained using the r package randomforest  <cit>  with  <dig> trees to grow and all variables sampled as candidate at each split. m try was determined using the recommended tuning procedures.
+
+separation of models by atom type
+a final decision before training the models concerns the handling of different atom types. as extreme cases, all atom types could be collected into one large model that contains the type as one additional feature, or different models could be trained for each atom type for which a significant number of experimentally determined shifts are available.
+
+the first option is, to the best of our knowledge, never used in chemical shift prediction: the physico-chemical processes that govern the influence of features  on an atom’s shift value differ too widely to combine them into a single formula. the other extreme, on the other hand, might lead to the risk of overfitting the models, in particular for the hydrogens, which can be classified into many different atom types. using amber  <cit>  atom types, for instance, we would end up with  <dig> individual models for all protein h, n and c atoms. for comparison, the shiftx <dig> approach employs  <dig> backbone and  <dig> side chain models.
+
+in our study, we decided for an intermediate approach. we thus designed the concept of atom super classes, which cluster force-field based atom types to form subsets of comparable size whenever possible. this clustering can be either defined by the user or automatically generated by the framework based on the data set at hand. in our experiments, we found a set of  <dig> types to be suitable, for which we then trained and evaluated separate models. the final atom super classes are given in table  <dig>  please note that the sizes for each super class in the table were taken from the ‘raw’ bmrb set, but do not vary strongly on the refdb-set.
+
+performance evaluation of the models
+the careful analysis and evaluation of the generated model is arguably the most crucial step in predictor generation. we hence decided to include functionality for automated conservative evaluation directly into the pipeline. to this end, we first choose an independent test set at random from the input data set, which is removed from the training set. in a data rich situation as the one described in this work , such a complete separation of training and test set is typically prefered to alternative approaches for approximating the generalization error, such as cross validation or bootstrapping  <cit> . for a conservative evaluation, it is greatly advisable to perform homology restriction in the pipeline, as described earlier in this work. comparison to state-of-the-art techniques was performed by applying the stand-alone version of shiftx <dig> on our test data set .
+
+the size is measured in the number of available atomic shifts.
+
+the test errors of our models can be estimated from the root mean square error  and pearson’s correlation coefficient : 
+
+  rmse=∑i=1nδiexp-δipred2n 
+
+  corr=1n-1∑i=1nδiexp-δ^iexpsδexpδipred-δ^ipredsδpred 
+
+with δexp denoting the experimentally measured chemical shift of an atom, δpred the predicted chemical shift, and n the number of predictions made. δ^exp denotes the mean of the experimentally measured  shifts and sδexp its standard deviation.
+
+RESULTS
+the two main results of this work are the pipeline and the generated data sets. in the following, we present these in more detail. in addition, we discuss – as a proof-of-concept – a new shift prediction model  that was automatically generated by the pipeline.
+
+pipeline
+our key goals in developing nightshift were its automizability, flexibility, robustness, and simple extensibility – goals that can easily become contradictory if they are not carefully addressed. by comparing several manual nmr chemical shift prediction approaches, we identified the following steps:  creation of an initial mapping between nmr and structural data,  filtering and restriction to a high-quality and non-homologous subset,  linking the nmr information to individual atoms,  computing the proposed features and storing them in a format that can be easily queried, and  training and evaluating the proposed statistical model. figure  <dig> shows our proposed workflow. we now describe the pipeline in more detail.
+
+creating an initial experiment-to-structure mapping
+the very first task in our pipeline is the construction or selection of a reasonable bmrb to pdb mapping. as described in section “data sources”, the bmrb is regularly updated, is the largest of the possible sets, provides unbiased data and high consistency between structural and chemical shift information. we thus decided for the bmrb mapping as inital mapping.
+
+to automatize data set creation, which allows retraining as soon as new data becomes available, the pipeline starts with a python script that automatically queries the bmrb for its mapping and parses the results to yield a pdb-id to bmrb accession number mapping. this step can be easily adapted to use different sources of chemical shift data. in our experiments, e.g., we also used reference-corrected shifts as deposited in the refdb. since this data base also offers its content in the form of nmrstarfiles, adapting the pipeline was trivial and mainly consisted in changing a single url. this initial mapping then forms the input for the next step of our pipeline.
+
+filtering the experiment-to-structure mapping
+the initial mapping needs to be further restricted with respect to the exclusion of homologs, the application of quality criteria, and the limitation to single protein entities measured in the experiment.
+
+the pipeline first applies type- <dig> filters: the user can select to focus on pure protein instances and apply a user defined homology criterion, e.g., maximally 10%.
+
+if a homology filter is not desired by the user, it can simply be skipped. similarly, it is easily possible to extend the filtering procedure by user generated scripts. if filtering is required at a later point in the pipeline, special filter columns can be added to the created data base by a provided python script.
+
+the type- <dig> filters, the limitation to high-quality data, cannot be adressed at this point since they require the download and parsing of pdb and bmrb input data and are thus handled in a later step.
+
+the input for the next step is then the resulting filtered mapping file.
+
+download of pdb data, bmrb data, and creation of the shift-to-atom mapping table
+the goal of this step is to automatically download all pdb and bmrb files specified in the mapping file, to find a mapping between pdb atoms and bmrb atoms, to perform referencing error correction, if so desired, and to store the resulting atom mapping for the later feature computation. this functionality is covered in our pipeline by a python script as well, which starts by automatically downloading all files  from their respective web interfaces.
+
+the pipeline then continues by identifying first corresponding residues, then atoms and shifts. in this stage, we store the residue alignment and its alignment score – which can be later used for quality filtering – in a mapping-related table.
+
+in addition, for each pdb–bmrb chain pair we store general information that is related solely to the pdb or bmrb entity: nmr experimental information like availability of h, c or n nmr chemical shifts, the nmr spectrometer used in the experiment, the experimental conditions like solution, ph, temperature, and pressure. the nmr information is parsed via ball’s python interface, pdb information can be taken from the pdb’s restful web service.
+
+now, finally having access to the nmr file, further shift re-referencing through external programs could be added to the pipeline. this step can be skipped if re-referencing is not desired, or if the data has been taken from an intrinsically reference-corrected source, such as the refdb.
+
+choice of input features
+the choice of features to be provided to the statistical model is governed by a feature definition file. besides some background descriptors needed for administrative issues  we offer a large number of features as input for the prediction model. our framework currently provides sequential , structural , force field based  and experimental features  as well as semi-classical contributions . a detailed definition of each feature can be found in the additional file  <dig>  a number of these features is already known to the community, but we developed new features as well. performances of all features are described in the additional file  <dig> as well.
+
+by commenting out lines in this feature definition file, pre-defined features can be easily excluded. feature implementation is greatly simplified by ball, which offers data structures and pre-implemented functionality for such tasks. in our pipeline, each feature is represented by a string that can be easily added to the list of features to compute. a c++ class connects these strings to functions that compute these features.
+
+computation of an atomic property table
+for each matched atom, the experimental nmr chemical shift has to be linked to the corresponding structural atom data and to the atom’s features to allow for training a prediction model. to this end, the pipeline parses the previously downloaded bmrb and pdb files for the relevant information to compute and store all features, and to assign the experimental chemical shifts to pdb atom entities.
+
+based on the mapping table, the corresponding pdb and bmrb files  are read in and a name converter is used to identify corresponding atom entities. when addressing the assignment of experimental chemical shifts to pdb atoms, we face some technical problems since bmrb files are hard to parse correctly and in some cases, the files contain serious syntax errors or inconsistencies. we thus designed a fault-tolerant nmrstarfile parser, which we included into the ball library, as well as data structures and algorithms for mapping and assignment.
+
+the output of this step is a sqlite data base with two tables, one for the pdb chain to bmrb mapping and related information, the other for the atoms and their shifts and properties.
+
+training and evaluation
+finally, the nightshift pipeline reads the sqlite data base into an r-data frame and automatically trains a random forest model for each atom super class separately. the underlying r training script automatically and randomly splits the provided shift data set into a training and test sets according to a user defined ratio  and calls the statistical model’s training method. the training method is given the training data subset defined by predefined feature columns and the column to train against, and returns a vector of models, one for each atom super class.
+
+finally, our script automatically stores the created models in “r.data” format.
+
+for evaluation purposes, the resulting prediction models are automatically applied to the test set and for each atom super class, the root mean square error  and pearson’s correlation coefficient  between experimentally measured and predicted values are computed.
+
+application of the model
+the framework additionally offers an interface to apply the created models to proteins given in pdb format. given the feature definition file, this script applies the preparation steps used for generating a query sqlite data base containing the specified features, and applies a provided r model. the output is a csv file.
+
+extensibility
+the presented pipeline can be easily extended in several different directions: 
+
+• re-training the models: given new data in the bmrb, only the pdb to bmrb mapping is needed as input to generate a new random forest model.
+
+• using alternative data sets: modifying the pipeline to use different data sources is typically simple, in particular if the data comes in a form already understood by ball. for instance, reference-corrected shift data can be used by either downloading the nmrstar files from a re-referenced data base, such as the refdb, or by applying a re-referencing tool to the downloaded data as a step in the pipeline. similarly, a change from nmr- to x-ray - derived structures can be achieved by using the pdb’s query functionality to find the most similar  x-ray derived entry for a given nmr structure.
+
+• adding a feature: for adding a feature, the user has to choose a feature name string, to add the feature name string to the feature definition file, and to add a method that computes the feature value. the feature value will then automatically be included in a column named accordingly and is made available to the training procedures.
+
+• adding a model: for testing a new statistical model, the user only has to include the corresponding r package and to wrap the correct prediction method to meet our interface definition of training methods.
+
+data set
+for reasons of simplicity, this section only describes the data set generated from the ‘raw’ bmrb; the numbers for the data set based on the refdb are very similar.
+
+the original mapping downloaded from the bmrb contained  <dig>  nmr resolved pdb–bmrb pairs. within this set, some pdb files contained multiple chains, in total  <dig>  yielding  <dig>  pdb chain–bmrb pairs. after performing a 10% homology restriction via pisces  <cit> , we arrived at  <dig> different pdb–bmrb mappings, accounting for  <dig> pdb chain–bmrb pairs in our data base.
+
+interestingly, the setting chosen for the proof-of-concept analysis performed in this work turned out to simplify matters significantly in this step: building the data set from nmr resolved structures instead of x-ray resolved ones increased the consistency of the data set considerably. for x-ray resolved pdb files, the corresponding sequence in the bmrb file often differs considerably from the one in the pdb file, while in our data set, this was only rarely the case. in fact, after pruning the non-identical pairs, the data set still contained  <dig> pdb chain–bmrb pairs – the minimal protein size in the set is  <dig> residues, the maximum  <dig> residues – with a total of  <dig>  shifts.
+
+comparing this to the number of features in our model, we currently use up to  <dig> , this is a data rich scenario. table  <dig> shows the number of shifts and features provided and actually used for each atom super class in our spinster model.
+
+maximum identity between proteins in test- and training data set was below 10%. the first two lines show the numbers for the raw data set before applying the training procedure, lines three and four show the number of shifts, and the last line shows the number of features used by the models .
+
+prediction model - spinster
+based on the given data set and the chosen atom super classes, we trained a random forest model, which we call spinster - single protein nmr shift determination. we evaluated spinster on a randomly chosen test set which was excluded from the training set and compared our model with the state-of-the-art nmr shift predictor shiftx <dig>  training and evaluation are performed automatically in the pipeline without manual intervention.
+
+the size is measured in the number of available atomic shifts.
+
+as clearly demonstrated by the evaluation, the automatically generated models spinster and spinster-ref perform at least very comparably to the established shiftx <dig> approach. in the case of non-reference corrected data, the model spinster even performs slightly better than shiftx <dig> in all cases. please note that shiftx <dig> performs significantly worse on the non-reference corrected data set than on the reference corrected one. while this is not unexpected per se, the fact that it is possible to train and evaluate a model on non-reference corrected data  with very comparable quality to those on reference corrected ones at least warrants further investigation.
+
+in addition to the prediction task, the random forest models implicitely perform a feature selection. in the case of the bmrb-derived data set, e.g., out of the  <dig> provided features, the forests evaluate up to  <dig> as important. the individual importance measures are shown in the additional file  <dig>  traditional features like amino acid type and torsional angles are within the top ten scored features as expected. some of our new features also appear in the top ten, e.g., the ‘residue sas’ – the surface accessible area of the atom’s residue – for atom super classes c, hb, hd and hehz.
+
+web-interface
+to simplify the usage of our pipeline, we have created a set of tools for the ballaxy service – a web-based workflow toolkit for structural bioinformatics built on the galaxy workflow engine  <cit> . a manuscript on ballaxy is currently in preparation. this integration allows the user to easily generate his own prediction models for his own choice of parameters  from the browser, or to apply existing ones. through galaxy’s powerful workflow functionality, a user can even generate his own pipeline on demand or integrate nightshift into arbitrarily complex workflows. figure  <dig> shows the web-interface.
+
+discussion and 
+CONCLUSIONS
+chemical shift prediction from candidate structures plays an important role in many application scenarios in structural bioinformatics. hence, the problem has received considerable attention in the literature. but despite tremendous advances in the field in recent years, there is still considerable room for improvement. on the one side, there is obviously the challenge to further improve the prediction quality. on the other, there is strong interest in extending the applicability to protein-dna or protein-ligand complexes.
+
+unfortunately, though, the initial barrier to create a new prediction technique, potentially introducing novel features or new statistical models, is enormously high. the problems range from the seemingly trivial, but practically difficult, error-tolerant implementation of nmr file formats to the challenges in computing novel descriptors from three-dimensional structure representations.
+
+with this work, we have contributed a framework that allows researchers not only simple access to the required data, but also a wide variety of molecular features to choose from. in addition, our reliance on open-source software packages, such as the ball library, the r framework for statistical computing, and the sqlite data base engine, greatly magnifies the extensibility of our approach. should a user, for instance, want to extend nmr chemical shift prediction to protein-dna complexes, he can simply make use of the large number of molecular features available in ball, or program his own extensions, which he can then easily feed into our pipeline.
+
+using our pipeline, we automatically generated exemplary data sets for training and evaluating shift prediction models based on the ‘raw’ bmrb as well as on the reference-corrected refdb. these sets have unprecedented size and can easily grow if new data becomes available. in contrast to alternative current data sets, they have been constructed exclusively from nmr resolved structures, leading to great consistency between molecular structures and nmr shift information. due to the unclear relative influences of structure quality and resolution on the one side, and consistency between structure and shifts on the other, the framework also allows to generate data sets based exclusively on x-ray structures, or to freely mix the two kinds. evaluating the differences in shift prediction due to this choice will be the topic of future work, which will be greatly simplified by the nightshift-framework.
+
+in addition to preparing the data sets, we exemplarily trained prediction models on them, again in a completely automatic fashion without any fine-tuning to further to optimize performance. even without such optimizations, the performance of the model is surprisingly good. in fact, we find that it can easily compete with state-of-the art techniques, as tested by comparison to the well-established shiftx2-method. first results indicate that our method seems to be particularly robust against lowly resolved structures and against the presence of wrongly referenced shifts, but further work is required before this question can be conclusively answered. such robustness would be highly desirable for application scenarios such as molecular docking, where the input structures are merely candidates, instead of highly resolved, precise configurations.
+
+in summary, we have demonstrated that the creation of chemical shift prediction models can be greatly simplified, and to a large extent automatized, without spoiling prediction quality. the models we presented will further improve over time with each new structure-shift pair deposited to the bmrb and refdb and each new feature developed. our own future work will focus on adding feature sets that are suitable for protein-ligand and protein-dna complexes to extend the applicability of nmr chemical shift prediction to a whole new set of problems.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+ah and hpl supervised the study. akd, ah, and sl implemented the pipeline. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplementary material.
+
+click here for file
+
+ acknowledgements
+ah acknowledges financial support from the intel visual computing institute  of saarland university, ah and hpl financial support from dfg .

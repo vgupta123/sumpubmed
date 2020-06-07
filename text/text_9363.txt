@@ -1,0 +1,59 @@
+BACKGROUND
+systems biology markup language  is a standard for representing dynamical systems of biological interest  <cit> . interfaces between sbml and high level computational environments are currently being developed for mathematica  <cit>  and matlab  <cit> , but to the author's knowledge, no such efforts are being carried forth for r/s-plus. this brief paper presents the author's initial developments toward a two-way sbml-r interface. the interface is currently limited in the range of sbml input files that it can handle. for example, it only handles sbml level  <dig> and does not handle "events" and "functiondefinitions." the interface can nevertheless be used for some models, examples  <cit>  of which are included under "demo" in the sbmlr package  <cit> . this paper provides an explicit example of one approach to an sbml-r interface. it is assumed throughout that the reader is already quite familiar with both sbml  <cit>  and r  <cit> .
+
+implementation
+the software exists completely in r. it is comprised of four functions and is currently being distributed as a developmental package called "sbmlr" through bioconductor  <cit> . the software was written subject to two constraints: 1) models expressed in sbml-like r must be exchangeable with a range of sbml models; and 2) models must be amenable to simulation in r. the first subsection that follows defines an sbml-like r model structure, the second illustrates how it can be used in simulations, and the third describes its conversions into and out of sbml.
+
+an sbml-like model structure in r
+to facilitate mappings between sbml and r, an sbml-like list structure is defined in this subsection using the purine metabolism model of curto et al.  <cit>  as a specific example . in this figure and elsewhere, ellipses  indicate missing code not critical to current discussions; complete source codes are available through the sbmlr package  <cit> . the essential components of an sbml model, namely, its compartments, species and reactions, are all present in this r analog of an sbml model. in the model of curto et al.  <cit> , there is one compartment, be it the cell or the entire human body, and  <dig> species:  <dig> boundary conditions  and  <dig> state variables , each with an initial condition  or value. each reaction is a list that includes a reaction id, the names of species that are reactants , the names of species that are reaction rate modulators , the names of species that are produced by the reaction , parameter values , and the reaction rate law  function definition. in this framework, only state variables need be listed as products, boundary condition reactants can equivalently be listed as modulators, and missing terms  are equivalent to a null assignment. the rate law function has as its input arguments two vectors, one carrying the concentrations of reactants and modulators , the other carrying reaction parameter values . if the body of the rate law function contains n statements, the first n- <dig> trivially convert input vector components into variables with the same names. the nth statement then contains the complete reaction rate law. it can occupy multiple lines, but it must be a single statement, i.e. it cannot depend on substitution variables temporarily defined in preceding statements.
+
+sbml-like model execution in r
+model definition codes such as that given in figure  <dig>  when placed in a separate file , can be sourced into a parent script to become globally available for simulations. for example, the purine metabolism model of curto et al.  <cit>  can be simulated using the execution code shown in figure  <dig> 
+
+this code simulates the response to a 10-fold increase in phosphoribosylpyrophosphate  at time t =  <dig> and plots the responses of inosine monophosphate  and hypoxanthine  as shown in figure  <dig>  two functions called by this script are defined in the sbmlr package and shown in figure  <dig>  they are, getincidencematrix(), which computes the incidence/stoichiometry matrix used by the second function, fderiv(), which computes state derivatives for integration by the function lsoda() of the "odesolve" package. in getincidencematrix(), the incidence matrix is generated automatically using an i loop over the rows  and a j loop over the columns . if a state is a product of a reaction, the corresponding matrix element becomes a positive integer equal to its stoichiometry , and similarly for reactants, though with negative numbers entering the matrix in this case .
+
+the function fderiv() creates the current species vector by overriding initial states with current states clipped to positive values, and by overriding any time varying boundary conditions defined by rules . the function fderiv() then computes the reaction rate flux vector  based on the current species vector  and multiplies it by the incidence matrix to produce the current state derivative vector . the names of xp and v are reset at the end of each function call to override the problem of variables gaining new composite names from the names of their expression arguments.
+
+a two-way interface between sbml and r
+two functions comprise the sbml-r interface: write.sbml() converts sbml-like r models  into sbml models , and read.sbml() converts sbml models  into an sbml-like r model . a key component of these two interface functions is a locally defined recursive function named recurs(). this function converts arbitrary r expressions into arbitrary mathml expressions, and vice-versa; it is defined differently, locally, in each of the two functions. in write.sbml(), shown in figure  <dig>  recurs() initially takes as its input argument the last component of the body of the kinetic rate law function definition, which is the entire rate law expression . in r, expressions are lisp like in that they contain a first element, the operator, and the remaining elements, the arguments, any of which can be an expression. if the operator is the parentheses operator, the action taken is that of a unary identity operator, and we simply skip it and move on to its argument since parentheses are not needed in mathml. each nested call to the function recurs() sends "<apply>" and the converted operator to the output file on its way in, and a matching "</apply>" on its way out. nested calling continues until all nodes of the expression tree are of class "name" or "numeric," i.e. when all found objects are leaves of the tree rather than "expressions" that require further parsing. leaves are then sent to the output file bracketed by <ci> and </ci>.
+
+the second of the two sbml-r interface functions, read.sbml(), maps a limited range of sbml level  <dig> files  into sbml-like r model files. portions of read.sbml() are given in figure  <dig>  the main difference between this function, read.sbml(), and the previous function, write.sbml(), is that here, rather than using parse() to decompose the list-of-lists structure of the model defined in r, the sbml model is instead decomposed as an xml object using xmltreeparse() of the xml package available to r  <cit> . in read.sbml(), the locally defined recursive function recurs() uses an overkill of parentheses to avoid operator precedence issues. this recursive function is passed a mathml reaction rate law which it parses recursively until the leaves of the tree  are all found. during the recursion a corresponding r expression is built as a vector of character strings which, upon exit from the last of the recursive calls, is collapsed into a single string and sent to the output file as the last line of the current rate law function definition.
+
+RESULTS
+the function write.sbml() was applied to curto.r to generate curto.xml and the function read.sbml() was then applied to curto.xml to generate curtox.r. execution of the script given in figure  <dig> with line  <dig> of the execution code changed to act on curtox.r instead of curto.r generated the same plots as before . this shows that the r model was successfully converted into an sbml file that can be reconverted back into a properly functioning r model. the intermediate file curto.xml was successfully validated as an sbml level  <dig> file  <cit> . the sbml file could thus be imported into visualization packages such as jdesigner  <cit> .
+
+discussion
+if the model of curto et al.  <cit>  were implemented in r without any knowledge of sbml, a form that it might take is that given in appendix b . compared to its sbml-like counterparts, this code is more compact and easier to understand, e.g. the system's network connectivity is clearly visible. the disadvantage of such code is that it is not readily converted into sbml. since the benefits of sbml are compelling, this disadvantage alone warrants the use of sbml-like model structures.
+
+as sbml evolves to handle a broader range of dynamical systems, it will become more and more challenging for simulation packages to handle all possible sbml models. it is envisioned here that the development of this sbml-r interface will be driven by its users, and not by the model representation capabilities of sbml, i.e. it is expected that the users of this interface will be programmers who are capable of modifying it as their needs require.
+
+CONCLUSIONS
+compared to matlab, which may be better equipped than r to simulate arbitrarily complex dynamical systems, r has the advantage of list handling infrastructure in parse() and xmltreeparse(), and it also has the advantage of indexing by names instead of numbers. a further advantage, though not exploited here, is that r is object-oriented; in future versions of this interface, a print() method might be defined for objects of class sbmlr  to generate more readable renderings of models in r. another advantage of r over matlab is that it provides access to a much broader collection of microarray analysis tools, e.g. see bioconductor  <cit> . this aspect is important for those individuals who are interested in biochemical systems analyses of microarray data  <cit> . for statisticians already familiar with r, there are also the obvious economies of maintaining system familiarity. finally, perhaps the biggest advantage of r over matlab is that it is freely available. on balance, there seems to be ample motivation for further developments of this interface between sbml and r.
+
+availability and requirements
+project name: sbmlr
+
+project home page: 
+
+operating system: windows xp
+
+programming language: r  <dig> 
+
+other requirements: r packages: xml and odesolve
+
+license: gnu gpl
+
+any restrictions to use by non-academics: no restrictions
+
+list of abbreviations
+sbml = systems biology markup language; xml = extensible markup language; mathml = mathematical markup language; ode = ordinary differential equation.
+
+authors' contributions
+tr is the sole contributor.
+
+appendix a
+the sbmlr package is available through bioconductor as a developmental package  <cit> . it has been developed and tested only under windows xp. to install, do not unzip the file sbmlr.zip after downloading to a local directory, rather, within the r gui, click packages and install from local zip. the xml package installs similarly  <cit> . note that an error message from library can be resolved by copying the *.dll files of the xml package libs directory into the "c:\windows" directory. the odesolve package must be installed before running simulations. this package is installed from the r gui by clicking packages and install from cran.
+
+appendix b
+the implementation of curto et al.'s model shown in figure  <dig> is independent of any knowledge of sbml. it is included here to illustrate what comes "naturally" when implementing a model in r, see discussion.
+

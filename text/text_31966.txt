@@ -1,0 +1,188 @@
+BACKGROUND
+the biological magnetic resonance data bank  is a free, publicly-accessible repository of data on peptides, proteins, and nucleic acids obtained through nmr spectroscopy  <cit> , that is part of the worldwide protein databank   <cit> . it currently consists of more than  <dig>  individual nmr-star file entries, containing a wide range of nmr spectral data, experimental details, and biochemical data collected from thousands of biological samples. the nmr-star format is based on the self-defining text archival and retrieving  flat file database format  <cit> , with some modifications specific to the bmrb. star provides a hierarchical dictionary structure for storing arbitrary data. in nmr-star, the format specifies top-level dictionaries called “saveframes”, which are used to categorize the data and meta-data about the experiment. inside each saveframe is an arbitrarily number of key-value pairs and tables of records . the key-value pairs store a single piece of information under a descriptive variable name. each loop stores a table of records, each record containing a set of values representing individual fields in the record. there are currently two active versions of the bmrb: version  <dig>  and version  <dig> . while they both use the same nmr-star format at the most general level, the layout of the data in the two formats is different.
+
+python is a free, open-source scripting language which runs on all major operating systems  <cit> . it is designed to facilitate the development and maintenance of simple, efficient, and readable code. python has object-oriented programming facilities and includes several high-level data structure objects in its standard library. among these are the dictionary, a data structure implemented via the dict class that stores data as a set of key-value pairs . the ordereddict class is identical to the dict class except that the order of inserted keys-value pairs is remembered. this is particularly useful for categorical data with sequential relationships. the dictionary data structure is the most straightforward mechanism for representing and using data from nmr-star files, which have a nested, mostly dictionary-like structure themselves. however, to our knowledge no nmr-star parsing library using this design exists. the newest major version of python , was initially released on 2008-12- <dig>  however many software libraries and utilities written in python still use python version  <dig> x exclusively. as python version  <dig>  brings many substantial improvements over python  <dig> x . as of python version  <dig>  ordereddict is implemented in c which makes it much faster than the python  <dig>  implementation of ordereddict. moreover in python  <dig> , the dict data structure implementation becomes ordered by default and dict and ordereddict are more efficient than in any previous versions of python. while we provide support for python  <dig>  for use by legacy code, we believe that researchers will prefer libraries and tools written in latest version of python in order to develop maintainable codebases, especially as python version  <dig> x becomes less supported over time. moreover, python version  <dig>  will no longer be maintained after spring of  <dig>  <cit> . two publically available python libraries for parsing nmr-star format files pystarlib  <cit>  and nmrpystar  <cit>  both require python version  <dig> . pynmrstar  <cit>  works with both major versions of python .
+
+implementation
+the nmrstarlib package consists of several modules: nmrstarlib.py, bmrblex.py, converter.py, and csviewer.py . the nmrstarlib module  provides the starfile class, which implements a nested python dictionary/list representation of a bmrb nmr-star file. once a nmr-star formatted file is processed into a starfile object, experimental data can be accessed directly from the starfile object, using bracket accessors as with any regular python dict object. the nmrstarlib module relies on the bmrblex module  for processing of tokens. the bmrblex module provides the bmrblex generator – bmrb lexical analyzer . we provide two versions of the bmrblex module: a pure python version  and a python + c extension  for faster performance. the compiled c extensions are implemented in the cython programming language  <cit> , which we will call the cython implementaion. if the cython implementation of bmrblex fails for any reason, the library will use the python implementation, ensuring that the library always works.fig.  <dig> organization of the nmrstarlib package version  <dig> . <dig>  a uml package diagram of the nmrstarlib library; b uml class diagram of the bmrblex.py  module; c uml class diagram of the nmrstarlib.py module; d uml class diagram of the converter.py module; e uml class diagram of the csviewer.py module
+
+
+
+
+the library creates an internal representation of the nmr-star format as a nesting of ordereddict objects with the top-level object starfile inheriting from the ordereddict class . this allows the user to access data in its original nmr-star organization using familiar python dictionary syntax. the library provides facilities to read data from nmr-star formatted files into an internal starfile object, to access and make modifications to this starfile object, and to save the resulting starfile object as a new nmr-star formatted file. it is also possible to create nmr-star files from scratch using this library; however, this requires the user to adhere to the recommended layout for nmr-star formatted files by adding keys and values to the starfile object in the appropriate order.
+
+the nmrstarlib module provides a memory-efficient read_files() generator function  that yields  starfile objects, one at a time for each file parsed. when reading an nmr-star formatted file , the read_files() generator function first opens the file and passes a filehandle to the starfile.read() method that reads the text into python as a string and passes that string into the bmrblex object that then splits the text into tokens. as the bmrblex lexical analyzer keeps emitting valid tokens, the starfile object is constructed sequentially. the starfile object decides what type of token it is dealing with and chooses which internal method to call in order to construct itself, i.e. calls to starfile._build_starfile(), starfile._build_saveframe(), or starfile._build_loop(). for example, fig.  <dig> shows the function call diagram during the starfile object creation: the _build_saveframe() method is called  <dig> times and _build_loop() is called  <dig> times, meaning that the nmr-star file consists of  <dig> different saveframe categories and  <dig> loops. the total number of tokens processed is equal to  <dig>  =  <dig>  +  <dig>  +  <dig>  .fig.  <dig> diagram showing what function calls are made during the process of starfile object creation
+
+
+
+
+each saveframe category is also an ordereddict data structure that can be accessed by saveframe name as the key from the top-level starfile object. once a saveframe dictionary is constructed and populated with key-value pairs, it descends further into each loop and constructs a tuple of two lists: the first list corresponding to loop field keys ; the second list consists of ordereddict objects corresponding to loop rows  in the original nmr-star file. by the end of parsing, a single nested dictionary/list structure in the form of a starfile dictionary object  is constructed, emulating the structure of the original nmr-star formatted file . in addition, comments can be parsed and included as additional key-value pairs within the nested dictionary structure.fig.  <dig> internal starfile object representation and correspondence to nmr-star format without comments: a an example of a nmr-star formatted file; b starfile dictionary representation equivalent to the nmr-star formatted file and the jsonized version of the nmr-star file
+
+
+
+
+the nmrstarlib module provides a genericfilepath  object that is used by the read_files() generator function in order to open nmr-star formatted files from many different sources: a single file on a local machine; a url address of a single file; a directory of files on a local machine; an archive of files on a local machine; a url address of an archive of files; or the bmrb id of a single file.
+
+to write from a starfile object to an nmr-star formatted file, the library recursively crawls through the starfile dictionary structure, formatting and printing each of the keys and corresponding values sequentially. this allows nmrstarlib to recall the sequential order of the original nmr-star formatted file, due to the stored ordering of key insertion from the underlying ordereddict objects. using python’s json library, the entire starfile dictionary structure can be saved as json , which is an open, human-readable, lightweight data exchange format that is readable by most programming languages via optimized parsing libraries. this json conversion of starfile objects greatly facilitated the implementation of the converter module which converts original nmr-star formatted files into their equivalent jsonized nmr-star files and vice versa. the converter module  consists of a single converter class which can convert in both one-to-one  and many-to-many  modes. see “the nmrstarlib api reference” documentation of the converter module for the full list of available conversion options .
+
+in order to simplify access to assigned chemical shift data, we created the csviewer module  that includes the csviewer class that can access both the nmr-star version  <dig>  and version  <dig>  assigned chemical shifts loop and visualize  chemical shift values by amino acid residue type, and save this visualization as an image file or a pdf document . the csviewer module requires the graphviz python library  <cit>  in order to create an output file. in addition to visualizing chemical shift values, the csviewer module provide code example for utilizing the nmrstarlib library.fig.  <dig> example of output file: chemical shifts organized by amino acid residue type produced by csviewer module
+
+
+
+
+overall, the nmrstarlib package can be used in two ways: 1) as a library for accessing and manipulating data stored in nmr-star formatted files, converting between nmr-star and its equivalent json format, and visualizing assigned chemical shift values; or 2) as a standalone command-line tool for converting files in bulk and visualizing assigned chemical shift values. we used the docopt python library  <cit>  to create the nmrstarlib package command-line interface.
+
+RESULTS
+performance on nmr-star formatted files
+as part of nmrstarlib’s development process, we tested our library extensively against the entire bmrb  for both nmr-star version  <dig>  and version  <dig>   <cit> . to measure the performance speed of the nmrstarlib library, we used a simple program that accesses nmr-star files from local directory one file at a time, which then creates a starfile object and records how much time in seconds it took to create the object. table  <dig> shows that our library was able to read the entire bmrb for both nmr-star version  <dig>  and version  <dig>  without any errors. with the pure python implementation, it took  <dig>  s  and 326 s  to read nmr-star version  <dig>  and nmr-star version  <dig> , respectively. with the more efficient cython implementation, it took 423 s  and 320 s  to read nmr-star version  <dig>  and nmr-star version  <dig> , respectively. we used the metric kilobytes per second , because files/sec would be a misleading metric due to widely varying files sizes in the bmrb and because read times scale almost linearly  with file size. as such, we found that nmrstarlib’s average reading speed is  <dig>  kb/sec  and  <dig>  kb/sec  for the python implementation and  <dig>  kb/sec  and  <dig>  kb/sec  for the cython implementation on the hardware used for testing. the nmr-star  <dig>  is more comprehensive than nmr-star  <dig>  and usually represents more experimental information and details. this additional complexity is computationally harder to parse. however, for our cython implementation average reading speed for nmr-star  <dig>  was faster than for nmr-star  <dig>  due to multiline text pre-processing discussed in more detail in the next section.table  <dig> the nmrstarlib library performance test against nmr-star formatted files using pure python and python with c extension and against jsonized nmr-star files using the standard python library json parser and the ultrajson  3rd party library
+
+
+awe added support for the ujson library for versions of python starting with python  <dig> , because the ujson library does not provide methods to keep the dict data structure in order when parsing from json files; however, starting with python  <dig> , the dict data structure is ordered by default
+
+
+fig.  <dig> graph showing the dependency of loading time into starfile object from the size of file: a loading times for nmr-star  <dig>  formatted files; b loading times for jsonized nmr-star  <dig>  files
+
+
+
+
+performance on jsonized nmr-star files
+next, we converted both nmr-star version  <dig>  and version  <dig>  files into their equivalent json format and performed speed tests again . we found that read times of both jsonized nmr-star version  <dig>  and version  <dig>  were significantly faster than read times of the original nmr-star formatted files: 130 s  and 30 s  for nmr-star version  <dig>  and nmr-star version  <dig> , respectively, for the entire bmrb data set. the average read speed was  <dig>  kb/sec and  <dig>  kb/sec for version  <dig>  and version  <dig> , respectively. next, we tested performance using another compiled json parsing third-party library, ultrajson   <cit> . we found that reading times and average reading speeds of jsonized nmr-star files were slightly faster than using the built-in json parser: 127 s  and 27 s  for version  <dig>  and version  <dig>  respectively . table  <dig> shows how much time it took to convert the entire bmrb into its jsonized version and how much disk space it occupied as uncompressed directory and as compressed zip and tar archives. compressed zip and tar formats represent the entire bmrb database in a single file and save disk space. in order to simplify access, our library provides facilities to directly read nmr-star files from zip and tar archives without the requirement to manually decompress and separate the archive into separate files first. frequency polygons of loading times on fig.  <dig> show that the majority of nmr-star and jsonized nmr-star files can be loaded into starfile object in less than 1 s per file and jsonized nmr-star files can be loaded much faster than the original nmr-star files. figure 6a and b show that the fastest reading times were for parsing jsonized nmr-star files using the ujson and json parsers. however on fig. 6a, it is clear that the pure python implementation outperformed the cython implementation for some of the nmr-star  <dig>  files . this is because those files contain saveframe categories deposited as very large multiline blocks of text and the majority of time is spent to pre-process them, equivalent nmr-star  <dig>  files have those saveframes properly formatted and do not require extra time to pre-process multiline text blocks. for nmr-star  <dig>  formatted files , the cython implementation outperformed pure python implementation in all cases.table  <dig> converting nmr-star formatted files into their equivalent json format
+
+
+fig.  <dig> frequency polygon of loading times for nmr-star files: a comparison of loading times between nmr-star  <dig>  and jsonized nmr-star  <dig> ; b comparison of loading times between nmr-star  <dig>  and jsonized nmr-star  <dig> 
+
+
+
+
+comparison to similar existing software
+using the entire bmrb, we performed and compared speed performance tests between our nmrstarlib package and the three other publically available python libraries for reading nmr-star formatted files: pystarlib  <cit> , nmrpystar  <cit> , and pynmrstar  <cit> . for each of these libraries, we wrote a simple python program that loads a nmr-star formatted file from a directory, creates an object representation, and then reports how much time it took to process each file. results of these comparisons are summarized in table  <dig>  for the pure python implementation, pystarlib showed the fastest reading time: 239 s  and 796 s  for nmr-star version  <dig>  and version  <dig>  respectively, but it was not able to parse  <dig> %  nmr-star version  <dig>  and  <dig> %  nmr-star version  <dig> . all errors occurred inside a function that is responsible for processing multiline quoted text, which uses regular expressions to collapse multiline quoted text into a single token. the most probable cause for these errors is a regular expression that is not capable of handling all edge cases. examples of failures include files where: i) multiline quoted text included a semicolon character inside the text; ii) multiline quoted text that is not followed by the new line character; and iii) multiline quoted text followed by a loop .table  <dig> performance comparison of nmrstarlib to other python libraries
+
+
+
+
+the pure python implementation of the nmrstarlib package was the second fastest method 326 s  and  <dig>  s  and, more importantly, parsed 100% of files for both nmr-star  <dig>  and nmr-star  <dig> , respectively. the nmrpystar library showed the slowest results, taking  <dig>  s  to process nmr-star version  <dig>  and was not able to read any of the nmr-star version  <dig>  files . both the nmrstarlib and pynmrstar provide python + c extension implementations in order to speed up the tokenization process. the nmrstarlib performed faster than pynmrstar on nmr-star  <dig>  files: 423 s  versus 538 s . however, pynmrstar was faster than nmrstarlib on nmr-star  <dig>  files: 144 s  versus 320 s . overall, the nmrstarlib  was the fastest method to read nmr-star  <dig>  files, and pynmrstar  was the fastest method to read nmr-star  <dig>  files. however, when using the jsonized versions of nmr-star files with the nmrstarlib library, parsing speed can be further improved to 30 s for nmr-star  <dig>  and 130 s for nmr-star  <dig>  .
+
+all tests were performed on a single workstation desktop computer with intel core i7-4930 k cpu @  <dig> ghz processor, 64 gb memory, and a solid-state drive. the latest stable version of python  was used to compare libraries. python version  <dig>  was used for libraries that do not support the latest version of python.
+
+discussion
+the nmrstarlib interface
+to use nmrstarlib as a library, first import the library. next, create a starfile generator that will return starfile instances one at a time from many different file sources: a local file, url address of a file, directory, archive, bmrb id. next, the starfile object can be utilized like any built-in python dict object. table  <dig> shows common usage patterns for reading nmr-star files into starfile objects, accessing and manipulating data using bracket accessors, and writing starfile objects back to both nmr-star and jsonized nmr-star formats. for more detailed examples, see “the nmrstarlib tutorial” documentation .table  <dig> common usage patterns for the nmrstarlib module
+
+sf_gen = nmrstarlib.read_files
+
+
+starfile = next
+starfile
+
+
+starfile = new_value
+starfile.write
+
+
+starfile.write
+
+
+
+the nmrstarlib command-line interface provides two commands: convert in order to convert between nmr-star format and its equivalent json format; the csview command for quick access to assigned chemical shift data of a single starfile, organizing chemical shifts by amino acid residue type. table  <dig> shows common usage examples for the convert and csview commands. for a full list of available conversion options and more detailed examples see “the nmrstarlib api reference” and “the nmrstarlib tutorial” documentation. figure  <dig> shows example output of the csview command.table  <dig> the nmrstarlib library command-line interface
+
+
+convert
+$ python <dig> -m nmrstarlib convert bmr <dig> str  <dig> json \
+
+
+--from_format=nmrstar --to_format=json
+
+
+ $ python <dig> -m nmrstarlib convert  <dig> json bmr <dig> str \
+
+
+--from_format=json --to_format=nmrstar
+
+csview
+$ python <dig> -m nmrstarlib csview  <dig> \
+
+
+--csview_outfile=18569_cs_all
+
+
+--csview_format=png
+
+
+ $ python <dig> -m nmrstarlib csview  <dig> \
+
+
+--aminoacids=glu,thr --atoms=ca,cb,cg,cg <dig> \
+
+
+--csview_outfile=18569_cs_glu_thr_ca_cb_cg_cg <dig> \
+
+
+--csview_format=png
+
+
+
+we also have developed the “user guide”, “the nmrstarlib tutorial” and “the nmrstarlib api reference” documentation that is available as a pdf file  and up-to-date online documentation .table  <dig> comparison of nmrstarlib to other python libraries
+
+
+
+
+advantages of using nmrstarlib and jsonized nmr-star version
+one of the main advantages of our library is that it provides a one-to-one mapping between each of the following representations of bmrb entries: nmr-star format, internal python ordereddict- and list-based objects, and jsonized nmr-star format. this makes the library more python-idiomatic, providing a very intuitive programming interface for accessing and manipulating nmr data. another benefit of our nmrstarlib package is that the bmrblex lexical analyser module is written in a generic fashion, making it easy to adapt for parsing data from other star-related formats, for example, the crystallographic information file  and its closely related macromolecular cif  format.
+
+json is an open, programming language independent, human-readable, data exchange standard that represents data objects in a nested dictionary/list ascii format. json is one of the most common formats for asynchronous browser/server communication as an alternative to xml . we selected the json object representation, because it has a smaller overhead compared to common xml object representations, making it faster to parse and more human-readable when formatted for this purpose. but more importantly, it facilitates a one-to-one mapping with both nested python data structures and bmrb’s nested data representations of their entries. while xml is more flexible, it is not easily represented by a nesting of standard python data structures that would produce an intuitive programming interface. also, jsonization of the original nmr-star files provides several advantages: i) much faster reading times  and ii) makes the data stored in bmrb entries easily accessible to other programming languages that have json parsers, i.e. all modern programming languages, scripting as well as compiled, without requiring to write a specific parser for the specialized nmr-star format. figures  <dig>   <dig>  and  <dig> show code examples for accessing data from jsonized nmr-star files using r with the jsonlite library  <cit> , javascript with the jquery library  <cit> , and c++ with the rapidjson library  <cit>  , respectively.fig.  <dig> code example showing how to access data from jsonized nmr-star files using r programming language
+
+
+fig.  <dig> code example showing how to access data from jsonized nmr-star files using javascript programming language
+
+
+fig.  <dig> code example showing how to access data from jsonized nmr-star files using c++ programming language
+
+
+
+
+but one disadvantage of using json format is that it is more verbose in comparison to the original nmr-star format. as a result, uncompressed jsonized nmr-star files occupy more disk space . however, the nmrstarlib library offers the ability to read nmr-star files in both uncompressed  and compressed  forms, making storage and access of jsonized nmr-star files very efficient.
+
+CONCLUSIONS
+the nmrstarlib package is a useful python library, providing classes and other facilities for parsing, accessing, and manipulating data stored in nmr-star and jsonized nmr-star formats. also, nmrstarlib provides a simple command-line interface that can convert from the nmr-star file format into its equivalent json file format and vice versa, as well as accessing and visualizing assigned chemical shift values. the library has an easy-to-use, idiomatic dictionary-based interface, usable in programs written in python. the library also has extensive documentation including the “user guide”, “the nmrstarlib tutorial”, and “the nmrstarlib api reference”. furthermore, the easy conversion into the jsonized nmr-star format facilitates utilization of bmrb entries by programs in any programming language with a json parser. this same basic approach can be used to quickly jsonize other older text-based scientific data formats, making the underlying scientific data easily accessible in a wide variety of programming languages. as demonstrated in this study, many available json parsers are highly optimized and typically much more efficient than specialized parsers for scientific data formats. thus, jsonization of older scientific data formats provides easy steps for reaching interoperability and reusability goals of fair guiding principles  <cit> .
+
+additional files
+
+additional file 1: function call diagram of nmrstarlib. 
+
+
+additional file 2: profile of nmrstarlib execution. 
+
+
+additional file 3: documentation for nmrstarlib. 
+
+
+additional file 4: list of failed nmr-star  <dig>  files for pystarlib. 
+
+
+additional file 5: list of failed nmr-star  <dig>  files for pystarlib. 
+
+
+additional file 6: fragments of failed nmr-star  <dig>  files for pystarlib. 
+
+
+additional file 7: fragments of failed nmr-star  <dig>  files for pystarlib. 
+
+
+additional file 8: output of c++ example from fig.  <dig>  
+
+
+
+
+abbreviations
+nmrnuclear magnetic resonance
+
+bmrbbiological magnetic resonance data bank
+
+starself-defining text archival and retrieving
+
+jsonjavascript object notation
+
+xmlextensible markup language
+
+umlunified modeling language
+

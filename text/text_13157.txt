@@ -1,0 +1,238 @@
+BACKGROUND
+somatic copy number alterations  are a group of genomic aberrations commonly observed in many cancers  <cit> . copy number is the number of copies per cell of a particular gene or dna sequence. somatically acquired chromosomal rearrangements such as deletions and duplications may change the copy number of a gene. consequently, the expression level of a gene is often correlated with its copy number  <cit>  - a phenomenon known as the gene dosage effect. loss of heterozygosity  is an event in which one of the two alleles at a heterozygous locus is lost due to segmental aneuploidy, gene conversion, mitotic recombination, or mitotic nondisjunction  <cit> . loh events involving tumor suppressor genes such as pten, rb <dig>  and tp <dig> have been observed in many cancer. loh may alter gene expression. for example, monoallelic expression , which is the expression of a gene from only one of two alleles in a diploid organism, is associated with loh  <cit> . by analyzing a cohort of  <dig> triple-negative breast cancer patients, ha et al.  <cit>  have shown that loh is a prominent aberration in this type of cancer, and modulates a significant portion of the transcriptome in the form of mae. copy-neutral loh  is a specific type of loh that occurs when the lost allele is replaced with a duplicated copy of the surviving allele, resulting in the copy number remaining unchanged. suzuki et al. have shown recurring cnloh at chromosome 17p  in low-grade astrocytoma  <cit> . the altered expression of genes with allelic imbalance due to loh events may bring about selective advantages for tumorigenesis and tumor progression. additionally, regions with cnloh may harbor genes with driver mutations  <cit> . hence, accurate and reliable detection and characterization of events, such as scnas and loh, are crucial for the identification of prospective cancer-related genes, such as tumor suppressor genes and oncogenes, and eventually for informing new approaches to treat cancer  <cit> .
+
+high throughput sequencing -based scna detection approaches  and whole genome sequencing ) have become popular due to their potential for accurate copy number estimation and breakpoint detection with single nucleotide accuracy. however, the short read length of current hts technologies makes it difficult to map some reads to unique locations in the genome. furthermore, due to gc-content bias, gc-content-rich regions in the genome will have increased number of reads. these ambiguities make accurate estimation of coverage and consequently copy number a challenge  <cit> . additionally, tumor ploidy and normal cell contamination introduce further challenges in scna detection  <cit> .
+
+hts-based copy number analysis is, in most cases, based on read depth  estimations at each genomic location and further segmentation and quantification of the rd profiles into segments of consistent copy number   <cit> . however, such tools are only capable of detecting deletions and duplications. recently, rd-based analysis has been augmented to identify cnloh events by incorporating information from an alternate allele’s fraction at heterozygous single nucleotide polymorphism  positions ). the baf of a heterozygous snp has an expected value of  <dig>  in normal diploid cells. deviation from  <dig>  in the heterozygous snp baf points to an aberration. in the case of cnloh, baf values are expected to be either  <dig> or  <dig> in a pure tumor population. tools such as control-freec  <cit> , patchwork  <cit> , and climat  <cit>  incorporate baf data to extend scna detection. control-freec determines the breakpoints using a least absolute shrinkage estimator  regression. sample ploidy is provided by the user to control-freec. it also evaluates and corrects for normal cell contamination, gc-content, and mapability biases while inferring the copy number profile of a tumor genome. patchwork performs gc and positional normalization and segments the genome using a circular binary segmentation  algorithm. it also estimates normal cell contamination and tumor ploidy. climat implements corrections for gc-content and mapability bias and models the rd and baf data with a hidden markov model  to infer the somatic copy number variation, normal cell contamination and tumor ploidy . while the above tools are well-suited for scna detection, their use has some limitations. control-freec and patchwork utilize computationally costly models, which leads to long analysis times. the main motivation of our study was to develop an accurate and user-friendly tool that could be used to analyze large wgs datasets, such as the cancer genome atlas  datasets. in our approach, the rd and baf signals are smoothed, and double sliding windows subsequently are used to detect breakpoints, which makes our approach fast and straightforward. because the breakpoint detection is performed simultaneously at different scales, it allows accurate detection. our tool, segmentum, is freely available under mit license at: https://github.com/eafyounian/segmentum .
+
+implementation
+pipeline
+segmentum was developed and written in the python programming language  and requires the scipy library to be installed . segmentum employs samtools to extract rd and heterozygous snps baf data from bam files containing wgs data. these constitute the inputs required by segmentum to perform copy number analysis. figure  <dig> illustrates the segmentum pipeline. each step is explained in more detail in the following sections.fig.  <dig> segmentum pipeline. normal and tumor rds are used to calculate rd log-ratios. rd log-ratios are then corrected for biases. baf data are simultaneously mirrored and smoothed. using rd log-ratios and baf, the genome is segmented with a double sliding window method. segmentation results are used to identify cnloh regions in the genome 
+
+
+
+
+rd extraction and baf calculation for heterozygous snps
+to extract the rd from the bam files, the genome is divided into bins of user-defined length  and the number of reads overlapping each bin is counted to determine the rd at each bin. to calculate the baf values, heterozygous snps in the normal sample are identified at known snp sites in the human genome . next, the number of reference and alternative alleles at each heterozygous snp position is extracted from the tumor sample and the baf for the i
+th heterozygous snp is calculated using the following equation: bafi=altialti+refi where alt
+i and ref
+i refer to the alternative and reference allele, respectively, of the i
+th heterozygous snp.
+
+it should be noted that by default reads with mapping quality score  <dig> are filtered out before rd extraction and baf calculation in order to address the challenges raised by reads not mapping to a unique region in the genome .
+
+log-ratio calculation
+the rd log-ratio is calculated using the following equation: logri=log2trdinrdi 
+
+
+where logr
+i is the log-ratio of the i
+th genomic window and trd
+i and nrd
+i are rds extracted from the i
+th genomic window of a specific size  for the tumor and normal samples, respectively.
+
+differences in the total number of aligned reads in the normal and tumor samples may bias the estimation of the rd log-ratios. the correction was performed by finding the mode of log-ratio values for each chromosome and subtracting the median of all of the modes from each log-ratio value. it should be noted that median, in the correction step, is robust to the changes in one mode. for instance, one chromosomal arm having a copy number change has no effect on the correction since it only affects one of the chromosomal modes.
+
+mirroring and smoothing of the baf values
+the baf of a heterozygous snp has an expected value of  <dig>  in normal diploid cells. in the presence of somatic copy number alterations, the baf can diverge from  <dig>  if the relative abundance of the two alleles changes. to make smoothing and segmentation of baf data possible, the baf values must be mirrored about the  <dig>  axis so that the b allele fraction always represents the allele fraction of the dominant allele. without this mirroring step, the baf values will be symmetric about the baf =  <dig>  axis and smoothing will underestimate the absolute divergence from  <dig>   <cit> . in this study, a median filter is used for smoothing the baf data. simultaneous mirroring and smoothing is implemented using the following equation: cbafi=h∗| <dig> −m9bafi|+1−h∗m <dig> −bafi. where baf
+i is the baf value for the i
+th heterozygous snp, cbaf
+i is the simultaneously mirrored and smoothed baf
+i, h is a heterozygosity measurement calculated with the following equation: h = 1 − 2 ∗ | <dig>  − x|, and m
+ <dig> refers to applying a median filter to  <dig> snps in the vicinity of and including the i
+th snp.
+
+segmentation using a double sliding window approach
+to detect changes in the rd log-ratio and baf signals, two non-overlapping, fixed-sized windows  are slid over the rd log-ratio and baf values and a compound score  is calculated for each of the adjacent two windows. if the compound score is greater than  <dig>  a change is detected and a breakpoint is placed at the place where the two windows touch each other. the compound score is calculated using the following equation: s=|logrwini¯−logrwini+1¯|2τlogr+|cbafwini¯−cbafwini+1¯|2τbaf where logrwini¯ is the mean of the rd log-ratio values in the i
+th window, cbafwini¯ is the mean of the mirrored and smoothed baf values in the i
+th window, τ
+logr and τ
+baf are thresholds for the absolute mean difference in the rd log-ratios and the absolute mean difference in the baf values in the two adjacent windows, respectively.
+
+it is possible that some breakpoints will not be detected by a single pass of a double sliding window due to a given window size. thus, to increase the sensitivity, segmentum analyzes the signals for the detection of breakpoints multiple times with different window-sizes and thresholds. each new window is  <dig>  times larger than the previous one. the increase in the window size decreases the detection thresholds. this is due to the fact that increasing the window size increases the sample size ) and consequently decreases the standard deviation of the mean . the new standard deviation of the mean when window size is increased  <dig>  times is  <dig>  times the old standard deviation. let τ = ασ where τ is the threshold and α is a scalar and σ is the standard deviation. it follows that: τnew=α.σnew= <dig> .α.σold= <dig> .τold 
+
+
+thus both the τ
+logr and τ
+baf thresholds are updated using the following equation: τnew= <dig> ∗τold 
+
+
+the process of increasing the window-size is continued as long as the updated thresholds are greater than the thresholds for the merging two consecutive segments . after detecting all the breakpoints, a consensus list of breakpoints is created by accepting all of the breakpoints detected by the first pass of the double sliding window and adding the breakpoints detected from the larger windows to the list only if the breakpoint is not in the vicinity of an existing breakpoint in the list . consensus breakpoints are used to create the segments. two consecutive breakpoints constitute a segment. for each segment, the average rd log-ratio and average mirrored and smoothed baf is calculated. two consecutive segments are merged if the following conditions are met: |logrsegi¯−logrsegi+1¯|<τmergelogrand|cbafsegi¯−cbafsegi+1¯|<τmergebaf where logrsegi¯ is the mean rd log-ratio of the i
+th segment, cbafsegi¯ is the mean mirrored and smoothed baf of the i
+th segment, and τmergelogr and τmergebaf  are the rd log-ratio and baf merging thresholds, respectively.
+
+detection of cnloh events within a single sample
+a segment is considered to be a cnloh segment if the following conditions are met: |logrsegi¯|<τcnlohlogrand <dig> −cbafsegi¯<τcnlohbaf where logrsegi¯ is the mean rd log-ratio of the i
+th segment, cbafsegi¯ is the mean mirrored and smoothed baf of the i
+th segment, τcnlohlogr and τcnlohbaf  are thresholds for calling a cnloh segment.
+
+detection of recurrent cnloh regions across multiple samples
+to find genomic regions with recurrent cnloh events, all cnloh regions for individual samples are identified following the procedure described earlier. then, the number of occurrences of a cnloh event for a specific region across multiple samples is counted using an interval tree data structure .
+
+simulator
+to evaluate segmentum in terms of segmentation accuracy, a simulator capable of simulating whole-genome rd for both normal and tumor samples and baf based on events such as deletions, amplifications and cnloh was developed. the simulator receives a normal sample rd data and outputs  <dig> sets of data including the simulated normal and tumor rd, baf data and a ground truth. first, the simulator learns the distribution of the rd data from the provided normal sample by simply counting the number of times two consecutive rd values  occur together throughout the genome . the learned distribution also accounts for the inherent noise in the rd data. next, inverse transform sampling  is used to generate rd values for each position in the genome based on the learned distribution. then, noise is removed using a median filter. a normal rd is constructed by adding independent poisson noise to the simulated rd data. to construct the tumor rd, two copy number tracks  harboring random scnas are constructed. the tumor sample rd is calculated using the copy number tracks, the simulated normal sample rd and the normal sample contamination . to construct the baf data, heterozygous snps are initially randomly distributed across the genome . the number of b-alleles at a heterozygous snp is calculated using a binomial distribution with the parameters n  and p . n is extracted from the simulated normal rd at heterozygous snp positions. p is calculated using the two constructed copy number tracks and the normal sample contamination. once the number of b-alleles is calculated, it is used to calculate the baf values   <cit> , respectively).
+
+RESULTS
+segmentum segmentation accuracy for the simulated data
+using the simulator , rd data for both normal and tumor samples and baf values for heterozygous snps from the tumor sample as well as a ground truth were simulated with different percentages of normal contamination . the simulated data were analyzed by segmentum. the segmentation results were evaluated against the ground truth. the precision, recall, and the f-measure values were calculated based on this evaluation .fig.  <dig> segmentation accuracy of segmentum for simulated data with different degrees of normal contamination. estimated precision, recall, and f-measure values for simulated data at different normal contamination levels 
+
+
+
+
+segmentum segmentation accuracy for real data compared to other tools
+to assess segmentation accuracy of segmentum for real data, paired tumor/normal whole genome sequencing samples  from  <dig> individuals diagnosed with low-grade glioma  were downloaded from the tcga dataset and used as is. furthermore, segmentation results from snp-array data   was used as ground truth . segmentum’s results were evaluated against control-freec, patchwork, and climat as competing tools. to evaluate the segmentation accuracy, the genome was broken into 100 bp. blocks . using block annotations from different tools, genome-wide proportions of the blocks annotated as scna by different combinations of tools were calculated and the results were illustrated by a venn diagram .fig.  <dig> comparison of the scna results with different tools and the snp array . venn diagram values  represent the percentage of overlap among the scna calls
+
+
+
+
+additionally, to measure the pairwise degree of similarity of the segmentation results between two tools, the jaccard similarity index  was calculated for all of the pairs using the following equation: jsi=∩pair|∪pair| where | ∩ pair| and | ∪ pair| are the cardinalities of intersection and union, respectively. intersection and union values were extracted from the venn diagrams. figure  <dig> represents a heat map of the jsi values for each pair of tools averaged over  <dig> tcga lgg samples. according to the heat map, on average, segmentum produces the most similar results to the snp array segmentation results with a jsi score of  <dig> , followed by patchwork with a jsi score of  <dig> .fig.  <dig> pairwise jsi scores averaged over ten tcga lgg samples. jsi scores range between  <dig> and  <dig>  where  <dig> means no similarity and  <dig> represents identical results between two tools
+
+
+
+
+similar evaluations using low coverage data  are shown in additional file 1: figures s <dig> and s <dig>  the low coverage data is comprised of the paired tumor/normal whole genome sequencing samples of  <dig> individuals diagnosed with prostate adenocarcinoma . with regard to the low coverage data, patchwork produces the most similar results to the snp array segmentation results with a jsi score of  <dig> , followed by segmentum with a jsi score of  <dig> . additional file 1: table s <dig> contains the names of the  <dig> tcga prad samples .
+
+segmentum segmentation accuracy for the subsampled real data
+to assess the segmentation accuracy of segmentum for real data with respect to sample’s coverage, we subsampled one of the lgg samples  at different subsampling fractions  using samtools . we analyzed each subsample by segmentum and benchmarked it against ground truth in the same manner as explained earlier. figure  <dig> represents the jsi scores for each subsample . it can be seen that segmentum reaches high accuracies even with low coverage data. for instance, the accuracy for the 10%-fraction subsample was  <dig> % .fig.  <dig> pairwise jsi scores  for different subsamples. jsi scores range between  <dig> and  <dig>  where  <dig> means no similarity and  <dig> represents identical results between two tools
+
+
+
+
+it should be noted that as the coverage decreases the number of identified heterozygous snps decreases . for instance, for the 10%-fraction subsample only  <dig> heterozygous snps were identified from the entire genome . even though segmentum is shown to work with low coverage data, one should note the implications of low amounts of detected heterozygous snps on the reliable detection of cnloh events.
+
+time usage evaluation
+all of the computations were completed on the same unix server. table  <dig> shows the average time required by each tool to perform the analysis for  <dig> tcga lgg samples . based on the results, on average, climat appears to be the fastest, followed by segmentum, patchwork, and control-freec. it should be noted that to assign the allele-specific copy number to genomic segments, patchwork requires users to determine some parameter values by interpreting plots produced by the tool, and this interpretation time is not included here. additionally, the time required to create the pileup files used by patchwork and control-freec is different due to the use of different parameter values in samtools. it should be noted that time required for making pileup files can be decreased by parallelizing the process on machines with multiple cores or on computer clusters . similarly, baf calculation for segmentum can be parallelized. however, since this is not a core feature of the benchmarked tools and not all tools support parallelization, to be fair, only the required linear time is reported here. a similar time usage evaluation, using low coverage data , is shown in additional file 1: table s <dig>  with regard to the low coverage data, segmentum comes second after climat in terms of analysis time, which is consistent with the results from the high coverage data.table  <dig> average tool analysis time for high coverage data 
+
+
+
+
+recurrent cnloh detection case study
+in a study of lower grade gliomas , i.e., grade ii and iii gliomas, suzuki et al.  <cit>  characterized the mutational landscape of these glioma types by dividing them into  <dig> distinct subtypes based on their distinct sets of mutations and clinical behaviors. these subtypes are distinguished with the following criteria:  mutation in idh1/ <dig> accompanied by co-deletion of chromosomes 1p and 19q ,  mutation in idh1/ <dig> without co-deletion of chromosomes 1p and 19q , and  idh1/ <dig> wild type . of interest to our study was the recurrence of cnloh events in chromosome 17p in subtype ii  <cit> . to show the ability of segmentum to detect such aberrations from large datasets,  <dig> paired-end wgs samples from the tcga dataset ) for patients diagnosed with lgg were downloaded and analyzed by segmentum. we were able to distinguish all three subtypes as characterized in  <cit> , including the recurrence of cnloh in subtype ii at chromosome 17p. we also identified a fourth subtype with a mutation in idh1/ <dig> without co-deletion of chromosomes 1p and 19q and no cnloh at 17p .fig.  <dig> scna landscape in grade ii and iii gliomas. who-grade, histological class, and molecular subtype classification are shown by color as indicated. the thirty-eight samples are divided into  <dig> distinct subtypes based on the occurrence of a mutation in idh1/ <dig>  co-deletion of chromosomes 1p and 19q and the presence of 17p cnloh. deletions and amplifications are visualized by boxes with different shades of blue and red, respectively. white regions are either normal or cnloh regions. the bar charts below each box represent the mirrored and smoothed baf values. large mirrored and smoothed baf values  point to heterozygous snp allelic imbalance. in the second subtype , at chromosome 17p, recurring cnloh is apparent where the bar charts point to large mirrored and smoothed baf values, though no deletion or amplification is detected at that region 
+
+
+
+
+discussion
+by comparing the simulated  and real data , we can conclude that segmentum can recover true copy number aberrations with high accuracy even when the coverage is as low as ~ <dig> reads . on average, segmentum produces results that are the most concordant with the copy number aberrations identified from the snp array data  . as shown in table  <dig>  our tool is more than twice as fast as the second best performing tool in terms of accuracy. segmentum is also the second fastest tool after climat compared to the other tools evaluated in this study . however, climat ranks last in terms of accuracy . one explanation for the speed of climat is that it computes the baf values for a subset of known snps . in contrast, segmentum, computes the baf values for heterozygous snps determined from the  <dig> genomes project’s snp list   <cit> . the other reason for the speed of climat might be that it does not require a normal sample for analysis.
+
+as the normal contamination in the simulated data increases, the number of false negatives increases and the recall rate decreases . however, within the ranges of realistic amounts of normal contamination , segmentum performs consistently well.
+
+segmentum is able to report recurrent cnloh regions across multiple cancer genome samples; a characteristic of cancer genomes that has been neglected until recently  <cit> . by applying segmentum to tcga data, we were able to recover recurrent cnloh events from low-grade glioma samples that were reported earlier by snp array-based data analysis. it is worth mentioning that segmentum can work in two modes, i.e., with or without baf value. in the case where baf values are not used, segmentum cannot detect regions with cnloh. furthermore, segmentum is capable of reliably segmenting the cancer genome using both high  and low  sequence coverage data. however, with the low sequence coverage data, the estimated baf values for the heterozygous snps will be less reliable. this is also reflected in additional file 1: figure s <dig>  where it is shown that the number of detected heterozygous snps drop as the average coverage decreases. the implications of low amounts of detected heterozygous snps on the reliable detection of cnloh events should not be overlooked.
+
+even though we have shown that segmentum is highly accurate at recovering the true copy number, other tools in this study do more than just segmenting the genome. for instance, climat and patchwork are capable of estimating tumor ploidy and tumor purity and consequently, reporting the integral copy numbers for each segment. patchwork and control-freec are also capable of reporting the genotype of each segment and climat reports the genotype for each snp within each segment. this is in contrast to segmentum that only reports the mean rd log-ratio and baf value of each segment. however, tools such as absolute  <cit>  or theta  <cit>  can be used to estimate tumor impurity and ploidy from segmentum’s segmentation result, meaning that segmentum can be used as part of a larger tumor evolution analysis pipeline. finally, a strength of our tool is its minimum dependence on third party tools, with the exception of samtools, for calculating the rd and baf.
+
+CONCLUSIONS
+we have developed segmentum as a tool for the identification of scnas, including cnloh in tumor samples, using wgs data. we have shown that segmentum is accurate and fast with regards to other state-of-the-art tools, making it suitable for analyzing cohorts with a large number of samples, such as tcga cohorts.
+
+availability and requirements
+
+project name: segmentum
+
+
+project homepage:
+https://github.com/eafyounian/segmentum
+
+
+
+operating system: linux
+
+
+programming language: python
+
+
+other requirements: scipy, samtools, and matplotlib if the ‘plot’ sub-command is used.
+
+
+license: mit license
+
+
+any restrictions to use by non-academics: none
+
+additional files
+
+additional file 1: this file contains supplementary information, tables and figures supporting the manuscript. figure s <dig>  detection of regions harboring recurrent cnloh across multiple samples. figure s <dig>  read depth spatial correlation. figure s <dig>  simulator pipeline. figure s <dig>  simulated data visualized in integrative genomics viewer . figure s <dig>  comparison of scna results from different tools and snp array  for low sequence coverage data. figure s <dig>  pairwise jsi scores for low sequence coverage data  figure s <dig>  subsample average coverages in the subsampling evaluation. figure s <dig> detected number of heterozygous snps in different subsamples figure s <dig>  copy number – b-allele fraction clusters. table s <dig>  list of scna tools using wgs data. table s <dig>  average tool analysis time for low sequence coverage data . table s <dig> tcga lgg sample barcode names and the estimated sample purity by absolute. table s <dig>  tcga prad sample barcode names and the estimated sample purity by absolute. table s <dig>  tcga lgg sample barcode names categorized based on inferred subtype. table s <dig>  parameter values for running dfextract. table s <dig>  parameter values for running climat. table s <dig>  parameter values for running patchwork for  <dig> tcga lgg samples. table s <dig>  parameter values for running patchwork for  <dig> tcga prad samples. table s <dig>  parameter values for running control-freec. 
+
+ 
+additional file 2: software code. this compressed file contains the software code . 
+
+ 
+
+
+abbreviations
+bafb-allele fraction
+
+bambinary alignment map
+
+cbscircular binary segmentation
+
+cgharray comparative genomic hybridization
+
+cnlohcopy-neutral loss of heterozygosity
+
+cnvcopy number variation
+
+dbsnpsingle nucleotide polymorphism database
+
+dnadeoxyribonucleic acid
+
+fishfluorescent in situ hybridization
+
+hmmhidden markov model
+
+htshigh throughput sequencing
+
+igvintegrative genomics viewer
+
+jsijaccard similarity index
+
+lassoleast absolute shrinkage estimator
+
+lgglow grade glioma
+
+lohloss of heterozygosity
+
+maemonoallelic expression
+
+pradprostate adenocarcinoma
+
+rdread-depth
+
+samsequence alignment/map
+
+scnasomatic copy number alteration
+
+snpsingle nucleotide polymorphism
+
+tcgathe cancer genome atlas
+
+weswhole exome sequencing
+
+wgswhole genome sequencing
+
+the results published here are in part based upon data generated by the cancer genome atlas project  established by the nci and nhgri. information about tcga and the investigators and institutions who constitute the tcga research network can be found at http://cancergenome.nih.gov. the authors would also like to acknowledge csc — it center for science ltd.  for providing the computational resources.
+
+funding
+this work was funded by the academy of finland , cancer society of finland, and sigrid juselius foundation. the funders had no role in study design, data collection and analysis, decision to publish, or preparation of the manuscript.
+
+authors’ contributions
+ea, ma implemented the method. ea performed the data analysis and drafted the manuscript. ma initiated the study and designed the method. mn supervised the study. all authors edited and approved the manuscript.
+
+authors’ information
+ea is a ph.d. student at faculty of medicine and life sciences and biomeditech institute, university of tampere, tampere, finland.
+
+ma is a ph.d. student at faculty of medicine and life sciences and biomeditech institute, university of tampere, tampere, finland.
+
+mn is a professor of bioinformatics at faculty of medicine and life sciences and biomeditech institute, university of tampere, tampere, finland.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable
+
+ethics approval and consent to participate
+not applicable
+
+publisher’s note
+springer nature remains neutral with regard to jurisdictional claims in published maps and institutional affiliations.

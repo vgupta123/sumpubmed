@@ -1,0 +1,200 @@
+BACKGROUND
+amplicon-based metagenomics studies provide insight into the numbers and types of organisms in a particular sample based on dna sequence analysis of a gene, such as the prokaryotic 16s ribosomal rna gene  <cit> . the combined technologies of pcr and next-generation sequencing have allowed for the study of the rare biosphere by obviating the need for culturing or cloning. however, these same advances confound subsequent analysis of the sequence data. the presence of sequencing errors, pcr single-base errors, and pcr chimeras leads to inflated estimates of microbial diversity  <cit> . to limit the effects of these artifacts, various analytical tools have been designed. two of the most widely used are ampliconnoise  <cit>  and the denoising pipeline in qiime  <cit> , the microbial ecology analysis package  <cit> .
+
+in roche- <dig> pyrosequencing  <cit> , as well as ion torrent sequencing  <cit> , nucleotides are washed sequentially across a plate with picoliter-volume wells that each contain a bead attached to identical dna molecules. if the flowed nucleotide is complementary to the templates in a well, a reaction occurs that results in the emission of light  proportional to the number of nucleotides incorporated. this quantity of light is called a flow value. for example, if the nucleotide g is flowed and a well has a flow value of  <dig>  it means that four gs were added to the template. however, actual flow values are not integers; rather, they are floating-point values, such as  <dig> . the flow values of a well over the course of a sequencing run, collectively referred to as the flowgram, are rounded to the nearest integers by the  <dig> software for sequence interpretation. if the  <dig>  flow value were actually generated from a homopolymer of  <dig> gs, then an incorrect deletion would have been made for that sequence. hence, pyrosequencing errors, as well as errors in ion torrent sequencing  <cit> , consist mostly of insertions and deletions, due to the incorrect determination of these nucleotide lengths, especially for longer homopolymers. substitution errors are much rarer, since they occur only as the result of an overcall being followed by an undercall, or vice versa  <cit> .
+
+reducing the effects of pyrosequencing errors is an important component in amplicon-based metagenomics, as well as in the many other applications that utilize such data  <cit> . in all these fields, various filtering criteria are used to remove entire sequence reads  or portions of reads  that are likely to contain many errors, while retaining as much sequence information as possible. huse et al.  <cit> , in analyzing first-generation  pyrosequencing, found that a relatively small number of reads accounted for the vast majority of the sequencing errors in their dataset. they concluded that removing reads that contained an ambiguous base  or that were of anomalous length was sufficient to achieve an error rate of  <dig> % while retaining  <dig> % of reads. in a similar study of second-generation  pyrosequencing, kunin et al.  <cit>  used improved error estimates and an algorithm that took into account quality scores to approach the correct result for a known microbial sample. however, this was achieved at the expense of throwing out nearly 30% of the reads. with gs-flx titanium, seven variables contribute to the increased error rates of certain reads, including those relating to the location where a read is generated on the sequencing plate  <cit> .
+
+in amplicon-based metagenomics, there is no agreement on a set of filtering criteria that is universally used. hence, the filtering step in qiime allows the user to select from a variety of criteria based on sequences and quality scores. in ampliconnoise, filtering is performed by analyzing flowgrams only, not sequences or quality scores. the filtering criteria are fixed and cannot be easily altered by the user. it has been shown that one particular criterion , which remains unsubstantiated, is responsible for most of the eliminations and truncations of this step. in addition, although the filtering was designed to truncate reads prior to an ambiguous base, it misses most of these due to the way the flowgrams are analyzed  <cit> .
+
+with amplicon-based pyrosequences, there is an additional, fundamentally different approach for removing pyrosequencing errors known as denoising. in denoising, the reads are actually changed wherever a sequencing error is judged to have occurred. the principal insight behind an early denoising algorithm  <cit>  was that the flowgrams contained information that could be used to aid in the identification of pyrosequencing errors. this algorithm’s successors, pyronoise in ampliconnoise and denoiser.py in qiime, were similarly designed to cluster flowgrams, while reducing the prohibitive computational time of the original algorithm. others have written software that further improved computational efficiency by disregarding flowgrams entirely  <cit> .
+
+both pyronoise and denoiser.py have user-selected parameters that control the denoising process. the default values for these parameters were chosen based on the analysis of mock community data, in which the correct sequences were known. therefore, the parameters could be fine-tuned to minimize the error rates of reads. however, the algorithms were intended to be used in the studies of real communities. without knowing the true sequences, one will not have a basis to choose values for the parameters other than the defaults.
+
+we have previously shown that one can evaluate the outcomes of these denoising pipelines by considering how the individual reads have been changed at each step  <cit> . when used with the default parameter values, pyronoise caused more substitutions than insertions or deletions, a pattern that is inconsistent with the known spectrum of pyrosequencing errors. by increasing one of the parameters , we were able to achieve a result that was consistent with these errors. another issue that arose was that of the “accordion effect”: since pyronoise chose the longest read as the representative for each cluster, shorter reads had their 3’ ends filled in by sequences that were sometimes very different from what had been removed by truncation in the previous filtering step. the analysis was more complicated with denoiser.py in qiime, since it also aligned the flowgrams during the denoising process, so as to allow for the correction of pcr single-base errors. therefore, we could only point to the overall large number of changes , which were reduced with a change in the parameters.
+
+in this paper, we detail our program, flowclus, which both filters and denoises amplicon-based pyrosequenced data. our goals for the program were fivefold:  to keep the users in charge of their data by allowing them to specify how the data are analyzed;  to provide feedback to users about how their data are being altered through the filtering and denoising processes, so they have a basis on which to adjust the parameters;  to avoid the negative side-effects of other denoising pipelines, such as the accordion effect;  to be able to analyze data generated by all stages of roche- <dig> and ion torrent sequencing technology;  to require less computational resources than existing denoising algorithms, while still leveraging the information contained within the flowgrams.
+
+methods
+filtering
+the different criteria by which certain reads are eliminated or truncated have a profound effect on the outcome from a denoising pipeline  <cit> . flowclus allows one to choose from a number of criteria based on sequences, quality scores, and flowgrams, all of which are in the sff.txt file  that flowclus requires as an input. the available criteria include those used by split_libraries.py in qiime and cleanminmax.pl in ampliconnoise. the only default filtering is to require a match to a mid tag and primer, with the user being able to specify an allowed number of mismatches to each. once a read matches a mid tag - primer, it is further analyzed according to the user-selected filtering criteria . when a read passes the filtering step, the flows corresponding to the mid tag and primer are removed from its flowgram, and the 3’ end of the flowgram is trimmed to match the read’s sequence, taking into account any truncations that were made.
+
+at the end of the filtering step, flowclus produces filtered flowgram files that are prepared for denoising, and a corresponding fasta file. it also creates a detailed report that lists the filtering criteria and the number of reads truncated and eliminated due to each, as well as the number of mid tag - primer matches and reads that passed the filtering for each sample. this report can be used to determine the effects of the filtering criteria on the data, and if, for example, a particular criterion has a biased effect on the reads derived from certain samples.
+
+denoising
+clustering
+to correct pyrosequencing errors, denoising algorithms such as the pyronoise component of ampliconnoise perform clustering of flowgrams. it is critical to understand what the meaning of such a clustering is. by clustering two flowgrams together, the algorithm is declaring that the two reads are so similar that the only differences between them are due to pyrosequencing errors. therefore, it is acceptable to have them map to the same flowgram, even if that means changing one or both of them in some way to make them the same. those changes are what the algorithm considers pyrosequencing errors.
+
+the denoising part of flowclus is based on similar logic. if two reads are so similar that the only differences between them are due to pyrosequencing errors, the two reads must have the same flow values at each position throughout their flowgrams, to within some margin of error. if any of the flow values differ by more than a given threshhold, then the reads probably contain differences beyond pyrosequencing errors, and they should not be clustered together. on the other hand, if each pair of flow values is not significantly different, then the reads are likely to be the same, except for pyrosequencing errors. those reads can be clustered together and declared to be the same.
+
+during denoising, flowclus compares each read to the existing cluster centers in turn. if there are no significant differences between its flow values and that of a cluster center, it joins that cluster, and its flow values are averaged into the cluster center’s . if it does not match any of the existing clusters, it begins its own cluster.
+
+recalculating cluster centers in this manner can lead to drift, where early reads no longer match clusters whose centers have drifted away, and other reads that were not placed into clusters now are within the range. to address this issue, flowclus iterates the process as follows. the first time through the reads, the cluster centers are created as described above. next, the clusters centers are sorted based on the number of reads that map to them, from most populous to least. then, the process begins again; each read is checked against the existing cluster centers. if its flow values are not significantly different from those of a cluster center, it joins that cluster, but the cluster center is not recalculated. since the clusters are sorted by size after the first iteration, the reads will map to the most populous clusters possible.
+
+at the end of the denoising process, flowclus reconstitutes the reads by interpreting the clusters’ flowgrams. flowclus rounds all flows ending in “.50” down, as the  <dig> software does most of the time, and adds an n whenever there are three consecutive flows of insufficient signal. the length of each read’s filtered flowgram is taken into consideration when its sequence is produced, so as to avoid the accordion effect  <cit> . in addition to this denoised fasta file, flowclus produces output files that can be used for de novo pcr chimera checking by uchime  <cit>  or perseus  <cit> .
+
+trie
+an alternative usage for denoising with flowclus is to utilize a trie data structure, in which the edges contain the flow values. instead of comparing a query read to each of a set of clusters, the read is simply placed into the trie based on the same comparisons of flow values. as reads are placed, the flow values of the trie are updated, again based on a weighted average. in cases where a query flow value is within the denoising distance of multiple child edges, it is added to the closest edge.
+
+denoising with this method has greatly reduced computational requirements compared to the clustering approach, at the cost of some precision. in particular, there is no second iteration with the trie, making the denoising more sensitive to the choice of distance. also, the abundance information provided for chimera checking is less apparent compared with clustering; the abundance of each leaf node is given by the number of reads that map to it or any of its ancestor nodes.
+
+denoising distance
+the denoising process of flowclus, whether by clustering or trie, is dependent on the choice of a distance threshhold, the maximum difference at which flow values are considered significantly different. this distance is determined by the user. one can choose a constant value, such as  <dig> , which means that, for example, query flow values between  <dig>  and  <dig>  will not be considered significantly different from a reference flow value of  <dig> . this is similar to how the  <dig> software interprets a flow value, except that  <dig> calls bases using integers as its reference values. another possibility is to specify variable denoising distances. one can use distances based on the standard deviations of balzer et al.  <cit> , which increase with larger flow values and may better reflect  <dig> pyrosequencing errors. or, one can use a set of custom distances that suit a particular dataset.
+
+outcome evaluation
+the best way to evaluate the outcome of denoising is to ascertain whether or not the changes to the individual reads are consistent with the known spectrum of pyrosequencing errors. this is the same method we recommended for judging the outcomes of other denoising algorithms  <cit> . flowclus provides an additional way for the user to assess the denoising process. as flow values are being compared, the program records these values whenever they are judged as being distinct, based on the user-specified denoising distance value. at the end of the denoising step, the user can visualize a levelplot of these “misses” to gain further insight as to whether the denoising value should be altered for a particular dataset.
+
+datasets
+for our primary analysis, we used a previously published dataset  <cit>  derived from the microbiomes of fourteen individual nematodes. two regions of the bacterial 16s ribosomal rna gene  were pcr amplified and sequenced using the roche- <dig> gs flx platform with the titanium protocol , resulting in just over  <dig>  reads.
+
+to calculate error rates, we retrieved the titanium mock community dataset of quince et al.  <cit> , which was used to validate ampliconnoise, as well as other denoising algorithms  <cit> . the  <dig>  reads were derived from pcr amplification of the v4-v <dig> region of the 16s gene, using  <dig> plasmid clones as the source dna . the set of original reads  was determined by filtering only for mid tag and primer sequences and allowing one and two mismatches to them, respectively. the initial error rate was calculated by finding the best match of each read to the  <dig> reference sequences  using clustalw  <cit>  with a reduced gap-opening penalty . in this and other error-rate calculations, we counted only insertions and deletions, which are the dominant form of errors in roche- <dig> pyrosequencing  <cit> . we filtered the reads with flowclus  using criteria similar to those recommended with the qiime denoising pipeline and denoised with a constant value of  <dig> . the dataset was also processed through the equivalent steps of ampliconnoise v <dig>   <cit>  and the denoising pipeline in qiime  <dig> . <dig>  <cit> .
+
+to evaluate scalability, we analyzed the large datasets from krych et al.  <cit> . in this study of the human gut microbiome, the v3-v <dig> region of the 16s gene was amplified by pcr and sequenced on the roche- <dig> gs flx titanium platform. the total number of reads for all three groups  was  <dig>  million.
+
+RESULTS
+we used flowclus to filter and to denoise a previously published dataset  <cit> .
+
+filtering
+with our dataset,  <dig>  reads matched one of  <dig> different mid tag - primer combinations . we used several common filtering criteria, resulting in the elimination of  <dig> % of the reads . most of these eliminations were due to reads that were shorter than the specified minimum sequence length of 200 bp, or that were truncated prior to this length by having a window of  <dig> quality scores whose average was less than  <dig>  this sliding window criterion also resulted in the truncation of nearly half of the  <dig>  reads that passed this step. the  <dig>  reads that were truncated by removal of the reverse primer were almost exclusively from the shorter of the two amplicons, as would be expected.table  <dig> 
+results of the filtering step of flowclus
+
+
+min. sequence length 
+max. sequence length for elimination 
+max. ambiguous bases allowed before truncation 
+reverse primer removed
+min. window quality score 
+total
+
+
+denoising
+clustering
+we denoised our dataset with flowclus using a constant value of  <dig>  for the maximum allowed difference between flow values. this resulted in  <dig>  clusters of varying sizes. we determined what changes had been made at this step, using the same process we used to evaluate other denoising pipelines  <cit> . for the reference, we used the filtered reads whose flowgrams had been reinterpreted by flowclus; these reads had  <dig> changes  compared to the regular filtered reads, due to the rounding of flow values ending in “.50” down. the denoised reads had only  <dig> substitutions of the  <dig>  total changes from the reference reads, with the remaining changes being slightly in favor of more deletions than insertions. this pattern is consistent with the known spectrum of pyrosequencing errors. in fact, of the  <dig> substitutions,  <dig> were conversions of an n  to a regular base.
+
+we further determined the effect of altering the constant value parameter of flowclus. as this value  was increased, the numbers of insertions and deletions increased, as expected . the number of substitutions remained much lower until the denoising value was increased above  <dig> .figure  <dig> 
+effects of altering the denoising distance parameter of flowclus. the numbers of changes to the reads made during denoising using different values for the maximum allowed distance between flow values. a: effects of changing the constant denoising value . b: effects of using different multiples  of the distances based on the standard deviations of balzer et al.  <cit> .
+
+
+
+we also denoised using variable denoising distances based on the standard deviations of balzer et al.  <cit> . when using different multiples of those distances , the changes were similar to those of specifying a constant denoising value, with the number of substitutions not increasing significantly until the multiple rose above six .
+
+although the best way to evaluate the outcome of denoising is to examine the changes to the reads, as we have done, flowclus also allows one to visualize the set of flow values that were judged as being distinct during the denoising process. when we examined these denoising “misses” after using a constant distance value of  <dig> , we saw an even white stripe that represented the flow values that were judged as not being different . the denoising misses were concentrated around flow values close to integers, such as where the cluster had a flow value around one and the query read had a flow value close to zero. between these local maxima and along the central stripe were blue and green “close” misses that suggested that using a larger constant denoising value might better suit this dataset. when denoising with a multiple of five for the distances of balzer et al.  <cit> , most of those close misses, especially at larger flow values, were not seen .figure  <dig> 
+denoising “misses” with flowclus. as flowclus denoises flowgrams by comparing pairs of flow values, it records the flow values of the cluster and the read each time they are judged as being distinct. the set of these “misses” for a denoising run can be visualized as a levelplot, such as those shown here. the red-orange colors represent a large number of misses at those particular pairs of cluster and read flow values. a: denoising using a constant distance value of  <dig> . b: denoising using a multiple of five distances based on the standard deviations of balzer et al.  <cit> .
+
+
+
+trie
+with our dataset, the effects of altering the denoising values were similar to those of the clustering approach, except that the numbers of changes increased more sharply at larger distances . part of this volatility resulted from the trie analysis’ not including a second iteration through the reads.
+
+after denoising with the trie and a constant value of  <dig> , the misses did not have the clean white stripe down the middle that was seen previously . this was due to cases where the query flow value was within the denoising distance of more than one child edge. a similar effect was seen when denoising with a multiple of five variable distances .
+
+benchmarking
+computational time
+for our dataset, the filtering step of flowclus required just over one minute . this was  <dig> times faster than the filtering step in qiime, and nearly  <dig> times faster than that of ampliconnoise. part of this discrepancy was explained by the fact that split_libraries.py  and splitkeys.pl  needed to be run for each of the four primers for this dataset separately, whereas flowclus analyzed them all at once.table  <dig> 
+comparison of the run-times  of different denoising pipelines
+
+
+flowclus, min. filtering
+flowclus, with filtering*
+ampliconnoise**
+qiime
+*filtering options as shown in table  <dig> 
+
+**denoising by the pyronoise step only.
+
+
+
+when denoising by clustering with flowclus, the run-time depends on the number of filtered reads, as well as the number of clusters formed. with our dataset that had been filtered, the denoising time was eight seconds, compared to  <dig>  hours and  <dig>  hours required by ampliconnoise and qiime, respectively . flowclus utilized a maximum of  <dig>  mb memory, while pyronoise and denoiser.py both needed more than twice that amount .
+
+it is important to note that ampliconnoise, in addition to analyzing fewer reads due to its stringent filtering criteria, also denoised the reads by mid tag and primer separately . qiime and flowclus both denoised by primer , which is a computationally more expensive approach, in time and memory usage. it is conceptually better to denoise data in as few groups as possible, allowing for error correction of reads derived from rare taxa  <cit> .
+
+with the dataset that had undergone minimal filtering, the denoising run-time of flowclus doubled to 16 seconds. this was due to the increased number and lengths of reads, which in turn resulted in more clusters being formed. a maximum of  <dig>  mb memory was required.
+
+to assess scalability, we analyzed the “baseline” dataset of krych et al.  <cit> . the  <dig>  reads were filtered by flowclus in two minutes, and denoising by clustering, with a constant distance of  <dig> , required less than two hours and  <dig> gb of memory . ampliconnoise, despite denoising  <dig> % fewer reads  and being parallelized over  <dig> cores, needed  <dig>  days and  <dig> gb of memory to process this dataset. the denoiser in qiime, which was similarly run on  <dig> cores, took  <dig>  days , although running it on each sample separately  reduced the run-time to  <dig>  days.
+
+we further applied flowclus to the combination of all three datasets  of krych et al.  <cit> . the  <dig>  million raw reads were filtered in  <dig>  minutes. less than twelve hours and  <dig> gb of memory were used to complete the denoising with a constant distance of  <dig>  .
+
+when denoising by trie with flowclus, the computational time becomes linear with respect to the number of reads. the time to denoise our filtered dataset was reduced to two seconds , with only  <dig>  mb of memory required. for the datasets of krych et al.  <cit> , the “baseline” reads were denoised in 36 seconds , and the nearly  <dig>  million filtered reads of the combined dataset were denoised in 97 seconds  .
+
+error rates
+in order to determine how effective a denoising algorithm has been in removing or correcting errors, one must analyze a dataset in which the correct sequences are known. to this end, datasets derived from mock communities are often used. mock communities are created by combining known plasmid sequences or known bacterial genomic dna. these dna mixtures are then processed like a typical environmental sample, by pcr and sequencing.
+
+we examined the performance of flowclus in correcting pyrosequencing errors in the titanium mock community dataset of quince et al.  <cit> . the set of original reads  was determined by filtering only for mid tag and primer sequences. the combined insertion and deletion error rate of these reads was just over  <dig> % . we then filtered the reads with flowclus using criteria similar to those recommended with the qiime denoising pipeline. this resulted in a drop in the error rate by more than half, while losing  <dig> % of the sequence information. we denoised the reads by clustering, using a constant  <dig>  as the denoising distance, which was the largest value that did not cause a significant  change in the substitution error rate. after denoising, the in/del error rate was further reduced, to less than  <dig> %.figure  <dig> 
+analyzing a mock community dataset. a comparison of the error rates  and total sequence alignment length  of the titanium mock community dataset  analyzed by flowclus and ampliconnoise.
+
+
+
+we processed the mock community dataset through the equivalent steps of ampliconnoise. the initial error rate was nearly identical to that of flowclus, although there were fewer sequences, since splitkeys.pl requires an exact match of the mid tag and primer  <cit> . after filtering with cleanminmax.pl, the error rate was reduced further than with flowclus, but this was achieved at the expense of losing nearly twice as much sequence information . the pyronoise step of ampliconnoise, which is designed to correct only pyrosequencing errors, brought the error rate down nearly to the level of flowclus. however, it is important to note that this error rate was artificially deflated, because of the positive 3’ gap of pyronoise  <cit> , as shown by the increase in sequence information .
+
+we also analyzed this mock community dataset with the qiime denoising pipeline, and we found that the error rates through each step were similar to those of flowclus . here again, though, the final error rate of just over  <dig> % was artificially reduced because of the positive 3’ gap of denoiser.py. the lowest error rate was produced after filtering using the -g option in qiime, but this also resulted in the loss of  <dig> % more sequence information .
+
+in all these analyses, factors other than sequencing errors also contributed to the in/del error rate. these included in/dels derived from pcr errors and the possibility of some incorrect reference sanger sequences . in addition, the presence of reads derived from contaminants  <cit>  and pcr chimeras also increased the error rates. we found that removing reads classified as chimeras by uchime  <cit>  had a small and equivalent effect on the in/del error rates for each of the denoising pipelines. despite these issues, we performed no manipulation or exclusion of individual reads, beyond what was done by the denoising algorithms.
+
+in analyzing this dataset, flowclus had a greatly decreased run-time compared to the other pipelines . it filtered and denoised in just over twenty seconds. ampliconnoise required more than nine hours, despite analyzing  <dig> % fewer reads. the qiime denoising pipeline used nearly seven hours, although some of this time was used to correct pcr single-base errors, which denoiser.py does simultaneously with addressing pyrosequencing errors.
+
+when used with the trie denoising option, flowclus required just two seconds . the error rates across constant denoising distances ranging from  <dig>  to  <dig>  were similar to those when denoising by clustering . however, the trie error rates greatly increased at denoising distances above  <dig> . this underscores the sensitivity of the trie denoising option to larger denoising distances, which is consistent with the spectrum of read changes seen previously .
+
+CONCLUSIONS
+the importance of accounting for errors stemming from pcr and sequencing in amplicon-based metagenomic studies is well-established  <cit> . however, existing denoising programs have negative side-effects  <cit>  and do not allow one to evaluate the outcome when they are used to analyze real-world data. in addition, they are computationally prohibitive for many larger datasets.
+
+we have described a new program, flowclus, that filters and denoises pyrosequenced amplicons. our goal was to have a program that would keep the users in charge of their data by providing detailed information about the filtering and denoising processes, and that would be practical for use with current and future datasets, including those generated by ion torrent sequencing.
+
+for filtering, flowclus provides a wide variety of criteria that will eliminate or truncate reads based on sequences, quality scores, and flowgrams. the user can select any or all of these criteria, and the program analyzes the reads according to a strict order of operations. when the filtering step is completed, flowclus provides an accounting of the effects that the chosen criteria have. if a particular criterion has a biased effect on certain samples, for example, the user will be made aware of this and may consider altering the filtering parameters accordingly. although this step was also designed to prepare the flowgrams for denoising, those analyzing other pyrosequenced datasets may choose to filter their data using flowclus, simply because of the value of the information that is reported back and the systematic approach that is employed.
+
+the denoising process in flowclus is designed to correct pyrosequencing errors. like other denoising programs, it does this by clustering flowgrams whose only differences are judged as being pyrosequencing errors. with flowclus, the user controls the clustering process by setting the maximum distance allowed between flow values. after the denoising has completed, the effects of denoising can be assessed by ascertaining whether or not the changes to the individual reads are consistent with the known spectrum of pyrosequencing errors. this is the same method we recommended for judging the outcomes of other denoising pipelines  <cit> . an additional way one can evaluate denoising with flowclus is to examine a levelplot of the flow values that were considered different during the clustering process. both of these methods provide for the user information that can be used to adjust the parameters to suit the particular dataset being analyzed.
+
+the feedback provided for the filtering and denoising steps of flowclus applies to datasets generated from real-world samples. that is, the user does not need to know the true sequences to judge the effects that the program has had on the data. this is an important distinction, because other denoising algorithms were validated based on their abilities to achieve the “correct” results with mock community data. the problem is that these results are not necessarily reflective of how well the algorithms will perform with data derived from real communities. in a real-world sample, there are rare variants of more dominant species, and it is not certain that these true sequences will not be considered errors. it is also unclear how well a denoising algorithm that was validated with mock community data at one stage of sequencing technology will continue to perform as the technology improves, generating more and longer reads per run.
+
+nevertheless, we processed a mock community dataset through flowclus. it produced a lower error rate than ampliconnoise and the qiime denoising pipeline, while retaining more sequence information. another important result from this analysis was the extent to which filtering reduced the error rates far more than denoising in each of the pipelines. this highlights the importance of continued study of filtering criteria, which does not seem to be keeping pace with new advances in sequencing technology.
+
+flowclus does not address sources of error arising from pcr artifacts directly. there are already numerous programs available that are used to identify pcr chimeras. due to the importance of removing chimeras in amplicon-based metagenomics, we designed flowclus to produce files that can be fed to de novo chimera-checking programs, which require abundance information . on the other hand, we do not believe that pcr single-base errors contribute substantially to noise, nor do we believe there is a valid model that can distinguish such errors from the natural diversity inherent in real-world samples  <cit> .
+
+with all the datasets, flowclus completed the analysis in a fraction of the time required by ampliconnoise and the qiime denoising pipeline. our small dataset was processed in under two minutes. less than twelve hours were required for a large dataset of  <dig>  million reads. those who are analyzing such large datasets can consider using flowclus with the trie denoising option, which is even more efficient, at the cost of some precision. there is no second iteration with the trie, making the denoising more sensitive to the choice of distance, and the abundance information provided for chimera checking is less precise compared to that from clustering.
+
+as sequencing technology has progressed, reads have increased in length and in quantity. flowclus was not written for a particular implementation of roche- <dig> sequencing, so it can analyze reads generated from any number of flows and any flow order . with the impending demise of pyrosequencing, ion torrent has gained popularity in the field; flowclus can process data from this sequencing platform as well. this is particularly important in addressing the need to re-analyze multiple large datasets that may have been generated at different stages of sequencing technology. because of its flexibility and efficiency, flowclus is uniquely suited to be able to perform this task.
+
+availability of supporting data
+the dataset for our primary analysis, taken from gaspar and thomas  <cit> , is available in the ncbi sequence read archive, accession srr <dig>  the titanium mock community dataset of quince et al.  <cit>  is available in the sra, accession srr <dig>  the datasets of krych et al.  <cit>  are available in the sra, accessions srr550157- <dig> 
+
+additional files
+additional file 1: 
+the filtering criteria and order of operations used by flowclus.
+
+
+additional file 2: 
+notes on the mock community dataset that was used.
+
+
+additional file 3: 
+the  <dig> reference sequences of the mock community dataset.
+
+
+additional file 4: 
+effects of altering the parameters of flowclus when using a trie. the numbers of changes to the reads made during denoising with a trie was determined. a: effects of changing the constant denoising value. b: effects of using different multiples for the distances based on the standard deviations of balzer et al.  <cit> .
+
+additional file 5: 
+denoising “misses” with flowclus when using a trie. levelplots of the flow values that were judged as being distinct, based on the following user-selected parameters. a: a constant value of  <dig> . b: a multiple of five distances based on the standard deviations of balzer et al.  <cit> .
+
+additional file 6: 
+comparisons of the run-times  of different denoising pipelines. a: titanium mock community dataset of quince et al.  <cit> . b: baseline dataset of krych et al.  <cit> . c: combined dataset  of krych et al.  <cit> .
+
+additional file 7: 
+analyzing a mock community dataset by the qiime denoising pipeline. a comparison of the error rates  and total sequence alignment length  of the titanium mock community dataset  <cit>  analyzed by the qiime denoising pipeline, with and without the -g filtering option.
+
+additional file 8: 
+comparisons of the error rates when denoising by clustering vs. by trie at different denoising distances.
+
+
+
+
+abbreviations
+pcrpolymerase chain reaction
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+jmg wrote the software and the paper. wkt edited the paper. both authors read and approved the final manuscript.
+

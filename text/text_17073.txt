@@ -1,0 +1,84 @@
+BACKGROUND
+ribosome profiling is a next-generation sequencing strategy that enriches for ribosome-protected mrna footprints indicative of active protein translation  <cit> . fragments of mrna bound by ribosomal complexes are selected for by enzymatic digestion, isolated using a sucrose cushion or gradient, released from their occupying ribosome, size-selected by gel electrophoresis, and then sequenced. thus, sequencing and analysis of ribosome-protected fragments  of mrna enables profiling of the translational content of a sample on a transcriptome-wide level.
+
+various algorithms have been developed to differentiate protein-coding and non-coding transcripts in ribosome profiling sequence data using fragment length distribution differences  <cit>  and read frame enrichment of aligned reads  <cit> . however, classification based on extreme outlier analysis of fragment length organization similarity score  differences is agnostic to the ribosome-protected fragment abundance over a transcript. furthermore, classification based on read frame alignment enrichment  is optimized for canonical open reading frame  usage only. in addition, neither of the algorithms described above are available as standalone packages and must be implemented by the user. published more recently, ribotaper  <cit>  utilizes a coherence-based approach to detect actively translated transcripts from the alignment of ribosome-protected fragments; however, the ribotaper algorithm requires matched ribosome profiling and mrna sequence libraries and can take multiple days to analyze a single sample.
+
+here we introduce spectre, a classification algorithm based on spectral coherence to identify regions of active translation with high sensitivity and specificity using aligned ribosome profiling sequence reads without the requirement of a matched mrna sequence library . spectre leverages a key feature of ribosome profiling where sequence reads aligned to a reference transcriptome will track the tri-nucleotide periodicity characteristic of transcripts as they are translated by ribosomes, and reports both significant signals of translation as well as windowed periodicity scores for visualizing results within a genomic context. options to change the size of windows analyzed, the step size between adjacent windows, false discovery rate, abundance cutoffs to define actively translated versus non­translated score distributions, and parameters to optimize runtime performance are provided to the user to customize. implementations of floss and orfscore are included with spectre for comparative purposes.fig.  <dig> spectre pipeline and performance. a spectre analytical pipeline, input files, formats and outputs. b ribosome profiling read coverage averaged over annotated protein-coding transcripts demonstrates a tri-nucleotide periodic signal characteristic of translation by ribosomes
+
+
+
+
+implementation
+in contrast to non-coding transcripts, ribosome profiling fragments aligned to protein-coding transcripts are characterized by a tri­nucleotide periodic signal as ribosome-bound mrnas are translated into protein in a codon-dependent manner . thus coding transcripts may be differentiated from non-coding transcripts by the presence or absence of a strong tri-nucleotide periodic signal. to measure the strength of this tri-nucleotide signal, we calculate the spectral coherence  <cit>  over sliding n nucleotide length windows across a transcript . spectral coherence is a measurement of the power relationship between two signals over the frequency domain, such that two signals with shared frequencies will have high coherence, whereas two unrelated signals will be of low coherence. the spectre score, based on a modified welch’s spectral density estimate  <cit>  of overlapping windows, is calculated for each transcript from a user-provided transcript annotation database.
+
+for a given transcript with coordinates defined by the set c, the a- or p-site adjusted read positions overlapping those coordinates are extracted from a bam alignment file. the coverage over each coordinate in the set is summed, then normalized to the position with the highest coverage, such that all coordinate positions defined by the set c range from zero  to one . the default spectre score is calculated as the average  coherence over n nucleotide sliding windows across a normalized coverage region against an idealized tri-nucleotide control signal of the same length. therefore, the spectre score across a normalized coverage region r, with coordinates c, against an idealized tri-nucleotide periodic signal s with frequency j, over adjacent n nucleotide windows is given by:  <dig> specrs,j=1m∑m=1mcohrm,m+nsn,jforallm+n∈c 
+
+
+alternatively, the number of sliding windows  over the coordinate set c, may be modified based on the step size between each window. therefore, given a coordinate set c, and step size of l:  <dig> wn=cln,forn≥1andl≥ <dig> 
+
+
+therefore, the default spectre score of a normalized coverage region r, at frequency j of an idealized trinucleotide signal s, over n nucleotide sliding windows with a step size of l, is given by the equation:  <dig> specrs,j=1m∑m=1mcohrm,m+nsn,jforallm∈wnandallm+n∈c 
+
+
+distributions of these scores are generated using a user-defined fragments per kilobase per million reads, or fpkm  <cit> , cutoff to differentiate transcripts under active translation from those that are not; these distributions are then used to derive a minimum spectre score threshold for active translation given a pre-determined false discovery rate, as well as the posterior probability that a given transcript or region is actively translated.
+
+ribosome profiling libraries treated with cycloheximide typically isolate rpfs of  <dig> to  <dig> nucleotides in length; these fragments align with high fidelity to protein-coding regions  <cit> . however, in the absence of cycloheximide, conformational changes in the ribosomal complex enrich for a shorter range of rpfs that also map with high fidelity to protein-coding regions  <cit> . enrichment of these shorter-range fragments may obscure the tri-nucleotide signal profiled by coherence-based classifiers, like spectre, and may under-estimate the number of actively translated orfs. we simulated increasing variance of rpf lengths outside of the expected enrichment of 28–30 nt length fragments through a biased sampling of reads aligned to the housekeeping gene actb. with increased bias, the rpf length distribution is no longer enriched in fragments of 28–30 nt in length, but instead progressively resembles a uniform distribution . biased re-sampling of  <dig>  out of over  <dig>  p-site adjusted reads aligned to actb was performed over  <dig>  trials, and in each trial the sampled reads were converted into normalized coverage, then scored by spectre. using an extreme outlier cutoff, this biased re-sampling analysis suggests that spectre scoring remains robust under increased variance in sequence library fragmentation .
+
+RESULTS
+we assessed the sensitivity and specificity of each classification algorithm using recently published ribosome profiling and mrna-seq data derived from hek <dig> cells  <cit> . for the comparative analysis of each classification algorithm in the hek <dig> ribosome profiling library, ribotaper  was run against published read alignments using the included gencode  transcript annotation database  <cit> . the highest scoring ribotaper orfs were extracted from the orfs_found results file using the transcript identifiers and scoring method from the orfs_max output. these orfs were then scored by spectre , floss and orfscore, and then relative performance of each algorithm was assessed by receiver operating characteristic  analysis. previous work has benchmarked classifier performance using a series of transcript fpkm cutoffs  <cit>  or other coverage-based metrics  <cit> . therefore roc analyses were performed using a series of orf abundance cutoffs based on fpkm to differentiate those under active translation from those that are not. in this manner, we are able to assess the ability of each approach to identify orfs with signatures of active translation in the interrogated cell type. we performed roc analyses and calculated the area under the curve  over pre-defined rpf abundance cutoffs  to assess the relative performance of each classification algorithm to accurately define regions of active translation. in hek <dig> cells, spectre conforms with high fidelity to ribotaper classification and outperforms both floss and orfscore to identify actively translated orfs .fig.  <dig> comparative analysis of spectre against previously published translational classification algorithms. a performance of spectre, ribotaper, floss and orfscore classification of orf translation at various rpf abundance cutoffs as measured by area under the curve  in ribosome profiling of hek <dig> cells  <cit> . b receiver operating characteristic  curves of spectre, ribotaper, floss, and orfscore at a cutoff of  <dig>  fpkm. c performance of spectre, floss, and orfscore classification of orf translation in ribosome profiling of mesc  <cit>  at various rpf abundance cutoffs as measured by auc. d performance of spectre, floss, and orfscore classification of orf translation in a meta-analysis of ribosome profiling in zebrafish  <cit>  over various rpf abundance cutoffs as measured by auc. all spectre analyses were based on 30 nt sliding windows, using a step size of three between each window
+
+
+
+
+we also used previously published ribosome profiling data derived from mouse  <cit>  embryonic stem cells  and zebrafish embryos  <cit>  to assess the performance of spectre, floss and orfscore in the absence of mrna-seq data ; ribotaper was excluded from these analyses due to its requirement of matched mrna-seq data. ribosome profiling sequence reads from each set were aligned to the mouse or zebrafish reference genome and transcriptome, respectively. antisense, overlapping and neighboring protein-coding and non-coding transcripts were removed from the analysis using methods described previously  <cit> . the floss, orfscore and spectre metrics were calculated for each remaining transcript and roc analyses were carried out as described above. spectre remains robust in its classification of actively translated transcripts in the standalone mesc ribosome profiling library , and exhibits a marked improvement in accuracy in a meta-analysis of ribosome profiling libraries derived from zebrafish embryos .
+
+a unique feature of spectre is its ability to report and visualize signals of periodicity in the context of surrounding genomic features. graphical output from spectre analysis is shown for two representative transcripts . shown in fig. 3a is the condensed transcript profile of rcc1­ <dig>  with the 5′utr and 3′utr depicted by the narrow black lines, and the cds region depicted with the thicker black line. in gray is the normalized p-site adjusted read coverage over the transcript, with the posterior probability calculated by spectre denoted by the black line. the dashed horizontal line represents the translational threshold calculated by spectre at a false discovery rate  of  <dig> . in addition to the transcript structure depicted in fig. 3b are two upstream open reading frames  detected separately by ribotaper  in the mief <dig>  transcript. although the 5′utrs of both rcc1­ <dig> and mief <dig> are profiled by rpf coverage, spectre analysis identifies only the uorfs in the 5′utr of mief <dig>  also identified previously by ribotaper  <cit> , with a tri-nucleotide signal of sufficient strength to be indicative of translational potential.fig.  <dig> examples of spectre results and runtime comparison to ribotaper. a spectre posterior probability profile  and normalized p­site adjusted read coverage  over the transcript structure of rcc1­ <dig>  solid, horizontal black line represents the translational threshold as calculated by spectre at a false discovery rate of  <dig> . arrow indicates position of annotated translational start site. thin black boxes  denote the 5′utr and 3′utr, respectively, with cds  in between. b spectre posterior probability profile  over the transcript structure of mief <dig>  thin, black boxes under transcript structure denote two uorfs previously identified by ribotaper analysis. c scatter plot of spectre and log <dig> scores over assessed orfs. d comparison of spectre  and ribotaper  total compute time, in hours
+
+
+
+
+a further analysis of these and other orfs assessed by both spectre and ribotaper show a very high degree of score consistency between the two algorithms  in addition to their comparable overall accuracy. however, spectre has been designed to be fast and efficient and exhibits a runtime almost one-third of that required by ribotaper  without the necessity of rna-seq data. this is achieved through spectre’s ability to chunk experiments and parallelize analyses over multiple threads, depending on available computational resources, which enables this exceedingly fast runtime relative to existing methods and decreases the computational barrier between library alignment to application and validation. for these experiments, spectre analysis was split by chromosome and run using  <dig> processors, with  <dig> gigabytes of ram allocated; ribotaper was run with default parameters, using  <dig> processors and  <dig> gigabyes of ram. both spectre, and ribotaper were run on a high-performance computing cluster running red hat enterprise linux version  <dig>  . for installation simplicity and application efficiency, spectre has been written in python with minimal third-party dependencies; the only non-standard python libraries required for spectre analysis are rpy <dig>  numpy  <cit> , htseq  <cit> , samtools, pyfasta, pysam, and the r package rocr.
+
+CONCLUSIONS
+spectre is a flexible, lightweight, command-line driven analytical package that identifies regions of active translation through modeling of the tri-nucleotide periodicity characteristic of translation by ribosomes, and does so with high fidelity to a recently published method that relies on a similar coherence-based approach. spectre classification also out-performs prevailing algorithms based on fragment length distribution profiling and reading frame occupancy enrichment. spectre is robust across ribosome profiling libraries derived from multiple organisms and cell types, even in the absence of matching mrna-seq data, and is capable of identifying active translation in regions previously thought to be non-coding. further, spectre is under continuous development to optimize compute runtime and memory overhead in order to facilitate the efficient and accurate investigation of translational dynamics through ribosome profiling sequence analysis.
+
+availability and requirements
+project name: spectre
+
+project home page: https://github.com/mills-lab/spectre
+
+
+operating systems: linux, os x
+
+programming languages: python, r
+
+other requirements: python v <dig> .8+, rpy <dig>  htseq, samtools v <dig> +, pyfasta v <dig> .2+, and pysam  <dig> . <dig>  + .
+
+additional files
+
+additional file 1: supplemental methods, tables, figures and example scripts. 
+
+
+
+
+abbreviations
+aucarea under the curve
+
+flossfragment length organization similarity score
+
+fpkmfragments per kilobase per million mapped reads
+
+mescmouse embryonic stem cells
+
+orfopen reading frame
+
+ramrandom access memory
+
+rhelred hat enterprise linux
+
+rocreceiver operating characteristic
+
+rpfribosome-protected fragment
+
+uorfupstream open reading frame
+

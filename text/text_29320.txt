@@ -1,0 +1,315 @@
+BACKGROUND
+generalized hidden markov models have seen wide use in recent years in the field of computational gene prediction. a number of ab initio gene-finding programs are now available which utilize this mathematical framework internally for the modeling and evaluation of gene structure  <cit> , and newer systems are now emerging which expand this framework by simultaneously modeling two genomes at once, in order to harness the mutually informative signals present in homologous gene structures from recently diverged species. as greater numbers of such genomes become available, it is tempting to consider the possibility of integrating all this information into increasingly complex models of gene structure and evolution.
+
+notwithstanding our eagerness to utilize this expected flood of genomic data, methods have yet to be demonstrated which can perform such large-scale parallel analyses without requiring inordinate computational resources. in the case of generalized pair hmms , for example, the only systems in existence of which we are familiar make a number of relatively restrictive assumptions in order to reduce the computational complexity of the problem to a more tolerable level  <cit> . yet, even these systems are currently capable of handling no more than two genomes at once. if larger numbers of genomes are to be simultaneously integrated into the gene prediction process in a truly useful manner, then it is reasonable to suggest that new methods will be needed for efficient modeling of parallel gene structures and their evolution. assuming for now that these methods are likely to continue to build on the basic ghmm framework, we feel it is important that efficient methods of ghmm implementation be properly disseminated for the benefit of those who are to work on this next generation of eukaryotic gene finders.
+
+modeling genes with a ghmm
+a hidden markov model  is a state-based generative model which transitions stochastically from state to state, emitting a single symbol from each state. a ghmm  generalizes this scenario by allowing individual states to emit strings of symbols rather than one symbol at a time  <cit> . a ghmm is parameterized by its transition probabilities, its state duration  probabilities, and its state emission probabilities. these probabilities influence the behavior of the model in terms of which sequences are most likely to be emitted and which series of states are most likely to be visited by the model as it generates its output.
+
+eukaryotic gene prediction entails the parsing of a dna sequence into a set of putative cdss  and their corresponding exon-intron structures  <cit> . thus, the problem of eukaryotic gene prediction can be approximately stated as one of parsing sequences over the nucleotide alphabet Σ = {a,c,g,t} according to the regular expression:
+
+Σ**Σ*Γ)*Σ*,     
+
+where the signals  have been underlined for clarity, and where Γ = {tag,tga,taa} represents a stop codon. . an additional constraint not explicitly represented in formula  <dig> is that the number of non-intron nucleotides between the start and stop codons of a single gene must be a multiple of three, and furthermore, if these nucleotides are aggregated into a discrete number of nonoverlapping triples, or codons, then none of these codons must be a stop codon, other than the stop codon which terminates the gene. note that the Σ* terms in formula  <dig> permit the occurrence of pseudo-signals – e.g., an atg triple which does not comprise a true start codon. gene prediction with a ghmm thus entails parsing with an ambiguous stochastic regular grammar; the challenge is to find the most probable parse of an input sequence, given the ghmm parameters and the input sequence.
+
+in the case of simple hidden markov models, this optimal parsing  problem can be solved with the well-known viterbi algorithm, a dynamic programming algorithm with run time linear in the sequence length   <cit> . a modified viterbi algorithm is required in the case of ghmms, since each state can now emit more than one symbol at a time  <cit> , resulting in the following optimization problem:
+
+
+
+where φ is a parse of the sequence consisting of a series of states qi and state durations di, 0≤i≤n, with each state qi emitting subsequence si of length di, so that the concatenation of all s0s <dig> ..sn produces the complete output sequence s . pe denotes the probability that state qi emits subsequence si, given duration di; pt is the probability that the ghmm transitions from state qi- <dig> to state qi; and pd is the probability that state qi has duration di. the argmax is over all parses of the dna sequence into well-formed exon-intron structures; hence, the problem is one of finding the parse which maximizes the product in equation  <dig> 
+
+implementation
+the psa decoding algorithm
+the approach commonly used in ghmm gene finders for evaluating equation  <dig> is to allocate several arrays, one per variable-length feature state, and to evaluate the arrays left-to-right along the length of the input sequence according to a dynamic programming algorithm, which we will detail below. we refer to this approach as the prefix sum arrays  approach, since the values in the aforementioned arrays represent cumulative scores for prefixes of the sequence.
+
+without loss of generality, let us consider the ghmm structure depicted in figure  <dig>  although individual ghmms will differ from this particular structure on specific points, the model in figure  <dig> is general enough to serve as a concrete example as we illustrate the operation of the algorithm.
+
+the diamonds denote the states for fixed length features  and the circles denote states for variable length features . this model generates genes only on the forward strand of the dna; to obtain a double-stranded model one can simply mirror the structure and link the forward and reverse models through a single merged intergenic state.
+
+associated with each diamond state is a signal sensor such as a weight matrix  or some other fixed-length model   <cit> , and with each circular state is associated a variable-length content sensor, such as a markov chain  or an interpolated markov model   <cit> .
+
+for the purposes of illustration, we will consider only the simplest of each model type, since the more complex model types commonly in use can in general be handled generically within the ghmm framework. the simplest fixed-length model is the wmm:
+
+
+
+where xh..xh+n denotes the subsequence currently within a sliding -element window, called the context window, and p denotes the probability of nucleotide x occurring at position i within the window, for model θ. in practice, all of the probabilities described in all of these models are represented in log space , so that products of probabilities can be replaced with sums of their logs.
+
+the simplest variable-length model used in practice is the markov chain. an nth-order markov chain m for state qi would evaluate the probability p of a putative feature si according to:
+
+
+
+where xj is the jth nucleotide in the sequence of the putative feature, di is the length of that feature, and pm is the probability of nucleotide xj conditional on the identities of its n predecessor nucleotides, according to content model m. as with the fixed-length model described above, this computation is typically done in log space.
+
+in scoring the signals and content regions of a putative gene parse, it will be important for us to carefully differentiate between the nucleotides which are scored by a signal sensor and those which are scored by a content sensor in a putative parse. as shown in figure  <dig>  the content and signal regions must partition the sequence into non-overlapping segments; allowing overlaps would result in double-counting of nucleotide probabilities, which can lead to undesirable biases in the decoding algorithm.
+
+the first step of the psa algorithm is to compute a prefix sum array for each content sensor. for noncoding states  this can be formalized as shown in figure  <dig> 
+
+in the case of exon states, it is important to capture the different statistical properties present in the three codon positions, referred to as phase  <dig>  phase  <dig>  and phase  <dig>  we employ three markov chains, m <dig>  m <dig>  and m <dig>  corresponding to these three phases. together, these three chains constitute a three-periodic markov chain, m{ <dig> ,2}. exon states then require three arrays, each of which can be initialized using the procedure shown in figure  <dig> 
+
+in this way, we can initialize the three arrays αi,  <dig>  αi,  <dig>  and αi,  <dig> for an exon state qi as follows:
+
+for ω ←  <dig> to  <dig> do
+
+   init_phased ;
+
+the individual chains m <dig>  m <dig>  and m <dig> comprising m{ <dig> ,2} are applied in periodic fashion within the procedure init_phased() to compute conditional probabilities of successive nucleotides along the length of the array. the three arrays are phase-shifted by one from each other, with each element in the array storing the cumulative score of the prefix up to the current nucleotide. the first nucleotide is taken to be in phase ω for array αi,ω. initializing the arrays for reverse-strand states can be achieved by simply reverse-complementing the dna sequence and then reversing the order of the resulting arrays .
+
+once the prefix sum arrays have been initialized for all variable-duration states, we make another left-to-right pass over the input sequence to look for all possible matches to the fixed-length states, via the signal sensors. in general, a signal sensor θ models the statistical biases of nucleotides at fixed positions surrounding a signal of a given type, such as a start codon. whenever an appropriate consensus is encountered , the signal sensor's fixed-length window is superimposed around the putative signal  and evaluated to produce a logarithmic signal score rs = log p, where h is the position of the beginning of the window and n is the window length. if signal thresholding is desired, rs can be compared to a pre-specified threshold and those locations scoring below the threshold can be eliminated from consideration as putative signals.
+
+the remaining candidates for signals of each type are then inserted into a type-specific signal queue for consideration later as possible predecessors of subsequent signals in a putative gene model. as each new signal is encountered, the optimal predecessors for the signal are selected from among the current contents of the signal queues, using a scoring function described below. in the example  ghmm depicted in figure  <dig>  the possible  patterns are:
+
+atg→tag
+
+atg→gt
+
+gt→ag
+
+ag→gt
+
+ag→tag
+
+tag→atg
+
+associated with each of these patterns is a transition probability, pt, which is included in the scoring of a possible predecessor; this probability can be accessed quickly by indexing into a two-dimensional array. the logarithmic transition score will be denoted rt = log pt.
+
+the distance from a prospective predecessor to the current signal is also included in the evaluation in the form of pd for distance  di and signal type  qi. this probability can usually be obtained relatively quickly, depending on the representation of the duration distributions. if the distributions have been fitted to a curve with a simple algebraic formula, then evaluation of the formula is typically a constant-time operation. if a histogram is instead maintained, then a binary search is typically required to find the histogram interval containing the given distance. we denote the logarithmic duration score rd = log pd where di is the length of the content region delimited by signals qi and qj, and qi:j is the variable-length state corresponding to that content region.
+
+following equation  <dig>  the final component of the scoring function is the emission probability pe. for a fixed-length state, this is simply the score produced by the signal sensor. for a variable-length state qi, pe can be evaluated very quickly by indexing into the prefix sum array αi,γ for state qi and phase γ at the appropriate indices for the two signals and simply performing subtraction:
+
+rc ← αi,γ  - αi,γ ,     
+
+where wpos is the 0-based position  of the first nucleotide in the context window for signal s, wlen is the length of the context window for signal s, and spred and scur are the predecessor and current signals, respectively. in the case of coding features, γ is the phase of the array and ω = )mod <dig> is the phase of scur, for pos the position of the leftmost consensus base of scur. for reverse-strand features, since the prefix sum arrays tabulate their sums from the right instead of the left, the subtraction must be reversed:
+
+rc ← αi,γ - αi,γ,     
+
+and ω =  - 1)mod <dig>  for l the sequence length. for noncoding features, the phases can be ignored when computing rc, since there is only one array per noncoding state.
+
+the resulting optimization function is:
+
+
+
+for current signal sj and predecessor signal si; ri denotes the logarithmic inductive score for signal si in phase γi. for forward-strand coding features, the phases γi and γj are related by:
+
+γi = mod <dig>      
+
+for Δ the putative exon length, or, equivalently,
+
+γj = mod <dig>      
+
+these relations can be converted to the reverse strand by swapping + and -. for introns, γi = γj. for intergenic features, the phase will always be  <dig> for a forward strand signal and  <dig> for a reverse strand signal .
+
+the result of equation  <dig> is the optimal predecessor for signal sj. this scoring function is evaluated for all appropriate predecessor signals, which are readily available in one or more queues, as mentioned above. a pointer called a trellis link is then created, pointing from the current signal to its optimal predecessor. in the case of those signals that can terminate an exon or an intron, three optimal predecessors must be retained, one for each phase. the inductive score ri of the new signal sj is then initialized from the selected predecessor si as follows:
+
+ri ← ri + rt + rd + rc + rs,     
+
+where rs is the logarithmic score produced by the signal sensor for signal sj.
+
+a final step to be performed at each position along the input sequence is to drop from each queue any signal that has been rendered unreachable from all subsequent positions due to intervening stop codons. except for the final stop codon of a gene, in-phase  stop codons are generally not permitted in coding exons; for this reason, any potential stop codon  will eclipse any preceding start codon or acceptor site  in the corresponding phase. the algorithm shown in figure  <dig> addresses this issue by dropping any fully eclipsed signal  from its queue.
+
+for the reverse strand, line  <dig> of eclipse() should be changed to:
+
+ω ← -len - 1) mod3;
+
+where len is the length of the consensus sequence for signal s . note that by xmod <dig> we mean the positive remainder after division of x by 3; in some programming languages , a negative remainder may be returned, in which case  <dig> should be added to the result.
+
+a special case of eclipsing which is not handled by eclipse() is that which occurs when a stop codon straddles an intron; this can be handled fairly simply by checking for such when considering each donor signal as a prospective predecessor for an acceptor signal . as each predecessor is evaluated, the bases immediately before the donor and immediately following the acceptor are examined, and if a stop codon is formed, the predecessor is no longer considered eligible for selection in the corresponding phase.
+
+as shown in figure  <dig>  when a signal has been eclipsed in all three phases it can be removed from its queue. in this way, as a signal falls further and further behind the current position in the sequence, the signal becomes more and more likely to be eclipsed in all three phases as randomly formed stop codons are encountered in the sequence, so that coding queues  tend not to grow without bound, but to be limited on average to some maximal load determined by the nucleotide composition statistics of the sequence. because of this effect, the expected number of signals which must be considered during predecessor evaluation can be considered effectively constant in practice.
+
+in the case of noncoding queues , the assumption that noncoding features follow a geometric  distribution allows us to limit these queues to a single element , because once a noncoding predecessor has been selected in a given phase, no other noncoding predecessor which has already been compared to the selected predecessor can ever become more attractive by virtue of its transition probability , its duration probability , nor its sequence probability .
+
+because the coding and noncoding queues are effectively limited to a constant load , the expected processing time at each nucleotide is o in practice and therefore the entire algorithm up to this point requires time o for an input sequence of length l and a ghmm with a fixed number of states. it will be seen that the traceback procedure described below also requires time o, and so this is the time complexity of the psa decoding algorithm for normal eukaryotic genomes .
+
+once the end of the sequence is reached, the optimal parse φ can be reconstructed by tracing back through the trellis links. in order for this to be done, a set of virtual, anchor signals  must be instantiated at either terminus of the sequence . those at the left terminus will have been entered into the appropriate queues at the very start of the algorithm as prospective targets for the first trellis links , and those at the right terminus are the last signals to be evaluated and linked into the trellis. the highest scoring of these right terminal anchor signals is selected  as the starting point for the traceback procedure. traceback consists merely of following the trellis links backward while adjusting for phase changes across exons, as shown in figure  <dig> 
+
+modifications to figure  <dig> for features on the reverse-strand include changing the ag on line  <dig> to gt, changing the subtraction on line  <dig> to addition, and changing the  <dig> on line  <dig> to  <dig> 
+
+it should be clear from the foregoing that the space requirements of the psa decoding algorithm are o for sequence length l and variable-duration state set q. if, for example, array elements are 8-byte double-precision floating point numbers, then the ghmm depicted in figure  <dig> would require  <dig> prefix sum arrays , resulting in a memory requirement of at least  <dig> bytes per nucleotide. generalizing this ghmm to handle both dna strands would increase this to  <dig> bytes per nucleotide, so that processing of a  <dig> mb sequence would require at least  <dig> mb of ram just for the arrays. adding states for 5' and 3' untranslated regions would increase this to  <dig> mb of ram for a  <dig> mb sequence, or over  <dig> gb of ram for a  <dig> mb sequence. for the purposes of comparative gene finding on multiple organisms with large genes, these requirements seem less than ideal, especially when one considers the possibility of adding yet other states.
+
+the memory requirements can be reduced in several ways. first, markov chains can be shared by similar states. for example, the intron and intergenic states can share a single markov chain trained on pooled noncoding dna, and all the exon states can use the same three-periodic markov chain trained on pooled coding dna. to our knowledge, the extent to which this optimization affects the accuracy of the resulting gene finder has not been systematically investigated, though it is commonly used in practice. second, the models for exons can be modified so as to utilize likelihood ratios instead of probabilities. if the models for exons are re-parameterized to compute:
+
+
+
+and the noncoding models are modified to compute:
+
+
+
+then the latter can be seen to be unnecessary, since it will always evaluate to  <dig>  such a modification is valid and will have no effect on the mathematical structure of the optimization problem given in equation  <dig> as long as the denominator is evaluated using a markov chain or other multiplicative model, since the effect of the denominator on inductive scores will then be constant across all possible predecessors for any given signal. using such ratios allows us to skip the evaluation of all noncoding states, so that the number of prefix sum arrays required for a double-stranded version of the ghmm in figure  <dig> would be only  <dig> , corresponding to the three exon phases on two strands. furthermore, to the extent that these likelihood ratios are expected to have a relatively limited numerical range, lower-precision floating point numbers can be used, or the ratios could instead be multiplied by an appropriate scaling factor and then stored as 2-byte integers  <cit> . this is a significant reduction, though asymptotically the complexity is still o. an additional consideration is that the log-likelihood strategy makes unavailable  the raw coding and noncoding scores, which might be desired later for some unforeseen application.
+
+a third method of reducing the memory requirements is to eliminate the prefix sum arrays altogether, resulting in what we call the dynamic score propagation  algorithm.
+
+the dsp decoding algorithm
+informally, the dsp algorithm is similar to the psa algorithm except that rather than storing all nucleotide scores for all content sensors in a set of prefix sum arrays, we instead store only the specific elements of those arrays that are needed for assessing prospective predecessors during the trellis formation. associated with each signal is a "propagator" variable which represents the log probability of the highest-scoring partial parse up to and including this signal. as processing proceeds left-to-right along the sequence, these propagators are updated so as to extend these partial parses up to the current position. in this way, the inductive score of each signal is incrementally propagated up to each potential successor signal that is encountered during processing; when a signal is eclipsed in all phases by stop codons , propagation of that signal's inductive score halts, since further updates would be useless beyond that point. because no prefix sum arrays are allocated, and because the signal queues are effectively limited in size , the expected memory requirements of dsp will be seen to be o, where the constant factor associated with the l term is small, reflecting only the number of signals per nucleotide emitted by the signal sensors, as well as the memory required to store the sequence itself.
+
+let us introduce some notation. we define a propagator π to be a 3-element array, indexed using the notation π for 0≤i≤2; when dealing with multiple propagators, πj will denote element i of the jth propagator.
+
+each signal si will now have associated with it a propagator, denoted πi. for signals which can be members of multiple queues , the signal will have one propagator per queue, but it will be clear from the context to which propagator we refer. each queue will also have a propagator associated with it, though for the sake of reducing ambiguity we will refer to these as accumulators and represent them with the symbol α. the purpose of the accumulators is to reduce the number of updates to individual signal propagators; otherwise, every signal propagator in every queue would need to be updated at every position in the input sequence. the accumulator for a given queue will accumulate additions to be made to the propagators of the signals currently in the queue. the update of signal propagators from their queue's accumulator is delayed as long as possible, as described below. accumulator scores are initialized to zero, as are the propagator scores for the left terminus anchor signals; the general case of propagator initialization will be described shortly.
+
+updating of a propagator π from an accumulator α is simple in the case of a noncoding queue:
+
+∀0≤ω≤ <dig> π ← π + α <cit> .     
+
+for coding queues, the update must take into account the location of the signal s associated with the propagator π, in order to synchronize the periodic association between phase and array index:
+
+∀0≤ω≤ <dig> π ← π + α,     
+
+or, on the reverse strand:
+
+∀0≤ω≤ <dig> π ← π + α.     
+
+given a content sensor m, a coding accumulator can be updated according to the rule:
+
+∀0≤ω≤ <dig> α ← α + log pm,     
+
+or, on the reverse strand:
+
+∀0≤ω≤ <dig> α ← α + log pw,     
+
+where f is the position of the current nucleotide xf, pm is the probability assigned to xf by the content sensor m in phase ω, and w is the reverse-complementary model to m which computes the probability of its parameter on the opposite strand and taking contexts from the right rather than from the left. this update occurs once at each position along the input sequence. use of f provides an absolute frame of reference when updating the accumulator. this is necessary because the accumulator for a queue has no intrinsic notion of phase: unlike an individual signal, a queue is not rooted at any particular location relative to the sequence.
+
+for noncoding queues, only the 0th element of the accumulator must be updated:
+
+α <cit>  ← α <cit>  + log pm.     
+
+all that remains is to specify the rule for selecting an optimal predecessor and using it to initialize a new signal's propagator. we first consider new signals which terminate a putative exon. let si denote the predecessor under consideration and sj the new signal. denote by Δ the length of the putative exon. then on the forward strand, we can compare predecessors with respect to phase ω via the scoring function rci + rd + rt, where rd and rt are the duration and transition scores described earlier and rci includes the content score and the inductive score from the previous signal:
+
+∀0≤ω≤ <dig> rci ← πi.     
+
+on the reverse strand we have:
+
+∀0≤ω≤ <dig> rci ← πi .     
+
+for introns it is still necessary to separate the three phase-specific scores to avoid greedy behavior, though the phase does not change across an intron, so no Δ term is necessary:
+
+∀0≤ω≤ <dig> rci ← πi.     
+
+when the preceding feature is intergenic we need only refer to phase zero of the preceding stop codon:
+
+rci ← πi <cit> ,     
+
+or, on the reverse strand, phase  <dig> of the preceding start codon .
+
+once an optimal predecessor with score rci + rd + rt is selected with respect to a given phase ω, the appropriate element of the new signal's propagator can be initialized directly:
+
+πj ← rci + rd + rt + rs,     
+
+where rs = p|θj) is the score assigned to the context window of the new signal sj by the appropriate signal sensor θj. an exception to equation  <dig> occurs when ω is not a valid phase for signal sj , in which case we instead set πj to -∞.
+
+one final complication arises from the fact that the algorithm, as we have presented it, does not permit adjacent signals in a prospective parse to have overlapping signal sensor windows; to allow such would be to permit double-counting of nucleotide probabilities, thereby biasing the probabilistic scoring function. it is a simple matter to reformulate the algorithm so that signal sensors score only the two or three consensus nucleotides of the signals under consideration; this would allow adjacent signals in a prospective parse to be as close as possible without actually overlapping . however, doing so might be expected to decrease gene finder accuracy, for two reasons:  statistical biases occurring at fixed positions relative to signals of a given type can in general be better exploited by a signal sensor specifically trained on such positions than by a content sensor trained on data pooled from many positions at variable distances from the signal, and  in the case of markov chains and interpolated markov models, probability estimates for nucleotides immediately following a signal can be inadvertently conditioned on the few trailing nucleotides of the preceding feature , even though the models are typically not trained accordingly. for these reasons, we prefer to use signal sensors which impose a moderate margin around their respective signals, both to detect any biologically relevant biases which might exist within those margins, and to ensure that content sensors condition their probabilities only on nucleotides within the same feature.
+
+given the foregoing, it is necessary to utilize a separate "holding queue" for signals which have recently been detected by their signal sensors but which have context windows still overlapping the current position in the dsp algorithm. the reason for this is that propagator updates via equations 13– <dig> must not be applied to signals having context windows overlapping any nucleotides already accounted for in the accumulator scores, since to do so would be to double-count probabilities. it is therefore necessary to observe the following discipline.
+
+associated with each signal queue gi there must be a separate holding queue, hi. when a signal is instantiated by a signal sensor it is added to the appropriate hi rather than to gi. as the algorithm advances along the sequence, at each new position we must examine the contents of each holding queue hi to identify any signal having a context window which has now passed completely to the left of the current position. if one or more such signals are identified, then we first update the propagators of all the signals in the main queue gi using equations 13– <dig>  then zero-out the values of the accumulator αi for that queue, and then allow the recently passed signals to graduate from hi to gi. observe that at this point all the signals in gi have in their propagators scores which have effectively been propagated up to the same point in the sequence, and that point is immediately left of the current position; this invariant is necessary for the proper operation of the algorithm. all content sensors are then evaluated at the current position and their resulting single-nucleotide scores are used to update the accumulators for their respective queues. finally, whenever it becomes necessary to evaluate the signals in some queue gi as possible predecessors of a new signal, we must first update the propagators of all the elements of gi as described above, so that the comparison will be based on fully propagated scores.
+
+equivalence of dsp and psa
+we now give a proof that dsp is mathematically equivalent to psa, since it may not be entirely obvious from the foregoing description. we will consider only the forward strand cases; the proof for the reverse strand cases can be derived by a series of trivial substitutions in the proof below.
+
+to begin, we show by induction that the signal propagator πj for signal sj is initialized to the psa inductive score ri. for the basis step, recall that the left terminus anchor signals were initialized to have zero scores in both psa and dsp, regardless of whether a given signal began a coding or noncoding feature. in the case of coding features, substituting equation  <dig> into equation  <dig> yields:
+
+πj ← πi + rd + rt + rs.     
+
+according to equation  <dig>  this initialization will result in πj = ri only if:
+
+πi = ri + rc,     
+
+where γi = mod <dig> according to equation  <dig>  at the time that signal sj is instantiated by its signal sensor, πi has been propagated up to e = wpos -  <dig>  the nucleotide just before the leftmost position of the context window for sj. by the inductive hypothesis, πi was initialized to ri. this initialization occurred at the time when the current dsp position was at the beginning of the predecessor's context window. note, however, that πi effectively began receiving updates at position b = wpos + wlen, the position immediately following the end of the signal's context window, at which point si graduated from its holding queue. thus, πi will have accumulated content scores for positions b through e, inclusive. in order to establish equation  <dig>  we need to show that these accumulations sum to precisely rc.
+
+substituting equation  <dig> into equation  <dig> we get the following formula describing propagator updates as if they came directly from content sensor m:
+
+∀0≤ω≤ <dig> π ← π + log pm,     
+
+where Δ = f- + len) is the distance between the rightmost end of signal si and the current position f in the dsp algorithm. let us introduce the notation:
+
+f = ∑k = i..jlog pm.     
+
+using this notation, πi has since its initialization accumulated f - len); this can be verified by expanding this expression via equation  <dig> and observing that the result equals a summation of the log term in equation  <dig> over f = b to e. looking at init_phased(), it should be obvious that the effect of lines  <dig> and  <dig> will be that:
+
+αi,γ  = ∑k =  <dig> .hlog pm  = f.     
+
+according to equation  <dig>  showing that πi has accumulated rc is therefore equivalent to:
+
+f = f -  <dig> γ) - f + wlen -  <dig> γ),     
+
+where ψ = γi - pos - len and γ = ω - pos. equivalently:
+
+f = f - f.     
+
+to see that ψ ≡ γ, observe that pos -  + len) = Δ, the length of the putative exon , and further that γi - ω ≡ -Δ according to equation  <dig>  so that ψ - γ ≡ Δ-Δ ≡  <dig>  thus, equation  <dig> is equivalent to:
+
+f = f - f,     
+
+which can be established as a tautology by simple algebra after expansion with equation  <dig>  this shows that the signal propagator for signal sj is initialized to the psa inductive score ri, and thus establishes the inductive step of the proof in the case of coding features.
+
+to see that the above arguments also hold for noncoding features, note that equation  <dig> simplifies equation  <dig> to:
+
+πi = ri + rc,     
+
+that equations  <dig> and  <dig> combine to simplify equation  <dig> to:
+
+∀0≤ω≤ <dig> π ← π + log pm,     
+
+and that lines  <dig> and  <dig> of init_nonphased() cause:
+
+αi = ∑k =  <dig> .hlog pm = fnc,     
+
+for fnc = ∑k = i..jlog pm. we can thus reformulate equation  <dig> as:
+
+fnc = fnc - 1) - fnc + wlen - 1),     
+
+or, equivalently:
+
+fnc = fnc - fnc,     
+
+which is again a tautology. in the interests of brevity, we leave it up to the reader to verify that the above arguments still apply when the noncoding features are intergenic, thereby invoking equation  <dig> rather than equation  <dig> in formulating equation  <dig> 
+
+to see that the selection of optimal predecessors is also performed identically in the two algorithms, note that the psa criterion given in equation  <dig> is equivalent to the argmax criterion of dsp as long as rci = rc + ri at the time the optimal predecessor is selected, which we have in fact already shown by establishing equation  <dig> 
+
+thus, dsp and psa build identical trellises; application of the same traceback() procedure should therefore produce identical gene predictions.
+
+fast decoding of markov chains
+markov chains are typically implemented in ghmm-based gene finders using hash tables, due to the simplicity of such an implementation. thus, for a given markov chain m we may utilize a hash table which associates the probability pm with the sequence xj-n..xj. although hash tables provide a relatively efficient solution for this task, they are wasteful in the sense that as we evaluate the chain on successive nucleotides in a sequence, we repeatedly manipulate preceding nucleotides in forming successive substrings to be indexed into the hash table.
+
+a much faster  solution is to employ a finite state machine  in which states exist for all possible sequences of length n+ <dig> or less, and where the state having label xj-n..xj emits the probability pm, for nth-order markov chain m. in this way, the transition probabilities of the markov chain become the state emissions of the fsm. during a single left-to-right scan of a sequence, each base requires only a single two-dimensional array indexing operation to access the desired probability, and a single integer value store operation to remember the identity of the new state. when compared to the typical regime of arithmetic and bit-shift operations over an -element string that would be required for a typical hash function, the difference can be significant.
+
+implementing this optimization is fairly straightforward, both for conventional markov chains and for interpolated markov models, whether homogeneous or three-periodic. central to the method is a means of mapping between state labels and integer state identifiers for use in indexing into the transition table. the base- <dig> number system can be utilized for this purpose, assuming a nucleotide mapping such as ∇ = {a↔ <dig>  c↔ <dig>  g↔ <dig>  t↔3}. to account for lower-order states, define:
+
+
+
+which gives the total number of strings of length less than l. converting a string s = x <dig> .xl- <dig> to base- <dig> can be accomplished as follows:
+
+
+
+now a string s can be mapped to a state index using:
+
+state = b + λ,     
+
+where |s| denotes the length of s.
+
+given this integer↔label mapping and an nth-order markov chain in hash table format, the fsm state emissions can be initialized by indexing state labels into the hash table to obtain the markov chain transition probabilities. the transition table can be initialized fairly simply by noting that the successor of state x <dig> .xl- <dig> upon seeing symbol s is x <dig> .xl-1s if l = n +  <dig>  or x <dig> .xl-1s for l <n +  <dig>  a model for the reverse strand can be handled by applying this scheme in reverse, so that the state with label xj-n..xj emits the probability pm, and the lower-order states are reserved for the end of the sequence rather than the beginning.
+
+RESULTS
+we utilized our dsp-based gene finder tigrscan  <cit>  in the construction of our syntenic gene finder twain, a generalized pair hmm which performs gene prediction in two genomes simultaneously. twain operates by invoking a modified version of tigrscan to build a directed acyclic graph of all high-scoring parses of each of the two input sequences. early experiments indicated that these parse graphs could be quite large in practice and may therefore require a significant portion of available ram for their storage. in addition, the dynamic programming matrix used by twain promised to be large as well. it was in anticipation of this problem that we were prompted to develop tigrscan using the dsp architecture, to minimize the memory requirements of the underlying ghmm, thereby freeing the remaining available memory for use by the rest of the machinery within twain.
+
+as a result of these and other optimizations  we were able to apply twain's gene prediction component to a pair of fungal genomes  while consuming under  <dig> mb of ram, whereas an earlier prototype of this system applied to the same input data routinely exhausted all available memory on a computer with  <dig> gb of ram. we are hopeful that through the use of optimizations such as those described here we will be able to apply twain to other pairs of genomes with longer genes, and possibly extend the program to handle more than two species simultaneously.
+
+CONCLUSIONS
+in describing a number of optimizations for ghmm-based gene finders and making available two complete open-source software systems embodying these methods, it is our hope that others will be more enabled to explore promising extensions to the ghmm framework, thereby improving the state-of-the-art in gene prediction techniques.
+
+availability and requirements
+* project name: tigrscan, glimmerhmm
+
+* project home page: 
+
+* operating system: linux/unix
+
+* programming language: c/c++
+
+* other requirements: compiled using gcc  <dig> .3
+
+* license: artistic license, see 
+
+* any restrictions to use by non-academics: terms of artistic license
+
+authors' contributions
+the dsp algorithm was devised by whm, who also performed the computational experiments and wrote the manuscript. the psa gene finder glimmerhmm was implemented by mp. mp, ald, and sls provided detailed insights into the psa architecture and provided valuable comments on the manuscript.
+

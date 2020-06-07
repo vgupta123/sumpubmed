@@ -1,0 +1,204 @@
+BACKGROUND
+one of the choices that needs to be made when performing a bayesian phylogenetic analysis is which site model to use. a common approach is to use a likelihood-based method like modeltest  <cit> , jmodeltest  <cit> , or jmodeltest <dig>  <cit>  to determine the site model. the site model is comprised of  a substitution model defining the relative rates of different classes of substitutions and  a model of rate heterogeneity across sites which may include a gamma distribution  <cit>  and/or a proportion of invariable sites  <cit> . the site model recommended by such likelihood-based method is then often used in a subsequent bayesian phylogenetic analysis. this analysis framework introduces a certain circularity, as the original model selection step requires a phylogeny, which is usually estimated by a simplistic approach. also, by forcing the subsequent bayesian phylogenetic analysis to condition on the selected site model, the uncertainty in the site model can’t be incorporated into the uncertainty in the phylogenetic posterior distribution. a more statistically rigorous and elegant method is to co-estimate the site model and the phylogeny in a single bayesian analysis, thus alleviating these issues.
+
+co-estimation of the substitution model for a nucleotide alignment can be achieved by sampling all possible reversible models  <cit> , or just a nested set of models  <cit> , using either reversible jump mcmc or stochastic bayesian variable selection  <cit> . the cat-gtr model  <cit>  solves a related problem by providing a mixture model over sites that often fits better than using any single model for all sites. wu et al.  <cit>  use reversible jump for both substitution models and partitions and furthermore sample the use of gamma rate heterogeneity for each site category. however, since the method divides sites among a set of substitution models, it does not address invariable sites, and only considers a limited set of five  substitution models.
+
+here we introduce a method which combines model averaging over substitution models with model averaging of the parameters governing rate heterogeneity across sites using reversible jump. whether one considers the method to be selecting the site model, or averaging over  site models depends on which random variables are viewed as parameters of interest and which are viewed as nuisance parameters. if the phylogeny is viewed as the parameter of interest, then bmodeltest provides estimates of the phylogeny averaged over site models. alternatively if the site model is of interest, then bmodeltest can be used to select the site model averaged over phylogenies. these are matters of post-processing of the mcmc output, and it is also possible to consider the interaction of phylogeny and site models. for example one could construct phylogeny estimates conditional on different features of the site model from the results of a single mcmc analysis.
+
+the method is implemented in the bmodeltest package of beast  <dig>  <cit>  with gui support for beauti making it easy to use. it is open source and available under lgpl licence. source code, installation instructions and documentation can be found at https://github.com/beast2-dev/bmodeltest.
+
+implementation
+all time-reversible nucleotide models can be represented by a 4× <dig> instantaneous rate matrix: 
+ q=−πcracπgragπtratπarac−πgrcgπtrctπaragπcrcg−πtrgtπaratπcrctπgrgt−,  with six rate parameters r
+ac,r
+ag,r
+at,r
+cg,r
+ct and r
+gt and four parameters describing the equilibrium base frequencies Π=. a particular restriction on the rate parameters can conveniently be represented by a six figure model number where each of the six numbers corresponds to one of the six rates in the alphabetic order listed above. rates that are constrained to be the same, have the same integer at their positions in the model number. for example, model  <dig>  corresponds to a model where all rates are independent, named the general time reversible  model  <cit> . model  <dig> corresponds to the hky model  <cit>  in which rates form two groups labelled transversions  and transitions . by convention, the lowest possible number representing a model is used, so even though  <dig>  and  <dig>  represent hky, we only use  <dig> .
+
+there are  <dig> reversible models in total  <cit> . however, it is well known that transitions  are more likely than transversions   <cit> . hence grouping transition rates with transversion rates is often not appropriate and these rates should be treated differently. we can restrict the set of substitution models that allow grouping only within transitions and within transversions, with the exception of model  <dig> , where all rates are grouped. this reduces the  <dig> models to  <dig> models . alternatively, if one is interested in using named models, we can restrict further to include only jukes cantor  <cit>  , hky  <cit>  , tn <dig>  <cit>  , k <dig>  <cit>  , tim  <cit>  , tvm  <cit>  ,and gtr  <cit>  . however, to facilitate stepping between tim and gtr during the mcmc  we like to use nested models, and models  <dig>  and  <dig>  provide intermediates between tim and gtr, as well as k <dig> and tvm, leaving us with a set of  <dig> models .
+fig.  <dig> model spaces. the model spaces supported by bmodeltest. a all reversible models, b transition/transversion split models, and c named models. arrows indicate which models can be reached by splitting a model. note all models with the same number of groupings are at the same height
+
+
+
+
+the state space consists of the following parameters: 
+the model number m,
+
+a variable size rate parameter  r,
+
+a binary variable to indicate whether  <dig> or k> <dig> non-zero rate categories should be used,
+
+a shape parameter α, used for gamma rate heterogeneity when there are k> <dig> rate categories,
+
+a binary variable to indicate whether or not a category for invariable sites should be used,
+
+the proportion of invariable sites p
+inv,
+
+
+
+
+rates r
+ac, r
+ag, r
+at, r
+cg, r
+ct and r
+gt are determined from the model number m and rate parameter r. further, we restrict r such that the sum of the six rates ∑r.. equals  <dig> in order to ensure identifiability. this is implemented by starting each rate with value  <dig>  and ensuring proposals keep the sum of rates in .
+
+prior
+by default, bmodeltest uses the flat dirichlet prior on rates from  <cit> . from empirical studies  <cit> , we know that transition rates tend to be higher than transversion rates. it makes sense to encode this information in our prior and bmodeltest allows for rates to get a different prior on transition rates  and transversion rates .
+
+an obvious choice for the prior on models is to use a uniform prior over all valid models. as fig.  <dig> shows, there are many more models with  <dig> parameters than with  <dig>  an alternative allowed in bmodeltest is to use a uniform prior on the number of parameters in the model. in that case, jukes cantor and gtr get a prior probability of 1/ <dig>  since these are the only models with  <dig> and  <dig> degrees of freedom respectively. depending on the model set, a much lower probability is assigned to each of the individual models such that the total prior probability summed over models with k parameters, p=1/ <dig> for k∈{ <dig> , <dig> , <dig> }.
+
+for frequencies a dirichlet prior is used, reflecting our believe that frequencies over nucleotides tend to be fairly evenly distributed, but allowing a  <dig> % chance for a frequency to be under  <dig> . for p
+inv a beta prior on the interval  is used giving a mean of  <dig>  and for α an exponential with a mean  <dig>  these priors only affect the posterior when the respective binary indicator is  <dig> 
+
+mcmc proposals
+the probability of acceptance of a  proposal  <cit>  is 
+ min{ <dig> posterior ratio×proposal ratio×jacobian}  where the posterior ratio is the posterior of the proposed state s
+′ divided by that of the current state s, the proposal ratio the probability of moving from s to s
+′ divided by the probability of moving back from s
+′ to s, and the jacobian is the determinant of the matrix of partial derivatives of the parameters in the proposed state with respect to that of the current state  <cit> .
+
+model merge/split proposal
+for splitting  substitution models, suppose we start with a model m. to determine the proposed model m
+′, we randomly select one of the child  nodes in the graph . this is in contrast to the approach of huelsenbeck et al.  <cit> , in which first a group is randomly selected, then a subgrouping is randomly created. for any set of substitution models organised in an adjacency graph our merge/split operator applies, making our graph-based method easier to generalise to other model sets . if there are no candidates to split  the proposal returns the current state . likewise, when attempting to merge model m= <dig> , the current state is proposed . let r be the rate of the group to be split. we have to generate two rates r
+i and r
+j for the split into groups of size n
+i and n
+j. to ensure rates sum to  <dig>  we select u uniformly from the interval  and set r
+i=r+u/n
+i and r
+j=r−u/n
+j.
+
+for a merge proposal, the rate of the merged group r from two split groups i and j with sizes n
+i and n
+j, as well as rates r
+i and r
+j is calculated as r=niri+njrjni+nj.
+
+when we select merge and split moves with equal probability, the proposal ratio for splitting becomes 
+ 1|mmerge′|1|msplit|1rni+nj  where |m
+split|  is the number of possible candidates to split  into from model m . the proposal ratio for merging is 
+ 1|msplit′|1|mmerge|rni+nj. 
+
+
+the jacobian for splitting is ni+njninj and for merging it is ninjni+nj.
+
+rate exchange proposal
+the rate exchange proposal randomly selects two groups, and exchanges a random amount such that the condition that all six rates sum to  <dig> is met. a random number is selected from the interval  where δ is a tuning parameter of the proposal . let n
+i, r
+i, n
+j and r
+j as before, then the new rates are r
+i′=r
+i−u and rj′=rj+uninj. the proposal fails when r
+i′< <dig> 
+
+the proposal ratio as well as the jacobian are  <dig> 
+
+birth/death proposal
+birth and death proposals set or unset the category count flag and sample a new value for α from the prior when the flag is set. the proposal ratio is d for birth and 1/d for death where d is the density used to sample from .
+
+likewise for setting the indicator flag to include a proportion of invariable sites and sampling p
+inv from the prior. the jacobian is  <dig> for all these proposals.
+
+scale proposal
+for the α, we use the standard scale operator in beast  <dig>  <cit> , adapted so it only samples if the category count flag is set for α. likewise, for pinv this scale operator is used, but only if the indicator flag to include a proportion of invariable sites is set.
+
+RESULTS
+since implementation of the split/merge and rate exchange proposals is not straightforward, nor is derivation of the proposal ratio and jacobian, unit tests were written to guarantee their correctness and lack of bias in proposals .
+
+to validate the method we performed a simulation study by drawing site models from the prior, then used these models to generate sequence data of 10k sites length on a tree : <dig> )) with three taxa under a strict clock. the data was analysed using a yule tree prior, a strict clock and bmodeltest as site model with uniform prior over models and exponential with mean one for transversions and log-normal with mean one and variance  <dig>  for transition rates. a hundred alignments were generated with gamma rate heterogeneity and a hundred without rate heterogeneity using a  script. invariant sites can be generated in the process and are left in the alignment.
+
+comparing the model used to generate the alignments with inferred models is best done by comparing the individual rates of these models. figure  <dig> shows the rate estimates for the six rates against the rates used to generate the data. clearly, there is a high correlation between the estimated rates and the ones used to generate . results were similar with and without rate heterogeneity. note values for rates ag and ct  tend to be higher than the transversion rates due to the prior they are drawn from.
+fig.  <dig> accuracy of estimated substitution rates. true rates  against estimated rates  in simulated data for  <dig> taxa. in reading order, rate ac, ag, at, cg, ct and gt. diamonds are for estimates when no rate heterogeneity was used to simulate the data, circles are for estimates with rate heterogeneity. error bars represent 95% hpd intervals for each estimate
+
+
+
+table  <dig> coverage summary for simulation study
+
+α
+p
+inv
+the first column lists the frequency and site models used to generate the data, and the last row is the mean coverage over all  <dig> runs. coverage for rate parameters and frequencies is defined as the number of replicate simulations in which the true parameter value was contained in the estimated 95% hpd interval. the mean rate column contains the coverage averaged over all six rate coverage columns . the situation with gamma shape parameter estimates and proportion of invariable sites is not as straightforward as for the relative rates of the substitution process. the site model coverage can be measured in a similar fashion: the site model coverage column shows how often the 95% credible sets for the four different site models  contains the true model used to generate the data. the coverage is as expected. when looking at how well the shape parameter  and the proportion invariable sites  is estimated, we calculated the 95% hpd intervals for that part of the trace where the true site model was sampled. coverage is as expected when only gamma rate heterogeneity is used, or when only a proportion of invariable sites is used, but when both are used an interaction between the two site model categories appears to slightly reduce the coverage of both parameters. in these experiments the coverage for the frequency estimates for the individual nucleotides was as expected. in summary, the statistical performance of the model is as expected for almost all parameters except for the case where gamma and a proportion of invariable sites are used due to their interaction as discussed further below.
+
+to investigate robustness of the approach, we repeated the study with a log normal uncorrelated relaxed clock  <cit>  with a gamma  prior over the standard deviation for the log normal distribution. trees with  <dig> taxa were randomly sampled from a yule prior with log normal distribution  giving trees with mean height ≈ <dig>  and 95% hpd interval of  <dig>  to  <dig> . the study as outlined above was repeated, and results are summarised in additional file 1: table s <dig>  which looks very similar to that of table  <dig>  so, we conclude that the model is not sensitive to small variation in molecular clock rates among branches.
+fig.  <dig> accuracy of inference of rate heterogeneity across sites. posterior probability for inclusion of gamma rate heterogeneity when the data is generated without  and with  rate heterogeneity for  <dig> taxa. right, true gamma shape parameter  against estimated shape parameter  when rate heterogeneity is used to generate the data
+
+
+
+fig.  <dig> accuracy of inference of proportion of invariant sites. posterior probability for inclusion of a proportion of invariant sites when the data is generated without  and with  invariant sites for  <dig> taxa. right, empirical proportion invariant in alignment  against estimated proportion of invariant sites  when a proportion invariable category is used to generate the data
+
+
+
+
+the same study with  <dig> taxa was repeated with the substitution model fixed to hky and gtr, but estimating the other parts of the model. results are summarised in additional file 1: tables s <dig> and s <dig> respectively. fixing the model to hky results in severe degradation of accuracy in all parameter and model estimates. the lack of coverage of frequency estimates when the true model has equal frequencies suggests that lack of degrees of freedom in substitution model parameters is compensated by estimating frequencies instead of keeping them equal. so substitution model misspecification can result in considerable misspecification of the remainder of the model. results when fixing the substitution model to gtr shows a table with results very similar to that of bmodeltest, however the substitution model parameters have on average a 95% hpd interval of size  <dig>  while that of bmodeltest is only  <dig> . the extra parameters that need to be estimated for gtr compared to bmodeltest result in more uncertain estimates, and thus more uncertainty in the analysis.
+
+to see the impact of the model set, the experiment was repeated with sampling from all  <dig> reversible models instead of using only the  <dig> transition/transversion split models. results are shown in additional file 1: table s <dig>  which do not differ substantially from table  <dig>  further, to investigate the effect of the number of taxa and sequence length, the study was repeated with  <dig> taxa and sequence lengths 1k and  <dig> k base pairs long under a relaxed clock as before. results are summarised in additional file 1: tables s <dig> and s <dig> respectively. the tables do not show significant differences to table  <dig> or degradation with decreasing sequence length, so the ability of our bayesian method to correctly estimate the posterior distribution of substitution models and their parameters does not appear to depend substantially on sequence length or number of taxa.
+
+comparison with jmodeltest
+we ran jmodeltest version  <dig> . <dig>  <cit>  on the sequence data used for the last simulation study with  <dig> taxa  and the two simulation studies using  <dig> taxa and compared the substitution model coverage . for each dataset, we collected the top models according to the aic and bic criteria such that the cumulative weight exceeded 95% of the models as shown in the jmodeltest output and registered whether the true model was contained in the resulting set. results are summarised in additional file 1: table s <dig>  which shows that both aic and bic do not cover the true model 95% of the time as would be desirable. for some combinations the coverage is close to the desirable value  and for some it is much lower . coverage of both aic and bic appears to decrease with increasing number of taxa and decreasing sequence length, although we have not attempted a systematic study. in contrast bmodeltest has a coverage of ∼95% for all scenarios. jmodeltest uses a single maximum likelihood tree and it seems that increasing uncertainty in the true tree  results in an increasing chance of incorrect model weights from jmodeltest. for bic, we find substantially less coverage of jmodeltest than the around 90% model coverage reported in a previous study  <cit> . this is probably because our data contains a larger amount of uncertainty due to shorter sequences and tree lengths. another factor is that we use different priors. for example, we use a beta for the proportion of invariable sites, while the previous study  <cit>  used a beta that was then truncated to the interval , thereby avoiding extreme values which might cause difficulties. to confirm this we produced simulated data more closely matched to previously published experiments  and obtained a coverage of  <dig> % for the 95% credible set and  <dig> % coverage by the best fitting model, similar to the results in  <cit> .
+
+in practice, users of bayesian phylogenetic packages only use the most highly weighted model returned by jmodeltest. additional file 1: table s <dig> shows how often the best fitting model according to aic and bic matches the true model, which ranges from  <dig> % for bic on  <dig> taxa to  <dig> % for aic on  <dig> k length sequences and  <dig> taxa, suggesting that the probability of model misspecification using this approach increases with phylogenetic uncertainty.
+
+to compare the application of bmodeltest to jmodeltest  we applied both to two real datasets. the first data set used was an alignment from  <dig> primate species  <cit>   containing  <dig> sites. in this case the model recommended by jmodeltest was tpm2uf+g and the substitution model tpm <dig>  has the highest posterior probability using bmodeltest  when empirical frequencies are used. however, when frequencies are allowed to be estimated, hky has highest posterior probability , while tpm <dig>  has less posterior probability then model  <dig>  . so, using a heuristic maximum likelihood approach  makes a difference in the substitution model being preferred. figure  <dig> left shows the posterior probabilities for all models, and it shows that the 95% credible set is quite large for the primate data. figure  <dig> middle and  <dig> right show correlation between substitution model rates. the former shows correlation between transversion rate ac  and transition rate ag . one would not expect much correlation between these rates since the model coverage image shows there is little support for these rates to be shared. however, since hky is supported to a large extent and the rates are constrained to sum to  <dig>  any proposed change in a transition rate requires an opposite change in transversion rates in order for the sum to remain  <dig>  so, when sampling hky, there is a linear relation between transition and transversion rates, which faintly shows up in the fig.  <dig> . figure  <dig>  shows the correlation between transversion rates ac and at. since they are close to each other, a large proportion of the time rate ac and at are linked, which shows up as a dense set of points on the ac=at line.
+fig.  <dig> posterior inference on primate data. model distribution for primate data using the transition/transversion split models . numbers on x-axis correspond to models in additional file 1: appendix. the middle panel plots rates a⇔c versus a⇔g  and the right panel plots a⇔c versus a⇔t
+
+
+
+
+
+the second data set used was an alignment of  <dig> sequences of  <dig> sites of coding hepatitis c virus  from  <cit> . it was split into two partitions, the first containing codon  <dig> and  <dig> positions  and the second all codon  <dig> positions . figure  <dig> left show the model distributions for the first partition at the top and second at the bottom. the 95% credible sets contain just  <dig> and  <dig> models respectively, much smaller than those for the primate data as one would expect from using longer, more informative sequences. note that the models preferred for the first partition have transition parameters split while for the second partition models where partitions are shared have higher posterior probability, resulting in quite distinct model coverage images. for the first partition, jmodeltest recommends tim2+i+g. tim <dig> is model  <dig> , the model with highest posterior probability according to bmodeltest, as shown in fig.  <dig>  for the second partition, jmodeltest recommends tvm+g, and though tvm is in the 95% credible set, it has a lower posterior probability than model  <dig>  which gets the highest posterior probability according to bmodeltest. running jmodeltest on all  <dig> models, model  <dig>  is preferred by both aic and bic, even though  <dig> was considered by jmodeltest. again, we see a difference in heuristic likelihood and full bayesian approaches. the correlation between transition rates a⇔g and c⇔t as well as between two transversion rates a⇔c and a⇔t are shown in fig.  <dig> top middle and right for the first partition and fig.  <dig> bottom middle and right for the second. the transition rates a⇔g and c⇔t have a posterior probability of being the same of  <dig>  in the first partition, whereas the posterior probability is  <dig>  in the second partition containing only 3rd positions of the codons. this leads to most models for the first partition distinguishing between a⇔g and c⇔t, while for the second partition most models share these rates. for the two transversion rates a⇔c and a⇔t the partitions display the opposite relationship, with the second partition preferring to distinguish them. as a result, overall the two partitions only have one model in common in their respective 95% credible sets, but that model  has quite low posterior probability for both partitions.
+fig.  <dig> posterior inference on hcv data. like fig.  <dig>  but the data is split into two partitions, the first containing codon positions 1+ <dig>  and second containing codon position  <dig> . the partitions support distinctly different site models. the left panels show the posterior distribution over models, the middle panel plots transition rates a⇔g versus c⇔t, and the right panel plots transversion rates a⇔c versus a⇔t
+
+
+
+
+
+implementation details
+the calculation of the tree likelihood typically consumes the bulk  of computational time. note that for a category with invariable sites, the rate is zero, hence only sites that are invariant  contribute to the tree likelihood. the contribution is  <dig> for those sites for any tree and for any parameter setting, so by counting the number of invariant sites, the tree likelihood can be calculated in constant time. switching between with and without gamma rate heterogeneity means switching between one and k rate categories, which requires k time as much calculation. having two tree likelihood objects, one for each of these two scenarios, and a switch object that selects the one required allows use of the beast  <dig> updating mechanism  <cit>  so that only the tree likelihood that needs updating is performing calculations. so, jmodeltest and bmodeltest can, but do not necessarily agree on the most appropriate model to use.
+
+CONCLUSIONS
+bmodeltest is a beast  <dig> package which can be used in any analysis where trees are estimated based on nucleotide sequences, such as multi-species coalescent analysis  <cit> , various forms of phylogeographical analyses, sampled ancestor analysis  <cit> , demographic reconstruction using coalescent  <cit> , birth death skyline analysis  <cit> , et cetera. the gui support provided through beauti makes it easy to set up an analysis with the bmodeltest site model: just select bmodeltest instead of the default gamma site model from the combo box in the site model panel.
+
+a promising direction for further research would be to incorporate efficient averaging over partitioning of the alignment  to the site model averaging approach described here.
+
+bmodeltest allows estimation of the site model using a full bayesian approach, without the need to rely on non-bayesian tools for selecting the site model.
+
+availability and requirements
+project name: bmodeltestproject home page: https://github.com/beast2-dev/bmodeltest/operating systems: windos, osx, linux and any other osprogramming language: javaother requirements: requires beast  <dig>  licence: lgpl.
+
+endnotes
+
+ <dig> estimated shape parameters only take values of the shape parameter in account in the portion of the posterior sample where gamma rate heterogeneity indicator is  <dig> 
+
+
+ <dig> the estimated proportion of invariable sites only take values of the parameter in account in the posterior sample where the invariant category was present.
+
+additional file
+
+additional file  <dig> appendix. 
+
+
+
+
+abbreviations
+beastbayesian evolutionary analysis by sampling trees
+
+gtrgeneral time reversible
+
+guigraphical user interface
+
+hcvhepatitis c virus
+
+hpdhighest probability density
+
+lgpllesser general public license
+
+mcmcmarkov chain monte carlo
+

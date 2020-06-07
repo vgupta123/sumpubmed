@@ -1,0 +1,299 @@
+BACKGROUND
+in systems biology, mathematical models often take the form of system of ordinary differential equations . these are approximations of the underlying mechanisms such as enzyme-catalyzed biochemical reactions that are applicable when molecule numbers are sufficiently high, and when the spatial distributions of components in a cell can be neglected. more specifically, ode models consider the rate of change in a set of states  as a function of the system’s current state, its inputs, and its inherent kinetic parameters that capture, for instance, affinities of molecular interactions  <cit> .
+
+in contrast to systems modeling in domains such as physics, however, model parameters and initial conditions for systems biology models are often not known, or they can only be roughly approximated. as few kinetic parameters can be measured directly, parametric uncertainty often prevails  <cit> . how the system variables depend on these system parameters can therefore be of interest, e.g. to help find parameters such that the simulated system matches some observed or desired behavior. dependencies between system variables and parameters are captured by the local parameter sensitivities that describe to what extent the state of the system changes when parameter values are perturbed from a reference value. formally, local parameter sensitivities comprise the set of derivatives of all system variables with respect to the system parameters. as with the state dynamics, the parameter sensitivities’ time evolution follows a system of odes  <cit> .
+
+from a computational point of view it is important to note that in all but the simplest cases, starting from a set of initial conditions, there is no direct way to compute the solutions of a system of odes  for an arbitrary time. the variables are therefore integrated numerically in small steps over time, until the desired end time is reached. consequently, efficient and accurate numerical integration methods are critical for many applications.
+
+the computational effort for numerical integration is linked to the system size, and over time mathematical models have become increasingly detailed to achieve better predictions. nevertheless, even models of moderate complexity result in numerical challenges when parameter sensitivities are needed. for instance, the parameter sensitivities can be integrated naively alongside the system variables, but this implies integrating a system of size nx×, where nx and np are the number of system variables and system parameters respectively  <cit> .
+
+additionally, the solution of a system of odes is often used in system identification processes where global optimization or probabilistic inference are required  <cit> . in such cases, thousands, if not millions of trajectories need to be computed. assessing the quality of the identified model, for instance with respect to the uncertainty in parameter values, again requires computing the local parameter sensitivities  <cit> . although local sensitivity information can often help improve the overall estimation process, sensitivity computations are rarely included for performance reasons. specific efficient methods exist for cases in which only scalar valued functionals are optimized  <cit>  or oscillatory systems are considered  <cit> . yet in many other cases, such as optimal control  <cit> , the identification of relevant parameters  <cit> , model reduction and simplification  <cit>  or parameter training  <cit> , the full parameter sensitivities need to be computed. consequently, improvements with respect to the speed with which the original ode systems and their parameter sensitivities can be reliably integrated may affect the entire process significantly.
+
+these issues are not new and they concern many application domains. considerable efforts have been invested in establishing reliable and efficient general-purpose ode solvers for dynamic systems and—to a lesser extent—for the associated parameter sensitivities. here, however, we are concerned with solving systems of odes as they typically occur in the simulation of biochemical reaction networks in systems biology  <cit> . we show that rather general characteristics of such systems allow for the development of application domain-oriented ode solvers with novel numerical features , and with superior performance compared to state-of-the-art, widely employed general-purpose solvers. to provide some context for this claim, we first briefly review key characteristics of systems biology models in the form of odes, and general methods for the numerical integration of odes.
+
+dynamic models of chemical networks
+when the effects of stochastic noise and of discrete molecule numbers are negligible, ode systems can be used to describe chemical or biological reaction networks. the
+nx time-dependent state variables xi, i = 1…nx, which represent the concentrations of the molecules of interest at time t and are usually known at some initial time t = t <dig>  evolve following
+
+
+  x˙:=∂x∂t=f,p),x=x <dig> 
+
+where f,p) is a system of functions
+fi,p) modelling the conversion rate of each respective variable xi
+at time t, and p
+is a vector of np
+system parameters.
+
+the local parameter sensitivities with respect to some parameter pk are defined as
+
+
+  sk:=∂x∂pkp=p <dig> 
+
+which is the vector of the derivatives of all variables xi
+with respect to the parameter pk. similar to the dynamics in eq. , the parameter sensitivities’ time evolution follows a system of odes given by differentiating eq.  with respect to t:
+
+
+  s˙k:=∂2x∂pk∂t=∂f,p)∂x︸:=jf,p)sk+∂f∂pk, 
+
+where jf) is the jacobian matrix of f) with respect to x; note that we drop explicit dependencies on p
+to simplify notation. initial conditions for eq.  are set according to whether the initial conditions for the states in eq.  depend on the parameters or not  <cit> .
+
+consider, for example, the biochemical scheme of a michaelis-menten type enzymatic reaction
+
+
+  x1+x2⇄k2k1x3→k3x1+x <dig> 
+
+where x1−4
+correspond to enzyme, substrate, enzyme-substrate complex, and product concentrations, respectively. with mass-action kinetics, the reaction network translates to the dynamic system
+
+
+ x˙=−k1x1x2+x3−k1x1x2+k2x3+k1x1x2−x3+k3x <dig> p=k1k2k <dig>  
+
+such problems are often well solved by general purpose ode solvers, but chemical reaction networks offer a number of features that may be exploited by more specialized solvers, resulting in faster and/or more precise simulations. for instance, in enzyme kinetics, reversible association and dissociation processes are usually much faster than product formation. the resulting stiffness severely limits the types of numerical methods that can be used for ode integration.
+
+an opportunity for increasing solver efficiency, however, presents itself because most chemical reaction networks are only weakly interconnected. more specifically, the change in every concentration xi usually depends on the concentration of very few other products. poor connectivity is reflected in sparse jacobians jf), where non-zero elements correspond to interactions between components . for the simple example eq. ,
+
+
+ jf)=∙∙∙∘∙∙∙∘∙∙∙∘∘∘∙∘, 
+
+ with closed and open circles indicating non-zero and zero elements, respectively. even in this dense sub-network, the number of non-zeros nnzj=5/8nx <dig> implies that we do not need to compute a substantial number of terms to determine the jacobian.
+
+many large-scale biological networks have a scale-free structure, that is, most of their nodes have few interactions, but a small number of hubs with many interactions exist  <cit> . this prevents an easy decomposition of a large network into subsystems that can be handled  independently. therefore, despite the sparsity of the jacobian, model size remains a major issue for numerical performance.
+
+two more general aspects also need to be considered. firstly, due to the growing use of abstract modeling software, the reactions and the underlying reaction equations are usually available to us as abstract models, such as smbl <cit> , which we can analyze and manipulate analytically. secondly, since parametric uncertainty is abundant in biology, sensitivity analysis, i.e. the integration of the parameter sensitivities sk, requires particular attention. hence, an ideal ode solver for our application domain would efficiently and reliably handle large, stiff dynamic systems including their parameter sensitivities, and optimally exploit the systems’ non-trivial sparsity and analytic access.
+
+methods for ode integration
+almost all ode integrators work under the assumption that the change in each variable xi
+over time can be modeled using a polynomial in t. consider the taylor expansion of the variables x around t = t <dig> to advance the system by a step of size h:
+
+
+  x=x+h∂x∂t+h22!∂2x∂t2+h33!∂3x∂t3+… 
+
+if the factors ∂kx / ∂tk / k!
+decrease sufficiently quickly and the higher-order terms become insignificant as of some degree n, then we can reliably approximate the new solution by a polynomial of degree n in h. in explicit integrators, previously computed values of x and the derivatives ∂x / ∂t are used to construct a polynomial gn of degree n and to extrapolate the value of x ≈ gn. in implicit integrators, a solution x is sought such that it matches that of a polynomial gn of degree n interpolated through previous values of x and/or their derivatives, and the derivative at the solution x
+itself. in general, implicit integrators are more accurate for stiff odes, where the derivatives in eq.  do not decay sufficiently quickly.
+
+within the two larger classes, different integrators are characterized by the amount of previous values of x and their derivatives which they use to approximate x. table  <dig> lists some common integration methods; see  <cit>  for a comprehensive review.
+
+
+1for multi-step methods, the index k =  <dig> − <dig> …,−n.
+
+despite the commensurate degree of freedom in designing ode integrators, and the number of algorithms for the numerical integration of odes that have been published over the past  <dig> years, only very few of them have found wide-spread application. practical considerations—any method should be easily accessible to its end users, who are usually not interested in manipulating or even formulating the underlying equations themselves—are certainly major causes for this convergence  <cit> . however, a closer analysis of the most popular solvers for stiff ode systems reveals another cause, namely incremental evolution.
+
+in this area, the first major piece of software was the gear package  <cit> , which by  <dig> evolved into cvode <cit> , a part of the sundials suite of nonlinear and differential/algebraic equation solvers  <cit> . the default integrators in matlab  such as ode15s <cit>  employ similar integration rules and error estimates. both the sundials suite and matlab are used increasingly in systems biology  <cit> , but it is not evident that they are optimal for this application domain.
+
+methods
+a second-derivative integrator
+all ode solvers mentioned above use only values of x
+and x˙ to approximate x. here, we differ from these methods in that we also employ the second derivatives:
+
+
+  x¨:=∂2x∂t2=∂f)∂t=jf)f) 
+
+
+and f instead of jf) and f), respectively). note that this second derivative with respect to the time t should not be confused with the second-order sensitivities described and used in  <cit> , which are the second derivatives of the system variables with respect to the system parameters.
+
+the use of second derivatives was first suggested in  <cit>  and later studied in detail in  <cit> ,  <cit>  and  <cit> , and the resulting formulas were shown to have good stability properties. a more recent study  <cit>  reinforces the stability and potential efficiency gains for stiff systems through second-derivative methods. however, despite several published implementations  <cit> , these methods have not yet found wide acceptance because, despite being a-stable, they are only stable at infinity if only the second derivative at t + h is used  <cit>  .
+
+the second derivatives in eq.  may seem somewhat clumsy and expensive to evaluate since they require the construction of the jacobian jf and the evaluation of a matrix-vector multiplication jff. remember, however, that chemical reaction network models typically have sparse jacobians. as a consequence, the cost of constructing jf and of evaluating the product jff
+grows only linearly with the number of variables and not quadratically, as the matrix-vector product would imply. furthermore, since we usually have an abstract representation of the governing equations, we can compute each entry of x¨ explicitly, much in the same way we evaluate the entries of f. for instance, the explicit second derivatives of the system eq.  are:
+
+
+ x¨=jff=−k1x2f1−k1x1f2+f3−k1x2f1−k1x1f2+k2f3k1x2f1+k1x1f2−f3k3f <dig>  
+
+ in most cases, the evaluation of the second derivatives is not much more expensive than the evaluation of f.
+
+for our second-derivative integrator, we construct an interpolating polynomial g <dig> of degree n =  <dig> matching x
+and the first and second derivatives at times t and t+h. this implicit method requires that we find x such that
+
+
+ x=g <dig> 
+
+ which, expanding g <dig>  gives us
+
+
+  x=x+h2x˙+x˙+h212x¨−x¨. 
+
+where the right-hand side is the polynomial through x, x˙, x¨, x˙ and x¨ evaluated at t+h . the solution to this system of equations can be computed iteratively. more specifically, we start from an initial guess x~ that is computed with an explicit formula, and use a simplified newton’s method:
+
+
+ x←x−m−1g4−x, 
+
+  m:=h2j~f−h212j~jf−i, 
+
+where m is the newton iteration matrix and
+jjf is the jacobian of eq.  with respect to x:
+
+
+  jjf:=∂jff∂x=∂jf∂xf+jf <dig> 
+
+the jacobians j~f and j~jf are evaluated at the initial guess x~.
+
+using a second-derivative scheme, the evaluation of each newton iteration is roughly twice as expensive as for first-derivative methods of the same degree since, in addition to f, we must also evaluate
+jff. the advantage of this scheme, however, becomes obvious once we consider the truncation error. by replacing x with the taylor expansion around t, we obtain
+
+
+  g4−x≈1720h5x,ξ∈ 
+
+for the truncation error of our second-derivative formula. for first-derivative methods of the same degree, assuming a constant step size h, this error is
+
+
+ bdf4−x≈72750h5x,ξ∈, 
+
+ am4−x≈19720h5x,ξ∈, 
+
+ in the case of the bdf and the adams-moulton formula of degree four, respectively. these truncation errors are  <dig> times and  <dig> times larger than the error of our second-derivative formula  is approximately constant in , see section s <dig> and figure s1a in additional file  <dig> and additional file  <dig> for details). the large difference stems from the dependence of the interpolation error on the width of the interpolation interval, e.g. for the bdf and the adams-moulton formula, this interval is four times larger.
+
+error estimates and step size adjustment
+in any ode integration scheme, the local error estimate and the step-size adjustment are crucial to both its accuracy and its efficiency. the step-size adjustment uses the error estimate of a previous integration step to predict the largest possible next step h satisfying the required tolerance. with imprecise error estimates, the step-size adjustment has to be conservative to preserve accuracy, or it risks producing an imprecise result.
+
+in most implicit ode solvers, the local error is either estimated from the difference between the initial estimate x~, usually computed with an explicit rule, and the final converged step x, or as the difference between two rules of different degree over the previous x and the converged step x. these approaches mainly consider computational efficiency because, ideally, to estimate the error of a formula of degree d <dig>  we need to compute a better approximation of degree d2 > d <dig>  the difference between both converged solutions x <dig> and x <dig> can then be used to approximate the difference between the lower-degree estimate and the exact solution x⋆. however, this requires two newton iterations to compute both solutions and if both rules have different weights for the values of x˙ and x¨, we would need to invert or decompose two different matrices to compute a newton iteration ).
+
+we propose a different approach that may better reconcile accuracy with computational cost. we first compute the converged lower-degree solution
+x1
+and use it as an initial estimate for the newton iteration of the higher-degree solution. since we are not actually interested in the exact solution x <dig>  but only in an approximation of the difference between the two solutions, it suffices to compute just one newton step to get a first-oder approximation of that difference. note that, in principle, this still requires the inversion or decomposition of a different matrix for the newton iteration.
+
+however, for our second-derivative solver, we can compute the second approximation as the polynomial g <dig> that interpolates x at the same nodes as g <dig> plus the second to last node x. in this case, the weights in the newton iteration matrix are similar. if the current step size h and the previous step size h− <dig> are equal, the weights for jf and jjf are 14/ <dig> and 2/ <dig>  respectively, which is close to the values for g4
+of 1/ <dig> and 1/ <dig>  we therefore re-use the newton iteration matrix in eq.  to compute the first approximation x <dig> and obtain the local error estimate
+
+
+  ε:=m−1g5−x. 
+
+note that the estimate ε approximates the truncation error eq. . assuming that x
+varies only slowly between two time steps, we can compute a scaling σ such that the error of the next step of size σh is equal to a prescribed tolerance τ:
+
+
+  ε=h5720x,τ=5720x⇒σ=τε1/ <dig>  
+
+note that if the assumptions on x
+do not hold, the error estimate in the next time step will fail, causing the step size to be reduced automatically. furthermore, if we adjust h to fulfill the requested tolerance τ exactly, the error estimate will be larger than τ
+approximately half of the time. therefore, in practice, we choose σ such that the next error will be τ/ <dig>  this gives us a recipe to adjust the step size from one integration step to the next and, hence, the last key ingredient of a functional second-derivative ode solver .
+
+parameter sensitivities
+for nx variables and np
+parameters, the naive approach to sensitivity calculation implies integrating a system of nx× variables and, by consequence, inverting or decomposing matrices of that size within the newton iteration. however, the system variables x
+do not depend on the parameter sensitivities, yet the sensitivities depend on x. hence, we can, in each step, first compute the values x and, once they have converged, compute the sk
+in a separate step using the same integration rule. this staggered approach was first introduced in caracotsis & stewart  <cit> , then extended by maly & petzold  <cit> , and finally implemented in the sundials cvodes ode solver, a modified version of cvode capable of sensitivity analysis  <cit> .
+
+to integrate the parameter sensitivities in our second-derivative solver in a similar way, we need to compute the second derivatives
+
+
+  s¨k:=∂2sk∂t2=∂∂tjfsk+∂f∂pk=jjfsk+∂x¨∂pk. 
+
+the equation in the implicit step using the second-derivative rule in eq.  for the parameter sensitivities sk thus becomes
+
+
+  sk=sk+h2×s˙k+jfsk+∂f∂pk+h212s¨k−jjfsk−∂x¨∂pk, 
+
+which, after isolating the sole unknown term sk
+leads to
+
+
+  i−h2jf+h212jjfsk=sk+h2s˙k+∂f∂pk+h212s¨k−∂x¨∂pk. 
+
+we then have two alternatives to compute sk: either iteratively using newton’s method to solve eq. , or directly by inverting or decomposing the matrix on the left-hand side of eq. . the iterative approach via eq.  is equivalent to the one suggested in  <cit> , and we can re-use the inverted or decomposed iteration matrix used to compute the variables x
+in eq. . however, one has to re-evaluate the jacobians at each iteration to compute s˙k and s¨k because j~f and j~jf are evaluated at the initial estimate x~, and not at the converged solution x. to compute sk
+directly, which corresponds to the original approach in  <cit> , we need to re-compute the jacobians and the inverse or decomposition of the left-hand side of eq. . for small nx, however, this extra matrix computation may be advantageous over running the newton iteration for each parameter pk.
+
+furthermore, if the jacobians do not vary significantly over time, they can be re-used as the matrices j~f and j~jf for the newton iteration of the next step. such an approach offers an advantage if the cost of running an additional np newton iterations to compute the parameter sensitivities iteratively outweighs the cost incurred by the slower convergence due to using older jacobians in the next step. in our second-derivative integrator, we therefore compute the parameter sensitivities directly as per eq. .
+
+framework for conversion of sbml models
+in order to generate the matrices jf and jjf, as well as the second derivative x¨ automatically, we established a framework that automatically translates arbitrary models from the standard sbml format  <cit>  to matlab functions or c-language code. the framework also generates routines to compute the parameter derivatives ∂f/∂p
+and ∂x¨/∂p necessary for the parameter sensitivity computations. this conversion, which needs to be done only once per model, exploits the sparsity of the corresponding matrices by generating compact expressions for their non-zero entries only, making them efficient to evaluate. it uses the matlab symbolic toolbox to manipulate, differentiate and simplify the resulting expressions automatically .
+
+RESULTS
+implementation and testing
+we implemented the second-derivative ode integrator as odesd in matlab and as odesdmex in the c programming language, using the matlab mex interface with calls to the lapack and blas libraries for the linear algebra operations. both solvers provide an interface similar to that of the matlab default integrators. additionally, a native c-language version, odesdc, was implemented for use outside of the matlab programming environment. all implementations could operate on any type of ode-based model, but the overall implementation is targeted to systems biology models in standard sbml format, for which we developed an automatic model conversion framework . the implementation details are described in sections s <dig>  and s <dig>  of the additional file  <dig> and additional file  <dig> 
+
+we compared our algorithm against three integrators which use newton’s method to compute each implicit step:
+
+
+ <dig> matlab’s default integrator for stiff systems, ode15s <cit> , which uses a 5-point numerical differentiation formula , a more stable variant of the bdf integration rules; it is used as the default integrator in sbtoolbox <dig>  <cit> ,
+
+ <dig> the cvode integrator from the sundials suite  <cit>  which employs variable-order bdfs of up to degree 4; it is the integrator used in the sbml ode library   <cit> , and
+
+ <dig> the radau <dig> integrator, a fifth-order three-stage implicit runge-kutta method for stiff systems described in  <cit>  and implemented in matlab  <cit> .
+
+the matlab interface supplied by the sundialstb toolbox  <cit>  served to run the sundials integrators which are implemented in c.
+
+for performance evaluation, we selected a number of curated systems biology models from the biomodels database  <cit>  . this set comprises systems of different sizes  and characteristics, namely convergence to steady-state and  oscillatory behavior. note that all models have sparse jacobians, as is evident from the number of non-zero elements nnz.
+
+
+1abbreviations used: erk = extracellular regulated kinase; egf = epidermal growth factor; il- <dig> = interleukin 6; fgf = fibroblast growth factor.
+
+integrator performance without parameter sensitivities
+the results of the performance comparison without sensitivity analysis for a wide range of integration tolerances are summarized in figure  <dig> . the average computational times for our integrator were comparable  to, or slightly lower  than those of the first-derivative solvers , except for low numerical tolerances. importantly, the second-derivative integrator required approximately half as many steps as ode15s or cvode , despite these three integrators using rules of the same degree of precision. the radau <dig> integrator used less steps than odesd, but it computes two additional intermediate steps per full step. the smaller number of steps in odesd is due to a combination of both the smaller truncation error of the second-derivative rule and the better accuracy of the improved error estimate. for more detailed results and discussion, see section s <dig> and figure s <dig> of the the additional file  <dig> and additional file  <dig> 
+
+as a function of the relative numerical tolerance. symbols specify the integrators ode15s , radau <dig> , odesd , and odesdmex
+, respectively. performance metrics are normalized to the corresponding measures for cvode and averaged  over all models, which were integrated over the time spans given in table 2; the dashed line indicates performance equal to cvode.  computation times and  number of integration steps as a function of numerical precision  in analogy to  and .
+
+to assess the relative accuracy of odesd, we compared the results of all models computed with different relative tolerances with an ‘accurate’ reference solution computed using radau <dig> with the relative tolerance set to 10− <dig>  analogously to the precision/work tests in  <cit> . the measured precision for each model and integrator is the maximum relative error in the final step for each state larger than machine precision in the reference solution. figure  <dig> shows these results for all models in table  <dig>  these results are summarized in figure 1e with the cpu time averaged over all models and the precision binned to the closest power of  <dig>  overall, without computing the parameter sensitivities, the new integrator is competitive, in terms of accuracy and efficiency, with highly optimized state of the art solvers for hard numerical problems in our application domain.
+
+, ode15s , radau <dig> , and cvodes . all models were integrated for the time spans shown in table  <dig> 
+
+integrator performance with parameter sensitivities
+the performance comparison with sensitivity calculations requires two additional considerations: since ode15s and radau <dig> do not provide any special functionality for computing parameter sensitivities, we used an augmented system of size nx×
+including an analytic sparse jacobian for each model, and the sensitivities sk, k=1…m were integrated alongside the system variables. cvodes, the sensitivity analysis-enabled version of cvode from the sundials package, uses a simultaneous integrator based on the method of maly & petzold  <cit> . optionally, the staggered integrator of feehery et al. <cit>  can be selected, but this did not produce better results.
+
+in all cases, parameter sensitivities were integrated to the same precision as the system variables. as with the integration without sensitivities, precision/work diagrams were computed for all models with sensitivities, omitting the cases in which ode15s failed completely.
+
+as one detailed example, figure 3a shows the computation times for a relative tolerance of 10− <dig>  in most cases, the compute times with sensitivities are substantial . for ode15s and radau <dig>  the size of the augmented system quickly becomes a problem as the solution of the linear system of equations in the newton iteration scales cubically with the number of variables. in terms of the additional effort for the sensitivity computation, we note that the second-derivative integrators are more efficient, often increasing the compute time only two- or three-fold, whereas the overhead is substantial for cvodes . the results for cvodes are best explained if we keep in mind that whenever the right-hand side f is evaluated, the algorithm also computes s˙k, k=1…np, which, as per eq. , requires an evaluation of the jacobian jf. as a consequence, our second-derivative integrator outperforms the sundials solver when implemented in c using the matlab mex interface , and even in native matlab  for all larger models. note that the higher compute times for odesdmex
+vs. odesd in some cases are the result of a more refined handling of near-singular matrices by matlab in the latter.
+
+using odesd , odesdmex
+, ode15s , radau <dig> , and cvodes . due to the explosion in compute time, the three largest steady-state models were not evaluated with ode15s and radau <dig>   cpu times with sensitivity calculation as in  relative to cpu times without sensitivity calculation.  average, normalized  cpu times with sensitivities as a function of the relative numerical tolerance for odesd  and odesdmex
+ relative to cvodes.  relative numbers of integration steps , of function evaluations f
+, and of evaluations of the jacobians j·
+ for odesdmex
+compared to cvodes, respectively. in all cases, model and sensitivity equations were integrated for the time spans shown in table  <dig>  performance metrics in  are normalized to the corresponding measures for cvodes and averaged ; the dashed line indicates performance equal to cvodes.
+
+in order to obtain results independent of any potential inefficiencies of the matlab interface, the same performance analysis was run using odesdc
+and cvodes with natively compiled c-language functions for the right-hand sides. the results of this comparison are summarized in figure  <dig> .
+
+with cvodes using the automatically generated, compiled c-language right-hand side and jacobian functions.  computation times for the individual models listed in table  <dig> with relative tolerance of 10−6
+using odesd  and cvodes .  average, normalized  cpu times as a function of the relative numerical tolerance for odesd relative to cvodes. in all cases, model and sensitivity equations were integrated for the time spans shown in table  <dig>  performance metrics in  are normalized to the corresponding measures for cvodes and averaged ; the dashed line indicates performance equal to cvodes.
+
+the higher efficiency of odesd, odesdmex
+and odesdc
+holds also for averages over all models and for a wide range of numerical tolerances . except for high-precision integration, we achieve approximately two to three-fold speed-ups. these general findings also hold when compute time is assessed as a function of numerical precision .
+
+, ode15s , radau <dig> , and cvodes . the models were integrated for the time spans shown in table  <dig> 
+
+to explain the performance, consider that although odesd and odesdmex also evaluate the jacobians in each step, both the much smaller number of steps required , which is of no particular advantage when the parameter sensitivities are not computed, and the re-use of the jacobians for sensitivity computations lead to significantly shorter execution times since substantially fewer evaluations of f and of the jacobians j
+are needed . since the latter dominates the integration cost, all three versions of odesd outperform cvodes in all but the smallest systems. these results are not a consequence of the sparsity of the systems per se, but of the more precise integration rule which can be computed efficiently thanks to sparsity. the better error estimate and the computation of local parametric sensitivities are therefore particular strengths of our ode solver based on second derivatives.
+
+CONCLUSIONS
+we have presented an integrator for ode systems resulting from the modeling of chemical and biological reaction networks, which are often stiff and sparse. for the realistic systems biology models tested, the new integrator outperforms commonly used state of the art integrators when parameter sensitivities are required. it is competitive in integrating the system equations alone, despite limitations for specific models near the steady state. the improvements with respect to sensitivity calculations are critical for many applications to drive highly compute-intensive  optimization and estimation processes.
+
+the improvements themselves are due to a combination of several factors: the more accurate second-derivative rule allows us, in combination with a better error estimate, to take larger steps, which in turn allows us to reduce the number of otherwise expensive sensitivity calculations. the re-use of the jacobians from the sensitivity calculations further reduces the total computational costs. although each integration step is more expensive than in first-derivative methods, due to the additional second-derivative information that needs to be computed, far less steps are required in total, resulting in a more efficient method.
+
+to be of practical relevance for applications in systems biology, odesd and odesdmex are accessible via matlab interfacesa, and we plan to make them more easily available through integrated modeling environments such as the sbtoolbox <dig>  <cit>  and copasi  <cit> , e.g. via the native c-language interface. to accelerate larger optimization and estimation processes, further efficiency improvements through the use of sparse matrix routines and by more elaborate step size control schemes are possible.
+
+in terms of numerical algorithms, to our knowledge, this is the first practical application of a second-derivative integration method with good performance. key, novel features of our integrator, such as a more precise error estimator and direct computation of parameter sensitivities with re-use of the jacobians, may well be suited for other problems or types of integrators. importantly, while our integrator has been developed for chemical and reaction networks, it is still quite general in targeting stiff and sparse ode systems. overall, we feel that a lot is to be gained by adapting general algorithms to specific problem domains, and that results from the work on specific problems can spill over to the broader field.
+
+availability
+the integrator  and the model conversion framework are available via http://www.csb.ethz.ch/tools.
+
+endnotes
+awe note that it is not possible to execute odesdmex
+in the 64-bit windows version of matlab r2010a as well as in 64-bit linux versions prior to r2010a in our testing environments, for reasons of memory allocation problems in matlab.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+pg developed the second-derivative integration scheme for the parameter sensitivities and the new error estimate, as well as the final matlab, mex and c-language versions. sd developed the automatic generation of the right-hand sides. lw implemented and tested the first versions of the integrator. js designed and conducted the experiments. both pg and js wrote the manuscript, which was read and approved by all authors.
+
+supplementary material
+additional file 1
+supplementary text and figures for a specialized ode integrator for the efficient computation of parameter sensitivities.
+
+click here for file
+
+ additional file 2
+supplementary source code for a specialized ode integrator for the efficient computation of parameter sensitivities.
+
+click here for file
+
+ acknowledgements
+we thank ernst hairer for comments and discussions. this work was supported by the eu fp <dig> project basysbio , the eu fp <dig> project unicellsys , the swiss initiative for systems biology systemsx.ch , by an eth excellence scholarship , and by swiss national science foundation’s individual support fellowships nr. pbezp2- <dig> and nr. pa00p2- <dig> .

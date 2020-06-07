@@ -1,0 +1,183 @@
+BACKGROUND
+massive parallel sequencing of short oligo reads has already found multiple applications in molecular biology. one of the promising novel ones is rna sequencing, used to determine abundance of transcripts in the sample  <cit>  - which is a more general description of gene expression profiling. the throughput of commercially available sequencers has reached the level where the depth of coverage is sufficient to measure the differences in rna expression for the larger genomes. for example - in a typical run of abi solid v <dig>  there are  <dig> million reads . assuming that half of these may be mapped to the known human genes, it gives  <dig> gbp of coverage, which allows for more than  <dig> times coverage of all the ensembl human genes. in practice, the distribution of reads coverage over the genes is very skewed.
+
+a recent study  <cit>  also shows good correlation of transcription measurements between rna sequencing and microarrays even in the cases with limited number of replicate samples.
+
+as has already happened with other technologies in molecular biology, the software development is trying to catch up with the improvements in the hardware  <cit> . a number of recent significant developments in the area of read mapping software  <cit>  allow the building up of tools for both managing short reads data and for secondary analysis adapted to particular biological applications. in the first group there are shortreads package  <cit> , genominator package or several commercial tools.
+
+in the case of rna sequencing the current approaches in secondary analysis tools are focused on three categories: genome browsers for displaying the reads over the genome  <cit> , statistical tools to find significantly expressed genes and tools for predicting the transcript structure with coverage and exon junctions, such as the tophat-cufflinks pipeline  <cit> , scripture  <cit>  or mapsplice  <cit> .
+
+the group of statistical software packages introduces the use of negative binomial distribution  <cit>  of counts within genes to find the significant ones. this has solid statistical foundations and usually relies on the databases of annotations to determine the loci where the reads are counted. however, the microarrays have already demonstrated that aggregating gene expression values on the gene level or averaging of the expression of gene fragments, is often very useful but may lead to spurious results in case of non-typical transcripts  <cit> .
+
+many of the tools may be used in a parallel computing environment, which enables publicly available cloud computing . however, the assumption of the rnaseqmap library is the minimization of the computing resources needed and platform independence for the secondary analysis. although the pipelines created with rnaseqmap may be parallelized to multiple cores with standard r or mysql mechanisms, they are supposed to run efficiently on a single, standalone machine. using the pre-defined annotation of genes, transcripts and exonic regions is not taking full advantage of the predictive qualities of rna sequencing data. the annotations can be assumed to be the real expression area boundaries, whereas the expression does not often follow the patterns frozen in the annotation databases  <cit> .
+
+the new bioconductor library, rnaseqmap, tries to overcome these limitations. this is achieved by describing the expressed regions not only by counts, but also by determining the boundaries with nucleotide precision. it may enable the exploration of rna sequencing data using pre-defined annotations, but also complementarily in a purely exploratory way - by adjusting the findings to the expressed areas. rnaseqmap can not only merely use the annotations, but may also confirm them, modify them or create novel ones. managing such a massive amount of rna sequencing data is another difficult issue. the operational memory is too small to keep the whole datasets, so it is necessary to use special mechanisms to select fragments of the data and annotations from the storage and process them. rnaseqmap solves this issue by keeping the sequencing reads and the annotations in the same relational database.
+
+the assumption of rnaseqmap is to use the existing tools in the areas where they evolved into useful solutions. its main goal is to serve as a complementary "middleware" to create analytical and discovery pipelines. thus, it relies on pre-processed mapping of the reads to a reference genome and well known database of annotations in the back-end and on existing software for finding significantly expressed genes in the front-end. rnaseqmap was designed to be independent of any sequencing platform, mapping software and statistical add-ons. by running it with real experimental data it was shown to be efficient at both tasks. in particular, the tests and data presented in the paper come from sequencing with an abi solid machine and mapping the colorspace reads using bioscope.
+
+implementation
+design paradigms
+rnaseqmap has been designed according to a set of principles that turned out to be useful and efficient in exonmap - the affymetrix exon array analysis software in bioconcuctor and its continuation, xmapcore  <cit> . those paradigms are:
+
+• working with the genome coordinates of expression areas
+
+• using database back-end for annotations and mapped reads
+
+• top-down analysis - starting from a global search and getting into interesting details
+
+• visualization of the genome by fragments
+
+• alternative splicing analysis
+
+• searching for the expression in potentially non-coding or non-annotated areas
+
+rnaseqmap uses reads mapped to the genome, characterized by a set of genome coordinates: chromosome, start, end and strand of the mapping. the option of using data from unstranded protocols is available. in this paper all the results are from a protocol with strand information. using such minimal information about reads gives the opportunity to freely tune parameters such as mismatches or multiple targeting in the mapper software. scripts that may be found in the installation version of rnaseqmap are examples of how the sam files may be trimmed to this basic set of attributes.
+
+back-end modes of feeding the r objects with data
+rnaseqmap supports three modes of getting the read data: directly from bam files , from a table in the mysql database  and from tables in text files.
+
+reading and processing of bam files uses current bioconductor infrastructure for processing sequencing reads: rsamtools, iranges and genomicranges libraries. in case of the database back-end it is expected to follow the xmapcore database format, extended by tables for sequencing reads, junction reads and samples, with appropriate stored procedures included in the sql scripts attached to the rnaseqmap package.
+
+data processing
+in rnaseqmap the global part of the analysis finds genomic and intergenic regions and then processes the coverage function  iteratively for subsequent regions. this approach allows the analyses to use a limited amount of operational memory, with nucleotide-level granularity of the findings.
+
+the regions found as a result of the analyses and their qualities  may be visualized using their genome coordinates - also in the areas not annotated previously to any gene or exon.
+
+technologies
+rnaseqmap may use mysql database as a back-end, because ensembl and, derived from it xmapcore, use this format. from version  <dig>  onwards, mysql engine has the partitioning mechanism which is used to partition reads in the seq_read table into sub-tables by chromosome - which speeds up searches by an order of magnitude in the case of larger genomes with multiple chromosomes.
+
+the library has been written in r  and makes use, among other things, the following bioconductor libraries: iranges during the processing, supporting input object creation for edger  <cit>  and deseq  <cit> . the critical algorithms for processing nucleotide distributions were written in c for performance reasons.
+
+distinctive features of rnaseqmap
+many of the functionalities presented above are novel not only in bioconductor. some combinations of features are also currently unique. such issues as the application of the same database for annotation and reads, platform and mapping independence or genome visualizations have been described above. here we describe some other features in detail.
+
+region mining algorithm
+the algorithm for finding genomic regions with the mean coverage above a defined level μ is an adaptation of aumann and lindell algorithm for mining quantitative association rules  <cit> . this algorithm uses two sliding windows that run across the genome, adding the coverage value of a nucleotide in every step and joining the windows under specific conditions. this results in a property of the discovered regions called irreducibility. biological meaning and utility of the algorithm is discussed in the further sections.
+
+classes seqreads and nucleotidedistr
+to encapsulate the sequencing data in a given region, rnaseqmap has two classes. seqreads keeps the raw read data and may be filled in from a database or directly from a file. from an object of the class seqreads, an object of nucleotidedistr  is constructed. in the data slot, it holds the distribution of the coverage function for all the nucleotides in the studied region. then the nucleotidedistr object may be a subject to various transformations of the coverage.
+
+building blocks for analysis pipelines
+the building blocks of the analytic infrastructure in rnaseqmap may be grouped in the following categories:
+
+• database access procedures, which are in fact wrappers for mysql stored procedures - similarly as in xmapcore
+
+• classes for encapsulating the sequencing reads and distributions
+
+• functions for normalization of the coverage distributions , summarizing them, calculating fold change and splicing index on the nucleotide level
+
+• aumann-lindell two-sliding-window algorithm implementation
+
+• functions for finding genomic and intergenic regions in given fragments of chromosomes - to iterate the searches over them
+
+• connectors to statistical libraries - deseq and edger
+
+• visualization - genome plots and histograms
+
+those building blocks may be used to construct processing pipelines that iterate over fragments of chromosome, genes or intergenic spaces .
+
+nucleotide-level splicing index
+the idea of the splicing index comes from the paper  <cit>  and in rnaseqmap was adapted to the sequencing data defined for every nucleotide, where the coverage may differ by many orders of magnitude. the nulcleotide-level splicing index is defined as follows:  
+
+where e1n and e2n are the coverage values for a given nucleotide, while g1n and g2n are the counts of reads in the region or gene.
+
+such an approach enables visualization of the splicing index on a genome plot and exploring its significant regions using the aumann-lindell algorithm. the example of the splicing index plot is presented on the figure  <dig> 
+
+discovery mode
+the genome regions and their analysis may be categorized in the following way:
+
+• gene regions, with boundaries defined according to annotations, searched for expression within the limits
+
+• extended gene regions - to check possible expression up- or downstream from a gene and extend its boundaries
+
+• intergenic regions - searched with the aumann-lindell algorithm for novel expression places
+
+the analysis by the two latter categories may lead to discovery of novel expression regions on the genome, which may be verified with databases of ests and other genomic sources of evidence. this type of analysis is independent from the genomic annotation scheme.
+
+providing input data to the statistical packages
+significance analysis packages for rna sequencing such as deseq or edger require the count data in defined regions  as an input, then they perform analysis using binomial distributions. rnaseqmap may generate such tables from the reads data in the database, the regions may be defined as gene boundaries or just regions that happen to be found significantly expressed in the discovery mode. in this way rna sequencing can perform significance analysis that goes beyond microarray-style predefined regions checking.
+
+RESULTS
+to evaluate the predictive performance of the software on a real sequencing dataset, we randomly selected a single strand of a human chromosome  and searched for expressed regions in  <dig> samples. it turned out to have  <dig> genes. the number of irreducible regions of expression in genes is summarized in the table  <dig>  traces of expression of coverage higher than  <dig> are found in ca 70% of genes, while consistent expression over  <dig> samples with irreducible regions can be found in ca 10% of genes.
+
+a particular point which may be the subject of wet-lab verification is whether the irreducible regions found by the aumann-lindell algorithm are indeed exons. the algorithm normally needs tuning with the parameters μ  and minsup, which is here the length of a region. they have to be set according to the overall coverage in the experiment and knowledge of biological factors - such as expected exon length and the characteristics of the concentration-coverage curve. some of this tuning may be automated by multiple runs of the algorithm across the regions with different parameters. in rnaseqmap, the function regionbasedcoverage() is an example of such a procedure. it searches for irreducible regions for several values of μ and sets the coverage value to the maximal of them. the resulting coverage function with discrete values may be more 'human readable' and this also removes peaks of over-amplified reads and less significant local minima.
+
+the issue of time and memory efficiency of the analyses is also important. rnaseqmap avoids memory overloads by providing the tools to slice the genome coverage into manageable fragments, still big enough to represent even longest genes measured in many samples - and encapsulating them into objects with well-defined analytical methods. the database mysql back-end is an engine that may be run on a single standard computer and contain a database from a complete rna sequencing experiment, in the case of bam files the limitation is the disc capacity.
+
+time of analysis is comparable to other operations in sequencing, such as preparing the libraries or mapping the reads to the reference genome. the result of a scalability tests is depicted in additional files  <dig> and  <dig> and shows that the processing time scales linearly with the number of genomic loci and number of processed biological samples. for example, for  <dig> bam files of  <dig>  gb  each, the processing time was less than a second per gene on a standalone machine. the proof of linear complexity of the region mining algorithm can be found in  <cit> 
+
+properties and tuning the region mining algorithm
+the definition of an irreducible rule in  <cit>  follows the intuitive understanding of the expressed region in rnaseqmap: the coverage may fall below μ in a fragment of an exon due to some artifacts , but the region itself may still have a consistent expression representation and clearly marked boundaries .
+
+according to the definition in  <cit> , an irreducible region is one that may be split anywhere into two sub-regions with the mean value of the analyzed variable  remaining above the predefined μ level in both. in addition, it may be proven that irreducible regions always start and end with a value above μ  <cit> . thus the aumann-lindell algorithm is expected to precisely find expressed regions which may be understood as exons in the biological meaning.
+
+the advantages of searching for novel expression regions with aumann-lindell algorithms are depicted in the figure  <dig> and can be summarized as follows:
+
+• skipping small, local drops of the coverage value, as the coverage in the region may drop locally, not violating its irreducibility
+
+• not overestimating the artefactual peaks, because the window algorithm does not consider them for the whole region. if the peaks are separate ones they do not fulfill the minimum support  condition
+
+• defining the boundaries of the region only for expression which is high enough, as they have to start with at least μ value
+
+to tune the outcome of the algorithm several strategies may be used. simple ones rely on a single μ level, that may be understood as a 'detection threshold' for the expression - often  <dig> is used as a threshord value for coverage. more sophisticated strategies choose μ as a given fraction of local minima or maxima of coverage, or apply a search with several levels μ of iteratively and choosing the highest as a value of coverage .
+
+region mining with aumann-lindell rules is based upon the magnitude and irreducibility of the coverage function, while cuffinks  <cit>  relies mainly on exon junctions mapping. as a result the susceptibility to different types of artifacts have been observed, although the two approaches often agree in the case of well pronounced exon expression .
+
+the lowess algorithm   <cit> , widely used for adjusting the bias of microarrays, is used in rnaseqmap to minimize the influence of artifacts  of the coverage. applying lowess is recommended before region mining to stabilize the outcome. the effect of lowess and region mining together is shown on additional files  <dig> and  <dig>  using lowess smoothing as a preprocessing step may possibly influence the precision of the region boundaries.
+
+CONCLUSIONS
+overall, the analyses performed by rnaseqmap belong more to data mining than to statistics - as the library does searches for interesting local phenomena, without pre-assumptions, starting from a global overview and dissecting it into significant slices of expressed transcriptome. such an approach is necessary, knowing that the existing annotations are just an approximated and constantly evolving snapshot of the real biological phenomena of transcription and alternative splicing. although it is not a classic data mining , the novel features of rnaseqmap make it different from classic genome browser and statistical tools using curated genome annotation, and is complementary to them.
+
+the analyses performed with rnaseq map will become gradually more precise, with the increased coverage of the rna sequencing. this is expected, because this particular technology is currently a cutting-edge of biomolecular techniques. thus, the applicability and utility of such an exploratory approach is expected to grow. according to  <cit>  the rna sequencing data are over-dispersed. there are also still a number of artifacts coming most likely from sample preparation and amplification protocols, and the closer look at the data with rnaseqmap confirms this point of view.
+
+availability and requirements
+• project name: rnaseqmap
+
+• project home page: http://www.bioconductor.org/packages/release/bioc/html/rnaseqmap.html
+
+• operating systems: windows, macos, unix
+
+• programming language: r, c, sql
+
+• other requirements: r v <dig>  or higher, bioconductor libraries v <dig>  or higher, mysql v <dig>  or higher in case of using the database
+
+• license: gpl-2
+
+the rnaseqmap library is available in bioconductor from version  <dig> . the mysql database and processing may be run on any standard operating system platform. hardware requirements do not go beyond standard desktop computers, however the amount of ram memory limits the size of the processed objects so the size of genome fragments analyzed, and the speed of the hard drive are the main limiting factors for database operations and input bam files.
+
+authors' contributions
+al has prepared the implementation of rnaseqmap, developed the algorithms, heuristics and the adaptation of xmapcore database, performed the quantitative experiments and helped to draft the manuscript. mo conceived the idea of the software, participated in the implementation of rnaseqmap and drafted the manuscript. both authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+scalability of processing experiment. execution time  of the basic operations creating seqreads and nucleotidedistibution object, processing the coverage) for  <dig> to  <dig> random genes and  <dig> to  <dig> bam les,  <dig>  gb  each, system time. the time is linearly scaling with the number of genes and files.
+
+click here for file
+
+ additional file 2
+scalability of processing experiment. execution time  of the basic operations creating seqreads and nucleotidedistibution object, processing the coverage) for  <dig> to  <dig> random genes and  <dig> to  <dig> bam les,  <dig>  gb  each, elapsed time. the time is linearly scaling with the number of genes and files.
+
+click here for file
+
+ additional file 3
+an example of cufflinks-rnaseq comparison. example of comparison of regions found by cufflinks  and rnaseqmap 
+
+click here for file
+
+ additional file 4
+an example of cufflinks-rnaseq comparison. example of comparison of regions found by cu inks  and rnaseqmap 
+
+click here for file
+
+ additional file 5
+an example of coverage plot smoothed by lowess. an example of lowess use to smoothen artifacts of sequencing coverage. the original rna-seq coverage , after lowess with f =  <dig>   and after region mining .
+
+click here for file
+
+ additional file 6
+an example of coverage plot smoothed by lowess. an example of lowess use to smoothen artifacts of sequencing coverage. the original rna-seq coverage , after lowess with f =  <dig>   and after region mining .
+
+click here for file
+
+ acknowledgements
+the authors would like to thank marzanna künzli, remy brugmann, hubert rehrauer, sirisha aluri and martin ryan for all the valuable discussions and help with testing the package, and prof. beat schäfer, marco wachtel and lucia bautista borrego for providing and discussing with us the experimental data. the work was supporthed by sciex-nms.ch grant no.  <dig> .

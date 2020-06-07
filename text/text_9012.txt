@@ -1,0 +1,232 @@
+BACKGROUND
+the acceleration in the process of genome sequencing in recent years has increased the availability of genome-scale metabolic network reconstructions for a variety of species. these genome-based networks can be used within the framework of flux balance analysis  to predict steady-state growth and uptake rates accurately  <cit> . dynamic flux balance analysis  enables the simulation of dynamic biological systems by assuming organisms reach steady state rapidly in response to changes in the extracellular environment. then, the rates predicted by fba are used to update the extracellular environment. there exist three approaches to simulate dfba models: the static optimization approach   <cit> , the dynamic optimization approach  <cit>  , and the direct approach . the static optimization approach uses the euler forward method, solving the embedded lps at each time step. since most dfba models are stiff, small time steps are required for stability, making this approach computationally expensive. meanwhile, the doa approach discretizes the time horizon and optimizes simultaneously over the entire time period of interest by solving a nonlinear programming problem . the dimension of this nlp increases with time discretization, therefore it is limited to small-scale metabolic models  <cit> . finally, a da has been proposed recently by including the lp solver in the right-hand side evaluator for the ordinary differential equations  and taking advantage of reliable implicit ode integrators with adaptive step size for error control. at present, the doa is rarely used due to the intractability of the resulting nlp. dfba can be easily performed on matlab using the constraint-based reconstruction and analysis  toolbox  <cit> , which implements the soa. recently, the da has been implemented by hanly and henson  <cit> , mao and verwoerd in the orca toolbox  <cit> , zhuang et al. in the dynamic multispecies metabolic modeling  framework  <cit> , and others. a comprehensive list of dfba implementations can be found in table i of  <cit> . cobra, dymmm and orca codes are available on the web. of these, only dymmm allows community simulations. since orca and dymmm are extremely similar, only cobra and dymmm were implemented in the case studies presented.
+
+these implementations present several shortcomings. the cobra toolbox uses a fixed time step and does not take advantage of the high quality built-in integrators provided by matlab. simulation stability and accuracy are closely linked to a uniformly small step size which can greatly increase simulation time. it can fail if the extracellular conditions are close to the fba model becoming infeasible. in addition, it uses a simple exchange flux bounding scheme that does not allow the implementation of michaelis-menten kinetics or other more complex dynamic behaviors such as day/night shifts for photosynthetic organisms or system feed and discharge rates. it does not allow community simulations.
+
+the orca toolbox and the dymmm framework use the matlab built-in integrators. orca simulates monocultures only, whereas dymmm can simulate cocultures. the orca toolbox allows the implementation of michaelis-menten and hill kinetics only, whereas dymmm provides the flexibility to implement more complex dynamics such as day/night shifts for photosynthetic organisms or system feed and discharge rates. both attempt to carry on with simulations when the fba model is infeasible by setting the growth rate and exchange fluxes equal to zero and displaying a death phase message. this message may be displayed even though the system is not infeasible.
+
+none of these implementations  account for the solution of a linear program  being a nonsingleton set. therefore, exchange fluxes are not necessarily unique and the dynamic system is not well-defined. nonunique optimal fluxes have been discussed elsewhere in  <cit>  and  <cit> . if no effort is made to obtain unique fluxes, different integrators could yield different results.
+
+höffner et al. have designed a fast and reliable community simulator that has the flexibility of implementing complex dynamics, does not fail, identifies precisely when a system becomes infeasible, and performs lexicographic optimization to render unique exchange fluxes  <cit> . in particular, it avoids numerical failure by reformulating the lp as an algebraic system and integrating an index- <dig> differential-algebraic equation  system. despite these advantages, this simulator has not been widely used due to being coded in fortran. in this paper, we implement the lp feasibility problem combined with lexicographic optimization in our dynamic flux balance analysis laboratory , a matlab code that performs fast, reliable and flexible community simulations.
+
+implementation
+dfbalab provides a solution to two major difficulties in existing implementations: nonunique exchange fluxes in the solution vector of an lp and the lp becoming infeasible when evaluating the ode right-hand side close to the boundary of feasibility. dfbalab implements lexicographic optimization to obtain unique exchange fluxes  <cit>  and uses the lp feasibility problem to avoid obtaining infeasible lps while running the simulation. dfbalab runs using the commercial linear program solvers cplex  <cit> , gurobi  <cit> , and mosek  <cit>  and is compatible with the cobra toolbox model format.
+
+lexicographic optimization
+dynamic flux balance analysis is defined in the following way. consider a vector x <dig> containing the initial concentrations of metabolites and biomass in a culture and assume there are ns microbial species in the culture. given some uptake and production rates of metabolites for each species , feed and discharge rates from the culture, mass transfer rates, and other dynamic processes, a rate of change function f can be obtained for each of the components of x <dig>  the function f can then be integrated to find the concentration profiles with respect to time, x. each species has a metabolic network represented by a stoichiometry matrix sk∈ℝnqk×nrk where nqk are the number of metabolites and nrk are the number of reactions in the metabolic network of species k. consider that each species k has nhk exchange fluxes. then, 
+  x˙=ft,h1),…,hns),∀t∈=x <dig>  
+
+where hk is a vector containing the exchange fluxes of species k and is obtained by solving a linear program: 
+  maxv∈ℝnrktv,s.t.skv= <dig> vubk)≥v≥vlbk), 
+
+where ck∈ℝnrk is the cost vector that maximizes growth fluxes, and vlbk,vubk are lower and upper bounds as functions of the extracellular concentrations. the vector hk then takes the solution of this linear program to find the values of the exchange fluxes . this definition of dfba has a serious problem: the solution set of the lp  can be nonunique  and it is not clear which flux distribution should hk take to carry-on with the integration.
+
+höffner and coworkers  <cit>  use lexicographic optimization to render unique exchange fluxes. lexicographic optimization works in the following way. first, it orders a number of objectives in a priority list. the highest priority objective is optimized first; then its optimum value is added as a constraint and the next objective in priority is optimized, and so on. lexicographic optimization can be implemented in dfba systems: the first objective is maximization of biomass; then all other exchange fluxes that appear in the right-hand side of  are added to the priority list. note that the choice of the objective functions and their ordering are part of the model description and must be provided by the user. although lps don’t necessarily have a unique flux distribution that attains the optimal objective function value, they do have a unique optimal objective function value. this optimal objective function value changes continuously with changes in vlbk,vubk. by making all the exchange fluxes that appear in the right-hand side of  optimization objectives ordered by priority, unique exchange fluxes are obtained, these exchange fluxes change continuously with respect to time and the integrator is able to carry-on integration reliably. additional file  <dig> presents all the mathematical details pertaining to lexicographic optimization.
+
+harwood et al.  present an efficient algorithm to compute a basis that contains optimal bases for all lps in the priority list. this algorithm was not implemented in dfbalab because of difficulties in extracting the optimal basis information with no artificial variables from lp solvers in matlab, but will be implemented in future releases.
+
+lp feasibility problem
+a major problem for dfba simulators is that the lp in  may become infeasible as time progresses. there are two situations where the lp may become infeasible: 
+the problem is truly infeasible and the solution cannot be continued: in this case the integration should be terminated.
+
+the problem is not infeasible but the lp becomes infeasible while the numerical integrator performs various operations to take a time step in : in this case the dfba simulator in cobra may fail to continue the simulation and orca and dymmm will erroneously display death phase messages. in particular, the matlab’s built-in integrators will have a hard-time obtaining reliable right-hand side information as the system changes abruptly from being defined by the solution to , to being defined by an artificial solution that sets growth rates and exchange fluxes equal to zero.
+
+
+
+in this paper we use the lp feasibility problem  <cit>  combined with lexicographic optimization to generate an extended dynamic system for which the lp always has a solution. an lp feasibility problem finds a feasible point or identifies an lp as infeasible. it has two main characteristics: it is always feasible and its optimal objective function value is zero if and only if the original lp is feasible. several different versions of the lp feasibility problem can be constructed by adding some slack variables to the constraints. for the lp formulation in , the following is an lp feasibility problem: 
+  minv∈ℝnrk,s+,s−∈ℝnqk∑i=1nqks+i+s−i,s.t.skv+s+−s−= <dig> vubk)≥v≥vlbk),s+≥ <dig> s−≥ <dig>  
+
+let si be the ith row of s. when an lp is constructed in this form, a feasible solution is obtained by finding a v such that vubk)≥v≥vlbk) and then letting s+i=−sikv and s−i= <dig> if sikv< <dig>  or s−i=sikv and s+i= <dig> otherwise. dfbalab transforms lp  to standard form and then obtains the lp feasibility problem for an lp in standard form  <cit> ; however, the principles are the same. a detailed explanation can be seen in the additional file  <dig> 
+
+dfbalab uses the lp feasibility problem  instead of  to find the growth rates and exchange fluxes for each species in the culture. it sets the feasibility cost vector as the top priority objective in the lexicographic optimization scheme. then, the second-priority linear program maximizes biomass and the subsequent lower-priority lps obtain unique exchange fluxes. the order of the exchange fluxes in the priority list is user-defined. the priority list order is fixed throughout the simulation. this order has to be defined carefully or unrealistic simulation results may be obtained . this approach has the following advantages: 
+the dynamic system in  is defined for all simulation time.
+
+the integrator does not encounter infeasible lps while taking a step and is able to obtain reliable right-hand side information speeding up the integration process.
+
+the objective function value of  provides a distance from feasibility and can be integrated providing a penalty function that can be useful for optimization purposes. only trajectories with penalty function value equal to zero  are feasible.
+
+
+
+RESULTS
+the following examples demonstrate the reliability and speed of dfbalab compared to existing implementations of the soa and da. soa is represented by the cobra dfba implementation and da by the dymmm implementation. in the first example, a monoculture of e. coli is simulated with all three methods. in the second example, a coculture of algae and yeast is simulated using dfbalab and dymmm. in the third example, this same coculture is simulated considering the ph balance. finally, the last example shows how dfbalab running time increases linearly with the number of fba models in the system. all running times are for a  <dig>  ghz intel®; xeon®; cpu in matlab  <dig>  , windows  <dig> 64-bit operating system using lp solver cplex. all running times are for the integration process only . dfba models are usually stiff; therefore, ode15s, matlab’s integrator for stiff systems, was used for all simulations.
+
+example 1
+this is example  <dig>  in  which is based on  <cit> . here we compare the performance of cobra, dymmm and dfbalab simulating an e. coli monoculture. the metabolic network reconstruction used was ijr <dig> published in  <cit> . this metabolic model contains  <dig> reactions and  <dig> metabolites. initial conditions were  <dig>  g/l of inoculum,  <dig>  g/l of glucose and  <dig> g/l of xylose. oxygen concentration was kept constant at  <dig>  mmol/l. michaelis-menten expressions with inhibition terms were implemented to bound the uptake of glucose, xylose and oxygen using the parameters presented in table i and equations ,  and  in  <cit> . dfbalab obtained unique fluxes by minimizing ethanol production, and then glucose and xylose consumption, after maximizing biomass, using lexicographic optimization. the cobra simulator performed poorly. since cobra does not have the flexibility to implement michaelis-menten expressions, the simulation results were incorrect. in addition, the fixed step size slowed down the integration process. non-negativity constraints for all states variables were enforced in both dymmm and dfbalab, by using the ‘nonnegative’ option. dymmm and dfbalab obtained the same concentration profiles presented in figure  <dig>  dymmm has a good performance recovering from a frequent failure point occurring when growth switches from glucose-based to xylose-based. dfbalab performs a little bit slower than dymmm due to the four additional lps being solved to perform lexicographic optimization, obtaining at least the same level of accuracy. finally, the penalty function indicates that the system becomes infeasible after approximately  <dig>  hours .concentration profiles  and dfbalab penalty function  of example  <dig>  the penalty function shows how the simulation becomes infeasible after approximately  <dig>  hours. simulation times: dymmm =  <dig>  seconds, dfbalab =  <dig>  seconds.
+
+
+
+example 2
+this is an example from  <cit>  of a coculture of the microalgae chlamydomonas reinhardtii and saccharomyces cerevisiae  in a continuous stirred-tank reactor  reactor. the genome-scale metabolic network reconstructions used were irc <dig>  comprising  <dig> reactions and  <dig> metabolites from  <cit> , and ind <dig>  comprising  <dig> reactions and  <dig> metabolites from  <cit> , for algae and yeast, respectively. in this simulation, yeast consumes glucose to produce co <dig> while algae consumes mainly co <dig> to produce o <dig> during the day, and acetate to produce co <dig> during the night. the dynamic mass balance equations of the extracellular environment for this system are: 
+  y˙i=μixyi−foutyiv, 
+
+  s˙=fins0−foutsv+mts)+∑ivspix−vscixyi,fori=y,a,and fors=g,o,c,e,a, 
+
+where yi, g, o, c, e, and a correspond to the concentrations of biomass of species i, glucose, oxygen, carbon dioxide, ethanol and acetate, respectively. the superscripts y,a refer to yeast and algae, x= , μi is the growth rate of species i, vsci and vspi are the consumption and production rates of substrate s for species i determined through lexicographic optimization, s <dig> is the concentration of s in the feed, fin and fout are the inlet and outlet flows, v is the volume of the system, and mts is the mass transfer rate of s given by the following expression: 
+  mts)=skhs−sfors=o,c,0fors=g,e,a, 
+
+where khs refers to henry’s constant of component s at 25°c, kslθ is the mass transfer coefficient for component s obtained from  <cit> , and s is the concentration of s in the atmosphere. the maximum concentration of oxygen and carbon dioxide in the culture is bounded by henry’s constant: 
+  s)≤khs,∀t∈t <dig> tffors=o,c. 
+
+initial concentrations and other parameters are presented in table  <dig>  the uptake kinetics are bounded above by the michaelis-menten expression: 
+  vsi,ub)=vs,maxisksi+s, table  <dig> 
+initial concentrations and parameters of example 2
+
+
+variable
+simulation 1
+simulation 2
+parameters
+y0y
+v
+0
+y0a
+f
+in
+g
+0
+f
+out
+o
+0
+c
+0
+e
+0
+a
+0
+simulation  <dig> used the priority list presented in table  <dig>  while for simulation  <dig> objective  <dig> for algae was inverted.
+priority list order for the lexicographic linear programs in example 2
+
+
+yeast
+algae
+
+
+for i=y,a and s=a,o,c with vs,maxi and ksi obtained from  <cit> ,  <cit>  and  <cit>  for acetate, carbon dioxide and oxygen. production of oxygen by algae, ethanol by yeast, and carbon dioxide by algae and yeast were not bounded.
+
+in addition to the extracellular concentrations, algae growth is affected by light availability because it is a photosynthetic organism. day and night shifts were simulated using the following surface light function: 
+  i0=28maxsin22πt <dig> sin210π48−sin210π481−sin210π48mmol photonsgdw×h. 
+
+this light function simulates daylight from 5: <dig> to 19: <dig>  the prefactor was obtained from  <cit> . the beer-lambert law was used to average the light available to algae cells considering that higher biomass densities block light and deeper sections of the pond receive less sunlight: 
+  ia)=i01−exp−lke)lke),mmol photonsgdw×h, 
+
+where ke) is a linear function of the concentration of biomass in the culture and l is the pond depth  <cit> . concentration variations of biomass for different pond depths were neglected.
+
+this complex community simulation cannot be carried out using the dfba simulator in cobra. non-negativity constraints were enforced for all state variables in both, dymmm and dfbalab, by using the ‘nonnegative’ option. after more than  <dig>  seconds of running time using matlab implicit integrator ode15s, the simulation on dymmm was stopped. using explicit integrator ode <dig> instead, dymmm took more than  <dig> seconds to simulate one hour of the cyclic steady-state of this coculture and the results are inaccurate. this is expected because explicit integrators can calculate new steps as long as they are able to evaluate the right-hand side of the ode. the results obtained by dymmm using ode <dig> are inaccurate because explicit integrators should not be used for stiff systems, and the right-hand side is nonunique. in figure  <dig>  it can be seen that the acetate curve presents several points of nonsmoothness which are expected in systems with nonunique fluxes. numerical integrators are unable to handle these systems as they encounter discontinuous exchange fluxes when decreasing step-size. therefore, computation time is excessive and the results are incorrect. this shortcoming is addressed by dfbalab using six lexicographic optimizations for yeast and five for algae. it took only  <dig> seconds to simulate accurately  <dig> hours of this coculture using the lexicographic objectives shown in table  <dig>  and  <dig> seconds to simulate this same system with objective  <dig> for algae inverted. simulation results can be seen in figure  <dig> dymmm simulation results of example  <dig>  dymmm is unable to simulate example  <dig>  computation time for one hour of simulation was of more than  <dig> seconds using matlab integrator ode <dig>  in addition, the acetate curve has several points of nonsmoothness that can be explained by the presence of nonunique fluxes. numerical integrators are unable to integrate these kinds of systems.
+dfbalab simulation results of example  <dig>  two cyclic steady states are presented. simulation  <dig>  was performed with lexicographic objectives presented in table  <dig>  whereas simulation  <dig>  used the negative of objective  <dig> for algae. significant differences can be observed in the predicted concentrations of yeast, glucose, and oxygen. computation times for simulations  <dig> and  <dig> where  <dig> and  <dig> seconds, respectively.
+
+
+
+lexicographic optimization is very important in this example; if the negative of objective  <dig> for algae is used, oxygen, acetate and yeast concentration profiles vary significantly. in particular, notice the large difference in the o  <dig> concentration profile between the two simulations. since the o  <dig> flux is nonunique, selecting different fluxes will lead to different trajectories. without a rule on how to choose a flux from the optimal solution set, dymmm can choose different elements of this set while cutting its time step, obtaining unreliable right-hand side information. therefore, it is not surprising that the dymmm simulator was unable to simulate this system.
+
+it must be noted that in reality, this difference is not observed in nature. when objective  <dig> for algae is inverted , the model is able to uptake unlimited h + ions from the environment and produce water until the o  <dig> uptake bound is reached. this behavior will change the ph of the system and the overconsumption of o  <dig> would be unsustainable. increased modeling efforts can bound the uptake of other substrates such as nitrogen, phosphorus and iron and use ph dependent uptakes. in this context, a ph balance will be necessary. this balance is implemented in example  <dig>  finally, biologically relevant lexicographic objectives must be selected because some objectives may lead to unrealistic systems as the one just presented.
+
+example 3
+this example illustrates the modeling flexibility dfbalab provides. the growth rate of autotrophic microalgae such as c. reinhardtii is dependent on co  <dig> concentration. this concentration is affected by ph, as the following equilibrium reactions are present in the extracellular environment: 
+  nh3+h2o⇌nh4++oh−co2+h2o⇌h++hco3−⇌2h++co32−h2o⇌h++oh− 
+
+using the equilibrium constants presented in table one in  <cit>  and the equilibrium model in equations  and  in  <cit> , a ph balance was introduced to example  <dig>  the ph balance introduces algebraic equations that have to be satisfied at all times. this kind of system is called a differential-algebraic equation system  where some variables are algebraic variables  and others are differential variables. to our knowledge, no one has introduced the ph equilibrium equations in a dfba simulation before. to add the ph balance to the system, total carbon and total nitrogen were added to the differential variables, co  <dig> concentration was transformed into an algebraic variable, and new algebraic variables for nh4+, nh  <dig>  hco3−, co32−, and h + concentrations were introduced. total nitrogen in the system was assumed to be constant at  <dig>  mmol/l, which is the concentration present in the charles river in cambridge  <cit> , the effect of h + exchange by algae on ph was considered negligible, and ionic valency of the solution was assumed to be equal to zero.
+
+if the jacobian of the algebraic equations with respect to the algebraic variables is nonsingular, the dae is index- <dig> and can be solved with matlab ode15s. table  <dig> shows the initial conditions and parameters used. no non-negativity constraints were enforced; however, the uptake kinetics were specified so that negative concentrations could not occur. concentration profiles are presented in figures  <dig> and  <dig>  simulation results with a ph balance are close to those without a ph balance. however, the information obtained from this simulation enables using ph dependent uptake kinetics and ionic species uptake kinetics leading to more accurate simulations. it took only  <dig> seconds to simulate accurately  <dig> hours of this coculture with a ph balance.dfbalab simulation results of example  <dig>  this example incorporates the ph balance . simulation results were close to the ones obtained without a ph balance. slight variations were observed for the co  <dig> concentration profile. computation time was  <dig> seconds.
+equilibrium species and ph of example  <dig>  the ph balance enables tracking of ionic concentration profiles. this information allows using ph dependent uptake kinetics and uptake kinetics for ionic species.
+initial concentrations and parameters of example 3
+
+
+variable
+no ph balance
+ph balance
+parameters
+y0y
+v
+0
+y0a
+f
+in
+g
+0
+f
+out
+o
+0
+c
+0
+e
+0
+a
+0
+
+
+example 4
+in this example a monoculture of chlamydomonas reinhardtii was simulated to illustrate how dfbalab performs for simulations with a large number of species models. the parameters implemented in example  <dig> were used with different initial conditions. no non-negativity constraints were enforced, but the uptake kinetics were specified so that negative concentrations could not happen. algae biomass was split among several lps and running times were compared. table  <dig> shows the running times for  <dig> hours of simulation for different numbers of models in the system.running times of example  <dig> with increasing number of models
+
+
+
+number of models
+time 
+
+
+discussion
+in these examples, the reliability and speed of dfbalab has been shown compared to current open matlab benchmarks in dfba simulation. cobra lacks flexibility when implementing michaelis-menten kinetics and the use of a fixed time step decreases the accuracy of these simulations, or increases the integration time for very small time steps. dymmm provides a flexible framework that allows the implementation of community simulations. however, if any of the exchange fluxes are nonunique, simulation results will be incorrect. dfbalab uses lexicographic optimization to obtain a well-defined system, but it requires specification of lower-priority objective functions. biologically relevant lower-priority objectives must be sought to restrict the solution set of  to a more realistic set. for instance, it has been suggested by a reviewer that maximization of atp is a biologically relevant objective that should follow maximization of biomass. in dfbalab, this objective can be added right after maximization of biomass. then, the unique exchange fluxes obtained are guaranteed to maximize biomass first, and then maximize atp. if other biologically relevant objectives are found, they can be added in the same way to the priority list , such that the exchange fluxes obtained are more realistic.
+
+the dfbalab framework is flexible enough to allow daes, which could result from performing ph balances in the culture. furthermore, in community simulations, the running time of dfbalab increases linearly with the number of species. the lp feasibility objective function in dfbalab serves two purposes: it helps to distinguish between feasible and infeasible trajectories and it can serve as a penalty function in optimization algorithms. future work will present the implementation of this penalty function in the context of dfba optimization.
+
+CONCLUSIONS
+the objective of this work is to provide an easy to use implementation that minimizes troubleshooting of numerical issues and facilitates focus on the analysis of simulation results. dfbalab, a reliable dfba simulator in matlab, is presented. dfbalab uses lexicographic optimization to obtain unique exchange fluxes and a well-defined dynamic system. dfbalab uses the lp feasibility problem to generate an extended dynamic system and a penalty function. dfbalab performs better than its counterpart dymmm in complex community simulations: it is faster and more accurate because the unique fluxes provided by lexicographic optimization are necessary for numerical integration. in addition, dfbalab can integrate the daes resulting from implementing ph balances. biologically relevant lower-priority objectives must be sought to perform lexicographic optimization. the penalty function provided by dfbalab can be used to optimize dfba systems. however, it should be noted that the fortran code referred in  <cit>  has advantages since it only takes about  <dig> seconds for example  <dig>  <cit> .
+
+availability and requirements
+the dfbalab code is available, without charge, for both education and non-profit research purposes, at http://yoric.mit.edu/dfbalab.
+
+project name: dfbalab
+
+project homepage:http://yoric.mit.edu/dfbalab
+
+operating system: any operating system that supports matlab
+
+programming language: matlab’s programming language
+
+other requirements: an lp solver among cplex, gurobi, or mosek
+
+license: terms of use need to be accepted before being able to download the code.
+
+any restrictions to use by non-academics: not available for non-academics.
+
+additional file
+additional file  <dig> 
+detailed mathematical presentation of lexicographic optimization and the lp feasibility problem.
+
+
+
+
+abbreviations
+cobraconstraint-based reconstruction and analysis
+
+cstrcontinous stirred-tank reactor
+
+dadirect approach
+
+daedifferential-algebraic equation
+
+dfbadynamic flux balance analysis
+
+dfbalabdynamic flux balance analysis laboratory
+
+doadynamic optimization approach
+
+dymmmdynamic multispecies metabolic modeling
+
+lplinear program
+
+nlpnonlinear programming problem
+
+odeordinary differential equation
+
+soastatic optimization approach
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+jag prepared the manuscript and the examples, kh provided examples and edited the manuscript, and pib edited the manuscript. both kh and pib conceived the research. all authors read and approved the final manuscript.
+

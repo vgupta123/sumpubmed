@@ -1,0 +1,177 @@
+BACKGROUND
+introduction
+the past decades have witnessed dramatically increasing trends in the quantity and variety of publicly available genomic and proteomic sequence data. dealing with the massive data and making sense of them are big challenges in bioinformatics  <cit> . one of the most widely used procedures for extracting information from proteomic and genomic data is pairwise sequence alignment . given two sequences, psa finds the extent of similarity between them. many bioinformatics applications have been developed based on pairwise sequence alignment, such as blast  <cit> , psi-blast  <cit> , and fasta  <cit> . psa produces a score for an alignment as a measure of the similarity between two sequences. generally, the higher the score, the more related the sequences. however, the alignment score depends on various factors such as alignment methods, scoring schemes, sequence lengths, and sequence compositions  <cit> . judging the relationship between two sequences solely based on the scores can often lead to wrong conclusion. therefore, it is more appropriate to measure the quality of psa using the statistical significance of the score rather than the score itself  <cit> . statistical significance of sequence alignment scores is very important to know whether an observed sequence similarity could imply a functional or evolutionary link, or is a chance event  <cit> . accurate estimation of statistical significance of gapped sequence alignment has attracted a lot of research in recent years  <cit> .
+
+pairwise statistical significance
+consider a pair of sequences s <dig> and s <dig> of lengths m and n, respectively, the scoring scheme, sc , and the number of permutations n of s <dig>  pairwise statistical significance  of the two sequences is calculated by the following function  <cit> , which is described below:
+
+ pss, 
+
+through permuting s <dig> n times randomly, the function generates n scores by aligning s <dig> against each of the n permuted sequences and then fits these scores to an extreme value distribution   <cit>  using censored maximum likelihood  <cit> . the returned value is the pairwise statistical significance of s <dig> and s <dig>  the evd describes an approximate distribution of optimal scores of a gapless alignment  <cit> . based on this distribution, the probability  of observing an sequence pair with a score s greater than x, can be given by:
+
+  p≈1-exp=1-e-e 
+
+where λ and k are calculational constants and e, also known as e-value, is the expected number of distinct local alignments with score values of at least x.
+
+note that the above distribution is for a gapless alignment. for the cases of gapped alignment, although no asymptotic score distribution has yet been established analytically, computational experiments strongly indicate these scores still roughly follow gumbel law  <cit> .
+
+in addition to not needing a database to estimate the statistical significance of an alignment, pairwise statistical significance is shown to be more accurate than database statistical significance reported by popular database search programs like blast, psi-blast, and ssearch  <cit> . however, it involves thousands of such permutations and alignments, which are enormously time consuming and can be impractical for estimating pairwise statistical significance of a large number of sequence pairs. hence, use of high-performance computing  techniques , fpgas, etc.) is highly conducive to accelerate the computation of psse. moreover, large data sets demand more computing power. in many demanding bioinformatics applications, such as sequence alignment  <cit> , and protein sequence database search  <cit> , many-core gpu has demonstrated its extreme computing power. this strongly motivates the use of gpus to accelerate the psse. acceleration of psse using mpi  <cit>  and fpga  <cit>  has been explored earlier, and in this work, we design a gpu implementation for the same. compared to  <cit> , we consider the estimation of multi-pair pss along with single-pair pss using gpus.
+
+contributions
+we present a gpu implementation to accelerate pairwise statistical significance estimation of local sequence alignment using standard substitution matrices. our parallel implementation makes use of cuda  parallel programming paradigm. our design uses an efficient data reorganization method to produce coalesced global memory access, and a tiled-based memory scheme to increase the gpu occupancy, a key measure for gpu efficiency  <cit> . through careful analysis of the data dependency and access patterns of psse, we reorganize the data sequences into aligned arrays that coalesce the global memory access pattern. such data access contiguity keeps the gpu cores occupied with computation and allows the thread scheduler to overlap the global memory access with the computation. in addition to the ability to calculate the optimal tile size for data to be shipped to the gpu, our design can also issue a large enough number of threads to maximize the occupancy.
+
+we further extend the parallelization technique to estimate pairwise statistical significance using position-specific substitution matrices, which has earlier demonstrated significantly better sequence comparison accuracy than using standard substitution matrices  <cit> . the implementation is also extended to take advantage of dual-gpus to accelerate those computations. as a result, maximum performance could be obtained by harvesting the power of many-core gpus.
+
+the performance evaluation was carried out on nvidia telsa c <dig> gpu. for multi-pair psse implementation, we observe nearly  <dig> × speedups using a single-gpu tesla c <dig> gpu  over the cpu implementation using an intel© core ™i <dig> cpu  <dig> processor. the proposed optimizations and efficient framework for psse, which have direct applicability to speedup homology detection, are also applicable to many other sequence comparison based applications, such as dna sequence mapping, phylogenetic tree construction and database search especially in the era of next-generation sequencing.
+
+methods
+in this section we present gpu implementations both for single-pair psse and multi-pair psse. along with the methodological details, we also discuss several performance optimization techniques used in this paper, such as, gpu memory access optimization, occupancy maximization, and substitution matrix customization. these techniques have significantly speeded up psse.
+
+careful analysis of the data pipelines of psse shows that the computation of psse can be decomposed into three computation kernels: permutation, alignment and fitting. permutation and alignment comprise the overwhelming majority  of the overall execution time  <cit> . therefore, efforts should be spent to optimize these two kernels to achieve high performance. also, we observe that permutation presents high degrees of data independency that are naturally suitable for single-instruction, multiple-thread  architectures  <cit>  and therefore, can be mapped very well to task parallelism models of gpu. moreover, even though the alignment task suffers from data dependency, we show that with clever optimizations, it can be heavily accelerated using gpus.
+
+design
+gpu memory access optimization
+it is especially important to optimize global memory access as its bandwidth is low and its latency is hundreds of clock cycles  <cit> . moreover, global memory coalescing is the most critical optimization for gpu programming  <cit> . since the kernels of psse usually work over large numbers of sequences that reside in the global memory, the performance is highly dependent on hiding memory latency. when a gpu kernel is accessing global memory, all threads in groups of  <dig>  access a bank of memory at one time. a batch of memory accesses is considered coalesced when the data requested by a warp of threads are located in contiguous memory addresses. for example, if the data requested by threads within a warp are located in  <dig> consecutive memory addresses , the memory can be read in a single access. hence, this memory access operation runs  <dig> times faster. if the memory access is not coalesced, it is divided into multiple reads and hence serialized  <cit> .
+
+after permutation, if the sequence s <dig> and its n permuted copies were stored contiguously one after another in the global memory, the intuitive memory layout would be as shown in figure  <dig>  note that, we need one byte  to store each amino acid residue. moreover, gpu can read four-byte  of data from the global memory to registers in one instruction. to achieve high parallelism of global memory access, uchar <dig> is used to store the permuted sequences. dummy amino acid symbols are padded in the end to make the length of sequences a multiple of  <dig> 
+
+considering inter-task parallelism, where each thread works on the alignment of one of the permuted copies of s <dig> to s <dig>  in this layout the gap between the memory accesses by the neighboring threads is at least the length of the sequence. for example, in the intuitive layout, if thread t <dig> accesses the first residue , and thread t <dig> accesses the first residue , the gap between the access data is n. this results in non-coalesced memory reads , which significantly deteriorates the performance.
+
+we therefore reorganize the layout of sequence data in memory to obtain coalesced reads. now, to achieve coalesced access, we reorganize layout of sequences in memory as aligned structure of arrays, as shown in figure  <dig>  in the optimized layout, the characters  that lie at the same index in different permuted sequences stay at neighboring positions. then if the first uchar <dig> of the first permuted sequence  is requested by thread t <dig>  the first uchar <dig> of the second permuted sequence  is requested by t <dig>  and so on. this results in reading a consecutive memory  by a warp of threads in a single access. thus the global memory access is coalesced, and therefore high performance is achieved.
+
+as the sequences remain unchanged during the alignment, they can be thought of as read-only data, which can be bound to texture memory. for read patterns, texture memory fetches is a better alternative to global memory reads because of texture memory cache, which can further improve the performance.
+
+occupancy maximization
+hiding global memory latency is very important to achieve high performance on the gpu. this can be done by creating enough threads to keep the cuda cores always occupied while many other threads are waiting for global memory accesses  <cit> . gpu occupancy, as defined below, is a metric to determine how effectively the hardware is kept busy:
+
+  occupancy=/tmax 
+
+where tmax is maximum number of resident threads that can be launched on a streaming multiprocessor  , tnum is the number of active threads per block and b is the number of active blocks per streaming multiprocessor .
+
+b also depends upon the gpu physical limitations . it can be given in the following way:
+
+  b=min 
+
+where bhw is the hardware limit , and breg, bshr, are the potential blocks determined by the available registers, shared memory, respectively and buser is blocks set by the user. note that b ≤ bhw, therefore we obtain:
+
+  occupancy≤/tmax 
+
+based on the above analysis, higher occupancy can be pursued according to the following rules:
+
+• to avoid wasting computation on under-populated warps, the number of threads per block should be chosen as a multiple of the warp size .
+
+• total number of active threads per sm should be close to maximum number of resident threads per multiprocessor . in short, we should use all the available threads if possible.
+
+• to achieve 100% occupancy, /tmax ≥  <dig>  hence, setting tnum such that tnum≥ tmax/bhw is preferable.
+
+substitution matrix customization
+the smith-waterman  algorithm  <cit>  looks up the substitution score matrix very frequently while computing the alignment scores. lowering the number of lookups obviously reduces the overall execution time. as suggested by  <cit> , performance improvement could further be obtained by customizing the matrix. usually, the substitution score matrix is indexed by query-sequence symbol and the subject-sequence symbol as in blosum <dig>  another way is to index the substitution score matrix by query-sequence position and the subject-sequence symbol. we refer to this customized substitution matrix as local query profile. for example, let us consider a query sequence q of length l over a set of residue alphabet ω. for each residue, we store a substitution score for every query sequence position. for example, in figure  <dig>  the substitution scores for matching residue 'a' with each symbol of the query sequence q are stored in the first row, and the substitution scores for matching residue 'c' are stored in the next row, and so on. here the substitution score of the residue of subject sequence against the same symbol of query sequence at different position is always same.
+
+by contrast, position-specific score matrix   <cit>  offers a variation of this approach. we call this a position specific query profile in which scores are further refined. in this case the same residue  appearing at different position of query sequence has different scores, as shown in figure  <dig> . for a given query sequence, pssm can be pre-constructed by psi-blast  <cit> .
+
+using the customized approach, in both cases, the dimension |ω| × |ω| of the substitution matrix is replaced by a query-specific matrix of dimension |ω|×|l|. this increases the memory requirement compared to the original layout, but reduces the lookups of the substitution matrix significantly as explained below.
+
+in traditional matrix layout, if the substitution scores of a subject sequence residue  against query sequence residues  are required subsequently, gpu has to look up the matrix four times one by one, because the score s, s, s, s are usually stored far from each other. in contrast, if we use cuda built-in vector data type int <dig>  to store the customized substitution matrix in the texture memory, the same four scores are stored at neighboring memory locations . by reading an int <dig>  the gpu can get these four scores s in one instruction, where i is the position of residues in query sequence. this reduces the number of lookups by a factor of  <dig>  therefore, a higher performance can be obtained.
+
+in essence, both coalesced memory layout and customized substitution matrix optimization heighten performance of memory access by improving data locality among threads in gpu programming.
+
+single-pair psse implementation
+as mentioned previously, to simulate the required random sequences, a lot of random numbers are needed, since each s <dig> copy has to be permuted thousands of times. although the most widely used pseudorandom number generators such as linear congruential generators  can meet our requirements, the current version of cuda does not support calls to the host random function. hence, we develop an efficient random number generator similar to lrand48() on gpus.
+
+the single-pair psse processes only one pair of query and subject sequences. the idea of computing single-pair psse is as follows. given the query sequence s <dig> and the subject sequence s <dig>  to compute psse, thousands  of randomly permutations of s <dig> are needed. to obtain these n random sequences of s <dig>  first, a set of n random numbers is generated in cpu as described in previous section. these numbers are then transferred to gpu and considered as seeds by the threads of gpu. each thread then generates new random numbers using its own seed and swap the symbols of s <dig> accordingly to obtain a permuted sequence. thus the n random permutations of s <dig> are obtained in parallel. the algorithm then uses sw algorithm to compute alignment score of s <dig> and the n permuted copies of s <dig> in parallel on gpu. the scores are then transferred to cpu for fitting. the details of computing single-pair psse is outlined by algorithm  <dig>  note that step  <dig> in algorithm  <dig> uses the optimized memory layout, explained previously in detail, for s <dig> and its n permuted copies.
+
+smith-waterman is a dynamic programming algorithm to identify the optimal local alignment between a pair of sequences. in general, there are two different methods for parallelizing the alignment task  <cit> . the first method is regarded as inter-task parallelism. in this case, each thread performs alignment of one pair of sequences. hence, in a thread block, multiple alignment tasks are performed in parallel  <cit> . the second one is intra-task parallelism. here, alignment of each pair of sequences is assigned to a block of threads, splitting the whole task into a number of sub-tasks. each thread in the thread block then performs its own sub-tasks, cooperating to exploit the parallel characteristics of cells in the anti-diagonals of the local alignment matrix  <cit> . we use a similar alignment kernel as proposed in  <cit>  with some modifications for further improvement. it is worthwhile to mention that step  <dig> describes fitting, which is implemented on the cpu. this is because it involves recursion that is not supported very well on gpu.
+
+multi-pair psse implementation
+the multi-pair psse processes multiple queries and subject sequences. we can obtain some hints about improving the performance by analyzing the single-pair psse implementation . owing to a dramatic increase of data set for multiple-pairs implementation, there are some significant differences relative to performance of gpu hardware between the two implementations. through analyzing our experimental results of the single-pair psse, we observe that inter-task parallelism performs better than intra-task parallelism . hence, we consider inter-task parallelism in computing multi-pair psse. based on the guidelines for optimizing memory and occupancy described earlier, we compare three implementation strategies.
+
+algorithm 1: pseudo-code of single-pair psse
+
+input:  - sequence-pair; m - substitution matrix; g - gap opening penalty; ge - gap extension penalty; n - number of permutes;
+
+output: pss- pairwise statistical significance
+
+ <dig>  initialization
+
+ generate a number n of random numbers in cpu;
+
+ copy lcg seeds to gpu global memory;
+
+ copy s <dig> and s <dig> to gpu global memory;
+
+ <dig>  generate random numbers  using lcg in gpu
+
+ <dig>  permute sequence s <dig> n times using the rns
+
+ <dig>  reorganize sequences s <dig> and its n times permuted copies as shown in figure  <dig>  if using inter-task parallel smith-waterman();
+
+ <dig>  align s <dig> and its n permuted copies against s <dig> using smith-waterman() ;
+
+ <dig>  transfer n alignment scores from gpu into cpu;
+
+ <dig>  fitting in cpu
+
+  ← ev dcensordmlfit;
+
+ pss ←  <dig> - exp;
+
+return pss
+
+intuitive strategy
+given q query sequences and s subject sequences, the intuitive strategy is to simply perform the same 'single-pair' procedure q × s times. in other words, in each iteration, we send a single pair of query and subject sequences to the gpu. the gpu processes that pair and returns the result to the cpu. the same procedure is repeated for all query and subject sequence pairs. however, this strategy suffers from low occupancy. we analyze the cause along with its performance results in the next section.
+
+data reuse strategy
+in the first strategy, the subject sequences from the database are permuted for every query-subject sequence pair. hence, the same subject sequence is permuted every time it is sent to the gpu. a better strategy is to create permutations of each subject sequence only once and reuse them to align with all the queries. "one permutation, all queries" is the idea of the second strategy. because of the reuse of permuted sequences, higher performance is expected than the first strategy. however, the occupancy of gpu, to be shown in the next section, is still not elevated.
+
+adaptively tile-based strategy
+the low occupancy of the above two strategies is due to the underutilized computing power of gpu. in addition, these two strategies do not work well when the size of subject sequence database becomes too big to be fitted into gpu global memory. for instance, if the size of the original subject sequence database is  <dig> mb, it becomes  <dig> mb when each of the sequences is permuted, say,  <dig> times. this prohibits transfer of all the subject sequences to gpu at the same time. we therefore need an optimal number of subject sequences to be shipped to gpu keeping in mind that the subject sequences and their permuted copies fit in global memory. moreover, the number of new generated sequences should be enough to keep all cuda cores busy, i.e., keep a high occupancy of gpu, which is very important to harness the gpu power.
+
+herein we develop a memory tiling technique that is self-tuning based on the hardware configuration and can achieve a close-to-optimal performance. the idea behind the technique is as follows. in out-of-core fashion, the data in the main memory is divided into smaller chunks called tiles and transferred to the gpu global memory. in our case, the tiles are the number of subject sequences to be transferred to the gpu at a time. the tile size t can be calculated using the following equation:
+
+  t=⌊smnum×tmaxn⌋ 
+
+where smnum is the total number of sms in gpu, tmax is the maximum number of resident threads per sm, and n is the number of permutations.
+
+in tesla c <dig> used in our experiments, there are  <dig> sms and the maximum number of resident threads per sm is  <dig>  let n =  <dig>  then, t = ⌊ <dig> × 1024/1000⌋ =  <dig>  which means that there are  <dig> distinct subject sequences to be transferred to the gpu's global memory at a time. based on the second strategy ,  <dig> subject sequences and their permuted copies are aligned against one query sequence at a time, until all the query sequences are processed. as a result,  <dig> ×  <dig> alignment scores in total are obtained in each round, which are subsequently transferred to cpu for fitting. the cpu takes the  <dig> alignment scores for each subject-query sequence pair and uses them to compute the corresponding pss. the tile-based strategy has been described in figure  <dig> 
+
+RESULTS
+all our experiments have been are carried out using intel© core™i <dig> cpu  <dig> processors running @ <dig>  ghz. the system has  <dig> cores,  <dig> gb of memory, dual tesla c <dig> gpu  and is running a 64-bit linux-based operating system. our program has been compiled using gcc  <dig> . <dig> and cuda  <dig> . the sequence data used in this work comprises of a non-redundant subset of the cath  <dig>  database  <cit> . this dataset consists of  <dig> domain sequences as our subject library and includes  <dig> cath queries as our query set. we derive pssms for the  <dig> test queries against the non-redundant protein database using psi-blast  over a maximum of five iterations and with other default parameters. blosum <dig> and pssms have been used as the scoring matrices with affine gap penalty of  <dig> + 2k for a gap of length k. we permute the  <dig> subject sequences n =  <dig> time as in several previous studies  <cit> .
+
+single-pair psse result analysis
+in single-pair psse implementation, we use both the intra-task and inter-task parallelism methods. we choose four pairs of query and subject sequences of length  <dig>   <dig>   <dig>  and  <dig> from cath  <dig>  database. we compute psse for all these pairs using  <dig>   <dig>   <dig>  and  <dig> threads per block. the experimental results have been plotted in figure  <dig>  all speedups are computed over the corresponding the cpu implementation. we observe that the inter-task parallel implementation performs significantly better than the intra-task parallel implementation. employing further optimizations and newer version of cuda, both methods show a higher speedup compared to our previous results  <cit> .
+
+for intra-task parallel implementation, the best speedups for sequences of length  <dig>   <dig>  and  <dig> are  <dig> ×,  <dig> ×, and  <dig> ×, respectively. all these are obtained using  <dig> threads per block. but the best speedup for sequences of length  <dig> is  <dig> × and used  <dig> threads per block. these results tell us that it is hard to find a general rule to parameterize the settings to achieve peak performance. a possible reason is that many factors, such as the number of threads per block, the available registers, and shared memory, may contradict with each other.
+
+the intra-task parallel implementation creates enough thread blocks  to keep the occupancy high. however, the sw alignment matrix must be serially computed from the first to the last anti-diagonal. only the cells of the alignment matrix belonging to the same anti-diagonal can be computed in parallel. in this case, most threads in a block have no work to do. as a result, the performance of the intra-task parallel implementation is worse than that of the inter-task parallel implementation even though it has higher occupancy.
+
+in contrast, inter-task parallelism would have a total of  <dig> threads . if each block contains  <dig> threads, then the total number of blocks is b = ⌈1000/64⌉ =  <dig>  the assignment of  <dig> blocks to  <dig> available sms will result in  <dig> sms with one active block and two sms with two blocks. therefore, the occupancy for the two sms with two blocks is / <dig> =  <dig> %. for the  <dig> sms with only one block its occupancy is / <dig> =  <dig> %. because of the low occupancy, there are not sufficient threads to keep cuda cores busy when the global memory is accessed. as a result, the latency-hiding capabilities of this method are limited. as the number of threads per block tnum increases, the total active blocks  decreases and some sms even have no blocks assigned. for example, if tnum =  <dig>  then b = ⌈1000/512⌉ =  <dig>  hence only two sms are working with one block each.
+
+however, these sms have a higher occupancy / <dig> = 50%, which compensates for the decrease in the number of working sms. consequently, even though there is a reduction in speedups, it is not directly proportional to the reduction in the number of active sms. when the number of threads per block is  <dig>  for the sequence length of  <dig>   <dig>   <dig>  and  <dig>  the best speedups are  <dig> ×,  <dig> ×,  <dig> ×, and  <dig> ×, respectively.
+
+in brief, getting performance out of a gpu is about keeping the cuda cores busy. both inter-task parallelism and intra-task parallelism, under the situations of small data set being processed, seem to fail in this regard, but not necessarily for the same reason.
+
+multi-pair psse result analysis
+in the intuitive and data reuse strategies, most of the sms suffer from the same low occupancy as the single-pair psse implementation using the inter-task parallelism method. as expected, we observe poor performance for both strategies, as shown in figure  <dig>  the data reuse strategy produces higher performance than the intuitive strategy, because the number of permutations is reduced by a factor of q, the number of query sequences. to alleviate the low occupancy problem, our proposed tile-based strategy uses a carefully tuned tile size that effectively increase the occupancy. recall that, as a result of tiling, we send  <dig> subject sequences and one query sequence to the gpu in each round. after the permutation step, we have  <dig> ×  <dig> alignments to be performed, assuming each subject sequence is permuted  <dig> times. consequently, each sm has  <dig> alignments to perform. also, note that, the maximum number of blocks that can be launched simultaneously on an sm is  <dig>  therefore, when the number of threads per block is  <dig>  the number of blocks per sm is min =  <dig>  resulting in an occupancy of / <dig> = 50%, based on equation  and . this is a significant improvement over the intuitive and data-reuse strategies. the maximum theoretical occupancy of an sm for the three strategies is given in table  <dig> 
+
+due to a high occupancy, the tile-based strategy using single  gpu achieves speedups of  <dig>  ×,  <dig>  ×,  <dig>  ×, and  <dig>  × using  <dig>   <dig>   <dig>  and  <dig> threads per block, respectively, as shown in figure  <dig> 
+
+the billion cell updates per second  value is another commonly used performance measure in bioinformatics  <cit> . the tile-based strategy using single  gpu achieves performance results in the range of  <dig>   to  <dig>   gcups, as shown in figure  <dig>  although a direct comparison across different gpu implementations and hardware in not fair, just for the sake of completeness, we cited below the performance in gcups reported by some existing implementations of the smith-waterman alignment task. it is worthwhile to mention here that  <cit>  has a peak performance of  <dig>  to  <dig>  gcups for various query lengths on an nvidia  <dig> and  <cit>  has a peak performance of  <dig>  gcups on a workstation running two geforce  <dig> gtx. our implementation show higher gcups.
+
+in summary, low occupancy is known to interfere with the ability to hide latency on memory-bound kernels, causing performance degradation. however, increasing occupancy does not necessarily increase performance. in general, once a 50% occupancy is achieved, further optimization to gain additional occupancy has little effect on performance  <cit> . our experiments verify this claim.
+
+since the gpu implementation presented in this paper uses the same algorithm for psse  as in  <cit> , the retrieval accuracy of the proposed implementation is expected to be identical to  <cit> . according to  <cit> , pairwise statistical significance with standard substitution matrices performs at least comparable or significantly better than database statistical significance . moreover, pairwise statistical significance with pssms performs significantly better than using standard substitution matrices, and also better than psi-blast using pre-constructed position-specific substitution matrices. more details can be found in  <cit> . the implementation of the proposed method and related programs in cuda is available for free academic use at http://cucis.ece.northwestern.edu/projects/psse/.
+
+CONCLUSIONS
+in this paper, we present a high performance accelerator to estimate the pairwise statistical significance of local sequence alignment, which supports standard substitution matrix like blosum <dig> as well as pssms.
+
+our accelerator harvests the computation power of many-core gpus by using cuda, which results in high end-to-end speedups for psse. we also demonstrate a comparative performance analysis of single-pair and multi-pair implementations. the proposed optimizations and efficient framework are applicable to a wide variety of next-generation sequencing comparison based applications, such as, dna sequence mapping and database search. as the size of biological sequence databases are increasing rapidly, even more powerful high performance computing accelerator platforms are expected to be more and more common and imperative for sequence analysis, for which our work can serve as a meaningful stepping stone.
+
+abbreviations
+blast: basic local alignment search tool; blosum: blocks of amino acid substitution matrix; cuda: compute unified device architecture; evd: extreme value distribution; gcups: billion cell updates per second; gpu: graphics processing unit; pssm: position specific scoring matrix; psse: pairwise statistical significance estimation; psi blast: position specific iterative blast; psa: pairwise sequence alignment; pss: pairwise statistical significance; simt: single: instruction, multiple: thread; ssm: standard substitution matrix sm: streaming multiprocessor; sw: smith-waterman.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+yz conceptualized the study, carried out the design and implementation of the algorithm, analyzed the results and drafted the manuscript; sm, aa, mmap, wl, zq, and ac participated analysis of the results and contributed to revise the manuscript. all authors read and approved the final manuscript.
+

@@ -1,0 +1,186 @@
+BACKGROUND
+hidden markov models  are a class of statistical models for sequential data with an underlying hidden structure. they were first introduced to bioinformatics in the late 1980s  <cit>  and have since then been used in a wide variety of applications, for example for gene finding  <cit> , modelling of protein structures  <cit> , sequence alignment  <cit>  and phylogenetic analysis  <cit> . because of their computational efficiency hmms are one of the few widely used statistical methodologies that are feasible for genome wide analysis where sequences often are several hundred million characters long. with data sets of this size, however, analysis time is still often measured in hours and days. improving on the performance of hmm analysis is therefore important to keep up with the quickly growing amount of biological sequence data to be analysed, and to make more complex analyses feasible.
+
+the most time consuming part of using hidden markov models is often parameter fitting, since the likelihood of a model needs to be computed repeatedly when optimising the parameters. depending on the optimisation strategy, this means that the forward algorithm  will be evaluated in potentially hundreds of points in parameter space. optimising the forward algorithm is therefore the most effective strategy for efficient hmm implementations.
+
+the forward algorithm can be seen as a sequence of vector-matrix operations along an input sequence. this, however, can be rewritten as a sequence of matrix-matrix operations. this replaces an o time vector-matrix operation with an o time matrix-matrix operation but opens up possibilities for changing the evaluation order since different parts of the computation now can be handled independently. this then makes it possible to reuse computations whenever the input contains repeated substrings  <cit>  or to parallelise the algorithm across a number of independent threads  <cit> .
+
+the main contribution of this paper is a software library that uses both of these ideas to greatly speed up the forward algorithm. we present a preprocessing of the observed sequence that finds common substrings and constructs a data structure that makes the evaluation of the likelihood close to two orders of magnitude faster . the preprocessing of a specific sequence can be saved and later reused in the analysis of a different hmm topology. the algorithms have been implemented in a c++ library, ziphmmlib, available at http://birc.au.dk/software/ziphmm/. the library also provides an interface to the python programming language.
+
+much of the theory used in ziphmmlib was also developed by lifshits et al.  <cit> , but while they developed the theory in the context of the viterbi algorithm, where the preprocessing cannot be reused, we concentrate on the forward algorithm and introduce a data structure to save the preprocessing for later reuse. we furthermore extend the theory to make the computations numerically stable and introduce practical measures to make the algorithm run fast in practice and make the library accessible.
+
+our implementation is tested on simulated data and on alignments of chromosomes from humans with chimpanzees, gorillas and orangutans analysed with the coalhmm framework  <cit> , a framework which uses changes in coalescence trees along a sequence alignment to make inference in population genetics and phylogenetics and which has been used in a number of whole-genome analyses  <cit> . using an “isolation-with-migration” coalhmm  <cit> , we train the model using the nelder-mead-simplex algorithm and measure the preprocessing time and total optimisation time. looking at the time required to perform the entire training procedure, we achieve up to  <dig> times shorter wall-clock time compared to the previously fastest implementation of the forward algorithm. even for data of high complexity and with few repetitions we achive a speedup of a factor  <dig> .
+
+implementation
+hidden markov models
+a hidden markov model  describes a joint probability distribution over an observed sequence y1:t=y1y2…yt∈o∗ and a hidden sequence x1:t=x1x2…xt∈ℋ∗, where  and  are finite alphabets of observables and hidden states, respectively. the hidden sequence is a realisation of a markov process which explains hidden properties of the observed data. we can formally define an hmm  <cit>  as consisting of: 
+
+•ℋ={h <dig> h <dig> …,hn}, a finite alphabet of hidden states;
+
+•o={o <dig> o <dig> …,om}, a finite alphabet of observables;
+
+•a vector Π=1≤i≤n, where πi= pr is the probability of the model starting in hidden state hi;
+
+•a matrix a={aij}1≤i, j≤n, where aij= pr is the probability of a transition from state hi to state hj;
+
+•a matrix b={bij}1≤i≤n1≤j≤m, where bij= pr is the probability of state hi emitting oj.
+
+an hmm is parameterised by π, a and b, which we will denote by λ=.
+
+the classical forward algorithm
+the forward algorithm  <cit>  finds the probability of observing a sequence y1:t in a model λ by summing the joint probability of the observed and hidden sequences for all possible hidden sequences: pry1:t|λ=∑x1:t pr. this sum is normally computed by first filling out a table, α, with entries αt= pr α1=πx1bx <dig> y1αt=bxt,yt∑xt−1αt−1axt− <dig> xt. 
+
+after filling out α, pr can be computed as pry1:t|λ=∑xtαt.
+
+the algorithm as linear algebra
+in the classical forward algorithm, we compute the columns of α from left to right by the recursion in equation . if we can compute the last one of these columns, αt, efficiently, we can compute pry1:t|λ=∑xtαt. now let αt be the column vector containing the αt’s: 
+
+ αt=αtαt...αt, 
+
+ let boi be the diagonal matrix, having the emission probabilities of oi on the diagonal: 
+
+ boi=b <dig> oib <dig> oi⋯bn,oi, 
+
+ and let 
+
+  coi=boia∗andc1=by1π, 
+
+where a∗ is the transpose of a. then αt can be computed using only cyt and the previous column vector αt−1: 
+
+  αt=cytαt−1=cytcyt−1⋯cy2c <dig>  
+
+thus the classical forward algorithm can be described as a series of matrix-vector multiplications of length t− <dig> as illustrated in figure  <dig>  the classical forward algorithm corresponds to computing this from right to left, but since matrix-matrix multiplication is associative the product can be computed in any order. since repeated substrings corresponds to repeated matrix-matrix multiplications, running time can be improved by reusing shared expressions  <cit> . in the following sections we will show how we precompute a grouping of the terms based on y1:t in order to minimise the workload in the actual computation of the likelihood.
+
+exploiting repetitions in the observed sequence
+let oioj∈o×o be the pair of symbols occurring most often without overlap in y1:t, and let noioj be the number of occurrences. we can then reduce the length of y1:t with noioj characters by introducing a new symbol om+ <dig> and replacing all occurrences of oioj by this symbol. to mimic this in the computation described above, we introduce a new c matrix: 
+
+ com+1=coicoj. 
+
+ now notice that we only need to compute this matrix once and substitute it for all occurrences of coicoj in equation . hence we can save noioj matrix-vector multiplications by introducing one matrix-matrix multiplication, potentially saving us a large amount of work.
+
+these observations suggest that we can split the computation of the likelihood of a given observed sequence in a preprocessing of the sequence and in the actual computation of the likelihood. in the preprocessing phase we compress the observed sequence by repeatedly finding the most frequent pair of symbols oioj in the current sequence and replacing all occurrences of this pair by a new symbol. this is repeated until noioj becomes too small to gain a speedup . the result is a sequence y1:t′′ over a new alphabet o′={o <dig> o <dig> …,om,om+1=,om+2=,…,om′=}, where li,ri∈{o <dig> o <dig> …oi−1}. this compression will be identical independent of the hmm, meaning that we can save it along with the observed sequence and reuse it for any hmm.
+
+the actual computation of the likelihood is then split in two stages. in the first stage we compute c <dig> and coi for i= <dig> …,m using . we then compute coi for increasing i=m+ <dig> …,m′ by coi=clicri. in the second stage, we compute αt by 
+
+ αt=cyt′′cyt′−1′⋯cy2′c <dig>  
+
+ this is illustrated in figure  <dig> where the actual computation is drawn in solid black, while the saved work due to redundancy is shown in gray.
+
+compression stopping criterion
+while the first iterations of the preprocessing procedure compress the sequence very effectively, the last iterations do not decrease the sequence length by much, since most pairs are uncommon when more characters are introduced. this is illustrated in figure  <dig>  where we see that the number of occurrences of the most frequent pair of symbols decreases superexponentially as a function of the number of iterations performed on an alignment of the human and chimpanzee chromosome  <dig>  this means that we potentially save a lot of time on the likelihood computation by performing the first iterations, but as the slope of the curve increases towards  <dig> we risk to spend a long time on the preprocessing and save very little time on the actual likelihood computation. to overcome this problem, we do not compress the input sequence all the way down to a single character. assume we know that the preprocessing will not be reused for an hmm with less than nmin states, and let tmv be the time required for an ×nmin matrix-vector multiplication and tmm be the time required for an × matrix-matrix multiplication. in iteration i of the preprocessing we replace the most frequent pair of two symbols in the current sequence and find the most frequent pair of two symbols in the resulting sequence.
+
+thus if pi is the number of occurrences of the pair found in iteration i, prei is the time required for iteration i, and e is an estimate  of the number of times the preprocessing is going to be reused , then, assuming that the matrix-vector multiplications and matrix-matrix multiplications dominate the runtime of the actual likelihood computations, the amount of time that is saved by running iteration i is e−prei, as we save pi− <dig> matrix-vector multiplications in each likelihood computation, and we do this by introducing one new matrix-matrix multiplication. this means that the optimal time to stop the preprocessing is before iteration j, where j is the minimal value of i making e−prei less than or equal to  <dig>  however, we do not know prei before iteration i has been completed, but we can estimate it by prei− <dig>  thus we stop the preprocessing just before iteration j, where j is the minimal value of i making e−prei− <dig> less than or equal to  <dig> 
+
+the values tmv and tmm are measured prior to the preprocessing, whereas the user has to supply an estimate, e, of the number of reuses of the preprocessing and nmin. if a single value of nmin can not be determined, we allow the user to specify a list of state space sizes  for which he wants the preprocessing to be saved. if no nmin values are provided, the compression is stopped whenever pi=pi− <dig> for the first time.
+
+numerical stability
+all our matrices contain probabilities, so all entries are between  <dig> and  <dig>  this means that their products will tend towards  <dig> exponentially fast. the values of these products will normally be stored in one of the ieee  <dig> floating-point formats. these formats have limited precision, and if the above was implemented naïvely the results would quickly underflow.
+
+if we can make do with log), we can prevent this underflow by repeatedly rescaling the matrices, much in the same way as the columns are rescaled in the numerically stable version of the classical forward algorithm  <cit> . to make this work in our case, we will normalise the results of each matrix-matrix multiplication or matrix-vector multiplication we do throughout the algorithm and work with the normalised matrices instead. we first take care of the rounding errors that can propagate through the first stage of the likelihood computations  if the dependency graph between the new symbols is deep. let 
+
+ coi=∑j∑kjk, fori= <dig> …,m 
+
+ be the sum of all entries in coi for all symbols in the original observed sequence, and let c¯oi=coi/coi be the corresponding normalised matrix. now for each new symbol oi= in the compressed sequence define 
+
+ coi=∑j∑kjk, fori=m+ <dig> …,m′, 
+
+ and let 
+
+ c¯oi=c¯lic¯ricoi, fori=m+ <dig> …,m′. 
+
+ finally let 
+
+ soi=coi,, ifi= <dig> …,mcoiclicri,, ifi=m+ <dig> …,m′. 
+
+ then 
+
+  αt=cyt′′cyt′−1′…cy2′c1=∏t=2t′sytc¯yt′′c¯yt′−1′…c¯y2′c <dig> 
+
+thus to handle the underflow in the first stage, we compute soi along with c¯oi for i= <dig> …m′  and compute the product above in the second stage of the likelihood computation.
+
+however, the c¯oi matrices still only contain values between  <dig> and  <dig>  and their product will therefore still tend towards  <dig> exponentially fast, causing underflow. to prevent this we introduce a scaling factor di for each of the t′− <dig> matrix-vector multiplications in , set to be the sum of the entries in the resulting vector. each di is used two times: first we normalise the corresponding resulting vector by dividing each entry by di, and next we use it to restore the correct result at the end of the computations. assume that α¯t is the result of the t′− <dig> normalised matrix-vector multiplications. then 
+
+ αt=∏t=2t′syt∏jt′−1djα¯t, 
+
+ and we can compute the final likelihood as 
+
+ pry1:t|λ=∑iαt=∑i∏t=2t′syt∏jt′−1djα¯t=∏t=2t′syt∏jt′−1dj∑iα¯t=∏t=2t′syt∏jt′−1dj. 
+
+notice, however, that we now risk getting an underflow when computing these products if t′ is big. we handle this by working in log-space. define 
+
+ s~oi=log,ifi= <dig> …,mlog+s~li+s~ri,ifi=m+ <dig> …,m′ 
+
+ and 
+
+ d~i=log,fori= <dig> …,t′− <dig>  
+
+ then 
+
+ logpry1:t|λ=∑t=2t′s~yt∑jt′−1d~j. 
+
+practical implementation details
+in our implementation of the preprocessing phase described above, we simply build a map symbol2pair, mapping each new alphabet symbol oi to its two constituents . in each scan every pair of symbols is counted, and the most frequent pair in the previous round is replaced by a new symbol. the data structure being saved in the end is symbol2pair along with two other maps: nstates2alphabetsize and nstates2seq. the map nstates2alphabetsize maps each nmini to the size of the alphabet mj′ after j iterations, where j is the number of iterations determined by the stopping criterion. the map nstates2seq maps nmini to the resulting sequence after j rounds of compression. these maps can be saved to disk for later use along with the original observed sequence.
+
+given a specific hmm with n states, the first stage of the actual computation of the likelihood builds a list, symbol2matrix, containing the c¯oi matrices, and a list of scaling values, symbol2scale, containing the s~i values. these are computed in om′n <dig> time in an iteration over the first m′ symbols in the symbol2pair map, where m′ is the alphabet size saved in nstates2alphabetsize in the preprocessing procedure. in the second stage log) is computed in ot′n <dig> time by 
+
+  logpry1:t|λ=∑t=2t′s~yt∑jt′−1d~jc¯yt′′c¯yt′−1′…c¯y2′c <dig>  
+
+using the two maps created in the first stage. to obtain maximal performance, we use a blas implementation for c++ to perform the series of matrix multiplication.
+
+our implementation uses o space in the preprocessing phase and on <dig> space in the actual computation, where k is the number of nmin values supplied by the user, n is the number of states in the hmm used in the actual computation, and m′ is the number of symbols in the extended alphabet corresponding to n in nstates2alphabetsize. if the preprocessed data structure is saved to disk, it will take up o space.
+
+we have also implemented the algorithm in a parallelised version. in this version, stage  <dig> is parallelised much like the implementation in parredhmmlib  <cit> , where the series of matrix multiplications in  is split into a number of blocks which are then processed in parallel. stage  <dig> can clearly also be parallelised by computing independent c¯oi matrices in parallel. however, we found that this does not work well in practice, as the workload in stage  <dig> is not big enough to justify the parallelization. stage  <dig> is therefore not parallelised in the library. the parallelisation of stage  <dig> gives the greatest speedup for long sequences that are not very compressible. this is because the parallelisation in general works best for long sequences  <cit> , and if the input sequence is very compressible then the compressed sequence will be short and more work will be done in the non-parallelised stage  <dig>  the experiments presented in the next section have all been run single-threaded to get a clearer picture of how the runtime of the basic algorithm is influenced by the characteristica of the input sequence and model. but in general a slightly faster running time can be expected if parallelisation is enabled, especially for long sequences of high complexity.
+
+RESULTS
+we have implemented the above algorithms in a c++ library named ziphmm. the code provides both a c++ and a python interface to the functionality of reading and writing hmms to files, preprocessing input sequences and saving the results, and computing the likelihood of a model using the forward algorithm described in the previous section. the library uses blas for linear algebra operations and pthreads for multi-threaded parallelisation.
+
+using the library
+the library can be used directly in c++ programs or through python wrappers in scripts.
+
+using ziphmm from c++
+when using the library in c++ the most important objects are from the forwarder class, which is responsible for both preprocessing sequences, reading and writing the preprocessed data structure, and for computing the likelihood of a hidden markov model. the code snippet in figure  <dig> shows a complete c++ program that reads in an input sequence, f.read_seq, preprocess it , stores the preprocessed structure to disk, f.write_to_directory, reads in an hmm from disk, read_hmm, and computes the likelihood of the hmm, f.forward.
+
+the sequence reader takes the alphabet size as parameter. this is because we cannot necessarily assume that the observed symbols in the input sequence are all the possible symbols the hmm can emit, so we need to know the alphabet size explicitly. it furthermore takes an optional parameter in which the user can specify an estimate, e, of the number of times the preprocessing will be reused. the default value of this parameter is  <dig> 
+
+if the preprocessed sequence is already stored on disk, we can simply read that instead like this:
+
+forwarder f;number_of_states = 4;f.read_from_directory;
+
+this will cause the saved sequence matching nmin≤ <dig> to be read from the directory example_preprocessed together with additional information on the extended alphabet used in this sequence.
+
+in the library, hmms are implicitly represented simply by a vector and two matrices, the π vector of initial state probabilities and the transition, a, and emission, b, matrices as described in the implementation section. these are all represented in a matrix class, and in the program in figure  <dig> these are read in from disk. they can also be directly constructed and manipulated in a program. in our own programs we use this, together with a numerical optimisation library, to fit parameters by maximising the likelihood.
+
+the f.forward method computes the likelihood sequentially using the preprocessed structure. to use the multi-threaded parallelisation instead, one simply uses the f.pthread_forward function, with the same parameters, instead.
+
+for completeness the library also offers implementations of the viterbi and posterior decoding algorithms. to use these in c++ the headers viterbi.hpp and posterior_decoding.hpp should be included and the functions viterbi and posterior_decoding should be called as described in the readme file in the library.
+
+using ziphmm from python
+all the c++ classes in the library are wrapped in a python module so the full functionality of the ziphmm is available for python scripting using essentially the same api, except with a more python flavour where appropriate, e.g. reading in data is handled by returning multiple values from function calls instead of pass-by-reference function arguments and with a more typical python naming convention. figure  <dig> shows the equivalent of the c++ code in figure  <dig> in python.
+
+performance
+to evaluate the performance of ziphmm we performed a number of experiments using a hidden markov model previously developed to infer population genetics parameters of a speciation model. all experiments were run on a machine with two intel sandy bridge e5- <dig> cpus, each with  <dig> cores running at  <dig> ghz and having access to a 64gb main memory. we compare the performance of our forward algorithm to the performance of the implementations of the forward algorithm in hmmlib  <cit>  and in parredhmmlib  <cit>  and to a simple implementation of equation  using blas to perform the series of matrix-vector multiplications. hmmlib is an implementation that takes advantage of all the features of a modern computer, such as sse instructions and multiple cores. the individual features of hmmlib can be turned on or off by the user, and we recommend only enabling these features for hmms with large state spaces. in all our experiments we enabled the sse parallelisation but used only a single thread. the parredhmm library implements equation  as a parallel reduction, splitting the series of matrix multiplications into a number of blocks and processing the blocks in parallel. the parredforward algorithm was calibrated to use the optimal number of threads.
+
+for performance evaluation we wanted to evaluate how well the new algorithm compares to other optimised forward implementations, evaluate the trade-off between preprocessing and computing the likelihood, and explore how the complexity of the input string affects the running time.
+
+our new implementation of the forward algorithm is expected to perform best on strings of low complexity because they are more compressible. to investigate this we measured the per-iteration running time of the forward algorithm for parredhmmlib, hmmlib and the simple implementation of equation  on random binary sequences  of length l= <dig> with the frequency of 1s varying from  <dig>  to  <dig> , and divided it by the per-iteration running time for ziphmmlib  to obtain the speedup factor. this experiment is summarised in figure  <dig>  where we note that the speedup factor decreases linearly with the complexity of the input sequence; however, speedup factors of more than two orders of magnitude are obtained for less complex sequences, and even for sequences of low complexity a  speedup is obtained.
+
+in the rest of our experiments, we used a coalescent hidden markov model  from  <cit>  together with real genomic data for the experiments. a coalhmm  <cit>  exploits changing gene-trees along a genomic alignment to infer population genetics parameters. the “isolation-with-migration” coalhmm from  <cit>  considers a pairwise alignment as its observed sequence and a discretisation of the time to the most recent common ancestor, or “coalescence time”, of the aligned sequences as its hidden states. the coalescence time can change from any point to another, so the transition matrix of the coalhmm is fully connected, and the number of hidden states can be varied depending on how fine-grained we want to model time. varying the number of states lets us explore the performance as a function of the number of states. the performance as a function of the length of the input was explored by using alignments of varying length. finally, to explore how the complexity of the string affects the performance we used alignments of sequences at varying evolutionary distance, since closer related genomes have fewer variable sites and thus the alignments have lower complexity. the coalhmm model uses a jukes-cantor model in its emission probabilities and thus only distinguishes between if a specific site has two identical nucleotides or two different nucleotides in the alignment. we therefore also varied the complexity of the strings by compressing either the actual sequence alignment or summarising it as an alphabet of size three, { <dig> ,2}, for identical sites, differing sites, or missing data/gaps. this way we obtain sequences with alphabets of size m= <dig> , m= <dig>  and m =  <dig> .
+
+for all experiments we trained the model using the nelder-mead-simplex algorithm and measured the preprocessing time and total optimisation time, and the expected number of likelihood computations was set to e= <dig> 
+
+we expected alignments of sequences at short evolutionary distance to be more compressible than alignments of sequences at longer evolutionary distance, and therefore expected the training procedure to be faster for alignments of sequences at short evolutionary distance. we recognise this in figure  <dig> except for the sequences with m= <dig>  where the human-orangutan alignment was processed faster than the human-gorilla alignment. however, this was caused by the trade-off between the time for the preprocessing and the time for the actual training procedure: the preprocessing procedure took significantly longer time for the human-gorilla alignment  than for the human-orangutan alignment, but this extra time was not all gained back in the training procedure, although the compressed sequence indeed was shorter .
+
+we also expected the total time of the training procedure to increase as the number of symbols in the initial alphabet was increased, because sequences with small initial alphabets are expected to be more compressible than sequences with larger initial alphabets. but as figure  <dig> shows, the sequences with an initial alphabet of size m= <dig> were processed faster than the sequences with an initial alphabet of size m =  <dig>  this is again caused by the optimisation procedure, which converges faster for the sequences with m= <dig> than for the sequences with m=  <dig> . this may be a result of the sequences with m= <dig> containing more information than the sequences with m= <dig>  the lengths of the compressed sequences and the per-iteration running times match our expectations, and for the sequences with m= <dig> and m= <dig>  which contain the same data, the algorithm behaves as expected.
+
+CONCLUSIONS
+we have engineered a variant of the hmm forward algorithm to exploit repetitions in strings to reduce the total amount of computation, by exploring shared sub-expressions. we have implemented this in an easy to use c++ library, with a python interface for use in scripting, and we have demonstrated that our library can be used to achieve speedups of  <dig> -  <dig> factors for realistic whole-genome analysis with a reasonably complex hidden markov model.
+
+availability and requirements
+project name: ziphmmproject home page:http://birc.au.dk/software/ziphmm/operating system: platform independentprogramming language: c++, pythonlicense: lgpl
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+as, mk and tm developed the algorithms. as implemented the library. as, cnsp and tm designed experiments. as, cnsp and tm drafted the manuscript. all authors read and approved the final manuscript.
+

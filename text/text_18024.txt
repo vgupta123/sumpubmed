@@ -1,0 +1,303 @@
+BACKGROUND
+in the last few years tiling microarrays have become a well-established tool for whole-genome transcriptome analysis. they have shown to be very useful for exploring and unraveling the complex genome-wide trancriptional landscape of higher organisms, in which not only protein coding genes, but also non-coding rnas play an important role
+ <cit> . the methods that have been developed for transcriptome analysis with tiling arrays either focus on segmentation and transcript discovery within a single biological condition
+ <cit> , or on the detection of differential expression between two distinct conditions
+ <cit> . recently, the focus in tiling array studies has shifted towards more complex experimental designs, such as studies with more than two conditions
+ <cit>  and studies with several experimental factors
+ <cit> . furthermore, it is recognized that expression is a dynamic rather than a static phenomenon. hence, more and more time-course experiments are designed to provide insights into the whole-genome transcript regulation of species during different developmental stages or external periodic changes in the environment
+ <cit> .
+
+currently, most tiling array transcriptome analysis pipelines start with summarization of the probe-level data. this can be done by constructing probesets from the groups of probes that map to known annotated genes, . hereby unannotated regions are disregarded. in
+ <cit>  a sliding window-based approach is adopted, combined with a thresholding rule for selecting transcriptional units, whereas in
+ <cit>  segments with piece-wise constant intensity levels are constructed first
+ <cit> . after the summarization a statistical test or a more heuristic analysis technique is conducted on the summarized expression values of the transcriptional units. in current time-course and single-factor studies this is merely done by directly applying traditional microarray analysis methods, such as a pairwise moderated t-test 
+ <cit>  conducted in
+ <cit>  or a permutated t-test 
+ <cit>  conducted in
+ <cit> . other studies adopt ad-hoc approaches to filter the genes or transcriptional units of interest. transcriptional units in a time-course experiment, for example, can be filtered based on thresholding the amplitude of the signal
+ <cit> . in an alternative approach the correlations between temporal expression patterns are explored and a clustering is performed of genomic regions based on expression profiles in different gene classes showing expression at different time-points
+ <cit> . the tests reported in
+ <cit>  and
+ <cit>  on the other hand are less ad hoc, but very specific for the periodic time-course design apparent in these studies
+ <cit> . the aforementioned methods either lack flexibility by only focusing on one specific experimental design, or they first summarize probes to probesets based on existing annotation, hence not exploiting the genome-wide nature of the data to the full extent.
+
+here, we present wavetiling, a r bioconductor package for transcriptome analysis of tiling arrays with flexible designs. the package is based on and provides an extension to a recently introduced wavelet-based functional model for transcriptome analysis
+ <cit> . while the methodology in
+ <cit>  was initially developed to conduct the simultaneous tasks of transcript discovery and detection of differential expression, their framework can be easily extended by adapting the model design matrix. after modeling the specific effect function of interest, probe-wise inference can be conducted for detecting affected regions. the probe-wise analysis allows for the detection of transcriptional units in both exonic, intronic and intergenic regions, without prior consultation of existing annotation. currently, wavetiling provides a standard analysis flow for transcriptome analysis on single-factor experiments with two or more biological conditions, the detection of linear and quadratic effects and circadian rhythms in time-course experiments, and the analysis of two-factor experiments, while more experienced users can also specify customized designs. furthermore, it generates along-genome plots and contains functions to easily extract the detected genes and unannotated regions. the implementation section gives an overview of the main functionalities of the wavetiling package and describes the model for the different designs, as well as the associated inference procedures. in results and discussion we illustrate the use of the package and the model on three different case studies with very distinct experimental designs.
+
+implementation
+the wavetiling package is an add-on package to the bioconductor project
+ <cit>  written in the programming language and statistical environment r
+ <cit> . it provides all the tools necessary to conduct a full analysis of tiling microarray experiments for flexible designs based on the recently introduced wavelet-based functional model for trancriptome analysis
+ <cit> . the package uses the standard bioconductor s4-class data structures making it fully compatible with existing packages. the data is imported with the aid of the oligo-package
+ <cit>  and the resulting object inherits from tilingfeatureset, which is specifically designed for representing tiling array data and in turn extends expressionset. existing instance methods from oligo and other bioconductor packages supporting this structure are therefore applicable as well. before starting the analysis the probes can be remapped to the existing annotation. moreover, probes that contain duplicated sequences for perfect match and mismatch probes or for probes on different strands can be filtered because they are deemed unreliable due to cross-hybridization effects. the main transcriptome analysis consists of two consecutive steps:  fitting the wavelet-based functional model to the data, and  model-based inference to identify transcriptionally affected regions. the fitted model is stored in a wfmfit-class object. depending on the design of the study a wfmfitfactor , wfmfittime , wfmfitcircadian  or wfmfitcustom  subclass is used. part of the code for fitting the model is implemented in c to speed up computation. in the second step, different inference procedures can be conducted depending on the research question. the inference procedure that can be conducted depends on the wfmfit-subclass. the results are stored as a wfminf -class object. there are  <dig> main subclasses: wfminfcompare which contains the results of a pairwise comparison between two groups or time points; wfminfmeans with the results of transcript discovery for each individual group or time point; and wfminfeffects which contains results with linear or quadratic time effects for time-course designs and circadian rhythm effects for circadian designs. all transcriptionally affected regions can be extracted from the wfminf -class objects and are stored as iranges-class objects
+ <cit> . the model fitting and inference steps are described in more detail in the statistical methods part.
+
+the results can be visually explored by means of a general plot function. the implementation is based on the genomegraphs package
+ <cit> . for any genomic region the fitted expression values and transcriptionally affected regions can be plotted along the genomic coordinate. furthermore, two functions are available for further post-processing of the results. provided a suitable annotation file is given, the transcriptionally affected regions are mapped against the existing annotation. the first function outputs the genes that are transcriptionally affected, while the second function provides a list of the detected unannotated regions. the output of both functions is a list of granges-class objects
+ <cit> .
+
+statistical methods
+we start by presenting an overview of the basic model introduced by
+ <cit> . subsequently, we show how we accomodate for several sampling schemes in time-course experiments or other experiments with more flexible designs.
+
+basic wavelet-based model for transcriptome analysis
+we consider the functional model designed for the detection of  expressed regions in experiments with two biological conditions. it is given by
+ <cit> 
+
+  yi=β1+x <dig> iβ2+ei, 
+
+with i= <dig> ..n, yi the measured log2-transformed expression values for the probe with position t  on array i . t is the number of probes that are more or less equally spaced along the genomic position of the chromosome, and n=n <dig> + n <dig> is the number of tiling arrays in the experiment, with n <dig> the number for biological condition  <dig>  say c <dig>  and n <dig> the number for biological condition  <dig>  say c <dig>  further, x <dig> i is a dummy variable which is  <dig> for c1and − <dig> for c <dig>  and ei is a zero mean error term. it is assumed that ei,..ei are jointly mvn. here, mvn denotes the density function of a multivariate normal distribution with mean μ and variance-covariance matrix Σ.
+
+the model can also be written as 
+
+  y=xb+e. 
+
+in this model, yis an n×tmatrix of measured log2-transformed expression values, containing the elements yi for the probe with genomic position t  on array i . further, e is an n×t error matrix containing the errors terms ei for probe position t on array i. the n× <dig> design matrix xis constructed as 
+
+ x=111− <dig>  
+
+ where the upper row represents the dummy coding for the n <dig> arrays in c <dig> and the lower row the dummy coding for the n <dig> arrays in c <dig>  the 2×t effect function matrix b contains the probe-wise effect functions β <dig> and β <dig> on the respective rows. column  <dig> of xwill be used to find regions with a mean expression level above some threshold, whereas the coding in column  <dig> allows for assessing differential expression between the two conditions. note that the coding in ximplies that two effect functions are estimated orthogonally for a balanced study design. this can be seen from 
+
+ xtx=n/200n/ <dig>  
+
+ with
+n1=n2=n <dig> 
+
+before estimating the effect functions, the expression data are projected onto the wavelet space by using the discrete wavelet transform . this linear projection can be written as the matrix multiplication d=ywt, where w is an orthogonal dwt matrix. this allows us to rewrite model  in the wavelet space as 
+
+  d=xb∗+e∗, 
+
+where the rows of the n×tmatrix dcontain the wavelet coefficients for each array, double-indexed by location k= <dig> ..kj and scale j= <dig> ..j. the 2×t and n×t matrices b∗ and e∗ contain the wavelet coefficients for the effect functions and the error terms, respectively. by putting a normal prior on the effect functions in the wavelet space, this model can also be written as 
+
+  d|β∗∼mvnxβ∗,iσε2βm∗|τm∼n <dig> τmσε <dig>  
+
+where
+βm∗ is the element of b∗ corresponding to scale j and location k and m= <dig> . in  n denotes the density function of a normal distribution with mean μand variance σ <dig>  the smoothing parameters τm and the error variances
+σε <dig> are estimated by marginal maximum likelihood using a gauss-seidel algorithm. the estimated
+τ^m induce a regularization of the wavelet coefficients of the effect functions. when backtransforming the modified coefficients to the original data space, this leads to a denoised expression signal whereby the main features are retained. the method has proven to be very fast which is essential when analyzing large datasets. for more details, see
+ <cit> .
+
+wavelet-based models for transcriptome analysis in more flexible designs
+to extend the modeling framework reviewed in the previous section and to make it suitable for the analysis of tiling array data with more flexible designs, the design matrix x needs to be adapted in an appropriate way. firstly, the adaptation must enable the model to answer the specific research questions provoked by the experimental design. secondly, it must allow us to use the same fast algorithms introduced in
+ <cit> . this second argument comes down to the preservation of the orthogonality of x. in the first part of this section we focus on general time-course designs and single-factor designs for more than  <dig> groups. the second part aims at specific time-course designs for assessing circadian rhythms in the transcriptome. the section concludes with looking specifically at non-orthogonal designs, typically encountered in multi-factor studies.
+
+general time-course designs
+in tiling array time-course experiments one is often interested in the detection of differentially expressed regions between any two different time points. an additional concern might be to detect significant effects of transcriptional activity in time, e.g. linearly increasing or decreasing transcriptional expression of certain regions. these two possible research aims can be dealt with by considering a functional relationship of the designed time points described by orthogonal polynomials. this approach has also been used in quantitative trait associated expression studies based on traditional microarrays
+ <cit> . in that paper the functional relationship with phenotype is considered instead of with time.
+
+consider a time-course experiment with whole-genome expression levels measured at q time points. let n be the total number of arrays used in the experiment. the number of arrays used for each time point is represented by n <dig> …,nq, with n <dig> + … + nq=n. in this exposition we only consider balanced designs, i.e. n1=…=nq, with equidistant time points. however, it is rather straightforward to obtain orthogonal polynomials when dealing with non-balanced and non-equidistance designs. a simple procedure is discussed in
+ <cit> . the design matrix x in model  now has dimensions n×qand can be written as 
+
+  x=1ψ1ψ2…ψq−11ψ1ψ2…ψq−1⋮⋮⋮⋮⋮1ψ1ψ2…ψq− <dig>  
+
+where
+x <dig> …,xq are the n <dig> …,nq-valued vectors that correspond with the q respective designed time points in the experiment. in  each function ψj is a polynomial of degree j, with j= <dig> …,q− <dig>  and is orthogonal to ψk  if j≠k. note that each  <dig> in the first column of x can also be seen as ψ <dig> . the orthogonality of xis clear from 
+
+  xtx=n000…00∑i=1nψ1200…000∑i=1nψ220…0⋮⋮⋮⋮⋮⋮000…∑i=1nψq−220000…0∑i=1nψq− <dig>  
+
+with this design matrix a q×nmatrix b with the q effect functions is associated. the first row of bcorresponds with an overall mean expression level over all time points, while row  <dig> until q are associated with a linear, quadratic, cubic,…,-th order polynomial effect respectively between the different time points. the fitted expression levels for each time point are obtained by a linear combination of all effect functions in accordance with model . this allows for a straightforward comparison between any two time points. when combining several effect functions, it may be desirable to induce the same amount of smoothing for each of them. this implies the estimation of one general smoothing parameter τ, instead of a separate τm for each effect function . to retain the fast algorithms of
+ <cit> , however, the diagonal elements of xtxneed to be identical in this case. this can be obtained by normalizing each column vector of x to give the normalized design matrix x″. this leads to the property 
+
+  x″tx″=1000…00100…00010…0⋮⋮⋮⋮-⋮000…10000…01=iq, 
+
+where iq is an q×q identity matrix. for this orthonormal design matrix x″it can be shown that the common smoothing parameter can be estimated by 
+
+  τ^=dtx″x″tdqσε2+. 
+
+although design matrix  can also be used for non-ordered single factor studies, one may choose to use a design matrix specifically constructed for unordered factors, e.g. a helmert contrast design matrix. helmert contrasts are basically designed to compare the mean expression at a specific time point with the overall mean over all preceding time points. the main reason why we use them here, however, is that they also lead to estimation orthogonalities for the effect functions. this is seen from 
+
+  xtx=n000…00∑i=12ni00…0002∑i=13ni0…0⋮⋮⋮⋮⋮⋮000…∑i=1q−1ni0000…0∑i=1qni. 
+
+just like for the polynomials, the design matrix xbased on helmert contrasts still needs to be normalized if the same smoothing for all factor effects is desired.
+
+designs for circadian rhythms
+suppose now that we are interested in the detection of a certain circadian rhythm in the transcriptome of an organism, based on an equally spaced time-course experiment. a natural way to model the circular effect is to construct x by means of fourier basis functions, instead of polynomial basis functions. the design matrix is then given by 
+
+  x=1sincos1sincos1sincos⋮⋮⋮1sincos 
+
+again the separate effect functions can be estimated orthogonally, which is seen from 
+
+  xtx=n000q000q. 
+
+to estimate a common smoothing parameter for inducing the same amount of smoothing for all effect functions, x can again be normalized as described previously.
+
+non-orthogonal designs
+design matrices for two- or multiple-factor designs are typically non-orthogonal. using these in the wavelet-based model would imply that the fast algorithms presented in
+ <cit>  would have to be adapted. this would lead to undesirably increased computation time during parameter estimation. a solution to this problem is to apply the gram-schmidt process to orthogonalize xand subsequently estimate the model parameters based on the orthogonalized design matrix. the gram-schmidt orthogonalization comes down to a qr-decomposition
+ <cit>  of x into an upper-triangular matrix xtri and an orthogonal matrix xorth, which is now used to fit the model. afterwards, the estimated parameters have to be transformed back to obtain the parameter values for the original x. this is possible by premultiplying them with
+− <dig>  similar to single-factor and time-course designs, the coding of the initial design matrix x still determines how the parameters can be interpreted, and may thus be constructed according to the specific research interest.
+
+statistical inference: detection of transcriptional effect regions
+depending on the study design and the aim of the analysis, either the parameters themselves or a function of the parameters are used to detect transcriptional effect regions. in both instances, the effect of interest can be represented by
+fβ. for general time-course designs one can be interested in detecting genomic regions that show a linear or a quadratic trend in time. in this situation
+fβ is just the effect function β that corresponds with either the linear polynomial term ψ <dig> or the quadratic polynomial term ψ <dig> in . on the other hand, if interest lies in the detection of differentially expressed regions between different time points, inference is performed on each row of a
+q2×t matrix zxb, where z is a
+q2×n contrast matrix indicating the specific time points to be contrasted. hence, each row of zxb corresponds with one of the
+q <dig> possible pairwise comparisons between two time points and gives rise to an effect function
+fβ for each desired comparison. in circadian rhythm designs the sine and the cosine effect functions are combined to give the amplitude a of the circadian rhythm per probe position, i.e. 
+
+  fβ=a=β22+β <dig>  
+
+based on the size of a circadian effect regions can be detected. in the case of non-orthogonal designs in multiple-factor studies, there are several possibilities for the choice of
+fβ, depending on the aim of the analysis. the idea remains the same, however.
+
+for each genomic location t,
+fβ is compared to a certain threshold value δwhich can be chosen freely by the biological researcher. a bayesian fdr procedure
+ <cit>  is adopted to evaluate statistical significance. this may be written as 
+
+  fdrf=pfβ<δ|y. 
+
+it basically involves the calculation of a probability mass from a univariate normally distributed random variable if
+fβ contains only one β, or from a multivariate normally distributed random variable if
+fβ contains a linear combination of β’s
+ <cit> . the variance-covariance matrix is readily available if xis orthogonal. for non-orthogonal designs it can be calculated by 
+
+ −1tvarfβ− <dig>  
+
+for the circadian rhythms design however, this approach is not possible because of the non-linear dependence of a on the β’s. in this case fdrf can be approximated by simulation. in each simulation step we sample from the normal sine and cosine effect functions and calculate asim. fdrf is now given by the proportion of simulations for which asim<δ. specifically for differential expression,  is used to detect overexpression at probe t, while for detecting underexpression at probe t we use 
+
+  fdrf=pfβ>−δ|y. 
+
+RESULTS
+the use and flexibility of the wavetiling package is illustrated in three case studies for transcriptome analysis with different experimental set-ups.
+
+case study 1: time-course experiment
+the first data set consists of a tiling array expression study for identifying the molecular events associated with early leaf development of the plant species arabisopsis thaliana <cit> . unraveling the underlying mechanisms of on one hand the transition from cell division to cell expansion and on the other hand the transition from non-photosynthetic to photosynthetic leaves, was the focus of this study. trancriptome analysis for six developmental time points  was conducted with agronomics <dig> tiling arrays
+ <cit> , with three biological replicates per time point. primarily, the researchers were focusing on the detection of differentially expressed regions between any two pairs of developmental time points. this specific study design, however, also allows for the detection of expression regions that change linearly over time. the functions and code used for this case study are described in more detail in the package vignette .
+
+pairwise comparison
+figure
+ <dig> gives an example of a genomic region on chromosome  <dig> of arabidopsis thaliana found to be differentially expressed between different time points. the threshold value used here was |log2|. for the most significant time point pairs the detected regions clearly resemble the exons of gene at1g <dig>  encoding a putative 2-oxoglutarate-dependent dioxygenase .
+▵, while the different days are represented by different colors: black , red , green , blue , cyan  and magenta .
+
+we evaluate the regions detected by the wavelet-based analysis against the genes produced by the well-established and often used rma method
+ <cit> . this is done by comparing the results of a gene set enrichment analysis based on both methods. by mapping the genomic regions found by the wavelet-based method to the arabidopsis thaliana tair <dig> annotation
+ <cit> , a list of genes is created for this method. only genes that showed an overlap of at least 15% with the detected regions were retained. the enrichment analysis as performed with plaza
+ <cit>  revealed a strong overlap in the processes detected by both methods. a total of  <dig> enrichments were identified using both genesets of which  <dig> common enrichments were shared. the rma gene list had  <dig> specific enrichments, while the wavelet-based gene list had  <dig> 
+
+the enrichment analyses revealed a high similarity of genes in common by the two methods for identifying differentially expressed regions of the genome that have previously been annotated. however, we could also discover non-annotated regions that were differentially expressed. we identified a total of  <dig> unannotated and differentially expressed regions in the genome with a length of at least  <dig> bp. selected regions were validated with qrt-pcr to confirm these findings. these regions were chosen based on the following criteria: 
+
+ <dig>  region was not in or near an exon or promoter from an annotated gene.
+
+ <dig>  longer regions containing more differentially expressed probes were preferentially selected.
+
+ <dig>  regions showing homogeneous probe directionality  across the entire region of differential expression were preferentially selected.
+
+using these criteria  <dig> regions were selected and qrt-pcr analysis was performed . of the  <dig> regions,  <dig> could be confirmed to contain differentially expressed transcripts during the time-course analysis. only  <dig> region had no detectable transcriptional products. log fold changes were calculated for confirming the expression and differential expression, as well as the directionality of the differential expression. from this analysis  <dig> of the  <dig> regions showed the same log fold change directionality as previously identified from the tiling arrays, and  <dig> regions showed opposite log fold change directionality. however, these  <dig> regions had the lowest log fold changes in the wavelet-based analysis. more details about the methods of enrichment and qrt-pcr analysis can be found in additional file  <dig> 
+
+linear and quadratic time effects
+in addition to a pairwise comparison analysis, the wavelet-based functional model using the orthogonal polynomial design matrix is also useful for detecting genes with linear and quadratic expression patterns over time. in fact, the estimated parameters now give direct interpretations in terms of the different order time effects. figure
+ <dig> gives some example plots of genes from the forward strand of chromosome  <dig> with a clear linear or quadratic time effect. from the plots, it is clear that the fitted probe-wise log <dig> intensities at the different time points  are squeezed to some extent towards the mean fitted log <dig> intensities over all probes in the whole detected region at these time points . the main reason for this is that in the wavelet domain strength is borrowed from the neighboring probes in the genomic region to provide a more reliable estimate for each probe-wise effect.
+
+for two of the genes shown in figure
+ <dig> a more detailed visualization is given of the fitted linear or quadratic time effect along the genomic coordinate of chromosome  <dig>  figure
+ <dig> shows the regions with significant decreasing linear time effects overlapping with gene at1g <dig>  encoding a putative lipid transfer protein, while figure
+ <dig> shows those regions with a significant quadratic time effect overlapping with gene at1g <dig>  encoding a cytochrome p <dig>  it is also possible to look at the fitted log <dig> intensities at the different time points. this means that we are still able to perform transcript discovery at each time point separately. figure
+ <dig> gives the corresponding plots for the linearly decreasing gene at1g <dig>  the trend apparent in the example plots of figure
+ <dig> is also clear from this figure. the grey rectangles in figure
+ <dig> indicate the discovered regions with mean log <dig> intensities significantly above a certain threshold chosen according to the procedure described in
+ <cit> . this illustrates that for the discussed models, it is possible to simultaneously detect differentially affected regions between groups as well as transcriptionally active regions for each group - in this case for each day - separately.
+▵, while the different days are represented by different colors: black , red , green , blue , cyan  and magenta . the grey rectangles indicate the detected regions showing a significant linear time effect, while the black line corresponds with the coefficient function of the linear effect. the negative sign of the coefficients implies a decreasing effect over time. more specifically, the effect at probe t is
+β^1×time
+.
+▵, while the different days are represented by different colors: black , red , green , blue , cyan  and magenta . the grey rectangles indicate the detected regions showing a significant quadratic time effect.
+▵, while the different days are represented by different colors: black , red , green , blue , cyan  and magenta . the grey rectangles indicate the detected regions showing a significant mean expression. the decreasing trend of the fitted log <dig> intensities over the different time points exemplified in figures
+ <dig> and
+ <dig> is clearly apparent in this figure.
+
+case study 2: circadian rhythms
+the second case study concerns an expression analysis to examine circadian rhythms in arabisopsis thaliana <cit> . it is known that photosynthetic organisms anticipate changes in the daily environment with an internal oscillator, called the circadian clock. the aim of the study was to explore the genome-wide extent of the rhythmic expression patterns governed by this oscillator. in this experiment,  <dig> samples were collected from arabidopsis thaliana seedlings that were placed under a  <dig> h light /  <dig> h dark cycles regime. every  <dig> hours  <dig> samples were taken and hybridized to the affymetrix attile  <dig> f and  <dig> r tiling arrays. more information about the experiment can be found in
+ <cit> .
+
+figure
+ <dig> shows an example of the model fit for gene at2g <dig> with a clear strong circadian effect. this gene has been previously described and is known under the name circadian clock associated <dig> . besides the circadian effects, no other time-dependent effects are considered in the model. therefore, the fitted log <dig> intensities for time points at identical moments in the 24h day/night cycle always coincide. this strong circadian effect is confirmed by figure
+ <dig>  which shows the fitted effect for the genomic region of cca <dig>  this effect corresponds with the amplitude of the circadian rhythm,
+a=β22+β <dig>  as estimated by the model.
+a=β22+β <dig> is given. the grey rectangles indicate the detected regions showing a significant circadian effect. the different replicates are indicated by ∘ and
+▵, while the different samples in the  <dig> h light /  <dig> h dark cycles regime are represented by different colorsl.
+
+the performance of the wavelet-based method for circadian rhythms is further tested by examining some specific circadian clock associated genes on the forward strand of the arabidopsis thaliana genome
+ <cit> . the genes that we consider here were also reported in
+ <cit> . the results are shown in table
+ <dig>  all genes show a considerable overlap with the genomic regions for which a circadian effect was detected significantly above the threshold value log <dig>  except time for coffee . they also have a quite high maximum estimated effect or amplitude size, except time for coffee and zeitlupe . these latter two genes are the only genes from the list that do not fall within the top  <dig> genes with the strongest estimated circadian effect for their corresponding chromosome. the gene time for coffee is known as a clock gene that does not cycle at the transcriptional level
+ <cit> . hence, it is as expected that both the overlap between detected region and gene annotation, and the effect size are very small. the gene zeitlupe is reported as having weak rhythms at the transcriptional level
+ <cit> . this is confirmed by the low maximum effect size, while still showing a considerable overlap of the significant region with the existing annotation. the results of table
+ <dig> are thus completely in line with what was expected from literature.
+
+analysis results for  <dig> circadian clock associated genes and for time for coffee, a clock gene that does not cycle at the transcriptional level. these are the genes on the forward strand that were also tested in
+ <cit> . overlap indicates the proportion of overlap between the regions detected by the wavelet-based method and the gene annotation; max. eff. gives the maximum estimated effect or amplitude size for this gene; top  <dig> indicates whether the gene is within the top  <dig> genes with the strongest circadian effect for the associated chromosome, as produced by the wavelet-based method.
+
+case study 3: non-orthogonal two-factor design
+the third data set is used to illustrate the analysis of a two-factor design tiling array experiment. the data are taken from a study of the genome-wide analysis of endogenous abscisic acid -mediated transcription in dry and imbibed seeds of arabidopsis thaliana <cit> . aba is a phytohormone that is important for the induction and maintenance of seed dormancy. to understand how endogenous aba regulates the transcriptome in seeds, whole-genome expression analyses were conducted in two aba metabolism mutants, an aba-deficient mutant  and an aba over-accumulation mutant , and compared to a wild type. this is the first factor in the design. since endogenous levels of aba often change drastically during seed imbibition
+ <cit> , these experiments were done both for dry and for 24-h imbibed seeds. this is the second factor in the design. for each design point, three biological replicates were hybridized using the affymetrix attile  <dig> f and  <dig> r tiling arrays, resulting in  <dig> samples. for this case, model  can be written as 
+
+ yi=β0+β1imbibed+β2mutant1+β3mutant2+β4imbibed∗mutant1+β5imbibed∗mutant2+ei, 
+
+where imbibed= <dig> if the seed was imbibed and imbibed= <dig> if the seed was dry, mutant1= <dig> for the aba2-mutant and mutant1= <dig> otherwise, and mutant2= <dig> for the cyp707a1a2a <dig> triple mutant and mutant2= <dig> otherwise. this model specification implies that the design matrix x used for this model is 
+
+ x= <dig>  
+
+column  <dig> of xcorresponds with an overall mean expression level over all samples. the main imbibition effect is coded in column  <dig>  note that this corresponds with the imbibition effect for wild types, which is the reference species. columns  <dig> and  <dig> are associated with the main aba mutation effects, whereas columns  <dig> and  <dig> allow to examine an interaction effect between imbibition and aba mutation statuses. figure
+ <dig> shows two examples plots for representing the model fit for the genes at1g <dig>  encoding an expansin, and at1g <dig>  encoding a chlorophyll a/b binding protein, on the forward strand of chromosome  <dig>  table
+ <dig> gives the associated gene-wise mean parameter estimates for these genes. the left panel plot of figure
+ <dig> suggests a larger mean expression level of gene at1g <dig> for imbibed seeds compared to dry seeds. the increase in mean expression level, however, is larger for wild types than for aba-related mutants. the increase in mean expression level between imbibed seeds compared to dry seeds is given by
+β^ <dig> gene= <dig>  for wild types, while for aba <dig> mutants this increase is given by
+β^ <dig> gene+β^ <dig> gene= <dig>  and for cyp707a1a2a <dig> triple mutants by
+β^ <dig> gene+β^ <dig> gene= <dig> . on the right panel of figure
+ <dig> we see an increased mean expression level of gene at1g <dig> for aba <dig> mutants as compared to wild types and cyp707a1a2a <dig> triple mutants. in addition, this increase is much stronger for imbibed seeds.
+
+gene-wise mean parameter estimates for genes at1g <dig> and at1g <dig>  the estimates indicate a clear interaction effect between condition and species for these genes, which is further visualized in figure
+ <dig> 
+
+CONCLUSIONS
+in this paper, we have described the r package wavetiling for model-based analysis of tiling array expression studies with flexible designs. it implements the recently proposed wavelet-based model for transcriptome analysis
+ <cit>  and extends its applicability towards more complex experimental set-ups. unlike most currently applied methods, transcriptional activity is modeled at probe-level instead of gene- or exon-level. this probe-wise analysis allows for the detection of transcriptional units in both exonic, intronic and intergenic regions, without prior consultation of existing annotation. by appropriate adaptations of the basic model design matrix it becomes possible to easily analyze the transcriptome for single-factor experiments with more than two biological conditions, to detect linear and quadratic time effects or a circadian rhythm effect in time-course experiments, and to even conduct two- or multiple-factor studies. the package’s use and flexibility are illustrated with three case studies on the reference plant arabidopsis thaliana. these cases show the potential of the package and method to cope with a multitude of study designs and associated specific research questions and still provide reliable results. the wavetiling package will be freely available as part of the bioconductor project.
+
+availability and requirements
+•
+project name: wavetiling
+
+•
+project home page: http://r-forge.r-project.org/projects/wavetiling/
+
+•
+operating system: platform independent
+
+•
+programming language: r
+
+•
+other requirements: r >=  <dig> 
+
+•
+license: gnu gpl
+
+•
+any restrictions to use by non-academics: none
+
+competing interests
+the authors declare that they have no competing interests.
+
+author’s contributions
+kdb and lc conceived the study and developed the model. kdb implemented the model, conducted the case studies and statistical analyses and wrote the manuscript. pp helped in the design and implementation of the package. ma conducted the biological validation experiments and analyses and helped write the manuscript. ot and cc took part in several discussions related to the model. di took part in several discussions regarding the biological data. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+wavetiling package vignette.package vignette
+containing detailed information on how to perform a transcriptome
+analysis using a wavelet-based functional model with the wavetiling
+package. the data set of case study  <dig>  is used in the
+vignette.
+
+click here for file
+
+ additional file 2
+methods for biological validation.detailed
+information about the gene set enrichment and qrt-pcr analysis for case
+study  <dig> .
+
+click here for file
+
+ acknowledgements
+part of this research was supported by iap research network grant no. p6/ <dig> of the belgian government  and ghent university .

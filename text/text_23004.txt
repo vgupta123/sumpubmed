@@ -1,0 +1,467 @@
+BACKGROUND
+due to recent advances in high-throughput proteomic techniques, such as yeast two-hybrid system  and tandem affinity purification coupled with mass spectrometry , it is now possible to compile large maps of protein interactions, which are usually denoted as protein-protein interaction networks . however, extracting useful knowledge from such networks is not straightforward. therefore sophisticated ppi network analysis algorithms have been devised in the last decade for several goals such as: the prediction of protein-complexes , the prediction of higher level functional modules , the prediction of unknown interactions , the prediction of single protein functions , the elucidation of the molecular basis of diseases , and the discovery of drug-disease associations , to name just a few. in this paper we concentrate on the issue of predicting protein-complexes  in ppi networks. an incomplete list of complex prediction algorithms in chronological order is: mcode  <cit> , rnsc  <cit> , cfinder  <cit> , mcl  <cit> , coach  <cit> , cmc  <cit> , haco  <cit> , core  <cit> , cfa  <cit> , spici  <cit> , mcl-caw  <cit> , clusterone  <cit> , prorank  <cit> , the weak ties method  <cit> , overlapping cluster generator   <cit> , plw  <cit> , ppsampler <dig>  <cit> , and prorank+  <cit> . further references to existing methods can be found in recent surveys by .
+
+the graph representing a ppin can also be augmented so to include additional biological knowledge, annotations and constraints. the conservation of protein complexes across species as an additional constraint is studied in  <cit> . jung et al.  <cit>  encode in ppin the information on mutually exclusive interactions. proteins in ppin can also be marked with cellular localization annotations , and several types of quality scores. though all these aspects are important, they are possible refinements applicable to the majority of the algorithms listed above, involving the modeling of additional knowledge in the ppin framework . in this paper we concentrate on the basic case of a ppin modeled as an undirected and unweighted graph. the size of ppin found in applications tend to grow over time because one can obtain with modern techniques from a single high-throughput experiment thousands of novel ppi, and also because one can collate groups of ppi from different experiments into a single larger network   <cit> . for example very large ppin arise in multi-species ppi studies, , in immunology studies  and cancer data analysis . large ppin can be challenging for clustering algorithms as many of them have been designed and tested in the original publication with ppin of small and medium size , that was designed intentionally for large ppin). greedy methods that optimize straightforward local conditions may be fast but speed may penalize quality. thus, although more than a decade has passed since the first applications of clustering to ppin, the issue of growing ppin size poses new challenges and requires a fresh look at the problem.
+
+we develop a new algorithm  designed for clustering large ppin and we apply it to the problem of predicting protein complexes in ppin. the complexes we seek have just very basic properties, they should appear within the ppin as ego-networks of high density and thus we can model them as maximal quasi-cliques. these features are not particularly new, but we show in section ‘experiments’ that they are sufficient to characterize a large fraction of pcs in a sample of five large ppin for two species . computational efficiency is attained by a systematic exploitation of the concept of core decomposition of a graph, which for each vertex  in a graph provides a tight upper bound to the size of the largest quasi-clique that includes that vertex. we use this upper bound to trim locally the subgraphs of interest in order to isolate the sought quasi-clique, and proceed then to the final peeling out of loosely connected vertices. our approach has some superficial similarity with that of cmc  which applies the enumeration algorithm of  <cit>  to produce, as an intermediate step, a listing of all maximal cliques in a graph. we avoid this intermediate step that may cause an exponential running time in large ppin and cannot be adapted easily to listing all maximal quasi-cliques, when density below  <dig> % is sought. our approach is both more direct  and more flexible .
+
+cfinder  lists all k-cliques, for a user defined value of k, and then merges together k-cliques sharing a -clique. cfinder might produce too many low density clusters if the user choosees k too small, or miss interesting complexes if k is too large. core&peel avoids both pitfalls since we have a more adaptive control over cluster overlaps. our algorithm is empirically very fast: all instances in this paper run in less than  <dig> minutes on common hardware. the asymptotic analysis  indicates a running time very close to linear for sparse graphs. more precisely, with some additional mild sparsity assumptions, the algorithm runs in time om+n) for a graph g of n nodes and m arcs, where a is the arboricity of g . the output quality is assessed by comparative measures of the ability to predict known complexes and of the ability to produce biologically homogeneous clusters, against  <dig> state-of-the art methods. in both quality assessments core&peel leads or ties in most tests vs all other methods, often by a large margin . the robustness of our method is remarkably high, since practically no output variation is measured even when adding up to  <dig> % random edges in the input graph. finally, we show several high quality predicted clusters that involve a known complex with additional proteins, which correspond to biologically relevant mechanisms described in literature.
+
+paper organization
+in section methods we start by reviewing the issue of false positive/negative ppi in large ppin with hindsight from the work in  <cit>  indicating quasi-cliques as good models for protein complexes in our settings . next, in section preliminaries we recall the basic graph-theoretic definitions of subgraph density, quasi-cliques, and core-decompositions, that are central to our algorithmic design. in section ‘partial dense cover of a graph’ we introduce the notion of a partial dense cover as a formalization of our problem, showing its similarities with well known np-hard problems of minimum clique cover and maximum clique  <cit> . in section ‘algorithm core&peel in highlight’ we give a high level description of our proposed polynomial time heuristic. for ease of description it is split in four phases, though in optimized code some of the phases may be interleaved. the rationale behind certain design choices is explained in further detail in section ‘algorithm description: details’. the asymptotic analysis of the proposed algorithm can be found in . the experimental set up is described in section ‘results and discussion’, including the sources of raw data, the initial data cleaning  and the quality score functions . further data statistics and details of the comparative evaluations are in section ‘experiments’ and ‘comparative evaluation’. in particular we report on the ability to capture known complexes in section ‘performance of protein complex prediction’, to produce functionally coherent clusters , on robustness in presence of random noise , and on computation timings .
+
+in section ‘some predictions with support in the literature’ we list ten interesting predictions in which a known complex interacts with an additional protein. these findings have an independent support in the literature. finally in section ‘conclusions’ we comment on the potential applications and extensions of the proposed method, as well as on its limitations.
+
+methods
+on false positive and false negative ppi in dense and large ppin
+the estimation of the number of erroneous ppi calls  in ppi networks is highly dependent on the technology and the experimental protocols used. yu et al.  <cit>  report an experiment on  <dig> proteins of saccharomyces cerevisiae  for which ppi were detected using both error-prone high throughput technologies and more precise low throughput technologies. in  <dig> cases  for which the two methods differ, the vast majority  were false negatives , and just  <dig>  % false positive . a similar ratio among fp/fn rates is reported in  <cit>  for ppi obtained through y2h and high confidence ap-ms techniques. while each technology has its own systematic biases, it is observed in  <cit>  that such biases tend to compensate each other when data from several sources is used to compile ensemble ppin. the implication is that, over time, as the evidence on reliable ppi accumulates, the number of undetected real ppi  will steadily decrease, while the number of spurious ppi  should increase quite slowly. in graph terms the subgraphs representing complexes in the ppi will become denser , while the noisy interactions will still remain within a controllable level . expanding on these finding yu et al.  <cit>  demonstrate that quasi-cliques  are good predictors of the presence of a protein complex, provided the ppin is large. our own measurents on one medium size graphs  and four large graphs  in section ‘experiments’ confirm this tendency of protein complex density increase in larger ppin. besides the increase in density, a second notable phenomenon, is that protein complexes often resemble ego-networks, that is, the protein complex is mostly contained in the 1-neighborhood of some protein .
+
+preliminaries
+an early incarnation of the core&peel algorithm targeting communities in social graphs is described in  <cit> . in order to make this paper self-contained we are describing in this section a version of core&peel that includes all the modifications needed to target potentially overlapping protein complexes in ppi network. let g= be a simple  graph . a subset q⊂v induces a subgraph h
+q=, where e
+q={∈e|a∈q∧b∈q}. for a graph g its average degree is: 
+ av=2|e||v|. 
+
+
+the density of a graph d is the following ratio: 
+ d=|e||v|2=2|e||v|,  which gives the ratio of the number of edges in g to the maximum possible number of edges in a complete graph with the same number of nodes. we restrict ourselves to local density definitions, such as the two listed above, that are those for which the density of a subgraph induced by a subset q⊆v is a function depending only on q and on the induced edges set e
+q. a nice survey of concepts and algorithms related to local density of subgraphs is in  <cit> . cliques are subgraphs of density  <dig>  and finding a maximum induced clique in a graph g is an np-complete problem  <cit> . several relaxations of the notion of clique have been proposed , most of which also lead to np-complete decision problems. given a parameter γ∈, a γ-quasi clique is a graph g= such that: 
+ ∀v∈v|ng|≥γ,  where n
+g={u∈v|∈e} is the set of immediate neighbors of v in g. note that a γ-quasi clique has density d≥γ. in general, however, for a dense graph with density d we cannot infer a bound on the value of γ for which there exists a quasi-clique in g = <dig> that implies γ= <dig>  and those cases covered by turán’s theorem ). if we impose that the number of vertices in a subgraph is exactly k, then the average degree and the density depend only on the number of edges, and thus they attain their maximum values for the same subgraphs. without this constraint, finding the subgraph of maximum average degree or the subgraph of maximum density are quite different problems: the former admits a polynomial time solution, the latter is np-complete. in this paper we aim at detecting dense-subgraphs with a lower bound on the size of each sub-graph and on its density, thus still an np-complete problem. a k-core of a graph g is a maximal connected subgraph of g in which all vertices have degree at least k. a vertex u has core number k if it belongs to a k-core but not to any -core. a core decomposition of a graph is the partition of the vertices of a graph induced by their core numbers .
+
+partial dense cover of a graph
+in this section we formalize our problem as that of computing a partial dense cover of a graph. we aim at collecting efficiently only high quality candidate dense sets that cover the dense regions of the input graph. a partial dense cover p
+d
+c is defined as the range of the function f:v→2v that associates to any vertex v∈v a subset of v with these properties: 
+if f≠∅ then v∈f,  contains the seed v or it is empty).
+
+
+f⊆n
+r∪{v},  is a subset of the r-neighborhood of v, i.e. all its vertices are at distance at most r from v. 
+
+
+f is the largest set having size at least q, density at least δ, satisfying  and , or otherwise it is the empty set.
+
+
+
+
+note that there may be more than one set f that, for a given v, satisfies ,  and . if this is the case, we pick arbitrarily one such set as the value of f. we drop g and r from the notation when they are clear from the context. since the p
+d
+c is the range of the function f, by definition, it contains no duplicate sets, though its elements can be highly overlapping. one way to imagine this structure is as a relaxation of a minimum clique cover of a graph that is the problem of determining the minimum value k such that the vertices of a graph can be partitioned into k cliques. we relax this problem by  relaxing the disjointness condition   allowing also a covering with graphs of density smaller than  <dig>  . computing a clique cover of minimum size k is a well known np-complete problem  <cit> , and it is hard to approximate  <cit> . even in this weaker form it remains np-complete, by an easy reduction to the maximum clique problem. the cover we seek is partial since we do not insist that every vertex must be included in some set. we exclude sets that are too small  or too sparse . the size parameter q and density parameter δ ensure that we can focus the computational effort towards those part of the graph that are more interesting  with the goal of attaining computational efficiency while collecting high quality dense candidate sets. note that for δ= <dig>  the p
+d
+c is a subset of the set of all maximal cliques. while the set of all maximal cliques can be much larger than |v|, actually a worst case exponential number  <cit> , the p
+d
+c has always at most |v| elements .
+
+algorithm core&peel in highlight
+as noted above, computing a partial dense cover of a graph is a np-complete problem. in this section we describe an efficient heuristic algorithm which is based on combining in a novel way several algorithmic ideas and procedures already presented separately in the literature. for each step we give intuitive arguments about its role and an intuitive reason for its contribution to solving the problem efficiently and effectively. we first give a concise description of the four main phases of the core&peel algorithm. subsequently we describe each phase in more detail.
+
+
+algorithm overview.
+phase i. initially we compute the core decomposition of g ) using the linear time algorithm in  <cit> , giving us the core number c for each node v∈v. moreover we compute for each vertex v in g the core count of v, denoted with c
+c, defined as the number of neighbors of v having core number at least as large as c. next, we sort the vertices of v in decreasing lexicographic order of their core values c and core count value c
+c.
+
+
+phase ii. in phase ii we consider each node v in turn, in the order given by phase i. for each v we construct the set n
+c of neighbors of v in g having core number greater than or equal to c. we apply some filters based on simple node/edge counts in order to decide whether v should be processed in phase iii. if |n
+c|<q we do not process this node any more, being too small a set to start with. otherwise we apply one of the following filters. we compute the density δ of the induced subgraph g[n
+c]. if this density is too small ≤δ
+low) for a threshold δ
+low, which we specify later, we do not process this node any more ). in the second filter  we check if there are at least q nodes with degree at least δ. the third filter  is a combination of the previous two filters. nodes that pass the chosen filter are processed in phase iii.
+
+
+phase iii. in this phase we take v and the induced subgraph g[n
+c] and we apply a variant of the peeling procedure described in  <cit>  that iteratively removes nodes of minimum degree in the graph. the peeling procedure stops  when the number of nodes drops below the threshold q. the peeling procedure stops  when the density of the resulting subgraph is above or equal to the user defined threshold δ. the set of nodes returned by the successful peeling procedure is added to the output cover set.
+
+
+phase iv. here we eliminate duplicates and sets completely enclosed in other sets, among those passing the phase iii. we also test the jaccard coefficient of similarity between pairs of predicted complexes, removing one of the two predictions if they are too similar according to a user-defined threshold.
+
+algorithm description: details
+many of our choices rely in part on provable properties of the core number and of the peeling procedure shown in  <cit> , and in part on the hypothesis that the peeling procedure will converge to the same dense subgraph for both notions of density, when the initial superset of nodes is sufficiently close to the final subset. however the connections between these properties, the approximation to a partial dense cover computed by the algorithm, and the properties of validated protein complexes in a ppin network can be only conjectured. the final justification of individual choices is mainly based on the good outcome of the experimental evaluation phase.
+
+
+details on phase i. the core decomposition of a graph g= associates to any vertex v a number c which is the largest number such that v has at least c neighbors having core number at least c. consider now a clique k
+x of size x, for each node v∈k
+x its core number is x− <dig>  if k
+x is an induced subgraph of g, then its core number is at least x− <dig>  thus c is an upper bound to the size of the largest induced clique incident to v. consider a γ-quasi-clique k
+ of x nodes, for each node v in k
+ its core number is at least γ. if k
+ is an induced subgraph of g, then its core number can only be larger, thus c is an upper bound to the size of the largest  quasi-clique incident to v. thus if the upper bound provided by the core number is tight, examining the nodes in  order of their core number allows us to detect first the largest cliques , and subsequently the smaller ones.
+
+in a clique k
+x each node is a leader for the clique, meaning that it is at distance  <dig> to any other node in the clique. thus the first node of k
+x encountered in the order computed in phase i is always a leader. in the case of quasi-cliques of radius  <dig> we have by definition the existence of at least one leader node. for an isolated quasi-clique the leader node will have the maximum possible core count value, thus by sorting  on the core count value we force the leader node to be discovered first in the order . for an induced quasi-clique the influence of other nodes may increase the value of the core count for any node, but, assuming that the relative order between the leader and the other nodes does not change, we still obtain the effect of encountering the leader before the other nodes of the quasi-clique.
+
+the core number of a node v gives us an estimate of the largest  quasi-clique  incident to v, thus it provides a very powerful filter. we employ the very simple and very efficient algorithm in  <cit>  that computes the core decomposition of a graph in time and storage o.
+
+
+details on phase ii. in phase ii we aim at computing simple conditions and we decide whether node v should be processed in the next  phase iii. the first condition to test is |n
+c|<q, i.e. whether the number of nodes is below the user defined lower bound for the size . we apply then one of the following filter policies. we define the filter policy f= <dig>  by checking a sufficient condition for the existence of a clique in a dense graph based on the classical results of turán  that guarantees the existence of a clique  in graphs with sufficiently many edges . this corresponds to setting δ
+low=1/ <dig>  which indeed did perform well in our experiments with radius  <dig>  we define the filter policy f= <dig>  by checking the necessary condition for the existence of a δ-quasi clique of at least q nodes ] must contain at least q nodes of degree at least δ). finally, we define the filter policy f= <dig>  that is the union of the previous two filters.
+
+
+details on phase iii. the peeling procedure we use is similar to the one described in  <cit> . it consists in an iterative procedure that removes a node of minimum degree and all its incident edges, and iterates on the residual graph. in  <cit>  the graph of highest average degree constructed in this process is returned as output. we modify this procedure by returning the first subgraph generated that satisfies the density and size constraints. it is shown in  <cit>  that this procedure is -approximate for the maximum average degree, i.e. it returns a subgraph whose average degree is within a factor 1/ <dig> of that of the subgraph of highest average degree. empirically, we rely on the intuition that the input to the peeling procedure produced after phase ii is a superset of the target dense subgraph and that it is sufficiently tight and dense so that the peeling procedure converges quickly and the target dense subgraph is isolated effectively. we also use a novel heuristic to solve cases of ties within the peeling algorithm in  <cit> . when two or more vertices are of minimum degree the original peeling procedure picks one arbitrarily. in our variant we compute the sum of degrees of the adjacent nodes s=∑w∈n|n| and we select the vertex among those of minimum degree minimizing s. this secondary selection criterion is inspired by observations in  <cit> , where the objective is to select an independent set by iteratively removing small degree nodes, which is a dual of the problem of detecting cliques.
+
+
+details on phase iv. in order to eliminate duplicate sets, we collect all the sets passing phase iii, we split them in equal length classes and we represent them as lists of node identifiers in sorted order. next we do a lexicographic order of each class, thus lists that are equal to each other end up as neighbors in the final sorted order and they can be easily detected and removed. in order to further exploit the sparsity of the output of phase iii, we represent the collection of sets {Γ
+i} produced in phase iii, with duplicates removed, as a graph whose nodes are the sets and elements of {Γ
+i}. the edges represent the inclusion relation. in this graph the number of 2-paths joining nodes Γ
+i and Γ
+j is exactly |Γ
+i∩Γ
+j|. if |Γ
+i∩Γ
+j|=|Γ
+j|, we know Γ
+j⊂Γ
+i and we can remove Γ
+j. we can count efficiently such number of 2-paths by doing a breadth first search at depth  <dig> starting from each set-node in the bipartite graph in increasing order of size, and by removing each starting node after its use. this operation allows us to compute if a set is a subset of another set, and also the jaccard coefficient of similarity of any two non-disjoint sets.
+
+RESULTS
+used data and preprocessing
+we used the following freely accessible data sets to test our method.
+
+protein protein interaction networks
+biogrid : we downloaded both biogrid homo sapiens  and biogrid yeast . string : we downloaded the general string file  and then we extracted the two subsets of interest: the homo sapiens one  and the yeast one . dip : we downloaded the yeast db .
+
+protein databases
+from the ncbi web site we downloaded the two files for homo sapiens  and yeast , the uniprot db , and the ensembl mapping for the associations of ensemblproteinid with entrez id for homo sapiens.
+
+protein complexes
+we downloaded cyc <dig>  and corum  data on 26/03/ <dig> 
+
+gene ontology 
+we downloaded the files for homo sapiens  on 10/09/ <dig>  and for yeast  on 10/09/2014
+
+preprocessing
+files from different sources of ppi are heterogeneous in many aspects. dip exploits the uniprot accession id  to represent the proteins involved in the interaction, biogrid exploits the ncbi entrez id, and string uses ensembl proteins id for homo sapiens and gene locus or uniprot accession for yeast. the first operation was to represent in a uniform way the proteins for both the ppi files and the gold standard files. we decided to represent each protein with their associated ncbi entrez-id. in the process we removed possible duplications, and proteins for which the mapping was not possible. for the string data we also removed ppi with a quality score below  <dig>  for the go file, we identified and separated the three principal categories of the gene ontology, which are cellular component , biological process , and molecular functions . following the methodology in  <cit> , these files are filtered to remove the annotation with iea, nd and nas evidence codes . each protein associated to an annotated function is then mapped to its ncbi entrez id. eventual repetitions of proteins for an annotation have been removed.
+
+evaluation measures for protein complex prediction
+in order to better capture the nuisances of matching predicted clusters with actual complexes, we use four scalar measures  and we sum them to form a single scalar aggregated score . each of the four measures differs form the others in some key aspects: some use a step-function, while other use cluster-size as weights. all four, however, aim at balancing precision and recall effects. a similar aggregation of indices has been used in  <cit> , although we use a different pool of indices.
+
+f-measure
+from  <cit>  we adopted the following f-measure computation to estimate the degree of matching between the found cluster and the gold standard complex. let p be the collection of discovered clusters and let b be the collection of the gold standard complexes. for a pair of sets p∈p and b∈b, the precision-recall product score is defined as pr=|p∩b|2|p|×|b|. only the clusters and complexes that pass a p
+r threshold ω  are then used to compute precision and recall measures. namely we define the matching sets: n
+p=|{p|p∈p,∃b∈b,p
+r≥ω}|, and n
+b=|{b|b∈b,∃p∈p,p
+r≥ω}|. afterwards: pecision=np|p|,recall=nb|b|, and the f-measure is the harmonic mean of precision and recall. in line with  <cit>  and other authors we use ω= <dig> . experiments in  <cit>  indicate that the relative ranking of methods is robust against variations of the value of ω.
+
+from  <cit>  we adopted three measures to evaluate the overlap between complexes and predicted clusters: the jaccard measure, the precision-recall measure and the semantic similarity measure.
+
+jaccard measure
+let the sets p and b be as above, for a pair of sets p∈p and b∈b, their jaccard coefficient is jac=|p∩b||p∪b|. for each cluster p it is defined j
+a
+c=m
+a
+x
+b∈b
+j
+a
+c, and for each complex b it is defined j
+a
+c=m
+a
+x
+p∈p
+j
+a
+c. next, we compute the weighted average jaccard measures using, respectively, the cluster and complex sizes: jaccard=∑p∈p|p|jac∑p∈p|p|, and jaccard=∑b∈b|b|jac∑b∈b|b|. finally, the jaccard measure is the harmonic mean of j
+a
+c
+c
+a
+r
+d and j
+a
+c
+c
+a
+r
+d.
+
+precision recall product
+this measure is computed using exactly the same work flow as jaccard, except that we replace the jaccard coefficient with the precision-recall product score used also in  <cit> .
+
+semantic similarity measure
+let the sets p and b be as above, for a protein x, we define p as the set of predicted clusters that contain x: p={p∈p|x∈p}, and b as the set of golden complexes that contain x: b={b∈b|x∈b}. denote with i the indicator function of a set that is  <dig> for the empty set and  <dig> for any other set. let b
+i
+n denote the set of unordered pairs of distinct elements of a set. the semantic similarity of p in b is: den=∑∈bini∩b)|bin|. analogously the semantic similarity of b in p is: den=∑∈bini∩p)|bin|. next, we compute the weighted average semantic similarity weighted respectively by cluster and complex size: density=∑p∈p|p|den∑p∈p|p|, and density=∑b∈b|b|den∑b∈b|b|. finally, the semantic similarity measure is computed as the harmonic mean of d
+e
+n
+s
+i
+t
+y and d
+e
+n
+s
+i
+t
+y.
+
+handling of small protein complexes
+the presence or absence of small protein complexes in the golden standard and in the outcome of the algorithms complicates the evaluation, thus in additional file 1: section  <dig> we describe a fair method for placing all algorithms on a level field with respect to this issue.
+
+evaluation measure for gene ontology coherence
+for a predicted cluster p∈p we compute a q-value score trying to assess its biological coherence and relevance. let g be a collection of gene ontology annotations, and g one go class. let m be the set of all proteins. for a predicted cluster p, we compute the hypergeometric
+p-value h of the association of p to g, when g∩p≠∅: 
+ h=∑i=|p∩g|min|m|−|g||p|−i|g|i|m||p|,  which represents the probability that a subset of m of size |p| chosen uniformly at random has with g an intersection of size larger than or equal to |p∩g|. as, in general, p will have an hypergeometric score for each gene ontology class it intersects, following  <cit>  and  <cit> , we associate to each p the intersecting gene ontology class of lower p-value. in order to correct for multiple comparisons we correct the vector of p-values using the q-value method of  <cit>  which is a regularized version of the benjamini hochberg fdr estimation method. the q-values for the vector of p-values are computed via the r package provided at http://genomine.org/qvalue/.
+
+experiments
+basic direct measures
+basic measures on the ppins and protein complexes data sets are reported in table  <dig> and in table  <dig>  respectively. when we map the known curated complexes onto the ppi-networks we obtain  <dig> different data sets in which the number and density of the embedded complexes is specific to the involved ppin . the resulting embedded complexes have variable density. we report in table  <dig> the  <dig> % and the  <dig> % density percentiles. one of the assumptions we have used in our algorithm is that for each embedded complex there is one vertex that is linked to  all the other nodes in the embedded complex . this is an important property that measures on the actual data support . in table  <dig> we report on the degree of overlap among complexes by counting the number of proteins belonging to one, two, three or more than three complexes. this is an important feature of the prediction problem since algorithms need to handle properly overlapping clusters. human complexes have higher overlap rates than yeast complexes. in  we report the distributions of basic measures relative to the graph , and to the embedded pc .
+d¯
+
+
+
+
+
+
+
+quality testing
+we report the comparative evaluation of our algorithm vs several other algorithms, among those considered state-of-the-art. we used for these experiments an intel core i <dig> processor  at  <dig>  ghz, with  <dig> gb ram memory, and with mac os x  <dig> . <dig> 
+
+we have selected  <dig> algorithms, namely: mcl, coach, mcode, cmc, mcl-caw, prorank+, spici, clusterone, rnsc, and cfinder among those in literature. a brief description of each is in additional file 1: section  <dig>  in the selection we applied these criteria:  we selected algorithms that appeared in several surveys and comparative evaluations, and well cited in the literature;  we included both old classical algorithms and more recent ones;  we have included algorithms using definitions of density similar to the one we adopt;  we included algorithms with available implementation in the public domain or obtainable from the authors upon request;  we preferred implementations based on widely available  platforms;  we avoided algorithms that make use of additional biological annotations ;  we preferred methods with a clear and unique underlying algorithm ;  we preferred methods that aim at “protein complex detection” vs. those that aim at “functional module discovery”, since the evaluation methodologies for these two classes are quite different, although many methods could be construed as dual-use.
+
+each method has its own pool of parameters to be set. for the quality score shown in section evaluation measures for protein complex prediction we have considered for each method an extensive range of input parameter values  and we selected for each quality measure used in the aggregated score the best result obtained. note that each best value for the four base quality measures may be obtained with slightly different values of the control parameters. missing measures indicate that, for a specific algorithm and data set, the computation would not complete within a reasonable amount of time  or it generated fatal runtime errors.
+
+comparative evaluation
+performance of protein complex prediction
+figures  <dig>   <dig>   <dig>   <dig> and  <dig> report the f-measure, the semantic similarity, the j-measure, the pr-measure and the aggregated score  for three data sets relative to yeast ppin . out of  <dig> measurements, core&peel has the best value in  <dig> cases, cmc in  <dig> cases, and clusterone in  <dig> case. the aggregated score, which balances strong and weak points of the four basic measures, indicates that core&peel, cmc and clusterone have about the same performance for the medium-size ppi newtwork dip. but for biogrid data and even more for string data core&peel takes the lead, even with a wide margin.
+fig.  <dig> f-measure score for  <dig> algorithms and  <dig> random baselines on yeast data. runs optimizing the f-measure for each algorithm
+
+
+fig.  <dig> semantic similarity score for  <dig> algorithms and  <dig> random baselines on yeast data. runs optimizing the ss-measure for each algorithm
+
+
+fig.  <dig> j-measure score for  <dig> algorithms and  <dig> random baselines on yeast data. runs optimizing the j-measure for each algorithm
+
+
+fig.  <dig> pr-measure score for  <dig> algorithms and  <dig> random baselines on yeast data. runs optimizing the pr-measure for each algorithm
+
+
+fig.  <dig> aggregated score for  <dig> algorithms and  <dig> random baselines on yeast data
+
+
+
+
+figures  <dig>   <dig>   <dig>   <dig> and  <dig> report the f-measure, the semantic similarity, the j-measure, the pr-measure and the aggregated score for three data sets relative to homo sapiens ppi . during the evaluation of the predicted clusters for biogrid data we realized that the biogrid ppi network had one node of very high degree corresponding to the ubiquitin  protein. this fact has a straightforward biological explanation. since ubc is involved in the degradation process of other proteins, ubc is linked to many other proteins at a certain time in their life-cycle. given this special role of ubc, when protein degradation is not the main focus of the intended investigation, it may be convenient to consider also the same ppi network with the ubc node and its incident edges removed  we labelled this graph bg-hs-ubc. we tested also the other ppi network used in our study and this is the only case in which removing a node of maximum degree changes significantly the outcome of the prediction. out of  <dig> measures, core&peel has the best value in all  <dig> cases. good performance is obtained on some measures by cmc and spici.
+fig.  <dig> f-measure score for  <dig> algorithms and  <dig> random baselines on homo sapiens data. runs optimizing the f-measure for each algorithm
+
+
+fig.  <dig> semantic similarity score for  <dig> algorithms and  <dig> random baselines on homo sapiens data. runs optimizing the ss-measure for each algorithm
+
+
+fig.  <dig> j-measure score for  <dig> algorithms and  <dig> random baselines on homo sapiens data. runs optimizing the j-measure for each algorithm
+
+
+fig.  <dig> pr-measure score for  <dig> algorithms and  <dig> random baselines on homo sapiens data. runs optimizing the pr-measure for each algorithm
+
+
+fig.  <dig> aggregated score for  <dig> algorithms and  <dig> random baselines on homo sapiens data
+
+
+
+
+it is interesting to notice how the algorithms perform differently on the bg-hs with and without ubc. on biogrid data without ubc, core&peel, spici and clusterone improve their as value, while rnsc and coach have a reduced as value. the improvement in absence of ubc can be easily explained by the fact that ubc appears only in a few complexes of the golden standard, thus the evaluation phase is made more precise by its removal from the network and thus from the predicted clusters. the better results attained by rnsc and coach on the graph with ubc may be a hint that, for these two approaches, the presence of ubc helps in homing in more quickly on the true complexes hidden in the graph.
+
+we include as a sanity check also three random predictions . the purpose of this check is to assess how well the measure we are using are able to discriminate the predictions on real data sets from those generated randomly by generators allowed to access some partial knowledge about the structure of the golden standard.
+
+the method rand <dig> is given the size distribution of the sets in the golden standard and produce a random collection of sets out of the vertices of the ppi with the same size distribution. the method rand <dig> is as rand <dig> except that the random sets are generated starting from the subset of all vertices in the ppi that belong to some complex in the golden standard. the method rand <dig> is obtained by taking the golden standard and applying to it a random permutation of the nodes of the ppi. note that this approach besides preserving the size distribution preserves also the distribution of the size of the intersections of any number of sets of the golden standard.
+
+in terms of performance, rand <dig> behaves almost like rand <dig>  while rand <dig>  attains better results. the semantic similarity measure is the one that has better discrimination power vs all the three random test cases.
+
+
+core&peel has better ss performance on all the  <dig> ppin tested than the  <dig> competing methods. semantic similarity is the only measure that explicitly places a premium in correctly identifying the proteins that simultaneously belong to multiple complexes, thus we can infer that core&peel successfully uncovers the overlapping structure of the the known protein complexes.
+
+coherence with gene ontology annotation
+the second index is the number of predicted clusters with an associated functional annotation  of gene onontology ) below a given false discovery rate  threshold. note that here we use a non-normalized measure  since we want to favor algorithms with a rich high quality output. we are safeguarded against rewarding unduly methods that inflate their output since we operate each algorithm with the parameters that optimize the  f-measure. moreover, even though none of the methods we use incorporates go as part of its model, it is relatively safe to assume that, in most cases of interest, go annotations are indeed available and may be used for a post-processing re-ranking or filtering of the predictions.
+
+the biological function enrichment measure  is shown in figs.  <dig>   <dig>   <dig>   <dig>   <dig>  and  <dig>  we used in abscissa the fdr thresholds ranging from 10− <dig> to 10− <dig> on the q-value.
+fig.  <dig> number of predicted clusters with go enrichment q-value below threshold, as a function of the threshold, for dip yeast data
+
+
+fig.  <dig> number of predicted clusters with go enrichment q-value below threshold, as a function of the threshold, for biogrid yeast data
+
+
+fig.  <dig> number of predicted clusters with go enrichment q-value below threshold, as a function of the threshold, for string yeast data
+
+
+fig.  <dig> number of predicted clusters with go enrichment q-value below threshold, as a function of the threshold, for biogrid homo sapiens data
+
+
+fig.  <dig> number of predicted clusters with go enrichment q-value below threshold, as a function of the threshold, for biogrid homo sapiens data 
+
+
+fig.  <dig> number of predicted clusters with go enrichment q-value below threshold, as a function of the threshold, for string homo sapiens data
+
+
+
+
+
+core&peel has a larger or equal absolute number of high quality predictions below q-value 10− <dig> than the competing methods on five data sets out of six. for the bg-hs-ubc dataset core&peel leads below q-value 10− <dig>  the overall trend is fairly consistent for all the six data sets tested.
+table  <dig> data set string-core . functionally enriched clusters found with min size  <dig> and filtering policy 1
+
+we report the top ten clusters by hypergeometric p-value. each row reports: the go annotation class, go class type , the go id, the size of the cluster, the size of the intersection, the size of the functional class, and the hypergeometric p-value
+
+
+
+
+robustness against noise in the ppin graph
+we have tested our method for its robustness against injection of random noise in the input network. starting with the the biogrid hs network we have added randomly additional  edges for a number of additions ranging from  <dig> to  <dig> % of the initial number of edges in steps of  <dig> %. we have generated  <dig> networks for each class and taken the mean value of the  <dig> basic quality indices of section ‘evaluation measures for protein complex prediction’. the results are remarkably robust showing for three indices no variation up to the fourth decimal digit, and for the f-measure a variability of  <dig>  across the range of noise values. further tests with large random graphs are described in additional file 1: section  <dig>  where we use the two stage multiple hypothesis test proposed in  <cit>  to bound the false discovery rate  associated with the identified complexes.
+
+running times
+figures  <dig>   <dig>   <dig>   <dig>   <dig>  and  <dig> report in logarithmic scale the running times  for the  <dig> algorithms on the six data sets, with the parameters optimizing the f-measure. for mcl-caw we report the post-processing time in the graphic, thus a timing comparable with those of the other methods requires adding the mcl datum. spici is the fastest method on all the data sets, often completing in less than a second. core&peel comes second in speed in all the data set .
+fig.  <dig> time  in log <dig> scale for dip data. runs optimizing the f-measure for each algorithm
+
+
+fig.  <dig> time  in log <dig> scale for biogrid yeast data. runs optimizing the f-measure for each algorithm
+
+
+fig.  <dig> time  in log <dig> scale for string yeast data. runs optimizing the f-measure for each algorithm
+
+
+fig.  <dig> time  in log <dig> scale for biogrid homo sapiens data. runs optimizing the f-measure for each algorithm
+
+
+fig.  <dig> time  in log <dig> scale for biogrid homo sapiens data without ubc. runs optimizing the f-measure for each algorithm
+
+
+fig.  <dig> time  in log <dig> scale for string homo sapiens data. runs optimizing the f-measure for each algorithm
+
+
+
+
+some predictions with support in the literature
+in the long run the effectiveness of a protein-complex prediction method hinges upon its capability to uncover interesting and unexpected new phenomena of biological relevance. as an intermediate step we report on predictions made by core&peel that involve a known complex and one or two additional proteins, for which there is evidence of a biological function in the literature. we take the clusters detected by core&peel in the biogrid and string homo sapiens network, we rank them by the highest value of the jaccard correlation coefficient  and the semantic similarity  with a matching known complex, we analyze the discrepancies  and we highlight the literature supporting the functional relevance of the interaction. we chose here the parameter setting maximizing the f-measure.
+
+
+case  <dig>  this predicted cluster matches almost perfectly with the 20s proteasome complex . moreover the predicted cluster includes two additional proteins: ubc  and iqcb <dig> . the hitpredict database  also predicts high quality interactions between iqcb <dig> and six psa plus three psb proteins. the functional connection of ubc and the proteasome complex within the protein degradation pathway is also well known .
+
+
+case  <dig>  this predicted cluster matches almost perfectly with complex tfiih . moreover the predicted cluster includes an additional protein: ar . indeed the phosphorilation action of tfiih upon ar is reported in  <cit> .
+
+
+case  <dig>  this predicted cluster matches almost perfectly with the tfiiic containing complex , . moreover the predicted cluster includes an additional protein: gtf3c <dig> . dumay et al.  <cit>  identified a sixth human tfiiic subunit, specifically gtf3c <dig>  which corresponds to a previously uncharacterized 213-amino acid human protein .
+
+
+case  <dig>  this predicted cluster matches almost perfectly with the 20s proteasome complex . moreover the predicted cluster includes two additional proteins: psmb <dig>  and pomp . the protein encoded by the pomp gene is a molecular chaperone that binds the 20s preproteasome components and it is essential for 20s proteasome formation. the pomp protein is degraded before the maturation of the 20s proteasome is complete. a mutation in the 5’ utr of this gene has been associated with klick syndrome, a rare skin disorder .
+
+
+case  <dig>  this predicted cluster matches almost perfectly with pa <dig> complex  . moreover the predicted cluster includes an additional protein: uchl <dig> . interestingly, darcy et al.  <cit>  report that a small molecule  inhibits the activity of two 19s deubiquitinases regulatory particles: ubiquitin c-terminal hydrolase  <dig>  and ubiquitin-specific peptidase  <dig> , resulting in accumulation of polyubiquitin, which in turn induces tumor cell apoptosis. thus darcy et al. suggest that the deubiquitinating activity of this regulatory molecule may form the basis for a new anticancer drug.
+
+
+case  <dig>  this predicted cluster matches almost perfectly with baf complex  . moreover the predicted cluster includes two additional proteins: bcl7b  and arid1b . a connection of the swi/snf complex with the first protein  is described in  <cit>  where it is reported a proteomic analysis of endogenous mswi/snf complexes, which identified several new dedicated stable subunits of swi/snf complexes, including, among others, bcl7b.
+
+
+case  <dig> this predicted cluster matches almost perfectly with corum-id  <dig>  eif <dig> complex . moreover the predicted cluster includes an additional protein: gag-pol . it is reported in  <cit>  that “a conserved structure within the hiv gag open reading frame that controls translation initiation directly recruits the 40s subunit and eif3”.
+
+
+case  <dig>  this predicted cluster matches almost perfectly with sap complex  . moreover the predicted cluster includes an additional protein: ing <dig> . it is reported in  <cit>  that “besides the paralogous proteins, including hdac1/hdac <dig>  msin3a/msin3b, and the histone-interacting rbap46/rbap <dig> proteins, the mammalian rpd3l/sin3l complex comprises at least five other subunits, including sap <dig>  sds <dig>  sap180/rbp <dig>  sap <dig>  and ing1b/ing <dig>  whose precise roles at the molecular level are poorly understood but most likely involve targeting the complex to specific genomic loci via one or more interaction surfaces".
+
+
+case  <dig>  this predicted cluster matches almost perfectly with the ribosome complex . moreover the predicted cluster includes an additional protein: sirt <dig> . tsai et al.  <cit>  investigate the role of sirtuin  <dig> in the ribosome biogenesis and protein synthesis.
+
+
+case  <dig>  this predicted cluster matches almost perfectly with the exosome  complex . moreover the predicted cluster includes an additional protein: xrn <dig> . li et al.  <cit>  describe the competing role played by xrn <dig> and the exosome complex in hepatitis c-virus rna decay.
+
+CONCLUSIONS
+the experimental results reported in section ‘experiments’ show that core&peel is remarkably consistent in finding known complexes across  <dig> medium and  <dig> large data sets, ranking first in aggregated score against ten state-of-the-art methods in all  <dig> cases .
+
+
+core&peel also leads in the ability to produce cluster predictions that are highly consistent with go-bp annotations. the specific complex-protein interaction predictions listed in section ‘some predictions with support in the literature’ have all a strong support in the literature. although such predictions may not always correspond to actual complexes, they do indeed point at functionally relevant phenomena.
+
+the core&peel algorithm exploits properties of complexes embedded in ppins  that are more evident the larger the ppins become, and it does not suffer from phenomena of combinatorial explosion . thus we believe that core&peel can become a method of choice when even larger ppins are built and analyzed, such as those arising in multi-species ppin studies  and those arising in immunology studies .
+
+
+core&peel is fast and easy to use, requiring the setting of very few natural parameters relative to the minimum size, density and separation of the target complexes. indeed, having a small sample of the type of complexes to be sought, these parameters can be extracted directly form the sample.
+
+
+core&peel uses very little biological information except that embedded in the ppin topology. thus we believe further gains can be achieved by augmenting our scheme with the ability to handle ppins endowed with edge weights modeling, for example, ppi quality, or other types of a priori knowledge), or by incorporating go annotations-based filters within the basic algorithmic framework . improvements and tests along these lines are left for future research.
+
+in this paper our main focus is to compare our proposed algorithm versus  <dig> competing algorithms on a sufficiently diverse pool of test data  so to gain confidence in the robustness of the main thesis . we do not aim at suggesting that a particular type of ppin repository should be preferred over others, and we do not even aim at implying that one should always use large ppin in place of smaller ones . both questions are worthy of attention but fall outside the scope of the present article. the choice of the ppi data to be used for a given study is a non-trivial choice since many hidden biases could be implicit in the data   <cit> , thus these issues should be considered carefully at the initial stage of any experimental design.
+
+additional file
+
+additional file  <dig> detailed experimental settings. protein complex prediction for large protein protein interaction networks with the core&peel method- supplementary materials. description of the parameters and settings used in testing the competing sw for pc detection in large ppin. description of data sets features distributions. analysis of asymptotic complexity for core&peel. 
+
+ 
+
+
+abbreviations
+asaggregated score
+
+bpbiological process
+
+ccore number
+
+cccore count
+
+cdcore decomposition
+
+fdrfalse discovery rate
+
+fnfalse negative
+
+fpfalse positive
+
+gogene ontology
+
+pcprotein complex
+
+pdcpartial dense cover
+
+ppiprotein protein interaction
+
+ppinprotein protein interaction network
+
+mstandem affinity purification coupled with mass spectrometry
+
+ubcubiquitin
+
+y2hyeast two-hybrid system
+
+the authors would like to thank the participants to the nii shonan meeting “towards the ground truth exact algorithms for bio-informatics research”, january 17- <dig>   <dig>  for their support in the early stages of this research.
+
+declarations
+this article has been published as part of bmc bioinformatics vol  <dig> suppl  <dig> 2016: italian society of bioinformatics : annual meeting  <dig>  the full contents of the supplement are available online at http://bmcbioinformatics.biomedcentral.com/articles/supplements/volume-17-supplement- <dig> 
+
+funding
+work and publication costs supported by italian ministry of education, universities and research  and by the national research council of italy  within the flagship project interomics pb.p <dig>  .
+
+availability of data and materials
+
+project name: core&peel
+
+project home page: http://bioalgo.iit.cnr.it/index.php?pg=ppin
+
+
+operating system: platform independent
+
+programming language: python
+
+other requirements: none
+
+license: lesser general public license 
+
+any restrictions to use by non-academics: none, core&peel is a web application free and open to all users.
+
+data used for this study is available at http://bioalgo.iit.cnr.it/index.php?pg=ppin
+
+
+
+
+
+authors’ contributions
+mp devised the algorithm and its analysis, drafted the manuscript, and exercised general supervision. mb collected the data, wrote the evaluation code and performed experiments. fg performed experiments and set up the web site interface. all authors read and approved the manuscript and contributed extensively to the work presented in this paper.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+no ethical approval or consent was required for this study.

@@ -1,0 +1,311 @@
+BACKGROUND
+the illumina sequencing technology, as a representative of second generation sequencing technology, can produce reads of several hundred bases long  with an error rate <1%  and a cost of approximately $ <dig> – <dig>  per million bases  <cit> . the low cost of short reads has greatly facilitated the process of sequencing and analyzing new species; however, the limited read length can prohibit sequencing completeness and analysis accuracy. for example, a tremendous number of species have been assembled from short reads, but most of the assemblies are incomplete and fragmented into several thousands of contigs  <cit> . to address this issue, the pacbio smrt sequencing technology, as a representative of third generation sequencing technology, has been attracting more and more attention since its commercial release in  <dig>  <cit> . this technology can currently produce reads of 5-15k bases and some of 100k bases  with a cost of approximately $ <dig> - <dig>  per million bases  <cit> . with this technology, it becomes easier to assemble more complete sequences and perform more accurate analyses . depending on how the long reads are used, sequencing projects can be grouped into two classes. 
+
+short and long read hybrid sequencing projects obtain short reads of sufficient coverage as well as long reads of low or moderate coverage from the same species and assemble them together. when the coverage is low, long reads can fill gaps or form scaffolds for the corresponding short read assemblies  <cit> ; when the coverage is moderate, long reads can assemble together with the corresponding short reads .
+
+
+long read alone sequencing projects obtain long reads of high coverage and assemble them alone  <cit> . these sequencing projects are not as common as the short and long read hybrid sequencing projects because they are more expensive, as the long reads have higher cost than short reads.
+
+
+
+
+nevertheless, the generated long reads contain 10-15% errors   <cit> , so it is important to design efficient algorithms to correct them.
+
+several error correction algorithms for long reads have been proposed, including pacbiotoca , lsc  <cit> , proovread  <cit> , colormap  <cit> , the algorithm from the cerulean assembler  <cit> , ectools  <cit> , lordec  <cit> , jabba  <cit> , dagcon , lorma  <cit>  and the algorithms from the falcon and sprai assemblers . the long read error correction algorithms can be grouped into three classes. 
+
+short read based algorithms pacbiotoca, lsc, proovread and colormap align the short reads from the same species to the long reads and use the aligned short reads with low error rate to perform error correction. these algorithms are usually used in short and long read hybrid sequencing projects.
+
+
+short read assembly based algorithms the algorithm from cerulean, ectools, lordec and jabba all align the long reads to the de bruijn graph constructed or contigs assembled from the short reads from the same species to perform error correction. because of the continuity of the de bruijn graph or contigs, more error rich regions in the long reads can be aligned and corrected with the de bruijn graph or contigs. another benefit of using the de bruijn graph or contigs is that the alignment of long reads to de bruijn graph or contigs is much faster than the alignment of short reads to long reads. these algorithms are also usually used in short and long read hybrid sequencing projects.
+
+
+long read alone algorithms dagcon, pacbiotoca in its self-correction mode and the algorithms from falcon and sprai find multiple sequence alignments among the long reads, while lorma aligns the long reads to the de bruijn graphs constructed from themselves to perform error correction. these algorithms usually require long read coverage as high as 60– <dig> × and are thus used in the long read alone sequencing projects.
+
+
+
+
+it is worthwhile to note that there are also many short read error correction algorithms for the second generation sequencing technology  <cit> , but they do not work for long reads due to the different error model. the existing long read error correction algorithms could achieve error rates of approximately 1%, but they must discard a large amount of uncorrected bases and thus lead to low throughput. for example, as listed in  <cit> , pacbiotoca and lsc must discard  <dig> - <dig> % bases in a human brain long read library to achieve the 1% error rate in the corrected and outputted bases. for another example, in  <cit>  and  <cit> , ectools and lordec also discard  <dig> - <dig> % bases in e. coli read libraries for error correction. such a loss of bases is not economical considering the higher cost of long reads compared to short reads, and it may also reduce the completeness of downstream assemblies and the accuracy of analysis. this point was discussed in  <cit> : “a decrease in throughput could have a strong impact on the further steps of the projects, especially the assembly”. also, as reported in  <cit> , with  <dig> - <dig> % bases discarded, the lengths of assemblies decrease by  <dig> - <dig> % for the s. cerevisiae, a. thaliana and o. sativa read libraries.
+
+the low throughput discussed above is because of the following two problems. 
+
+error richness problem: some long read regions are error rich, and it is difficult to align them with sufficient identity to the reference data  for correction, or it is difficult to validate and distinguish the true alignments from many false ones aligning them with lower identity.
+
+
+lack of reference data problem: some long read regions do not have sufficient reference data for correction, due to low read coverage and/or sequencing gaps.
+
+
+
+
+the short read assembly based algorithms could address the error richness problem to some extent by aligning an error rich long read region with relatively low identity requirements, and then validating the candidate alignments and accepting the one that forms a continuous alignment with its adjacent regions’ alignments in the de bruijn graph or contigs. for example, the algorithm from cerulean validates long read regions’ alignments to contigs of small lengths by first aligning their adjacent regions to contigs of large lengths and then accepting the former alignments adjacent to the latter in the contigs; lordec and jabba validate long read regions’ alignments of low identity to the de bruijn graph by referencing their adjacent regions’ alignments of high identity and then accepting the former alignments adjacent to the latter in the de bruijn graph. this validation approach is thus called the adjacent alignment based validation approach. some of the remaining algorithms can also address the error richness problem to an extent by making alignments of several passes with different parameter settings  <cit>  or by aligning one pair of paired-end short reads by referencing the alignments of the other pair  <cit> . however, none of the existing algorithms could address the lack of reference data problem.
+
+to further address the error richness problem and also the lack of reference data problem, in this paper, we propose a novel short read assembly based algorithm called halc: high throughput algorithm for long read error correction. halc uses the contigs assembled from the corresponding short reads to correct the long reads. it aligns the long reads to the contigs with a relatively low identity requirement, so that a long read region could be aligned not only to its true genome region but also to the genome region’s repeats in the contigs for correction. this novel alignment approach can address the lack of reference data problem and is called the similar repeat based alignment approach. it then validates each long read region’s alignments with the adjacent alignment based validation approach and also by referencing other long read regions’ alignments. this novel validation approach can further address the error richness problem and is called the long read support based validation approach.
+
+implementation
+underlining approaches
+below are the details of halc’s two novel approaches, the similar repeat based alignment approach and the long read support based validation approach, as well as the adjacent alignment based validation approach. 
+
+similar repeat based alignment approach : a long read region could be aligned to its similar repeats in the contigs to guarantee that one long read region is aligned to at least one contig region for correction. here, a long read region’s similar repeats are the genome regions of <15% difference to the long read region’s true genome region  <cit> . the similar repeats can be located in the contigs by alignment algorithms with dedicated parameter tunings. by this approach, a long read region of approximately 15% error rate compared to its true genome region can be aligned and converted to its similar repeat of <15% difference from the true genome region. the reduced error rate makes it possible to further refine the long read region with the initial short reads and thus reduce the error rate to <1%. it is worth noting that although the existing error correction algorithms for both second and third generation sequencing technologies try to avoid alignments to repeat regions  <cit> , our observation and experimental results, in contrast, demonstrate the possibility to make use of some of the alignments .
+
+
+long read support based validation approach : the alignments of a long read region and its adjacent regions in the same long read are validated together, and the ones supported by a sufficient number of adjacent regions from the other long reads are accepted. here, the alignments of two adjacent long read regions are supported by another two adjacent long read regions if the latter are aligned to the same contig regions as the former. with this approach, among several aligned contig regions of a long read region, the one corresponding to its true genome region  is accepted after validation. the prerequisite of this approach is that different long reads should be aligned to a unified set of contig regions, and one alignment of a long read region is to one contig region in the set; otherwise, it is difficult to check if two adjacent long read regions are aligned to the same contig regions as another two.
+
+
+adjacent alignment based validation approach : the alignments of a long read region and its adjacent regions in the same long read are validated together, and the ones aligned adjacent to each other in the contigs are accepted. with this approach, among several candidate alignments of a long read region, the one forming the alignment of the highest continuity is accepted after validation.
+
+
+
+fig.  <dig> illustrations of the approaches discussed in the “background” section. the similar repeat based alignment approach, the long read support based validation approach and the adjacent alignment based validation approach are illustrated in ,  and , respectively.  long read region a in r
+ <dig> does not have its true genome region in contig c
+ <dig>  but it could be aligned to its similar repeat b , which is the true genome region of long read region b in contig c
+ <dig>   adjacent long read regions a and b in r
+ <dig> are aligned to contig region a in c
+ <dig> and contig region b in c
+ <dig>  respectively. these alignments are accepted after validation with a sufficient number of long reads r
+ <dig>  r
+ <dig>  r
+ <dig> and r
+ <dig> supporting them.  adjacent long read regions a and b in r
+ <dig> are aligned to the adjacent contig regions a and b in c
+ <dig>  respectively, and are thus accepted after validation
+
+
+
+
+algorithm overview
+the halc algorithm consists of the following five major steps, with the long reads, the short reads from the same species and the contigs assembled from the short reads as input. 
+align the long reads to the contigs with a relatively low identity requirement so that a long read region can be aligned to its true genome region or to similar repeats in the contigs.
+
+split the aligned contig regions and the long read regions so that different long reads are aligned to a unified set of contig regions, and one alignment of a long read region is to one contig region in the set.
+
+construct a contig graph from the long read region alignments so that one long read’s alternative alignments can be represented by different paths, and the alignment with the highest long read support and continuity has the minimum total edge weight. 
+ <dig>  construct a graph representing one aligned contig region as a vertex and representing adjacent long read regions’ alignments to two contig regions as an edge between their vertices.
+
+ <dig>  assign a small weight to the graph edge between two vertices if the long read regions’ alignments are supported by a large number of long read regions, or if the aligned contig regions are adjacent.
+
+
+
+
+for each long read, find the paths representing its alternative alignments in the contig graph, and use the one with the minimum total edge weight to correct it.
+
+refine the similar repeat corrected long read regions with the short reads.
+
+
+
+
+steps  <dig> and  <dig> are based on the similar repeat based alignment approach, step  <dig> guarantees the prerequisite of the long read support based validation approach, and steps 3- <dig> are based on the long read support based validation approach and the adjacent alignment based validation approach. it is worth noting that the halc algorithm does not try to maximize the total identity between a long read and the aligned contig regions because considering the high error rate of the long reads, the long read alignment of the maximum total identity may not be the one to the true genome regions. step  <dig> is sufficient to guarantee the identity between a long read region and the aligned contig region. table  <dig> shows the correspondence between the steps of the algorithm, the approaches the steps are based on, and the problems addressed by the approaches. figure  <dig> illustrates the halc algorithm.
+fig.  <dig> illustration of the halc algorithm. long reads r
+ <dig> to r
+ <dig> are aligned to contigs c
+ <dig> to c
+ <dig> with a relatively low identity requirement based on the similar repeat based alignment approach in , and a contig graph is constructed to validate the alignments and correct the long reads based on the long read support based validation approach and the adjacent alignment based validation approach in .  the long read region r
+ <dig>  is error rich, so it is aligned either to its true genome region in the contigs c
+ <dig> or its similar repeat c
+ <dig> . the reads r
+ <dig>  r
+ <dig> and r
+ <dig> do not have their true genome regions in the contigs and thus are aligned to their similar repeat c
+ <dig> . the aligned contig region c
+ <dig> is split into c
+ <dig> and c
+ <dig>  and the long read regions are split accordingly.  a contig graph is constructed, with vertices a, b, d, e and g representing the aligned contig regions connected by weighted edges. edge   is weighted  <dig>  since the contig regions a and b are adjacent.  and  are weighted  <dig>  since sufficient adjacent long read regions are aligned to contig regions b and g and g and d, respectively. as a result, a path of the minimum total edge weight to correct all the long reads is found containing vertices a, b, g and d. the reads r
+ <dig>  r
+ <dig> and r
+ <dig> are corrected using their similar repeats and can be refined with the initial short reads
+
+
+
+
+
+long read alignment to contigs
+in this step, we align the long reads to the contigs with blasr  <cit>  because  it is specifically designed for long read alignment tolerating large numbers of insertions and deletions, and  in our experience, the halc algorithm showed better performance with blasr than with several other aligners such as blast  <cit> , blat  <cit>  and mummer  <cit> . the parameter settings of blasr are -bestn  <dig> -minmatch  <dig> -ncandidates  <dig> -maxscore  <dig> -minalnlength  <dig>  with a trade-off between alignment sensitivity and accuracy so that the long read regions are aligned either to their true genome regions or to similar repeats in the contigs. to further improve the alignment sensitivity, we use scaffolds rather than contigs as input because scaffolds contain additional information about contig orientations and orders, and this information could help guide blasr alignment. for simplicity, we continue using the term contigs rather than scaffolds in the following discussion.
+
+splitting of contig and long read regions
+we split the aligned contig regions and the long read regions following the two rules below. in these two rules, an aligned contig region or long read region is denoted by its starting and ending positions in the underlining genome. for example, an aligned contig region c starting at genome position x and ending at y is denoted as c. 
+two aligned contig regions c and c of the same contig are split into three contig regions c, c and c, if x<x
+′<y<y
+′.
+
+two long read regions r and r are split into three long read regions r, r and r, if r is aligned to contig regions c and c, and r is aligned to contig regions c and c.
+
+
+
+
+these rules are for the general case that two aligned contig regions intersect, while small adjustment can be made to accommodate the case in which one contig region is contained in the other. in practice, long read regions from the same genome region usually contain many differences, so the boundaries of their alignments may be close but different. therefore, we consider two aligned contig regions c and c  and r) as the same contig region  without further splitting them if |x−x
+′|<δ and |y−y
+′|<δ, where δ is a small deviation value. the halc software provides an option -boundary to set this value .
+
+graph construction
+we construct a contig graph with each vertex per aligned contig region and each edge between two vertices if there is at least one pair of adjacent long read regions aligned to the two contig regions. in most of the cases, different pairs of adjacent long read regions can be aligned to the same two contig regions in the same orientation. more accurately, however, different pairs of adjacent long read regions can be aligned to the same two contig regions in four orientations: forward-forward, forward-reverse, reverse-forward, and reverse-reverse. the contig graph should thus have two vertices for one aligned contig region to represent both the forward and reverse alignments and four edges between the vertices for two aligned contig regions. therefore, the halc software provides an option –accurate to enable considering the different orientations .
+
+graph weighting
+we weight each edge between two vertices in the graph following the two rules below. the first rule guarantees  <dig> weight for the edges corresponding to the long read regions’ alignments to adjacent contig regions, and the second rule guarantees small weights for the edges corresponding to the long read regions’ alignments supported by a large number of long read regions. 
+if the aligned contig regions of the vertices are adjacent to each other in the initial contig, assign a weight of  <dig> to the edge.
+
+if the aligned contig regions are far from each other, assign a weight of m
+a
+x{c
+0−c,0} to the edge, where c
+ <dig> is the expected long read coverage on the contigs, and c is the number of adjacent long read regions aligned to the two contig regions.
+
+
+
+
+the expected long read coverage c
+ <dig> on the contigs can be calculated automatically by checking the average number of long reads covering a contig base, but the halc software also provides an option -coverage for manual input.
+
+long read correction
+for each long read, we find the paths representing its alternative alignments in the contig graph and use the one with the minimum total edge weight to correct it. to calculate and compare the total edge weight from one vertex representing the first long read region’s aligned contig region to one vertex representing the last long read region’s aligned contig region, dynamic programming is used with the following function: 
+  <dig> t=minj{t+wjk} 
+
+
+here, t is the minimum total edge weight from one vertex representing the first long read region’s aligned contig region to the vertex representing the ith long read region’s jth aligned contig region; t is the minimum total edge weight from one vertex representing the first long read region’s aligned contig region to the vertex representing the ith long read region’s jth aligned contig region, and then to the vertex representing the th long read region’s kth aligned contig region; w
+jk is the edge weight between the vertex representing the ith long read region’s jth aligned contig region and the vertex representing the th long read region’s kth aligned contig region. after the path is found, the long read is compared to the list of aligned contig regions in the path and corrected. adjacent long read regions corrected with distant contig regions are likely to be the ones corrected with similar repeats, so they are recorded for refinement in the next step. there are two things to note in this step.  the shortest path algorithms  cannot be used to find the path with the minimum total edge weight for a long read because the minimum total edge weight requirement is restricted to the paths representing the long read’s alternative alignments.  if there is more than one path with the same minimum total edge weight, the alignment identity is used to break the tie.
+
+refinement
+we further correct the similar repeat corrected long read regions recorded in the previous step by calling an existing error correction algorithm, lordec. the k-mer size of lordec is set to  <dig>  for a trade-off between error correction sensitivity and accuracy. we use lordec rather than implementing the function ourselves because lordec is efficient and accurate in achieving the function  <cit> . this step can be skipped if very few similar repeats are used to perform error correction. therefore, halc provides two modes: an ordinary mode and a repeat-free mode . in the repeat-free mode, halc skips this step by filtering very small alignments  in the graph construction step above and avoiding the use of similar repeats for error correction.
+
+software implementation
+halc is implemented in c++ for linux operating systems. its input includes the long reads, the short read contigs and the initial short reads, and it outputs the error corrected  full long reads,  trimmed long reads that do not contain the uncorrected regions in read heads and tails, and  split long reads that do not contain the uncorrected regions and very short corrected regions .
+
+RESULTS
+experimental design
+to evaluate the performance of halc, we ran halc on three data sets from the species, e. coli, a. thaliana and maylandia zebra, of small, medium and large genome sizes, respectively . the coverage of the long read sets was 11-39x, while the coverage of the short read sets was 35-51x, as halc is suitable for short and long read hybrid projects, and these levels are the common coverage requirements for this class of projects. soapdenovo <dig>  <cit>  was used to assemble the short reads into contigs. this choice was based on the gage evaluation of different assemblers on variable data sets  <cit> : soapdenovo <dig> and allpaths-lg  <cit>  are among the fastest and most accurate short read assemblers on variable data sets, but the latter’s hard requirement for the mate pair library is usually too stringent for sequencing projects with long reads. for comparison, we also ran pacbiotoca, lsc, proovread, colormap, ectools, lordec and jabba on the three data sets. the same set of contigs generated by soapdenovo <dig> was used for ectools. cerulean was not run because it does not directly output the error corrected long reads. dagcon, pacbiotoca in self-correction mode and the algorithms from falcon and sprai were not compared because they are all for long read alone sequencing projects. we measured the correction completeness and accuracy of the compared algorithms by aligning the error corrected and initial long reads to their corresponding genomes .
+
+furthermore, to see the effect of error correction upon the final assemblies with both short and long reads, we assembled the short read contigs and the long reads with or without error correction together using the spades assembler, which is fast and accurate for long sequence assemblies  <cit> . we also measured the completeness and accuracy of the obtained contigs by aligning them to the corresponding genomes . it is worth noting that the main purpose of this paper is not to compare assembly performance downstream of error correction algorithms, so this test is greatly simplified.
+
+in addition, to see halc’s performance on transcriptomic data, we also compared halc with the existing algorithms on a transcriptomic data set from s. cerevisiae and made measurements by aligning the error corrected and initial long reads to the corresponding transcriptome . trinity was used to assemble the transcriptomic short reads, also because of its good performance  <cit> .
+
+finally, we tested halc by varying the short read assemblers on the e. coli data set and the s. cerevisiae data set. for the former data set, we also assembled the short reads using other typical assemblers, velvet  <cit>  and abyss  <cit> , and for the latter, we also assembled the short reads by other typical transcriptome assemblers, oases  <cit>  and trans-abyss  <cit> . we then ran halc with the assemblies and performed the same measurements as above.
+
+all of the software or algorithms above were used with the default settings. only the corrected split long reads were compared and assembled in these tests, so the results could not be affected by the uncorrected bases. the split long reads for lsc were obtained by filtering bases with short read coverage ≤ <dig> 
+
+data sets and computing environment
+the long reads of e. coli, a. thaliana, maylandia zebra and s. cerevisiae were from the pacbio devnet site, ncbi accession srx <dig>  ncbi accession srx <dig>  and ncbi accessions srr <dig> and srr <dig>  respectively. the corresponding short reads were from ncbi accession err <dig>  ncbi accession err <dig>  ncbi accession srx <dig>  and ncbi accession srr <dig>  respectively. the genomes of e. coli and a. thaliana were from ncbi accession nc_ <dig> and the tair ftp site, respectively. the genome of maylandia zebra was not available, so the recently improved scaffolds were downloaded from ncbi accession gcf_ <dig>  to approximate the genome  <cit> . the transcriptome of s. cerevisiae was from the ensembl ftp site. details of the data sets are listed in additional file 1: table s <dig>  all experiments were performed in a computing node of a computer cluster with  <dig> cores of  <dig>  ghz and  <dig> gb memory, and the numbers of processes and threads allocated for the algorithms are listed in additional file 1: table s <dig> 
+
+performance measurements
+we aligned the genomic long reads to the corresponding genomes to evaluate their quality. the bwa-mem aligner was used for these alignments because it is a typical aligner for genomic sequences with fast speed and high sensitivity  <cit> . we made the following measurements:  throughput  is the number of corrected and outputted bases over the total number of initial long read bases ;  alignment ratio is the number of aligned bases over the total number of outputted bases;  alignment identity is the identity of the aligned bases;  genome fraction is the number of genome bases covered by the long reads over the total number of genome bases;  number of reads;  average read length.
+
+referencing the error correction evaluation toolkit for short reads  <cit>  and for full long reads  <cit> , we also implemented a version for the split long reads and obtained, in the outputted bases, the number of corrected errors , the number of falsely converted correct bases , the number of uncorrected errors , and the number of unconverted correct bases . with these numbers, due to the errors’ uniform distribution in the long reads, we can estimate the total number of errors in the initial long reads as the number of errors in the outputted bases over the throughput, i.e. ei=tp+fnth. we can also estimate the total number of correct bases in the initial long reads as the number of correct bases in the outputted bases over the throughput, i.e. ci=tn+fpth, and thus the number of correct bases in the discarded bases as the total number of correct bases in the initial long reads minus the number of correct bases in the outputted bases, i.e. c
+d=c
+i−. therefore, we made the following measurements:  sensitivity is calculated as tpei;  specificity is calculated as tn+cdci;  gain is the number of errors effectively corrected without introducing new ones over the total number of errors in the initial long reads, calculated as tp−fpei. it is worth noting that our error correction evaluation toolkit requires the correspondence information between a split long read and its initial long read, so it does not work for pacbiotoca, which does not provide this information in the output.
+
+in addition, we aligned the contigs assembled with the long reads to the corresponding genomes to evaluate the impact of error correction on the final assemblies. following  <cit>  and using the quast toolkit  <cit> , we split a contig into two subcontigs if the subcontigs were aligned at least 1k bp apart indicating a misassembly, and then we made the following measurements:  number of contigs is the number of initial contigs without splitting;  n <dig> is the split contig size at 50% of the total number of contig bases;  largest contig length is the largest length of split contigs;  number of covered bases is the number of genome bases covered by the split contigs;  epkb is the number of errors  per 100k bp in the initial contigs.
+
+in the transcriptomic data set, we aligned long reads to the corresponding transcriptome to evaluate their quality. the blat aligner was used to make these alignments because it is a typical aligner for transcriptomic sequences with high sensitivity  <cit> . we obtained the measurements - above as well as the following measurement:  transcriptome fraction is the number of transcriptome bases covered by the long reads over the total number of transcriptome bases.
+
+results on error correction performance
+the performance test results on the e. coli data set are listed in table  <dig>  a total of  <dig> % bases of the initial long reads can be aligned to the corresponding genome with  <dig> % identity, indicating a high error rate in the uncorrected long reads. the existing error correction algorithms pacbiotoca, lsc, proovread, ectools and lordec can correct and output  <dig> - <dig> % of the bases. halc can obtain  <dig> – <dig> % higher throughput than pacbiotoca, lsc, proovread and ectools and is comparable  to lordec. the alignment ratio, alignment identity and genome fraction of all the algorithms are almost 100% and thus comparable. except for pacbiotoca and lsc, the average read length of all the algorithms is inversely proportional to the throughput because more but shorter reads can be obtained with higher throughput. the sensitivity and gain of all the algorithms are proportional to the throughput, while the specificity remains comparable.
+
+ long reads of e. coli
+pacbiotocaa
+
+ long reads of a. thaliana
+pacbiotocaa
+
+ long reads of maylandia zebra
+the long reads of tests - are from e.coli, a. thaliana and maylandia zebra, respectively. the initial and error corrected long reads by pacbiotoca, lsc, proovread, colormap, ectools, lordec, jabba and halc are compared in the tests. the performance measurements are listed in the “performance measurements” section.
+
+
+asome measurements are not available without the correspondence information between a split long read and its initial long read
+
+
+
+
+the performance test results for the a. thaliana data set are listed in table  <dig>  halc can obtain  <dig> - <dig> % higher throughput than all the existing algorithms. the performance test results on the maylandia zebra data set are listed in table  <dig>  halc can obtain  <dig> % higher throughput than lordec. in both tests, the alignment ratio, alignment identity, genome fraction, sensitivity, gain and specificity of halc are comparable to or higher than the existing algorithms, and the average read length of halc is moderate. the results of pabiotoca, lsc, proovread, colormap, ectools and jabba are not shown in table  <dig> because of their very long running time.
+
+the test results in this section indicate that halc is efficient in correcting and outputting more bases in the initial long reads than the existing algorithms while maintaining sufficient accuracy.
+
+results on long read assemblies
+the assembly results for the error corrected a. thaliana long reads are listed in table  <dig>  the number of assembled contigs with halc corrected long reads is  <dig> - <dig> % smaller than with most of the existing algorithms, and the n <dig> value, the largest contig length and the number of covered bases with halc corrected long reads are  <dig> - <dig> ,  <dig> - <dig>  and  <dig> - <dig> % larger than with most of the existing algorithms, respectively. the epkb value with halc corrected long reads is  <dig> - <dig> % smaller than with most of the existing algorithms. generally, the assembly quality is proportional to the throughput of the algorithms, except for ectools, with much larger read lengths, and lsc and lordec, with relatively smaller read lengths. the assembly results for the error corrected maylandia zebra long reads are listed in table  <dig>  even though the number of assembled contigs with halc corrected long reads is  <dig> % larger than with lordec, the n <dig> value, the largest contig length and the number of covered bases with halc are  <dig> ,  <dig>  and  <dig> % larger than with lordec, respectively. the epkb value with halc corrected long reads is  <dig> % smaller than with lordec. the results with the initial uncorrected long reads are not shown because of the limited assembly quality. the assembly results with the e. coli long reads are not shown because almost perfect contigs were obtained with the variable long reads, and there is not much difference. these results indicate that halc corrected long reads can result in more complete assemblies than the existing algorithms with sufficient accuracy.
+
+ contigs of a. thaliana
+
+ contigs of maylandia zebra
+the contigs of tests - are for a. thaliana and maylandia zebra, respectively. the contigs assembled from the error corrected long reads by pacbiotoca, lsc, proovread, colormap, ectools, lordec, jabba and halc are compared in the tests. the performance measurements are listed in the “performance measurements” section
+
+
+
+
+results on transcriptome data
+for the transcriptome data, the performance test results on the s. cerevisiae data set are listed in table  <dig>  a total of  <dig> % bases of the initial long reads can be aligned to the corresponding transcriptome with  <dig> % identity, indicating a high error rate in the uncorrected long reads. the existing error correction algorithms lsc, colormap, lordec and jabba can obtain  <dig> - <dig> % throughput,  <dig> - <dig> % alignment ratio,  <dig> - <dig> % alignment identity and  <dig> - <dig> % transcriptome fraction. halc can obtain  <dig> - <dig> % higher throughput,  <dig> - <dig> % higher alignment ratio, and  <dig> - <dig> % higher transcriptome fraction than all the existing algorithms with comparable alignment identity. the results of the pacbiotoca, proovread and ectools are not shown in table  <dig> because of their limited performance. it is worth noting that even though some algorithms, such as proovread, can achieve much better performance by using tailor-made parameters  <cit> , we did not use this procedure to allow a fair comparison. the test results in this section indicate that halc is also efficient in correcting transcriptome data.
+
+the initial and the error corrected long reads by lsc, colormap, lordec, jabba and halc are compared. the performance measurements are listed in the “performance measurements” section
+
+
+
+
+results with various short read assemblers
+with various short read assemblers, halc exhibits stable results on the e. coli and the s. cerevisiae data sets, and the difference for all the measurements is below 5% . this result indicates that halc is not very dependent on the upstream short read assemblers and can be used together with various assemblers and for different data types.
+
+running time and memory usage
+the running time of halc on the e. coli, a. thaliana, maylandia zebra and s. cerevisiae data sets is  <dig> h,  <dig> h,  <dig> h and  <dig> h, respectively. the memory usage is  <dig> gb,  <dig> gb,  <dig> gb and  <dig> gb, respectively, including the running time and memory usage for short read assemblies by soapdenovo <dig>  compared to the existing algorithms, halc’s running time is much shorter than for pacbiotoca, lsc, proovread and ectools and is comparable to or greater than the running time for lordec. jabba’s running time is dependent on the genome sizes. comparatively, halc’s running time is much smaller on the maylandia zebra data set of large genome size and is larger on the other data sets of small and medium genome sizes. details of the running time and memory usage are listed in additional file 1: table s <dig>  these results indicate that although the main purpose of halc is to guarantee sufficiently high throughput, it is efficient in running time with acceptable memory usage and can thus scale well for variable project sizes.
+
+discussion
+the most important concern regarding the halc algorithm is whether the similar repeat based alignment approach introduces false corrections. in theory, false corrections are possible because after a long region is corrected with its similar repeat, it might be refined with the short reads from the similar repeat instead of the ones from the true genome region. however, this problem is not frequent because the refinement algorithm lordec aligns short reads to a long read region by considering not only the long read region’s identity but also its adjacent regions in the same long read.
+
+experimentally, if a similar repeat corrected long read region is a false correction not further refined with the short reads from the true genome region, it will be aligned to its similar repeat in the corresponding genome instead of its true genome region. in other words, it will be aligned to a genome region included in the short read contigs instead of the genome region not included in the contigs. therefore, we refer to the short read contigs to check for false corrections. we aligned both the halc corrected long reads and the short read contigs to the genomes on the e. coli, a. thaliana and maylandia zebra data sets used above and calculated the percentage of genome bases not covered by the contigs and the percentage of long read bases aligned to these genome bases. a much larger value of the former than the latter would indicate that many long read regions are aligned to their similar repeats instead of the true genome regions and are thus false corrections. for the e. coli data set, the two values are  <dig>  and  <dig> %; for the a. thaliana data set, the two values are  <dig>  and  <dig> %; for the maylandia zebra data set, the two values are  <dig>  and  <dig> %, all comparable. this result indicates limited false corrections by halc. furthermore, since many similar repeat corrected long read regions are not false corrections and are aligned to the genome regions not included in the contigs, we calculated the identity between the genome bases not covered by the contigs and the long read bases aligned to these bases to see the accuracy of the similar repeat corrected long read regions. the identity values are  <dig> ,  <dig>  and  <dig> % for the three data sets, respectively. this result indicates high accuracy of the similar repeat corrected long read regions.
+
+in addition, we also refer to the error corrected long reads produced by the existing algorithms to check for false corrections. we aligned the error corrected long reads by various algorithms to the genomes on all three data sets and calculated the percentage of genome bases above the various long read coverages. a much smaller percentage of genome bases above the small long read coverages for halc than the existing algorithms, or a much larger percentage of genome bases above the large long read coverages for halc, would indicate that many long read regions are aligned to their similar repeats instead of the true genome regions and are thus false corrections. the plot for the e. coli data set is shown in fig.  <dig>  and the curve of halc exhibits a similar switch to the existing algorithms from high coverage to low at  <dig> ×. the plots of the a. thaliana and the maylandia zebra data sets are also available in additional file 1: figures s <dig> and s <dig>  respectively, and similar results can be observed. this result also indicates limited false corrections by halc. indeed, the amount of errors contained in the long read assemblies with halc is another reflection of the false corrections. table  <dig> shows that the epkb values with halc are smaller or comparable to the ones with most of the existing algorithms, also indicating limited false corrections by halc .
+fig.  <dig> percentage of genome covered above various long read coverages on the e. coli data. the percentage of genome bases  is plotted with long read coverage from  <dig> × to  <dig> × , corresponding to the error correction results of different algorithms in table 2
+
+
+
+
+CONCLUSIONS
+this study introduces halc, a high throughput algorithm for pacbio long read error correction. with the similar repeat based alignment approach, the long read regions without true genome regions in the contigs can be aligned; with the long read support based approach, the long read regions’ alignments with the highest long read support and continuity can get accepted. hence, more long read bases can be corrected with accuracy. the experimental results indicate that halc can correct more bases in the long reads than the existing error correction algorithms while achieving comparable or higher accuracy. as a result, halc can help to obtain more complete assemblies by providing the error corrected long reads.
+
+availability and requirements
+
+project name: halc
+
+
+project home page:
+https://github.com/lanl001/halc
+
+
+
+operating system: linux
+
+
+programming language: c++
+
+
+other requirements: blasr and lordec
+
+
+license: artistic license  <dig> 
+
+
+pacbio devnet site:
+https://github.com/pacificbiosciences/devnet/wiki/e.-coli-bacterial-assembly
+
+
+additional file
+
+additional file  <dig> 
+figure s <dig>  percentage of genome above various long read coverages on the a. thaliana data. figure s <dig>  percentage of genome above various long read coverages on the maylandia zebra data. table s <dig>  data sets used in the evaluation. table s <dig>  running time and memory usage in the evaluation of error correction performance. 
+
+
+
+
+abbreviations
+cinumber of correct bases in the initial long reads
+
+cdnumber of correct bases in the discarded bases
+
+einumber of errors in the initial long reads
+
+epkbnumber of errors per 100k bp in the initial contigs
+
+fnfalse negative
+
+fpfalse positive
+
+ththroughput
+
+tntrue negative
+
+tptrue positive
+
+ergude bao and lingxiao lan are joint first authors.
+

@@ -1,0 +1,210 @@
+BACKGROUND
+next-generation dna sequencing is a powerful tool in biological research
+ <cit>  and is steadily gaining momentum as costs keep decreasing. applications vary from genome re-sequencing
+ <cit>  to transcriptome analysis
+ <cit> , metagenomics projects
+ <cit> , and sequencing of ancient genomes
+ <cit> . all these applications rely on mapping reads to existing reference genomes. many mapping programs have been developed using a variety of algorithms with different strengths, weaknesses and limitations
+ <cit> .
+
+hash-based algorithms such as maq
+ <cit>  and soap
+ <cit>  dominated initially but were hampered by large memory demands. subsequently, the burrows-wheeler transform
+ <cit>  was applied to compress the genome index in programs such as bowtie
+ <cit> , bowtie2
+ <cit> , soap2
+ <cit> , and bwa
+ <cit> . this decreased the memory usage while increasing speed and sensitivity, leading to mappers based on the burrows-wheeler transform to now dominate the field. other approaches, however, show promising results for some types of data. segemehl
+ <cit>  uses an enhanced-suffix array to provide fast alignment of insertion/deletion  prone reads, and a similar approach was implemented in the mapping tool used in the sequencing of the first ancient human genome
+ <cit> . programs such as cushaw
+ <cit>  and soap3
+ <cit>  have begun to use graphics processing units  to provide even faster mapping.
+
+most programs allow a specified number of mismatches in an alignment , and report uniquely mapped reads as those where all other locations have more mismatches. however, evaluating a mapping location by the number of nucleotide mismatches alone is not optimal and implicitly assumes that the genome has a homogeneous base composition and that errors occur uniformly in the reads. the mapping with the lowest number of mismatches may have a high probability of being incorrect if i) there are many sub-optimal mappings, ii) the genome has a very biased base composition, iii) certain nucleotide mismatches are expected due to sample conditions, or iv) the mismatching bases have low error-probabilities compared to other bases.
+
+most sequencing platforms provide a quality score for each base derived from the probability that the nucleotide is wrongly assigned in the base-calling. with the illumina platform, the error probabilities typically range from around  <dig> % in the 5’ end of the read to several percent in the 3’ end, but the actual dna sequence can affect the read quality
+ <cit> . these qualities can affect not only the ability of a mapper to find the correct hit, but also the quality of the reported hit. while the latest generation of mappers such as masai
+ <cit>  and gem
+ <cit>  either do not take quality scores into account or only consider them in a rudimentary manner, they also report all possible alignments and do not provide a mapping quality to distinguish between a high confidence alignment and a low confidence one. we demonstrate that taking quality scores and other information about the biases in the experimental data into account can improve the sensitivity while providing an accurate mapping quality estimation. recently, the use of position-specific scoring matrices  has been applied to the short read mapping problem and shown to provide accurate snp and indel calling
+ <cit> .
+
+here we show how quality scores, contamination, biases in base composition, mutations, and data-specific base-changes  can all be dealt with probabilistically and encoded in a pssm. we also present an algorithm which applies the burrows-wheeler transform to the scoring of pssms, and bwa-pssm, a fast and sensitive mapping tool which implements the methods.
+
+we show that the use of probabilistic scoring allows for both higher sensitivity and positive predictive value when mapping simulated reads. more importantly, we offer the ability to use a specified error model to map reads based on the expected types and locations of mismatches. this improves the mapping of ancient dna data with errors due to damage, and the improvement is even more pronounced when mapping par-clip data, where there is a strong bias towards t-to-c substitutions
+ <cit> , as well as data from p. falciparum which has an extreme nucleotide bias with more than 80% at content
+ <cit> . we also show that the probabilistic scoring can help in cases of contamination by dramatically reducing the mapping of short reads from e. coli to the human genome.
+
+RESULTS
+when mapping reads, one is interested in the probability that the read originated from a specific location in the genome. the read and the genome might not be completely identical due to e.g. sequencing errors or snps.
+
+a position-specific scoring matrix from quality scores
+most sequencing machines provide a quality score for each base which is related to the probability of a sequencing error occurring at this position in the read. these qualities are normally in the phred format
+ <cit>  and relate the error probability pe and the quality score q by pe = 10-q/ <dig>  from these qualities, we can calculate the probability p for the base a ∈ {a,c,g,t} being present at a given position in the dna fragment given that the base x ∈ {a,c,g,t} was called by the sequencing machine .
+
+if the dna being sequenced differs from the reference genome, e.g. due to evolution, there is a probability p that base g occurs in the genome if the base is a in the sample. we use a simple model with a probability p <dig> for a mutation .
+
+combining this with the probability of errors, the probability of a base g in the genome given the called base x is
+
+  p=∑app. 
+
+in some types of data, known base modifications are known to occur. for instance, in ancient dna some bases are damaged due to hydrolysis, resulting in cytosine to thymine  conversions in the 5’ ends of reads, which can look like apparent guanine to adenine  substitutions in the 3’ end, and in par-clip experiments there is a large fraction of thymine to cytosine  conversions where the protein crosslinks to the rna. these phenomena are easily modeled and included in the pssm, essentially by introducing a probability p that the observed base is b, given that the base is a in the sample .
+
+using this approach, one can turn a short read into a pssm and use it for mapping the read to the genome. the pssm is constructed such that at position i in the read, the score for base g is s = log2/q), where p is the probability of a genomic base g given the i’th base xi in the read calculated as described above in equation  <dig>  and q is a background probability, which is usually just the frequency of the base in the genome. the score for matching a read x to a certain position ℓ in the genome is sx, and is obtained by summing the scores from the pssm corresponding to the genome sequence starting at position l.
+
+bwa-pssm is very flexible when it comes to how you feed the pssm to the program. in the present implementation, the pssm can be constructed from the quality scores supplied with the sequence, using a background distribution calculated from the frequencies of bases in the reference genome and a mutation rate . alternatively, the user can supply a table with a direct translation of base and quality score pairs to pssm scores. such a table can be computed ahead of time to include for instance a more sophisticated evolutionary model or a par-clip model. finally the user can input a fully constructed pssm and use it for mapping.
+
+mapping probability
+the advantage of the pssm is that the probability of a match can be calculated directly
+ <cit> . there is a probability that a read x originates from – or is homologous to – a position ℓ in a genome g, p, where m means the "match model". alternatively, the background model n is used if the read does not originate from the genome due to e.g. contamination or adapter sequences. a priori, we may be able to estimate the probability p of a read being contamination, and obviously p = 1 - p.
+
+using the sum and product rule we can express the match probability at position ℓ as
+
+ p=ppppp+pp. 
+
+assuming that any mapping position is equally likely a priori we have p = 1/l, where l is the length of the genome.
+
+in the background model n we assume independently identically distributed  bases.
+
+in the match model m, the probability of the aligned bases in g is calculated from the pssm and the remaining bases are assumed to be distributed as in the background model; this means that
+
+p/p=2sx, where sx is the pssm score. it is possible, of course, to have more sophisticated background models of those sequences that do not originate from the genome, such as a markov model, but this will not be considered here.
+
+using the identity
+p=∑ℓ′pp, where ℓ′ runs over all positions in the genome, we can finally write the posterior probability of the read x mapping to position ℓ in the genome as
+
+  p=2sx∑ℓ′2sx+l)/p. 
+
+the first term in the denominator is the sum over all possible genomic positions. this is impractical to calculate, but since only positions with some similarity to the query yield a significant contribution, it is well approximated by a sum over high-scoring mappings. the second term in the denominator is proportional to the genome size and reflects the fact that the larger the genome, the more likely it is to have a random hit.
+
+in the bwa-pssm implementation we assume the same prior match probability for all reads, p = p, which can be specified as a parameter with a default value of  <dig>  which is used for all experiments in this paper. to simplify the presentation we assumed no indels in the alignment of the read and the genome, see additional file
+ <dig> for the derivation of equation  and methods for details on handling indels.
+
+algorithm and implementation
+pssm search is implemented in the bwa program
+ <cit>  as a separate version called bwa-pssm, which can be used instead of the regular bwa alignment step . here we describe the main algorithmic changes as compared to standard bwa.
+
+using a pssm, a score can be calculated for each position in the reference genome, where high scores indicate hits. using a burrows-wheeler transformed index, this operation can be sped up by evaluating scores on the prefix tree of the index. at any given point in the search, the position within the scoring matrix corresponds to the current depth of the prefix tree. scores are calculated by summing the position-specific score at each node along a path.
+
+to bound the number of positions in the genome that must be evaluated, a threshold score is used which replaces the maximum number of mismatches used in standard bwa. to calculate an overall score threshold for a read, we rely on converting a limit on the number of mismatches n into the minimum possible score with n mismatches. that is, we allow n mismatches of bases with high quality and more than n mismatches of low-quality bases.
+
+to further prune the search space, lookahead scoring can be used, in which the threshold is calculated for each position in the pssm as the difference between the threshold and the best possible score of the remaining pssm
+ <cit> . this is implemented in bwa-pssm , but using an improved bound. this is done by adapting the method  employed by bwa to consider what the minimum number of mismatches must be for that subsequence to align to some region of the genome. our algorithm, called calculatet , instead calculates the difference between the best possible pssm score with no mismatches and the best possible score with the minimum number of necessary mismatches. this difference is calculated at each position and added to the lookahead-derived intermediate thresholds. this has the effect of requiring a higher match score at each position and thus further bounding the search tree. this allows for faster and more accurate mapping of sequences with many low quality bases as more likely paths  will tend to be visited first.
+
+algorithm  <dig> the recursive bwa-pssm search algorithm. the pssm is denoted a and the pssm thresholds at each positioni are stored in t. a score, s, is maintained for every partial match and the indices into the burrows-wheeler transformed sequence are stored in k and l. in the algorithm o denotes the number of occurrences of the base b in the l’th prefix of the burrows-wheeler transformed reference sequence, and c is the number of occurrences of bases that are lexicographically smaller than b in the reference sequence. insertions and deletions are assigned penalties ρi and ρd, respectively. the algorithm is initiated with the values pssmsearch, wheret is calculated from the sequence x using the algorithm calculatet and |g| denotes the size of the reference sequence.  
+
+algorithm  <dig> calculation of intermediate thresholds. the algorithm calculates intermediate thresholds for pssm a, read sequence x, genomic reference sequence g given the global threshold t. xj:i is the subsequence from j to i of the read, and t stores the difference between the best and second best pssm score that can be obtained for the subsequence. the mindrop function simply calculates the minimum of the differences between the highest and lowest scores for columns i to j in the pssm, while the function summax calculates the sum of the maximal values in column  <dig> to column i -  <dig> in the pssm.  
+
+while bwa uses the maq mapping quality score , bwa-pssm reports the posterior probability given in equation , but estimating the sum in the denominator from the matches above the threshold. in keeping with the maq tradition, this probability is also log scaled, rounded to an integer and reported as the mapq score in the output, that is
+mq=⌊-10log10)+12⌋.
+
+comparing methods on simulated reads
+the performance of bwa-pssm was compared to bwa
+ <cit> , bwa-mem
+ <cit> , bowtie
+ <cit> , bowtie2
+ <cit>  and gem
+ <cit>  on a number of simulated datasets modelling different types of short reads. the results are summarized in tables
+ <dig> 
+ <dig> and
+ <dig> and figures
+ <dig> and
+ <dig>  and details are given below. each program, except bowtie, reports a mapping quality , and the mapping performance clearly depends on which threshold is used for this. we report the unfiltered results, for which we use no mapq threshold, and the filtered results, for which all matches with a mapq of less than  <dig> are discarded. the sensitivity reported is the number of correctly mapped reads divided by the total number of reads. the ppv  is the number of correctly mapped reads divided by the number of reported matches. the elapsed user time is reported when running each program on an intel xeon e <dig>  <dig> ghz cpu.
+
+comparison of sensitivity, positive predictive value  and run time using bwa-pssm, bwa, bwa-mem, bowtie, bowtie <dig> and gem on simulated data sets covering a random 1% of the human genome. the reads were simulated using the art_illumina
+ <cit>  program with the default error profile for the given read length. the symbol ’*’ indicates that the mapper does not provide mapq scores.
+
+comparison of sensitivity, positive predictive value  and run time using bwa-pssm, bwa, bwa-mem, bowtie, bowtie <dig> and gem on simulated data sets covering a random 1% of the human genome. the reads were simulated using the art_illumina
+ <cit>  program with the default error profile for the given read length. the insert sizes in the paired-end data were simulated using a mean length of  <dig> and a standard deviation of  <dig>  the symbol ’*’ indicates that the mapper does not provide mapq scores.
+
+comparison of sensitivity, positive predictive value  and run time using bwa-pssm, bwa, bwa-mem, bowtie, bowtie <dig> and gem on data sets simulated using the art_illumina
+ <cit>  program with the default error profile for the given read length. the par-clip and ancient dna data sets cover a random 1% of the human genome, while the p. falciparum data set covers  <dig> % of the p. falciparum genome corresponding to  <dig>  reads. the data simulated for the par-clip and ancient dna data was further mutated to simulate the bias introduced by the experiment and natural degradation . the symbol ’*’ indicates that the mapper does not provide mapq scores.
+ <dig> and
+ <dig>  bowtie and gem are excluded as they do not provide mapq scores.
+ <dig>  bowtie and gem are excluded as they do not provide mapq scores.
+
+unbiased reads
+to test the baseline performance of bwa-pssm, we simulated reads using three different simulation programs. the first, art
+ <cit>  simulates reads using an error profile particular to the sequencing technology being simulated . the second, wg-sim
+ <cit> , simulates reads with a uniform error probability. the third, mason
+ <cit> , uses variable, position dependent qualities drawn from normal distributions with a specified mean and standard deviation for the start and end position. art generated the lowest quality reads, followed by mason, followed by the high quality wg-sim simulated reads.
+
+as expected, bwa-pssm performs best on the low-quality data set  and slightly worse on the high quality reads . it performs comparatively better on the shorter reads than on the longer. this is likely explained by the fact that we limit the size of the heap  and thus miss more hits simply because we discard a proportionally larger portion of the search space for the longer reads. filtering according to mapping quality improves the ppv and reduces the sensitivity.
+
+the performance of bwa-pssm really stands out when considering high quality alignments  of art-simulated reads . bwa-pssm achieves the greatest sensitivity of the tested aligners which all have a ppv greater than 99%. for reads of length  <dig> and  <dig>  bwa-pssm performs better across all quality values, whereas for the longer reads bwa-mem reports more lower quality mappings . when ignoring the quality of the resulting mappings, bowtie returns more results with the caveat that they are more likely to be incorrect. the running time among the aligners varies within an order of magnitude with bowtie consistently being the fastest while the slowest depended on the length and quality of the reads.
+ <dig>  bowtie and gem are excluded as they do not provide mapq scores.
+
+for the longer higher quality reads, the performance of bwa-pssm lags slightly behind the other aligners for all ppv values . these results are not unexpected as using quality values which are largely irrelevant should not improve the performance. furthermore, some of the trade-offs employed to improve the performance for low-quality and biased reads impede the performance for high quality data. while disadvantageous, this is not the targeted type of data for which this approach was designed and the other aligners already serve this niche adequately.
+
+gem reports all the potential hits found and classifies them according to the edit distance from the genome. while this approach leads to a greater overall sensitivity, it also makes it difficult to assign a confidence value to a particular alignment. the strength of this mapper lies in aligning long insertion/deletion prone reads, two qualities which are conspicuously absent from the presented benchmark data sets. as such, the performance of gem is presented in the data tables simply as a point of a comparison for this different class of read mappers.
+
+for paired-end data , the situation is similar but more pronounced. low quality reads are readily aligned with high accuracy by bwa-pssm whereas high quality reads present a greater challenge. due to the use of  default parameters for each aligner, bwa performs extremely poorly on the longer low quality reads. the situation is somewhat reversed for the high quality reads where bwa-pssm finds slightly less hits in a longer amount of time than bowtie <dig> and bwa. the results presented, of course, depend greatly upon the parameters chosen for each mapper . exploring the potential parameter space for each program is an overwhelming task which is often guided by the data to be aligned. the results presented here are merely meant to be a cross section of the potential capabilities of each aligner, corresponding to a roughly comparable  running time.
+
+ancient dna
+by specifying a probability for each base at each position, it is possible to include additional information in the alignment. ancient dna is fragmented and degraded in various ways, leading to specific biases and errors in the data. the dominant error is the deamination of cytosines into uracils , which will be interpreted as thymines in the sequencing step
+ <cit> . this leads to an excess of c-to-t or g-to-a mismatches, depending on the strand being sequenced. this is most significant in the ends of the reads and decreases rapidly towards the center
+ <cit> .
+
+pssms were simulated using the damage model specified by orlando et al. <cit> , see methods. the results  show that bwa-pssm with a pssm modelling the simulated damage gives slightly higher sensitivity and ppv than without a damage model. the sensitivity is slightly higher than bwa while the run time is roughly the same. bwa-pssm was able to find more hits than bwa, bowtie and bowtie <dig> even without a specialized pssm.
+
+when mapping real ancient dna and filtering on mapq, the results mostly reflect the simulated data . the use of a pssm led to the recovery of more matches than without one. while the difference is not large, the number of reads one might expect to be damaged is rather low in comparison to the total number of reads present. hence, a modest increase in actual numbers can reflect a greater increase in relative terms. furthermore, if the results reflect the simulated data, then the expected ppv of the filtered results should be higher than for the other mapping tools. again, bwa-pssm without a specialized pssm provides an increase in filtered matches compared to bwa and bowtie <dig> 
+
+comparison of run times and fraction of reads mapped for the four mappers on two real data sets, each containing  <dig>  illumina reads. a) reads of ancient dna mapped to the horse genome. the run times do not include the time required to build the pssms. b) reads of par-clip data mapped to the human genome. bwa-pssm only makes use of the error model given by equation , while bwa-pssma also uses the ancient dna damage model and bwa-pssmpc also uses the t-to-c transition model characterizing par-clip data. the symbol ’*’ indicates that the mapper does not provide mapq scores.
+
+par-clip data
+sequencing data from par-clip experiments is very prone to t-to-c transitions due to the incorporation of 4su-containing nucleobases and their crosslinking to the bound protein. the locations of such transitions indicate where an rna molecule is bound by a protein
+ <cit> . the increased probability of a t-to-c mismatch is readily encoded in a pssm and incorporated into the mapping by bwa-pssm.
+
+to examine the efficacy of providing this extra information, reads were simulated with a 11% t-to-c rate. the results  show that the use of a t-to-c transition model improves both the unfiltered and filtered sensitivity. without such a model, bwa-pssm performs only slightly better than bwa. introducing the error model increases the filtered sensitivity by nearly 14% over the previous best aligner  for quality-filtered mappings. this advantage, however, is not limited to high quality mappings and can be seen across all reported mapping qualities . even for the high quality data sets, where the use of pssm was more of a hindrance for aligning unbiased reads, introducing an error model leads to greatly improved sensitivity in aligning simulated par-clip data .
+3a. bowtie and gem are excluded as they do not provide mapq scores.
+
+to support the simulated data, real data was obtained from a par-clip study investigating the binding of rna to the hur protein
+ <cit> . the statistics for the mapping of the real data  roughly reflects those for the simulated data. notice the greatly reduced number of matches after filtering for all the mappers, which is the result of shorter reads leading to more ambiguous matches, and a base distribution unlike that of the actual genome . nevertheless, bwa-pssm finds more matches than any of the other programs at a ppv value greater than  <dig>  for all types of simulated data.
+
+at rich data
+to test the effect of the background model in bwa-pssm, we simulated illumina reads of length 100nt using art
+ <cit>  from the p. falciparum genome
+ <cit> , which has an at content of more than 80%. in bwa-pssm, the pssms were constructed using a background model, q, that matches the base composition of the reference genome, while the other mappers do not consider this base composition. we see that all mappers except bwa-mem have similar ppvs for both unfiltered and filtered reads . among the mappers that provide a quality score, bwa-pssm obtains the highest sensitivity. for filtered reads bwa-mem has the next highest sensitivity, however the ppv for bwa-mem is significantly lower than for the other mappers. bowtie <dig> has a marginally lower unfiltered sensitivity than bwa-pssm, however, for the filtered reads the sensitivity of bowtie <dig> is notably lower. while bwa has a considerably lower sensitivity than the other mappers, bowtie has the highest sensitivity, which is obtained at the cost of slightly reduced ppv compared to the filtered ppv of bwa-pssm.
+
+random matches from contaminating reads
+we examined how well the mappers can filter out random short matches. to obtain random matches, we simulated short reads of different lengths from the e. coli genome
+ <cit>  using art
+ <cit>  and mapped them to the human genome. from figure
+ <dig> we observe that bwa-pssm, bwa and bowtie map similar fractions of reads when not applying a quality filter, while this fraction in general is smaller for bowtie <dig>  however, for quality filtered reads bwa-pssm maps at worst less than 2% of the reads, which is less than any of the other mappers except bwa-mem, though from read length 20nt the curves for bowtie <dig> and bwa-pssm are coincident. in comparison, bwa maps more than 25% of the reads at worst after quality filtering. gem maps approximately the same fraction of reads as bowtie <dig> does after quality filtering and bwa-mem cannot map any reads at the given lengths. in conclusion, we see that bwa-pssm has similar efficiency as bwa and bowtie in mapping short reads, however the quality score  reported by bwa-pssm allows for filtering out random matches at least as efficiently as bowtie <dig> 
+ <cit> . the dotted lines represent the fraction of unfiltered reads, while the full lines are the fraction of quality filtered reads. for bowtie and gem curves are only shown for unfiltered reads. the curves for bwa-mem are hardly visible as bwa-mem does not map any reads.
+
+xeno mapping
+if no reference genome is available for a set of reads, one can try to map the reads to a closely related species. this task is called cross species mapping or xeno mapping
+ <cit> . inspired by the work of frith et al. <cit> , we examine how well the programs can map real reads from d. melanogaster using the closely related d. simulans genome as reference. we consider three sets of d. melanogaster reads obtained from the ncbi sra database: a set of short reads , a set of long reads with low quality  and a set of long reads with high quality . all data sets are based on the illumina platform and low quality bases in the end of the reads are trimmed using the adapterremoval tool
+ <cit> .
+
+to gauge the performance of the mappers, reads are mapped to both the d. simulans and d. melanogaster genome using each mapper. for each tool, we consider all reads that map to the genomes with a mapping quality above a given threshold, and we compare the mapping positions in the two genomes based on the ucsc whole genome alignment of d. simulans and d. melanogaster. if the mapping regions overlap in the whole genome alignment we say the read is consistently mapped. if the read maps to a region in d. melanogaster that is aligned to d. simulans, but the mapping regions do not overlap, we say the read is inconsistently mapped. for the xeno mapping experiments we calculate the sensitivity as the number of consistently mapped reads divided by the total number of reads, and the ppv is calculated as the number of consistently mapped reads divided by the number of consistently and inconsistently mapped reads.
+
+the flexibility of bwa-pssm allows us to include an evolutionary model that reflects the substitution level between the two drosophila genomes when we map the reads to d. simulans . for comparison we also map the reads to d. simulans with bwa-pssm using only the standard error model. in both cases, we map the reads to d. melanogaster using only the standard error model.
+
+due to the setup of this experiment, we only consider mappers that provide mapq scores. the results are shown in table
+ <dig> and figure
+ <dig>  in table
+ <dig> we used a mapq threshold of  <dig> and in figure
+ <dig> the threshold was varied between  <dig> and  <dig> 
+
+comparison of sensitivity, positive predictive value  and run time using bwa-pssm, bwa, bwa-mem and bowtie <dig> on real single-end reads from d. melanogaster mapped to d. simulans. in bwa-pssmevo we include an evolutionary model reflecting the substitution rate between the two drosophila genomes when mapping the reads to d. simulans, while in the bwa-pssm results we only include the standard error model. the reported running time is only for the xeno mapping.
+ <dig>  bowtie and gem are excluded as they do not provide mapq scores.
+
+we see that bwa-pssm with the evolutionary model generally performs better than all the other programs for the short reads and the long low quality reads . bwa-pssm has higher sensitivity for any ppv value except in the high ppv end of the curves. for the short reads, bwa-mem has slightly better sensitivity at ppv between  <dig>  and  <dig> , and for the long low quality reads bwa and bowtie <dig> can obtain slightly higher ppv than bwa-pssm in the low sensitive end of the curves. for the long high quality reads  we see that bwa-mem performs best overall, while bowtie <dig> can obtain marginally higher ppv than bwa-mem. bwa-pssm can obtain the next highest sensitivity with the evolutionary model, however all the other mappers, including bwa-pssm without the evolutionary model, can obtain higher ppvs.
+
+we see a similar picture when we consider the filtered results in table
+ <dig>  while the mappers have similar ppvs on all the data sets for a fixed mapq threshold, bwa-pssm has the highest sensitivity on the short and long low quality reads. on the long high quality reads bwa-mem has the highest sensitivity and bwa-pssm the next highest. we also see that the increased sensitivity of bwa-pssm come at the cost of increased running time. in the worst case  bwa-pssm is nearly  <dig>  times slower than the fastest method , however in this case bwa-pssm maps over 40% more reads and have a marginal higher ppv than bowtie <dig> 
+
+finally we also see that the performance of bwa-pssm generally improves when including an evolutionary model. on the short reads the sensitivity of bwa-pssm is improved at all ppvs and on the two long read data sets bwa-pssm can generally obtain higher sensitivity with the evolutionary model. however, bwa-pssm can obtain slightly higher ppvs using only the standard error model on the long reads.
+
+CONCLUSIONS
+we have presented bwa-pssm, a novel method for using position-specific scoring matrices to provide quality aware short read mapping. the algorithm for pssm scoring is based on bwa’s mapping algorithm. this method can be applied to other pssm applications, lowering the number of genomic locations that need to be evaluated and increasing the efficiency of pssm searches.
+
+there are many advantages in the probabilistic approach taken here, in which the probability of a match being correct is estimated using prior probabilities that may be specific for the experiment. we have shown how it is possible to model the evolutionary differences between the sample and reference genome, sequencing errors based on e.g. quality scores, experiment-specific base substitutions, and contamination in the sample.
+
+it is worth emphasizing the importance of the prior probability of a match. in all experiments there is a possibility that the read sequence is due to contamination or that it does not appear in the reference genome for other reasons . in some experiments the majority of reads may be contamination, as is often the case with ancient samples. especially when it comes to short reads, there is a great risk that contaminating sequences will be mapped to the reference genome, as was illustrated with the mapping of e. coli sequences to the human genome. this may be taken into account by changing the value for the prior probability of a match.
+
+some of the important extensions implemented in bwa-pssm include the ability to use longer genomes and to handle the forward and reverse search in a single concatenated index, the control of the direction of the search tree traversal based on the underlying pssm, and the use of an interval heap for focusing on the most likely region of the search tree while discarding lower scoring branches. furthermore, bwa-pssm can capture platform and sample specific biases in the nucleotide composition, making the tool highly sensitive and adaptable to specialized applications such as ancient dna, par-clip, or biased genomes.
+
+because matches can be prioritized by a continuous match score, the number of candidate matches stored in the heap can be significantly reduced compared to other methods that use the number of mismatches to prioritize. for this reason the pssm implementation runs with a speed comparable to the other mappers.
+

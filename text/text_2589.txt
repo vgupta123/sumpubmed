@@ -1,0 +1,232 @@
+BACKGROUND
+following the surge of count-based sequencing data, a plethora of software packages for differential expression analysis of such data has emerged  <cit> . many of these methods are limited in use due to restrictions on the study design, the model and inference like a) 2- or k - group comparisons only; b) no random effects; c) no explicit solution for excess of zeros and d) no multi-parameter inference. we introduced shrinkbayes as a versatile analysis method which allows generalized linear mixed models and zero-inflation and with, due to its multi-parameter shrinkage options, good reproducibility and power characteristics  <cit> . this paper illustrates the r-package shrinkbayes on a challenging microrna sequencing  colon tumor-plus-metastasis study. in addition, we automated the use of mixture priors containing a spike, leading to improved fdr-based inference. finally, we extend the class of admitted priors with mixtures of a multivariate point mass and a gaussian product density to allow for powerful multi-parameter inference.
+
+implementation
+shrinkage
+shrinkbayes applies integrated nested laplace approximation, inla <cit> , in combination with empirical bayes principles to provide shrunken parameter estimates and inference. in a bayesian setting, multi-parameter shrinkage is effectuated by estimating hyper-parameters of priors. the core of shrinkbayes is iterative estimation of priors: each prior is fit to the point-wise empirical mean of the marginal posteriors of those parameters θ
+i
+,i =  <dig> …,p = # features, that correspond to the prior  <cit> . shrinkage is known to be potentially beneficial for dispersion parameters, but may be as important for parameters of interest to accomplish better inference  <cit>  and for nuisance parameters to reduce their impact when unimportant  <cit> .
+
+a typical shrinkbayes analysis consists of the following modules: a) iterative empirical bayes estimation of multiple priors which need to obey the parametric forms included in inla; b) fitting of the full model and the null model; c) updating one prior resulting from a) to a non-parametric or mixture prior to allow for for more flexibility and/or better inferential properties; d) updating the posteriors of the corresponding parameters; e) computing summary statistics including estimates of lfdr and fdr. the steps are detailed in the example section. below we discuss novel implementations and methods with respect to  <cit> .
+
+setting
+the setting is a generalized linear model. let j =  <dig> …,n denote independent samples, y
+ij 
+be the data for feature i and sample j, f be the likelihood model  negative binomial) with mean μ
+ij 
+and hyper-parameters 
+γ
+
+i 
+and g () a link-function. here, 
+γ
+
+i 
+contains distribution parameters that are not linked to covariates, e.g. zero-inflation and over-dispersion. then, 
+
+  yij=dfg=xjααi+xjββi, 
+
+where 
+β
+
+i 
+=  denotes the parameter for which  inference is desired, while 
+α
+
+i 
+contains all the other regression parameters, including the intercept. in addition, xjα  denotes the jth row of the design matrix restricted to those columns of this matrix that are relevant for 
+α
+
+i 
+.
+
+priors
+shrinkbayes inherits much of its flexibility from the inla r-package, including its ability to deal with arbitrary designs and random effects. inla, however, requires use of specific parametric priors. since the prior may be crucial for inference in a multiple testing setting, we extended the class of admissible priors to non-parametric and parametric mixture priors  <cit> .
+
+shrinkbayes was praised for its power and versatility, but also criticized for its poor fdr estimation in case of a point null-hypothesis for one parameter , h <dig> i 
+: β
+i 
+=  <dig> against h <dig> i 
+: β
+i 
+≠  <dig>  <cit> . here, we resolve this issue. in  <cit> , a smooth non-parametric prior was used for β
+i
+, which does not suit h  <dig> i
+. to promote more suitable priors, we simplified application of parametric mixture priors with a spike on zero by automating multi-grid parameter estimation of such priors, and increased their flexibility by allowing non-equal mixture proportions for negative and positive effects. moreover, we implemented a mixture of a spike and a smooth non-parametric component . for the results, we focus on the spike-gauss-gauss  and spnp priors: 
+
+  spgg=p0δ+p-1n+p1n spike-gauss-gauss’ 
+
+  spnp=p0δ+fnp spike-nonparametric’, 
+
+where δ () is the dirac delta function, i.e. a spike. the spike is essential, because it allows the posteriors to have non-zero mass on the null-hypothesis, β
+i 
+=  <dig>  hence accommodating selection. the smooth parts of both these priors allow asymmetry between under and overexpression. all parameters are determined by maximizing the total  marginal likelihood . this maximization is explicit for the parametric spgg prior, whereas fnp is obtained by the iterative marginal procedure  <cit>  with the restriction that it contains maximally one mode on both the negative and positive half-plane. the restriction helps to identify fnp together with p <dig>  in words, given a current proposal for p <dig> and fnp the iterative procedure proposes a new estimate of p <dig> and fnp by fitting the spnp prior to the point-wise empirical mean  of the current posteriors π, where the fit needs to respect the aforementioned restriction. any reasonable starting value of p <dig>  and fnp ) can be used and convergence is checked by assessing the total marginal likelihood.
+
+shrinkbayes allows for other parametric priors, such as the  spike-gauss’  and the  spike-and-slab’ . both are mixtures of a point mass and a central gaussian distribution, but the first has a data-adaptive variance fitted with the same direct maximization procedure as for the spgg prior, whereas the latter has a prescribed large variance. both alternatives are discussed in more detail in the additional file  <dig> 
+
+multi-parameter inference
+multi-parameter inference is desirable when the parameters represent multiple groups or covariates with a similar interpretation. in a frequentist setting, this is often done by likelihood-ratio tests. below we discuss the bayesian counterpart. suppose one aims at testing h0i 
+: 
+β
+
+i 
+=  <dig> against h <dig> i 
+: 
+β
+
+i 
+≠  <dig> in a linear model m , which also includes response y
+i
+, covariates x and, possibly, additional parameters 
+λ
+
+i
+. refer to the full model ℳ1=m when 
+β
+
+i 
+is unconstrained and the null model ℳ0=m. traditionally, comparison of two models is done by computation of the bayes factor . however, in a multiple testing setting a good threshold for bf requires knowing p <dig>  the proportion of true null models . then, thresholding for bf is directly linked to local fdr, which simply equals 
+
+  lfdr=π0=p=p0mlp0ml+ml, 
+
+where ml and ml are the marginal likelihoods under ℳ <dig> and ℳ <dig>  respectively. on its turn, lfdr determines bfdr = e : the mean of all local fdrs smaller than t. given its analogous interpretation to ordinary fdr  <cit>  we prefer to define threshold t using bfdr rather than lfdr. in any case, we need to compute ml,ml and p <dig> 
+
+the marginal likelihoods ml and ml are conveniently supplied by inla from the two separate fits of the models ℳ <dig> and ℳ <dig>  finally, p <dig> is determined by our iterative joint procedure <cit> , which determines the value of p <dig>  that maximizes the total marginal likelihood with respect to prior: 
+
+  p=p0δ+∏k=1kn, 
+
+hence a mixture of a multivariate point-mass ) and a gaussian product density for the regression parameters 
+β
+
+i 
+= . in particular when the true p <dig> is large, the total marginal likelihood may contain ridges and/or multiple modalities with respect to the parameters of . for example, when the true p <dig> is large a prior  with smallp^ <dig> and small values of σ
+k 
+may also fit rather well. to counter this, we use the constraint p <dig> ≥  <dig>   and use a large default starting value of p <dig> . moreover, iteration is stopped when the total marginal likelihood decreases by less than  <dig> % to avoid  walking on a ridge’.
+
+additional changes
+in addition to the improved implementation of spike-priors and the multi-parameter inference, shrinkbayes versions  <dig>  and higher contain a number of novelties and changes compared to version  <dig> , which corresponds to  <cit> . in particular, it is faster, because convergence of the parameters of the prior is assessed in terms of total marginal likelihood instead of on the separate parameters. the new version also allows to approximate marginal likelihood for a null model from the results of the full model using the savage-dickey approximation  <cit> . this is particulary convenient for contrasts for which a null-model can not be defined without the use of constraints. additional file  <dig>  section  <dig>  contains more details and a full list of changes.
+
+RESULTS
+priors
+to study which of the priors performs best in terms of fdr estimation and power, we compared them on simulated data sets, including those in  <cit> .
+
+
+results on simulations for various effect size distributions
+
+the true effect size distribution, i.e. the true generating distribution of the parameter of interest, may have impact on what prior performs best. hence, we study several effect size distributions, including a gamma, t, uniform and gaussian mixture . we compared performance of the spgg, spnp, spg and spslab priors in terms of accuracy of fdr estimation, area-under-the-curve , number of detections and absence of detections when h0i 
+is true for all features . from the results  we conclude that spgg and spnp lead to accurate estimates of fdr and are very competitive in terms of power, whereas spslab is often too conservative; spg generally performs well except for the  gamma distribution for which it is less powerful than spgg and spnp. in the case p <dig> =  <dig>  none of the prior returns a significant result at bfdr≤ <dig> , but the spgg prior performs best in the sense that it produces the highest bfdrs.
+
+
+results on simulations in 
+ <cit> 
+next, we report results of shrinkbayes with the spgg and spnp priors on simulations in  <cit> , which compared several methods, including shrinkbayes , on a variety of data sets. shrinkbayes was used with a smooth non-parametric prior , so not containing a spike. the number of features equals  <dig>  we focus on data sets where counts are exclusively generated from the negative binomial. moreover, we report results on the symmetric cases  only , because for the asymmetric cases the normalization procedure used in  <cit>  introduces artificial differential signal for the non-differential features. we do include a case with outliers which contains, on average, 5% outliers for 10% of the features . for sample sizes we focus on n = n/ <dig> =  <dig> , because the shrinkbayes results reported in  <cit>  were relatively worse for those sample sizes.
+
+table  <dig> contains the results on fdr estimation. note that the target fdr equals  <dig>  here, in order to be consistent with  <cit> . we observe that shrinkbayes with spgg or spnp is still liberal, but the results are much better than those for the np prior. in fact, when comparing the results of table  <dig> with those in figure four of  <cit> , we observe that shrinkbayes has improved from the worse to at least average in terms of fdr estimation. in particular, for the data sets with outliers it outperforms 5/ <dig>   of the other methods that are based on count distributions.
+
+n 
+= 
+n 
+∗
+∗: as reported in  <cit> .
+
+table  <dig> contains the results on auc. again, we observe a uniform improvement when using shrinkbayes with spgg or spnp instead of np. strikingly, shrinkbayes with both spgg and spnp generally outperforms all the other methods reported in  <cit>  when it comes to auc.
+
+n
+= 
+n 
+∗
+∗
+∗: as reported in  <cit> . best∗: highest auc of all other methods reported in  <cit> .
+
+multi-parameter inference: data-based simulation
+we compare our solution for multi-parameter inference to the likelihood-ratio tests that are implemented in the popular rnaseq data analysis programs edger <cit>  and deseq <cit> . we believe such a comparison is most meaningful and fair when the data is simulated in a relevant and realistic way, preferably avoiding distributional assumptions as much as possible. therefore, we generated the data in three steps. first, we create a realistic null data set: we simply re-sample 3* <dig>  observations’ from our mirseq data set, independently for each of the  <dig> features. hence, per feature  <dig> observations are generated from the same empirical distribution for each of the  <dig> groups. next, modest filtering on the number of non-zeros is applied, because this is recommended for the use of edger and deseq: at least  <dig> non-zeros should be present. finally, we need a realistic effect size distribution for the features. to avoid parametric assumptions this is estimated by fnp, the smooth component of the spnp prior , for the groups in the mirseq study . we create 20% differential features by sampling independently from fnp for groups  <dig> and  <dig> and multiplying the respective counts by the exponentiated sampled effect sizes. this entire simulation was repeated  <dig> times.
+
+we analyzed the simulated data sets using shrinkbayes, edger, deseq and a simple nonparametric kruskal-wallis test. in addition, the old version of shrinkbayes was applied with a smooth nonparametric prior and an a posteriori multiple comparison of the  <dig> groups, as suggested in  <cit> . figure  <dig> shows the roc curves, as averaged over the  <dig> repeats, for false positive rate  smaller than  <dig> . we focus on this fpr range, because when using fdr^≤ <dig>  as a selection criterion, all  <dig> methods produce sets of significant features with fpr≤ <dig> . shrinkbayes seems somewhat superior to edger across the entire range, while it is competitive with deseq. possibly due to the smoothness of the prior shrinkbayes,old performs a little bit better in terms of ranking than shrinkbayes for very small fpr, but becomes inferior for larger values. the latter may be caused by loss of power when using a multiple comparison approach in a k-group setting. surprisingly, the kruskal-wallis test seems to be very competitive, although it also loses power for larger values of the fpr.
+
+roc curves, however, only allow comparison of the rankings. in practice, the actual selection is most important. table  <dig> shows the results summarized over the  <dig> repeats when using fdr^≤ <dig>  as selection criterion. note that for all p-value-based methods we use the benjamini-hochberg fdr correction, which is appropriate here given the independent sampling per feature in our simulated data set. bfdr is used as an estimate of fdr in the shrinkbayes setting. true fdr is evaluated on the selected sets by simply dividing the number of false positives by the total number of positives. here, the differences are much clearer: the kruskal-wallis test is useless in this setting, because it does not select anything. shrinkbayes,old selects too much at a too high true fdr, probably due to the smooth prior, as discussed before. deseq and shrinkbayes produce better true fdrs , but, on average, shrinkbayes detects almost four times as many features. edger selects more, but is both more liberal and more variable. in fact, as can be inferred from the roc curves, shrinkbayes would achieve a smaller true fdr with the same number of detections as edger.
+
+results are summaries from  <dig> repeats of the simulated data sets.
+
+note that shrinkbayes is still liberal in the sense that it underestimates true fdr. this is probably due to the data not being generated from a specific parametric distribution. in particular, we observed that the data contains outliers for some features. dedicated detection of such outliers can certainly reduce the number of false positives. a simple, heuristic, practical alternative is to additionally require for selection the corresponding uncorrected kruskal-wallis p-value to be smaller than  <dig> . then, power of a parametric approach like shrinkbayes, which is essential in a multiple testing setting, is combined with the robustness of a nonparametric test. in this case, the median true fdr drops from  <dig>  to  <dig>  , while detecting  <dig> features on average instead of  <dig> .
+
+example: analysis of mirseq count data
+
+data
+
+we applied shrinkbayes to a challenging data set. the data set contains mirseq counts of  <dig> mirnas  for  <dig> resections from primary colon tumors  and corresponding metastases  coded by the covariate pm. in addition, several other covariates are available: indiv: most individuals correspond to  <dig> samples , but some have multiple measurements for m, because the metastasis occurred at multiple locations; organ: organ where the metastasis occurred; time: binary, indicating whether resections of the primary tumor and the metastasis were at different dates; chemo: binary, indicating whether chemotherapy was applied in between the resections. in addition to other software, shrinkbayes provides two important extra features to correctly analyze these data: it explicitly accounts for excess of zeros and allows for random effects . both are important for appropriate inference. in addition, we demonstrate here that joint inference for related parameters like those corresponding to organ is feasible. note that separate inference for each organ has limited power due to the small number of samples per organ. we focus on the statistical analysis. preprocessing is described in the additional file  <dig>  section  <dig>  which also contains annotated r-code for the entire analysis, including inferences for organ and the p-m contrast.
+
+
+analysis
+
+the analysis consists of the following steps: 1) likelihood specification for the counts, here the zero-inflated negative binomial one; 2a) specification of the regression model. here, the model  is the linear model with fixed effects pm, time, chemo and organ plus random effect indiv; 2b) specification of the null-model ℳ0: as , without organ; 3) choice of parameters to shrink. here, all fixed parameters plus the over-dispersion parameter of the negative binomial.
+
+4) estimation of priors for the purpose of shrinkage. standard priors  are used for all parameters, except for the inferential variable, organ, for which the multivariate mixture prior  is used; 5) computation of posteriors under models  and ℳ <dig>  given the prior parameters; 6) combination of the two posteriors to one given the parameters of the mixture prior; 7) compute local and bayesian false discovery rates . the most complex steps, 4) to 7), are completely automated including setting of tested defaults, which allows users with little experience in bayesian computing to apply shrinkbayes. the joint mixture prior is discussed above; other technical details are given in  <cit> .
+
+
+discoveries
+
+at bfdr =  <dig> , we discovered  <dig> mirs for which organ is associated to expression in the metastasis. figure  <dig> shows two posteriors of contrasts β
+ik 
+- β
+i 
+ℓ
+,k > ℓ, which help to explain differential or non-differential mir expression. for example, for the significant differential mir, which corresponds to the left display of figure  <dig>  differences are largest between organs  <dig> and  <dig> on one side and organs  <dig> and  <dig> on the other. to accommodate users, shrinkbayes contains functions to easily produce such posterior plots and also summary tables. importantly, the estimate of p <dig> in  is large, p^0= <dig> , which implies strong shrinkage of organ effects towards zero, rendering more  degrees of freedom’ and hence more power for other inferences. this is another strong aspect of shrinkbayes: in studies with relatively few samples, multi-parameter shrinkage helps to increase power for a particular parameter of interest  <cit> . the idea of jointly shrinking multiple parameters was recently also adopted in  <cit> , although their approach currently applies to k-group comparisons only.
+β
+
+
+i
+
+
+k 
+
+- 
+β
+
+
+i 
+
+
+ℓ
+
+, 
+k
+>
+ℓ
+, representing log
+e
+-fold expression differences  between  <dig> organs, for a significant mir  and non-significant mir .
+
+discussion
+for the choice of prior, we recommend to use the spgg prior when inference on a parameter equalling zero is desired, because of its uniformly good performance in terms of fdr estimation and power. the spnp prior is a good alternative which may be attractive in extremely small sample size settings for which the flexible shape of the non-parametric component is important . when using an interval null-hypothesis, h0i 
+: |β
+i
+| < δ, inclusion of a spike is less relevant, so smooth  priors generally suffice.
+
+given the good performance of the spgg prior in a univariate setting, it may be good to extend  to the multivariate analogue of the spgg prior: a mixture of a multivariate point mass and a two-component gaussian mixture product density. however, while this is conceptually feasible, it may be computationally cumbersome, because it would require combining several different fits from inla under combinations of the components of the mixture.
+
+although shrinkbayes is much more efficient that mcmc-based methods, it is computationally more demanding than frequentist counterparts like edger <cit>  and deseq <cit> . as an indication: the data example above  runs in approximately  <dig> minutes on  <dig> cpus of a linux-cluster, whereas approximately  <dig> hours would be required for  <dig>  features. for extremely large data sets, shrinkbayes provides quick pre-screen functions, application of which potentially reduces computing time by a large factor.
+
+we focused on sequencing count data for fairly complex designs. to our knowledge, extensively validated data are still not available for such studies, which hampers a thorough comparison between methods. even when such a data set would be available, it is uncertain to what extent conclusions from one data set could be extrapolated to others, because the relative performance of a method may depend on many aspects such as the proportion of outliers and zero counts and/or the presence of multiple noise levels . we emphasize that shrinkbayes is currently the only rnaseq analysis method that can deal with the latter, by allowing random and mixed effects models, concepts that are widely accepted and used in other fields of statistical data analysis.
+
+for simple designs, shrinkbayes can be useful as well, in particular due to its good reproducibility, as shown for publicly available rnaseq data in  <cit> . shrinkbayes also applies to gaussian data, like mrna microarray data or high-throughput rna interference screens  <cit> . use is similar, as illustrated in the shrinkbayes r-vignette, which also contains additional examples on count data.
+
+CONCLUSIONS
+we illustrated the versatility of shrinkbayes on a data set which reflects a level of complexity that is common in clinical practice. with the decrease of costs for sequencing, we are likely to encounter such complex data sets frequently in the near future and shrinkbayes provides the means and power to analyze these.
+
+availability and requirements
+project name: shrinkbayes project home page: http://www.few.vu.nl/~mavdwiel/shrinkbayes.htmloperating system: platform independent programming language: rother requirements: r ; r-packages: inla, from http://www.r-inla.org and snowfall, vgam, mclust, logcondens, iso from cranlicence: gnu gpl
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+mavdw developed the methodology and the software. mavdw and mn wrote the manuscript. hmwv and teb conceived of the mirseq study, which was carried out by mn. ds facilitated the sequencing and performed the initial analysis of the data. all authors read, discussed and approved the manuscript.
+
+supplementary material
+additional file 1
+supplementary material. it contains: additional simulation results, a list of changes of the software with respect to previous versions, details on the savage-dickey approximation for marginal likelihood and extensive r-code for the mirseq example.
+
+click here for file
+
+ acknowledgements
+we thank charlotte soneson for providing simulated data, andrea riebler for discussions and paul eijk for his help with library preparation.

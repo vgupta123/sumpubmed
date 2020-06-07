@@ -1,0 +1,115 @@
+BACKGROUND
+advances in next generation sequencing technologies have enabled rapid generation of newly sequenced genomes at a rate that can no longer be handled by a single-core non-distributed computing system in a feasible manner  <cit> . the large volume of sequencing data that are now available has created profound challenges in data transfer and analysis  <cit> . high throughput computing on supercomputers was recently introduced to meet these challenges  <cit> . however, high performance computing can be costly, and access to a supercomputing facility can be limited for small laboratories.
+
+in recent years, a number of publicly available meta-servers have been developed for protein sequence annotation , but public access to these servers is often restricted to a limit that ranges from  <dig> to  <dig> protein sequences per http request. other similar servers that allow users to submit their whole genome include the igs microbial annotation pipeline  <cit>  and the integrated microbial genomes  <cit> . while these servers provide the convenience of a whole genome annotation, they do not accept protein sequences as input and, therefore, cannot run analyses on a set of pre-selected proteins from a given genome or a set of un-related proteins from multiple genomes. on the other hand, a local server  <cit>  that is custom-built by using the available source code provides the option to customize the input size and to avoid all possible public exposure of private data. however, building such a local server requires expert knowledge and can be time consuming.
+
+in this paper, we describe a new high-throughput, genome-wide analysis tool for deriving enzymatic functions and other annotations for protein sequences. many tools and databases have already been developed to address the need of enzyme function annotations  <cit> . however a publicly available, high-throughput meta-server is needed to combine the existing annotation tools from their disparate domains in efforts to support genome-scale sequence annotations, whereby a single-user interface can be used to access a variety of computational tools and the results from these tools. here, we present the protein sequence annotation tool , a web-based, sequence annotation meta-server for performing integrated, high-throughput, genome-wide sequence analyses. our goals in building psat were to  create an extensible platform for integration of multiple sequence-based bioinformatics tools,  enable functional annotations and enzyme predictions over large input protein fasta data sets, and  provide a web interface for convenient execution of the tools. in this paper, we demonstrate the versatility of psat by inferring the potential metabolic pathways of a draft genome – herbaspirillum sp. strain rv <dig> 
+
+implementation
+server-side architecture
+an overview of the psat architecture is shown in fig.  <dig>  as of this writing, the psat back end is implemented in python  <dig>  on a redhat linux cluster comprising  <dig> dual intel xeon x <dig> 6-core,  <dig> ghz processors and 1 tb disk drive. data pertaining to job management are managed using python sqlite, and persistent storage is managed using mysql. once the web server accepts a psat job requested by a user, it communicates with the distributed computing layer to perform all computing tasks relevant to the psat job. these computing tasks executed through the distributed computing apis may involve any or all of the software packages currently supported by psat, which are interproscan  <cit> , signalp  <cit> , eficaz  <cit> , and blast+  <cit> . in our architecture, a software package may invoke any of the databases installed on the psat server, including kegg  <cit> , metacyc  <cit> , string  <cit>  and mvirdb  <cit> . currently, only blast + can invoke these databases as it is the only annotation tool installed on psat designed to search through a local but nonspecific biological sequence database. the kegg data set was acquired from the kanehisa laboratory through an organizational license. current versions of these codes and data sources can be found on the psat home page .fig.  <dig> psat web-based architecture: currently available computational sources for sequence annotations
+
+
+
+django web application
+psat is powered by django, which is a web application framework available through open source  <cit> . the django web framework adopts the standard “model, view, controller ” architectural pattern, whereby the model defines the data, the view controls data presentation to the user, and the controller depends on the model and the view to perform the necessary operations on data when interpreting a user request  <cit> . using such a framework in our web application removes the dependencies between the model and view, which in turn enhances source code reusability and software stability  <cit> . in our django web application, we can add a new database or a new software package support without modifying a significant portion of our source code.
+
+distributed computing
+all tasks related to parallel computing in psat are handled by celery  <cit>  and rabbitmq  <cit> . rabbitmq is an open-source message broker software, which offers robust, highly scalable asynchronous processing  <cit> , whereas celery distributes the jobs to its workers as it consumes the message sent by rabbitmq  <cit> . fig.  <dig> shows the real-time messaging system between the django web application, rabbitmq, celery workers, and the local mysql database. when the backend django web application receives a job request, celery creates a task queue to wrap up the job execution function through its decorator, and pushes that to the rabbitmq server. rabbitmq acts as an exchange server distributing the jobs to  <dig> celeryd workers over  <dig> compute nodes, based on processor availability. when a celeryd worker receives a job request, the worker processes it right on the node. all the job processing is handled asynchronously in the background without causing front-end web page delay . on the server side, data provenance is captured to ensure that sequence analysis results are generated in a reproducible and systematic manner.fig.  <dig> real-time messaging system between the django web application, rabbitmq, celery workers, and mysql database
+
+
+
+each core of the linux cluster can serve as a celery worker to perform a specific computational task. jobs executed on the  <dig> cores are run in parallel and are distributed into multiple subtasks handled by multiple computing threads. when sequence analysis by all celery worker threads is complete in the background, psat automatically combines the job results for user download through the psat website or a link specified in a notification email.
+
+psat package support
+psat provides a centralized computational resource for a variety of protein sequence annotation tools. psat supports a suite of software packages designed to predict enzyme functions for a given set of protein sequences, most notably eficaz  <dig> , which uses machine learning algorithms to automatically infer the enzyme function of a protein  <cit> . metacyc blast and kegg blast are also available to derive similar information by running blast+ against the open-source metacyc and licensed kegg databases  <cit> , respectively. combining the results of eficaz, metacyc blast, and kegg blast analyses produces lists of enzyme commission  numbers that putatively describe the functions of the query proteins. in a summary output file, for each protein, all predicted ec numbers are listed numerically followed by the evidence  for that ec. no attempt is made to rank order the evidence items or to combine them into a single prediction. the psat output enables comparison of annotation results across different annotation methods. the predicted ec numbers are then linked to metabolic pathways by means of a restful interface to the kegg api  <cit>  to retrieve up-to-date enzyme-to-pathway mappings.
+
+to supplement the primary goal of whole proteome enzyme function prediction of psat, we have also included functional annotation codes, signalp  <dig>   <cit>  and interproscan  <dig>  <cit> , to the meta-server. furthermore, the string  <cit>  and mvirdb  <cit>  databases are now also available for a blast+ search on psat.
+
+user interfaces and access
+psat was built using a thin-client approach, in which the entire mvc logic resides on the server side. hence, only a web browser is required in order to run a sequence analysis on psat. an online registration for a user account is available for all psat users at http://psat.llnl.gov/psat. user authentication is required in order to submit annotation jobs to the psat server. when submitting a new job, a user is required to either copy the fasta sequences onto the job submission form or upload a file containing a set of amino acid sequences in fasta format. then, when the job is finished, an automated email with a job result download link is sent to the user.
+
+summary results are presented as a tabbed text file containing computational predictions and reliability metrics from the set of tools that were run for a given job. because the user’s input fasta sequences are processed by psat in parallel, individual computations will finish out of order with respect to the original input fasta file. therefore, prior to processing, the user’s headers are pre-pended with a sequential numeric identifier to enable re-establishment of the original ordering upon completion of the job. the  raw data results are stored on our server in persistent storage and are available upon request for up to 3 months following completion of a job.
+
+all psat users must login using their credentials at the beginning of each psat session. once a psat user has successfully logged in, a homepage will be displayed dynamically, showing a list of the recently submitted psat jobs by the authenticated user and the corresponding job status. in order to control server load and file transfer volumes, we limit the number of submitted protein sequences to  <dig>  however, users are encouraged to contact the authors regarding submission of jobs in excess of  <dig>  and we welcome jobs that require enzyme prediction over whole bacterial proteomes or non-specific protein sets involving up to  <dig>  protein sequences per job.
+
+genomic sequence for the case study
+the genome of herbaspirillum sp. strain rv <dig> , which was isolated from underground water contaminated with alkane and aromatic hydrocarbons, has already been sequenced in a whole-genome shotgun project  <cit> . the draft genome of rv <dig> obtained from ncbi  <cit>  comprises  <dig> contigs under the accession numbers cbxx <dig> to cbxx <dig>  this newly sequenced genome, which has been reported previously to potentially degrade naphthalene  <cit> , was selected for our case study to demonstrate the ability of psat to derive functional annotations and link them to metabolic pathways that may be present in a draft genome that has not yet been fully annotated.
+
+pre-processing of genomic sequence
+a previous study has identified a set of  <dig> potential protein-coding genes in rv <dig> by using the rast server version  <dig>   <cit> . a renumbered and newer version of rast server  <dig>   <cit>  was used in our study, and generated a set of  <dig> features that are potentially protein-coding genes. these predicted genomic features were translated to amino acid sequences, which served as input for psat. ec data arising from the psat processing were subsequently re-formatted for input to ec2kegg  <cit> .
+
+ec2kegg analysis and statistical significance
+the pathways inferred from results generated by psat may be over- or under-represented when compared to a reference genome. to evaluate the statistical significance of the inferred metabolic pathways, we used ec2kegg  to compute the false discovery rate  of each pathway  <cit> . any pathway with an fdr adjusted p-value below  <dig>  is considered statistically significant. currently, there is only one reference genome for the genus herbaspirillum in kegg: h. seropedicae. hence, the genome of h. seropedicae was chosen as the reference genome for statistical evaluation.
+
+RESULTS
+function annotations and pathway analysis
+our combined analyses using eficaz, metacyc blast and kegg blast identified  <dig> genes in rv <dig> that potentially encode  <dig> different enzymatic activities as specified by their ec numbers with all four classes ascertained . these enzymes were mapped to  <dig> unique metabolic pathways defined in kegg. in the ec2kegg analysis, we found  <dig> of these metabolic pathways that were significantly over-represented when compared to the reference genome . naphthalene degradation was among the over-represented pathways, so in this analysis we further examined the enzymes identified in this pathway. as shown on table  <dig>  our results suggested that rv <dig> may encode  <dig> enzymes involved in the naphthalene degradation pathway, whereas only one of these enzymes is likely encoded by the reference genome . in rv <dig>  rast annotation yielded four genes that were identified to encode gentisate  <dig> -dioxygenase , which is an enzyme involved in the gentisate pathway for salicylate metabolism. naphthalene can be degraded to form salicylate, which can then be further metabolized by the gentisate pathway  <cit> . our finding of such gene duplication is consistent with a previous study suggesting the importance of the gentisate pathway for naphthalene degradation  <cit> . this suggests a possible mechanism by which naphthalene is degraded in rv <dig> that is absent in the reference genome, h. seropedicae.table  <dig> list of predicted enzymes in the naphthalene degradation pathway
+
+genes with putative function  were identified in rv <dig> along with the number of genes encoding these enzymes in the rv <dig> and h. seropedicae genomes
+
+
+
+runtime analysis
+the whole genome analysis of rv <dig> containing  <dig> proteins took approximately 8 h when selecting all of the currently available psat tools while running on  <dig> cores from  <dig> compute nodes on the psat cluster. in order to assess the throughput of psat, we performed a runtime analysis of eficaz and kegg blast for four sample genomes in addition to rv <dig>  this was performed in parallel and serial modes using  <dig> cores from  <dig> compute nodes and a single core on a single node on the psat cluster, respectively. table  <dig> shows that psat running in parallel mode on a multi-core linux cluster scales well with increasingly large datasets, and is at least  <dig> times faster than running in serial mode for a set of  <dig> randomly selected proteins. thus, enzyme prediction provided by the psat server is high throughput, enabling rapid enzyme predictions over whole-genome peptide fasta sequence sets.table  <dig> runtime analyses of back-end processing
+
+
+
+marinobacter aquaeolei
+
+
+pseudomonas mendocina
+jobs were run in parallel and serial modes using four different genomes and  <dig> proteins randomly selected from their corresponding genome, respectively
+
+
+
+CONCLUSIONS
+the psat server is a centralized online service offering several function-based protein annotation resources, and is capable of performing high-throughput protein sequence annotation and analysis. psat provides a convenient way for scientists to derive enzyme functions of proteins and to identify their corresponding metabolic pathways defined in the kegg database. the above-described case study identified a list of putative metabolic pathways in herbaspirillum sp. strain rv <dig>  thus demonstrating that psat is capable of deriving biological information that is consistent with the existing literature. hence, the predicted protein functions, including the enzymatic activities and catabolic potentials of the query proteins from rv <dig>  may warrant further experimental studies. because psat can rapidly provide de novo sequence-based enzyme prediction over whole proteomes by combining multiple methods, it can assist in the identification of genes, reactions, or pathways that may help explain an observed phenotype.
+
+psat aims to improve the scalability and usability of each individual sequence annotation tool by adding a distributed computing component to the architecture to run multiple processes in parallel. as demonstrated in this case study, psat was able to process a large set of proteins predicted from a whole genome in an efficient and systematic manner. furthermore, additional annotation sources can easily be adapted and executed in parallel under the psat architecture. future development of the psat platform will primarily depend on the demand of its users and its role in empowering subsequent scientific discoveries.
+
+availability and requirements
+project name: protein sequence annotation tool 
+
+project home page:http://psat.llnl.gov/psat
+
+operating system: platform independent
+
+programming language: python
+
+other requirements: chrome  or firefox 
+
+license: none required
+
+any restrictions to use by non-academics: none
+
+
+
+additional files
+additional file 1: 
+summary data for psat analysis of rv <dig>  
+
+additional file 2: 
+the ec2kegg output for the rv <dig> analysis sorted in ascending order by the fdr value. 
+
+
+
+abbreviations
+psatprotein sequence annotation tool
+
+httphypertext transfer protocol
+
+igsinstitute for genome sciences
+
+ncbinational center for biotechnology information
+
+ecenzyme commission
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+cz conceived of the project and led the work. ah wrote the front-end django interface, wrote the back-end server processing codes, and performed the run-time analysis. el, cz, ec, am, and js wrote parsers and formatters to post-process raw data generated by psat tools. cz tested the server, with input from ah and el. el performed the test case analysis with contribution from cz. el and cz wrote the manuscript with contributions from ah. all authors have full understanding and responsibility for the results and conclusions of this work. all authors have read and approved the manuscript.
+

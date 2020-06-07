@@ -1,0 +1,134 @@
+BACKGROUND
+introduction
+the biological function of an rna molecule is often determined by the three dimensional structure of the molecule. the structure is often more conserved than the exact sequence of bases in the course of evolution. therefore, a strong structural consensus among related, but diverged sequences can be taken as an indicator of a preserved functional role.
+
+following a classification introduced in  <cit> , the structural consensus for a family of rna molecules can be computed following three different "plans": we can either  align the sequences, then fold them jointly, or  simultaneously align and fold, or  first fold sequences individually, and then align their structures.
+
+plan b is theoretically optimal, as it jointly solves the two optimization problems of alignment and folding under arbitrary scoring functions  <cit> . however, its computational costs of o time and o space, where n is sequence length and m is the number of sequences, are rather high. implementations are for example foldalign, dynalign, pmcomp  <cit> , making pragmatic restrictions to improve efficiency.
+
+plan c applies to sequences that are too diverged to be meaningfully aligned based on sequence conservation. first, sequences are folded individually. this must be done with care. one cannot simply compute mfe structures and then align them with a structure alignment program. in an evaluation of  <dig> sequences from  <dig> rna families, the mfe predictions had the same abstract shape  as the consensus structure only in  <dig> cases . such lack of consensus in predicted mfe structures makes their structure alignment meaningless - but it does not rule out the existence of a good consensus structure hidden in the near-optimal folding space. therefore, a representative subset of near-optimal structures must be obtained for each sequence, for example by abstract shape analysis  <cit> . then, those structures which have a consensus abstract shape are aligned, for example via tree comparison . rnacast  <cit>  was the first plan c approach; a more recent one is r-coffee  <cit> .
+
+plan a is probably the most widely used approach and is the one we are going to strengthen further here. it applies when sequences can be meaningfully aligned using an off-the-shelf multiple sequence alignment tool . then, the aligned sequences are folded jointly .
+
+the above listing of plan a, b, and c methods is far from complete, as the difficulty of the problem is reflected by a large number of approaches. numerous heuristics have been suggested to retain the power of plan b approaches, but reduce its high computational cost and overcome its limitation to pairs of sequences, e.g. murlet or mxscarna  <cit> . the practically minded reader is referred to the war web server for aligning structural rnas  <cit> , where presently  <dig> such methods are on display. four of them can be categorized as plan a approaches, which is our concern here. our contribution presented here should not be considered as yet another approach, but rather, a fine-tuning step which is worthwhile to combine with plan a methods.
+
+plan a loses its raison d'être when sequence conservation is above 90%. while the sequence alignment is certainly reliable, it carries little extra information compared to folding the sequences individually. the method works best around 75% of sequence similarity. below 55%, measurements  <cit>  show a decline of performance. this effect has been confrmed in  <cit>  . here, we show how to alleviate this situation to a certain extent. the resulting method is named planacstar, as it constitutes an iterated combination of steps from plan a and plan c.
+
+motivation
+to evaluate the performance of plan a in detail, consider figure  <dig>  the score of plan a diverges most from the reference alignment in a range of 30-55% sequence identity. in this "twilight zone", the performance of rnaalifold drops, which is expressed in a lower structure conservation index   <cit> . the lower index indicates a quality drop of the produced consensus structure, but does not rule out that a better consensus exists, which has not been detected. in fact, this is often the case.
+
+let us look at the situation in some detail. it is generally known that with increasing divergence, sequence alignment will fail to align bases representing compensatory mutations and carry the covariance signal to be exploited in the subsequent phase. in fact, in the presence of gaps, sequence alignment will systematically obscure the covariance signal. as this observation has not been reported in the literature , let us explicate this phenomenon here.
+
+we use the familiar dot-bracket notation, where paired bases are indicated by matching parentheses, and unpaired bases by dots. for structures ..).. and ...., the expected structure alignment  
+
+might show good sequence conservation, two gaps and a compensating base pair change. in any sequence alignment of aaggaaaaccaa and aacaaaaga, aligning two bases gg with a single base c, the algorithm has to insert a gap either to the left of c, or to the right. as the resulting score is not affected by this choice, the gap position may be chosen arbitrarily. let us assume that the alignment algorithm first produces the mismatch, and then inserts a gap to the right of the mismatched base. so far, so good. exactly the same situation arises in the alignment of cc and g. again, the algorithm inserts the gap at the right side of g, and aligns the sequences this way:  
+
+now, joint folding of the aligned sequences will produce:  
+
+which prevents the second base pair in the upper sequence from being formed: pairing the second g with the second c would create non-nested base pairing, which is not allowed in the folding algorithm.
+
+outline of planacstar
+in the 30-55% sequence identity range, we conjecture that the resulting consensus structure is often correct in its overall shape, while structural detail is lost due to the obscured covariance signal. therefore, we disassemble the alignment and refold the sequences separately, with respect to the preliminary consensus. this separate folding will produce additional base pairs compatible with the consensus. we then align the resulting structures with a structure alignment program  <cit> . this aligns base pairs irrespective of the concrete bases, thus finding compensatory base changes and recovering the covariance signal. any structure alignment, so obtained, entails a sequence alignment, which we extract. this sequence alignment may now fold into a better consensus than before.
+
+there is a clear limitation in this approach: we may recover base pairs missed in the first alignment folding, but we never undo consensus base pairs which were actually formed in the initial step. these base pairs will always persist in the improved structures, although they may be aligned in a different way. this is why we consider our approach a fine-tuning add-on to plan a, rather than  new approach. this is in good analogy to tuning your guitar without reference to a perfect pitch device. you assume that one of the six strings, say a, is on pitch, and tune the other strings to the a string. while your guitar now sounds in harmony, in absolute terms, it may be more out of pitch than before. our assumption is that, in the twilight zone, the initial alignment will be good enough to point to the string a which is closest to pitch in absolute terms.
+
+this idea has been implemented using the tools clustalw, rnaalifold, and rnaforester. the quality of the consensus is assessed by rnaalifold's sci score, the structure conservation index, which according to gruber et al.  <cit>  is the best measure for structural conservation. folding an alignment a with rnaalifold results in the consensus minimum free energy  ea as output. ea includes pseudo-energy contributions from observed covariation. folding the sequences b <dig> .. bn separately, we can compute their average mfe  from the separate mfes. the sci is the quotient of ea/.
+
+thus, we measure an improvement in terms of rnaalifold's own quality criterion, the achieved sci.
+
+adequacy of sci improvement
+note that the sci is not a performance measure in the sense that an alignment optimizing the sci score is closest to a "true" alignment. it serves as an indicator of structural conservation in diverged sequences, whether or not the conserved structure is "true". mechanistically, the sci accounts for the energy required to refold the sequences from their mfe structures into the predicted consensus x. it does not preclude the existence of yet another, low energy consensus structure x', which may be structurally quite different and may actually be the relevant one for the rna's function. refolding all sequences from their mfe structures into x' instead of x might require only marginally more energy than with consensus x, but again, this does not imply that x and x' are structurally similar. x' might be the "true" structure, but plan a would not notice it at all. admittedly, the larger the number of sequences considered, and the more diverged they are, the more unlikely is this situation to occur. plan a approaches could, in principle, be augmented to safeguard against this situation, but only at the high cost of performing suboptimal consensus folding.
+
+our new approach is based on the premise that it is worthwhile to increase sci scores. however, we have also evaluated the resulting consensus structures against curated structures, and report on this in the conclusion and in additional file  <dig> 
+
+RESULTS
+algorithm
+planacstar is an iterated combination of elements of plan a and plan c. it uses separate structure predictions, as done in plan c, but includes information from a multiple sequence alignment and alignment folding as in plan a. we use clustalw for the initial alignment step, and rnaalifold for folding the sequences into the consensus structure, because they are most widely used tools for these tasks in practice. let a be the initial sequence alignment, c is the preliminary consensus and x is its sci-score. ci is the projection of the basepairs of the preliminary consensus c to a sequence bi from the input set of size n, where  <dig> ≤ i ≤ n. si is the individual folding of a sequence bi from the input set into the preliminary consensus structure c. y is the multiple structure alignment of the folded structures. the multiple structure alignment implies a sequence alignment, which is the improved sequence alignment a* with sci-score x*.
+
+in pseudocode, the procedure is as follows:
+
+given a set of rna sequences b <dig> ..., bn,
+
+ <dig>  a ← clustalw - initial sequence alignment
+
+ <dig>  c ← rnaalifold; x ← sci-score - preliminary consensus
+
+ <dig>  ci ← projection of basepairs in c to bi - 
+
+ <dig>  si ← rnafold -c ci for i =  <dig> .. n - individual folding of each bi relative to consensus
+
+ <dig>  y ← rnaforester - multiple structure alignment
+
+ <dig>  a* ← sequence alignment implied by y - extract improved sequence alignment
+
+ <dig>  c* ← rnaalifold; x* ← sci-score - fold improved alignment
+
+ <dig>  if x* >x, set a ← a* and iterate from step  <dig>  else exit with result a, c and x
+
+the "projection"  takes the base pairs from the consensus, removes the gaps with respect to sequence bi, and yields an unsaturated structure ci for bi. the call to rnafold with option -c ci  may produce additional base pairs aside from those of ci. these will, in general, be different for each bi.
+
+test data
+in the evaluation, we used the most recent version of rnaalifold  <cit>  and clustalw  <dig> . <dig>  the sci was computed with the formula given in  <cit> . in computing average sequence similarity, we did not use the original bralibase computation, but used the improved calculation suggested by torarinsson et al.  <cit> . planacstar was evaluated on data set  <dig> of the bralibaseii benchmarking database  <cit> . bralibaseii was created in  <dig> by gardner, wilm and washietl within a benchmark of multiple sequence alignment programs applied to structural rnas  <cit> .
+
+dataset  <dig> of bralibaseii contains various rna sequences of group ii introns, 5s rrna, trna and u <dig> spliceosomal rna. the sequences were obtained from the rfam database  <cit> . each rna family was chopped into  <dig> subalignments using a procedure described in  <cit> . those subalignments contain  <dig> sequences each and cover a wide range of sequence identities.
+
+currently, the full iupac code is not supported by rnaforester, therefore our method is restricted to concrete rna sequences as input sequences. this restriction reduces the size of our test data set to  <dig> out of  <dig> subalignments.
+
+for comparison, we include the score of the reference alignment. it must be kept in mind that it is scored from the full family alignment. therefore, the reference alignment does not necessarily represent the optimal subalignment.
+
+sci improvements
+in figure  <dig>  we see the average sci score at variable sequence similarity. the results of plan a, planacstar and the reference alignment were scored and a filtering with a savitzky-golay filter was applied afterwards. the filter uses local polynomial regression to compute a smoothened value for each point.
+
+the results suggest a boundary at 55% sequence similarity. above 55%, the sci scores are in agreement, below 55%, the two approaches are outperformed by the reference alignment. this confirms the observation by gardner, wilm and washietl:
+
+the results suggest that 60% sequence identity is a crude threshold, whereby the structural content of predicted sequence alignments diverges from reference structural alignments <cit> .
+
+ our working hypothesis was that the overall shape of the prediction might still be correct in this twilight zone. in fact, planacstar shows an improvement in the zone between 30% and 55% similarity, compared to plan a. while the underlying rna sequence is not conserved well, the additional information we extract from its structure improves structure conservation in the overall alignment. compared to plan a, planacstar reduces the area in the twilight zone to roughly two thirds of its original size.
+
+looking at the full data set, 90% of the dots are on or very close to the diagonal. as expected, above the 55% boundary, our fine-tuning is not necessary. in the twilight zone, we notice that almost 50% of the sci scores improved.
+
+we also tested whether the improvement is related to the gap content in the alignment, but no correlation was observed. this test is documented in figure  <dig> 
+
+a detailed observation
+below, a typical path through the pipeline of planacstar is shown. as an example, we picked an alignment located in the sequence identity's twilight zone, alignment  <dig> of the group ii introns. the alignment has a sequence identity of 31% and planacstar improves its sci score from  <dig>  to  <dig> .
+
+the first step is the initial sequence alignment a, conducted by clustalw. the result is the following:  
+
+using rnaalifold, its preliminary consensus c is calculated. figure  <dig>  shows the structure of the consensus, scored by rnaalifold with - <dig> , and a sci score of  <dig> . the string representation of c is the following:  
+
+the next step in our pipeline is an individual folding of the single sequences relative to the consensus with rnafold -c. a direct comparison of this procedure to the optimal mfe folding without any consensus is shown in figure  <dig>  rnaforester calculates the multiple structure alignment y, from which an improved sequence alignment a* can be easily extracted. both are shown below:  
+
+note that there is a new gap at the end of our alignment. the effects on the improved consensus structure c* are shown in figure  <dig> : the number of basepairs increased. the rnaalifold mfea improves to - <dig> , that is a sci score of  <dig> . a sci score above  <dig>  indicates a very well conserved secondary structure.
+
+evaluation summary
+structural conservation in rna alignments in the twilight zone of 30-55% sequence identity can often be improved. we achieved this by combining already available and widely used rna tools in the pipeline described above. while the average improvement lies at 10%, a percentage range of improvement cannot be stated, as sometimes, the original sci value is very close to  <dig>  in the leftmost data point in figure  <dig>  a structure has two parts, of which the original alignment only allows to identify one. rnafold finds the second part in each individual sequence, and the structure alignment matches these parts. hence, the sci value is raised from   <dig> to a significant positive value.
+
+comparing figure  <dig> and  <dig>  we notice that, in the twilight zone, planacstar reduced the discrepancy between predictions and reference to about two thirds of its original area. this goes hand in hand with the direct comparison of the sci scores of planacstar and plan a shown in figure  <dig>  almost all improvements occur within the twilight zone.
+
+these improvements are costly to compute. with our data set and particular set of tools employed, we found that planacstar is slower than plan a by a factor of  <dig>  to  <dig> . to be concrete, the runtime on a single subalignment  was increased from  <dig>  seconds to  <dig>  seconds on a  <dig> ghz intel core  <dig> duo processor. this extra efforts results from the individual calls of rnafold for n sequences and the multiple alignment of the refolded structures afterwards, where the former effort grows with o, and the latter grows with o. since each of the pipeline's components may be replaced with a functional equivalent, resource requirements in another implementation may be different. in particular, we are working on a faster version of the pure structure alignment algorithm for the special case when the aligned structures are known in beforehand to share a common overall shape.
+
+on the side, our study also confirmed the recent improvements made to the rnaalifold program  <cit> . our data were originally computed with the previous version of rnaalifold, yielding an average sci improvement near 20%. with improved gap handling in rnaalifold, our fine-tuning makes a smaller improvement of the sci score. but note that the new rnaalifold does not change the alignment, it only scores it more cleverly.
+
+CONCLUSIONS
+our evaluation shows that, with a fairly simple combination of available tools, structure conservation in rna alignments in the twilight zone can be improved. the degree of achievable improvement varies significantly. in a context of large screening for conserved secondary structures, such as genome-wide rna gene prediction with rnaz  <cit> , plan a is chosen for its high speed, and using planacstar in place of plan a must be considered too expensive. moreover, many folded alignments fall outside the twilight zone, and no improvement is to be expected from fine-tuning anyway. however, once certain alignments have been determined as promising and to be are used for model building, we suggest that fine-tuning with planacstar should be applied. our implementation is available on the bielefeld bioinformatics server at http://bibiserv.techfak.uni-bielefeld.de/planacstar/.
+
+while we have built our evaluation on the three tools clustalw, rnaalifold and rnaforester, note that each of these constituents may be replaced by a functional equivalent to create another instance of planacstar. recovering the covariance signal obscured by sequence alignment remains the underlying general idea.
+
+while often interpreted in this way, a high sci does not necessarily imply that the associated structure is close to the truth. it is not known currently to what an extent this interpretation is valid, in particular within the twilight zone. we have compiled a second test data set from curated structures, taking their consensus as a standard of truth. we created  <dig> data sets of  <dig> sequences each, randomly selected from the szymanski 5s ribosomal rna database  <cit> , taking care that the corresponding subaligments fall within the twilight zone. in  <dig>  cases, planacstar either confirmed the initial prediction , or it improved the sci and also made the alignment more similar to the reference . in  <dig> cases, the sci was improved but the alignment became less similar to the reference.. in  <dig> cases, this was due to moderate local rearrangement of base pairs, while the overall structure was retained. in one case, we found that planacstar was fine-tuning to the wrong string, and in the other remaining case, one  helix was strengthened on account of the other  helix, with an overall negative effect. details of this study are given in additional file  <dig>  and the complete data set in additional file  <dig>  there, we also look at the worst case in detail, and show how the pipeline performs when applied to the "true" alignment. as a final observation, we note that there were  <dig> cases where the alignment improved whereas the sci did not . this indicates that there are a few extra cases where fine-tuning could improve the predicted consensus structure. however - since in practice we have no reference structure available - we have no criterion to take advantage of this fact.
+
+authors' contributions
+rg and ss designed the study. ab implemented the planacstar pipeline and performed the first evaluation. ss performed the evaluation of the sci improvement against reference structures. both ab and ss contributed equally to this work and should be considered as joint first author. all three cooperated closely on the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+adequacy of sci improvement. this supplement reports on an evaluation which uses curated reference structures to evaluate whether an improvement of the sci is linked to bringing a predicted consensus structure closer to the reference.
+
+click here for file
+
+ additional file 2
+archaea subalignments. this file provides the subalignments of archaea sequences created and used in the study described in additional file  <dig>  this is a zipped archive of files in fasta format.
+
+click here for file
+
+ acknowledgements
+we appreciate the comments of the anonymous reviewers, which have helped to improve the presentation and significantly deepen the scope of this study. we also give thanks to stefan janssen for numerous discussions.

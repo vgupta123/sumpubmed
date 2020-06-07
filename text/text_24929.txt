@@ -1,0 +1,144 @@
+BACKGROUND
+simple sequence repeats  have been shown to be one of the most powerful genetic markers known  <cit> . they are abundant, having been reported to occur approximately every  <dig> kb in plant genomes  <cit> , and exhibit a high degree of polymorphism, due to a high mutation rate, which leads to variations in the number of repeat units  <cit> . their abundance and hypervariability make ssrs excellent markers for genotype identification, construction of genetic maps, analysis of genetic diversity, and marker-assisted selection of crop plants.
+
+ssr loci are commonly identified by sequencing genomic dna libraries enriched for ssr sequences  <cit> . raw results of this sequencing step usually consist of chromatogram or trace files. the manual analysis of these abundant sequence data, from base calling to the production of specific ssr primer pairs, is laborious and time-consuming.
+
+an automated ssr analysis tool  has been developed to collect sequence information and facilitate the design of pcr primers that will amplify ssrs and their flanking sequences. this software integrates various external tools like phred, lucy, d2-cluster, phrap, cap <dig> and eprimer <dig>  sat is able to successively perform base calling and quality evaluation of chromatogram files, eliminate cloning vector and low quality sequences, search for ssr motifs, cut chimeric sequences or partial restriction products, cluster and assemble the redundant sequences , and finally design ssr primer pairs and check primer specificity. an integrated web interface allows the remote use of this tool.
+
+implementation
+sat is composed of three major components: a set of pipelined programs, a relational database and a web interface. the sat pipeline consists of perl modules wrapping different external software programs. in some cases, we reused bioperl modules like bio::tools::restrictionenzyme  <cit> . the sat database system uses mysql  <cit> . the sat web interface is implemented with static html pages and dynamic perl/cgi scripts. the server is currently running on a machine with red hat linux  <dig> and apache version  <dig> . <dig> 
+
+pipeline components
+the automated process consists of eight steps :
+
+base calling
+sat accepts chromatogram files, in scf or abi format, and uses the phred program  <cit>  to perform base calling and to assign corresponding quality scores. the output of this step is a multi-fasta sequence file and the corresponding quality file.
+
+cleansing
+the pipeline uses the lucy software  <cit>  to clean the raw sequences by removing low quality sequences and those of the cloning vector and adaptors. the user must specify the quality thresholds and the vector information . lucy reads the quality information produced by the phred program in order to keep good quality regions, i.e. regions within sequences that have higher quality values than a threshold provided by the user. lucy then compares input sequence with the vector and splice site sequences and adds this clipping information in the header of the initial multi-fasta file. sequence and quality files are then clipped by sat.
+
+in silico restriction
+sat performs a virtual restriction to detect chimera or partially digested sequences that may have formed during the ssr enriched library construction. the virtual restriction is performed using the bioperl module bio::tools::restrictionenzyme  <cit> . the user has to specify the restriction enzyme used for library construction.
+
+if the in silico restriction of a specific sequence, using the same restriction enzyme as the one used for the library construction, leads to more than one fragments, this means that the fragment was either a chimeric sequence or a partially digested sequence.
+
+obviously, chimeric sequences can not be a priori distinguished from partially digested sequences, and we choose then to keep, after the restriction step, all the fragments containing a ssr motif. these fragments would correspond to what one should obtain with a complete digestion and no chimeric sequences.
+
+ssr detection
+sat searches for ssrs and keeps the sequences containing an ssr motif. users may choose between two different programs to perform the ssr search: the ssrit program  <cit> , which allows the choice of the minimal number of repeats for each pattern of di, tri or tetranucleotide; or the sputnik software  <cit> , which is offered as an alternative because it presents the advantage of reporting imperfect ssrs.
+
+clustering
+sat first masks the ssr repeat regions before it clusters sequences using the d2_cluster program  <cit> . sequences in the same cluster may correspond to either the forward and reverse sequencing of the same locus, the double picking of bacteria during the library construction, or the real repetition of the ssr locus in the genome. microsatellite sequences are then unmasked for the assembly step.
+
+assembly
+sequences in each cluster are assembled so that consensus sequences are generated. the assembly module uses either phrap  <cit>  or cap <dig>  <cit> , depending on the user's preference. the phrap assembly is followed by an additional alignment analysis performed by craw. whereas phrap tends to produce the longer contigs, cap <dig> is likely to produce fewer errors in consensus sequences  <cit> . sat users can select the assembly tool best suited to their needs.
+
+primer design
+a new ssr detection step is performed, within each consensus sequence, prior to the pcr primer design stage. the eprimer <dig> software  <cit>  then analyzes the flanking dna sequences in order to define suitable forward and reverse pcr primers with which to assay the ssr loci. primers are designed with a user-defined set of constraints, such as oligonucleotide melting temperature, primer length, gc content, pcr product size, and positional constraints around the ssr. when a consensus sequence contains several ssrs, the program targets each of them to define local primer pairs, before targeting the whole ssr region to design global primer pairs.
+
+virtual pcr
+the virtual pcr step verifies the specificity of the detected pcr primers. this step validates the efficiency of clustering: if primers designed on a specific contig amplify at least another contig, this either means that these two contigs should have been assembled together , or that primers have been designed in a conserved region of two distinct loci.
+
+each set of primer pairs is analyzed for sequence similarity using blast  <cit>  against all the sequences  of the project.
+
+using the outputs of the virtual pcr step, sat classifies sequences in three categories according to the specificity of primers:
+
+a) sequences for which the primers are specific. neither the forward nor reverse primer matches other sequences of the project with more than 80% identity. in this case, the first couple of primers found by eprimer <dig> are automatically flagged as "validated". if several ssrs are found in the same sequence, the primer pair designed to amplify the whole ssr region is validated. if no global primer is found, primer pairs specific for each ssr are validated.
+
+b) sequences for which the primers are not specific. at least one primer, among the various primer pairs proposed, matches one or more other sequence of the project with a greater than 80% identity. sat then uses the graph <dig> program  <cit>  to automatically perform a new clustering of these sequences, consensus or singletons, linked by at least one primer. users will be allowed to restart the sequence alignment with cap <dig> and decide whether or not to keep the newly formed consensus sequence by way of an automatic database update.
+
+c) sequences for which no primer is found because of the constraints applied on eprimer <dig>  for this class of sequences, user will be also invited to refine results, by running eprimer <dig> again, with less stringent parameters to allow the program to design primers.
+
+RESULTS
+web application
+a comprehensive help page includes details on how to configure and run the pipeline, and how to search, display and reanalyse sat results.
+
+users log onto the sat web site and choose between running the pipeline or querying the database. in the pipeline entry, users may submit a new project and execute the pipeline. in the database entry, users can consult the analysis results of previous projects, as well as refine the analyses on the consensus sequences and their respective primers.
+
+running the pipeline
+pipeline flexibility
+the sequences to be analysed can be provided either as trace files  or as sequence files ; therefore sat can use sequences obtained from different sources .
+
+the pipeline is flexible enough to allow users to select which of the steps should be launched . if the base calling step is selected, the user would need to submit an archive or zip file containing the chromatograms for analysis. if this step is skipped, a multi-fasta file containing the nucleotide sequences and the corresponding quality file would need to be entered. submitting a multi-fasta file is the only option available if the program is to be run from a point after the cleansing step. the virtual restriction digestion and primer design steps may be skipped, but not the ssr discovery and assembly steps, which are the core of the pipeline. the clustering step may only be skipped when cap <dig> is selected.
+
+although sat has been optimized for the analysis of sequences obtained from ssr-enriched libraries, the "analysis of bac" option  allows fasta nucleotide sequences to be quickly analyzed in order to detect ssr motifs and design primers, skipping the optional steps of a classical sat analysis.
+
+by default, the maximum number of sequences accepted by sat is limited to  <dig> chromatograms/sequences, but upon special request from users, this limit can be augmented.
+
+setting parameters and pipeline execution
+users have the option to set the parameters for each of the different steps along the pipeline . when the pipeline is launched, a new html page presents the results progressively while the sequences are analyzed. at the end of the process, users have access to the detailed reports of all the steps in the pipeline. they may save their results into the database, download a summary report  or re-run the pipeline with modified parameters. when users choose to import and save the results into the database, the virtual pcr analysis is launched automatically.
+
+querying the database
+the pipeline is linked to a database, which allows users to store and query results, as well as refine some of the analyses, including sequence assembly, new primer design for sequences without primers and the manual validation of primer pairs.
+
+primers pairs validation
+a "validated" status is automatically assigned to the first pair of primers that are found to be specific for either a consensus or singleton sequence. however, users may modify the "validated" status after checking the sat results. information on the validated primers can be exported.
+
+project management
+sat is equipped with password protection so that researchers can only access their own project and share it with collaborators. new users must send an email to the sat administrator tropgene@cirad.fr to request a login and password.
+
+for each project, users may visualize the analysis results , refine the analysis on the consensus sequences and their respective primers , submit personal primer pairs  and download the different results .
+
+results visualization
+a treeview display on the left-hand side of the screen provides a clearly-visible distinction between the different sequence assemblies  that were generated by the clustering and alignment steps. singletons are defined as unique sequences that could not be assembled in a cluster whereas singlets are unique sequences that were assembled in a cluster but could not be assembled in a contig. each leaf of the tree corresponds to a sequence identifier . clicking on an identifier link opens a new window displaying a colored representation of the sequence, highlighting the positions of the different ssr motifs and the associated primer pairs.
+
+the project description tab allows users to consult statistics on the different analysis steps, with links to the corresponding outputs .
+
+the summary tab provides general information on the ssrs identified and the candidate pcr primers. this table includes the consensus identifiers  and corresponding sequence lengths, the cluster and contig id, the original sequence id derived from the initial fasta headers or chromatogram names, links to the alignments for each contig, ssr motifs, ssr sizes, ssr start and end positions, forward and reverse sequences of the set of candidate primers, and the forward and reverse sequences of the validated primers, including the corresponding pcr product sizes.
+
+the validated primers tab displays the list of validated primers with specific details: sequence id, ssr motif, ssr start and stop positions, id, sequence, melting temperature, sequence size  and the final pcr product size. this list may be downloaded as an excel file.
+
+sequence analysis
+a powerful feature of sat is the possibility for users to check and refine the analysis on the consensus sequences and their respective primer pairs.
+
+the sequences analysis tab  displays the nucleotide sequence, the alignment of the consensus sequences, the coloured representation of the ssr motifs and the set of candidate primer pairs, for each sequence of the project. users can perform a blastn of a sequence against the ncbi nucleotide sequence databank and can also modify the validation status of different sets of primer pairs .
+
+for sequences with "specific" primers, the first couple of primers found by eprimer <dig> automatically gets a "validated" status .
+
+for sequences without primers, sat offers to run eprimer <dig> again using modified analysis parameters. the user then decides whether or not to accept any newly detected primers into the database, which will automatically validates them.
+
+for any remaining sequences without detected primers, a table shows statistics on the main reasons for the failure of eprimer <dig> for each sequence  and another table presents the global incidence of each reason. users are also given the opportunity to propose a primer pair for each remaining sequence and save it in the database .
+
+for sequences with non-specific primers, sat proposes to restart the sequence alignment  using cap <dig>  with the option of keeping the newly formed consensus sequence .
+
+import data
+sat allows existing primer pairs to be imported and blasted against all the initial or final sequences  of the project. if an exact match is found for the forward and reverse primer sequences, they are automatically registered in the sat database. imported primers are given priority over others, so any that may have already been validated for the same sequence are invalidated. details of the analysis  of the submitted primers are also available.
+
+export data
+the export data tab allows users to download a multi-fasta file containing the different members of a particular cluster or contig, a multi-fasta file compiling all the final consensus and singletons, as well as a multi-fasta file containing all the primers sequences. an excel file listing all the validated primer pairs and a summary text file of the sat analysis are also available.
+
+downloadable version
+a standalone command line version of the program is freely available through the download link on the sat home page.
+
+this package, which runs on linux platforms, contains all the perl scripts and modules needed for running the pipeline. the sat application is easily extendable; data marshalling is used to transfer data between each perl program, so a developer can easily add new perl modules.
+
+benefits
+previous software packages have been implemented to automatically discover ssr markers, but their functionality is more limited when compared to sat. ssr primer discovery tool  <cit>  only uses fasta formatted data as input and is not able to start analysis from base-calling. moreover, only a few constraints in the step of pcr primer design may be defined by the user. microsatdesign  <cit>  can accept sequencer trace files, but may only be used in command line mode on unix systems, without an interactive interface and database for project management. thiel et al.  <cit> , and more recently martins et al.  <cit>  proposed a suite of software to improve the determination of microsatellite markers, but to our knowledge, sat is the first integrated web application optimized for automatic development of ssr markers from chromatogram files.
+
+sat is highly flexible, so as to allow users to create their own ssr analysis workflow. either chromatogram files or fasta formatted sequences can be submitted to the program. in the case of chromatogram inputs, the initial evaluation of sequence quality is important in avoiding errors in the sequence assembly step that follows, allowing suitable pcr primers to be identified with confidence. users may selectively choose which steps of the sat pipeline to perform and have the option to modify the parameters at each stage of the sat analysis. in the case of the pcr primer design step, the default parameters are based on our empirical data. however, users are encouraged to adjust them and find combinations appropriate for their situation. the modular architecture of the sat pipeline renders this system easily extensible, which will facilitate the addition of new features and programs according to user feedback.
+
+sat was conceived to optimize the design of good quality ssr markers. for example, the in silico restriction digestion will detect potential chimeric sequences. the sequences analysis step permits users to refine the analysis at different levels: sequence clustering and assembly, primer detection and primer specificity. to facilitate easy data exploration, sat displays web-based results, which may be accessed through the internet. the project management database of sat allows users to store results, to query all the intermediate results, and to repeat some of the steps. sat presents detailed and well organized information, so that scientists can focus on the biological aspect of their projects, saving time from routine data processing work.
+
+in our laboratory, the entire sat pipeline was successfully used on different ssr enriched banks  and est banks  . the application has analyzed libraries enriched for ssrs with more than  <dig> sequences . the "analysis of bac" option of sat was used on  <dig> musa bac sequences of  <dig> kb to  <dig> kb. an example of experimental validation of the sat application was the development of new markers from the ssr sorghum enriched library . among the  <dig> primer pairs flanking ssr loci defined by sat, a subset  were selected and used for screening polymorphisms among  <dig> sorghum cultivars, including parents of the mapping population sar <dig> × ssm <dig>  of the  <dig> primer pairs,  <dig>  were found monomorphic between the  <dig> sorghum cultivars examined, and for  <dig> primer pairs  no amplification was detected. twelve of the validated new ssr markers have been integrated into the sorghum ssr kit to study sorghum genetic diversity  <cit> . this ssr kit has been elaborated in the frame of a large international genotyping project  supported by the generation challenge program  <cit> .
+
+CONCLUSIONS
+sat, ssr analysis tool, is a flexible and user-friendly web application, optimized for ssr marker identification and the design of specific pcr primers. the major advantages of sat are that it saves time and reduces the errors that might be introduced by analyzing sequences by hand; users only need to upload their sequences or chromatograms, and select the parameters appropriate to the tools.
+
+in addition to its utility in analyzing ssr-enriched libraries, sat can use any type of sequence  to detect ssrs and design the necessary primers. this tool is generic enough to be used on the dna of any organism.
+
+availability and requirements
+• project name: sat, ssr analysis tool
+
+• project home page: 
+
+• operating system: web access, standalone: unix/linux
+
+• programming language: perl
+
+• licence: gnu gpl, free for academic and non-academic users
+
+• any restrictions to use by non-academics: none
+
+authors' contributions
+ad wrote all the application. xa helped to design the software architecture. jfr and cb instigated and coordinated the project. mr provided advice and guidance throughout the project and drafted the manuscript. all authors read and approved the final manuscript.
+

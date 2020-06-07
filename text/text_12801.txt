@@ -1,0 +1,89 @@
+BACKGROUND
+we are witnessing a dramatic shift in the design of personal computer systems, where speedups are achieved by porting the parallel traits of supercomputers into the world of personal computing. modern computers are heterogeneous platforms with many different types of computational units, including central processing units , graphics processing units , digital signal processors , coprocessors and custom acceleration logic. today’s cpus contain from two to twelve cores, each capable of executing multiple instructions per clock cycle. assisting the cpu, graphics processing units usually render 3d graphics, but can also provide a general-purpose computing platform. current gpus are designed as massively parallel processors offering substantially more computing power than cpus. gpus are the most powerful computational hardware available at an affordable price  <cit> . the availability of general-purpose gpus with computing abilities in commodity laptop and desktop computers has generated a wide interest, including applications in bioinformatics  <cit> .
+
+the newest addition to the commodity computer parallel processing hardware is the intel xeon phi family of coprocessors  <cit>  designed for computationally intensive applications. xeon phi implements intel’s many integrated core  architecture and offers a theoretical performance similar to that of modern gpus, but promises easier porting of existing software to the new architecture. tianhe- <dig>  currently the world’s fastest supercomputer has  <dig>  <dig> xeon phi coprocessors  <cit> .
+
+many computational problems in bioinformatics require substantial computational resources  <cit> . problems that can be computed with a high degree of parallel and independent processing are most suited for heterogeneous massively parallel hardware. our aim was to investigate how these modern architectures cope with problems that are typical for bioinformatics, such as the problem of snp-snp interaction detection. as a proof-of-concept, we focused on a parallel implementation of computational core for the web-application snpsyn  <cit>  by exploiting heterogeneous processing resources, multi-core cpus, gpus, and the new mic coprocessors.
+
+snpsyn  <cit>   was developed as an interactive software tool for efficient exploration and discovery of interactions among single nucleotide polymorphisms  in case-control genome-wide association study  data. it uses an information-theoretic approach to evaluate snp-snp interactions  <cit> . information gain is computed for every individual snp, which allows the user to identify snps that are most associated with the disease under study. when searching for interesting pairs of snps, snpsyn estimates the synergy between a pair of snps by computing the interaction gain. information gain can identify snp pairs with non-additive effects. results are presented in an interactive graphical user interface that allows the user to select the most synergistic pairs, perform gene ontology enrichment analysis and visualize the synergy network among the selected snp-snp pairs.
+
+snpsyn computes the information gain exhaustively across all snp pairs to avoid missing any pair where snps on their own provide no information about the phenotype under study. because the number of pairs is quadratic to the number of snps, the exhaustive search quickly becomes computationally intractable for commodity computer systems. the information-theoretic-based detection of snp-snp interactions has a high degree of data parallelism and requires much more processing power than memory storage. this makes it a perfect candidate for processing on modern massively parallel architectures.
+
+implementation
+below we describe the snp-snp interaction scoring approach we use in snpsyn and discuss its implementation on cpu, cuda and mic architectures. our particular concern is to evaluate intel’s new mic architecture and compare its advantages against currently prevailing cuda architecture.
+
+snp-snp interaction scoring
+the snp-snp interaction scoring scheduler, written in python, partitions and distributes the computational tasks to all available, user-specified resources: cpus, gpus, and xeon phi coprocessors . it then merges the results from individual units into a final result file. each thread  takes one pair of snps and performs all the calculations needed to compute the synergy score of the pair. the synergy of a pair of snps x and y with respect to phenotype p is obtained by subtracting the information gains of individual snps from the information gain of the combined pair  <cit> : 
+
+  g=i-i-i. 
+
+given the two snps and the phenotype as random variables x, y and p, respectively, the information gains required in equation  <dig> are calculated as  <cit> : 
+
+  i=∑x∈x,p∈pqlog2qqq, 
+
+  i=∑y∈y,p∈pqlog2qqq, 
+
+  i=∑x∈x,y∈y,p∈pqlog2qqq. 
+
+computation of marginal probabilities q, q, q and joint probability distributions q, q, q, q requires a single scan through case and control samples. the number of joint probability distributions q and q that need to be determined grows quadratically with the number of snps. this ensures enough computational load to compensate for the memory transfer costs and makes it efficient for an implementation on parallel hardware.
+
+permutation analysis is used to evaluate the significance of results on true data. data is randomly shuffled thirty times. each time, information gain and synergy for all pairs are calculated to obtain the null distribution, which is used to determine the significance of results on true data. details on permutation analysis are described in curk et al. <cit> .
+
+parallel implementations of interaction scoring
+calculations are performed in parallel for as many pairs of snps as allowed by the hardware. we took special care to efficiently use the gpu and xeon phi hardware. we minimized memory transfers between the main cpu and the coprocessors to avoid bottlenecks and vectorized the code wherever possible. we optimized the number of threads running on the gpu to maximize throughput. to cope with the memory limitation of the gpu, snpsyn includes optional heuristics to quickly estimate the importance of snps and reduce the data set prior to analysis. in the following sections we present the implementation details regarding both architectures.
+
+gpu and cuda
+gpus gain their computational power from the numerous processing cores packed into one chip. for example, the modern nvidia tesla k <dig> gpu has  <dig> streaming multiprocessors, each containing  <dig> computational units called cuda cores. these cores lack sophisticated control units and are thus likely to work best when executing the same instruction on many data elements in parallel with no divergent program paths in the algorithm. a programmer sees the gpu as a parallel coprocessor and can use it to speedup computationally intensive parts of the algorithm. of course, there must be enough data parallelism in the code to make it worthwhile.
+
+different tools are available for programming gpus. nvidia offers the cuda toolkit  <cit>  for programming its own products. it includes a proprietary compiler and a set of libraries that extend the c++ syntax with parallel programming constructs. another popular option is the opencl framework  <cit> . it supports hardware from different vendors but usually lags slightly in terms of performance when compared to specialized development kits such as cuda.
+
+regardless of the development tool used, the programmer must follow certain rules to obtain maximum performance  <cit> . the most important one is to partition the algorithm in blocks small enough to simultaneously start a sufficient number of threads to utilize all available resources. for example, consider the code snippet in figure  <dig>  a simplified version of a code that scores pairs of snps. function computeigain calculates the information gain of a snp pair using equation  <dig>  the details of the calculation are omitted to emphasize the architecture specific parts of code. the snippet includes all the peculiarities of programming for gpus. the program has to implement the gpu-specific part separately from the cpu code and explicitly transfer data from the host to the gpu. special functions called kernels  must be written to be executed on the gpu. memory transfer and allocation functions must be called to supply the necessary data to the gpu and collect the results afterwards. usually, the programmer performs measurements to determine which thread configuration is most suitable for a particular problem size and the appropriate number of threads to launch.
+
+xeon phi and mic
+intel designed the xeon phi family of coprocessors around the new mic architecture  <cit>  to compete with gpus specialized in general-purpose computing. the design follows a different approach in comparison to gpus. coprocessors consists of many simple, but fully functional processor cores derived from the intel pentium architecture. intel improved the original design by adding a 512-bit wide vector unit and hyper-threading technology. this enables xeon phi to achieve similar theoretical performance as modern gpus. the model 5510p, which we used in this study, includes sixty cores interconnected with a bidirectional ring bus. each core is capable of running four threads in parallel. the cores fetch data from the  <dig> gb of on-board ram and communicate with the host cpu through the pcie bus. in comparison to gpus, each core on a xeon phi can efficiently execute the code even if threads do not follow the same program path. this makes it suitable for a wider range of problems, including multiplications of sparse matrices  <cit> , and operations on trees and graphs  <cit> .
+
+intel provides a c++ compiler suite and all the tools needed to exploit the hardware  <cit> . the code can be parallelized using openmp directives or the mpi library and compiled for the mic architecture. resulting applications can then run only on the xeon phi coprocessors. another, more general way to specify parallel execution is to use offload constructs along with openmp to mark the data and the code to be transferred and executed on the xeon phi. all other parts of the program will run normally on the host computer cpu. a third possibility is to use opencl framework in the same manner as with gpus.mic development tools facilitate data management through compiler directives. the example in figure  <dig> demonstrates this programming paradigm. it performs the same operation as the snippet from figure  <dig>  the programmer marks the data and the code that is needed on the coprocessor. all memory allocations and transfers are done implicitly. to obtain best performance, the programmer must tailor the algorithms to fully utilize the vector unit. the intel compiler automatically vectorizes sections of code where possible.
+
+if a computer lacks xeon phi, the mic code can be executed by the main cpu, which is not the case with cuda-specific implementation. the mic code looks much cleaner and easier to handle than cuda code. the current drawbacks of using xeon phi are the shortage of supporting linux distributions  and the pricey development environment for the windows operating system. the main aspects  of each of the architectures are shown in table  <dig> 
+
+lines of code  reports on the approximate length of the code that implements the computationally intensive tasks of snpsyn.
+
+RESULTS
+we benchmarked snpsyn on a workstation with two six-core intel xeon e5- <dig>  <dig>  ghz cpus capable of running up to twenty-four threads in parallel,  <dig> gb of ram, two nvidia tesla k <dig> general-purpose computing cards with  <dig> gb of ram each and one intel xeon phi 5110p coprocessor with  <dig> gb of ram. the operating system was centos  <dig> .
+
+we evaluated the performance on a series of representative wgas data sets constructed from the infinium_20060727fs1_gt_ms_gcf data set found in the wtccc study  <cit> . our goal was to observe the effect of the number of snps and wgas study subjects to the execution time on different configurations. we sampled with replacement the original data on  <dig> subjects and  <dig>  <dig> snps to obtain data sets with the desired number of subjects and snps. we performed the analysis on data with  <dig>  <dig>   <dig>  <dig>  and  <dig>  <dig> subjects and  <dig>  <dig>   <dig>  <dig>  and  <dig>  <dig> snps. the study considered only the data sets that could fit into the gpu memory. xeon phi is clearly in advantage when compared to k <dig> regarding the amount of ram . we tested six hardware configurations including one cpu core running a single thread, twelve cpu cores running twelve threads, twelve cpu cores running twenty-four threads, one gpu core, both gpu cores, and xeon phi.figure  <dig> reports on execution times of the exhaustive snp-snp interaction analysis and the speedups achieved using various hardware configurations. for easier comparison, execution times are plotted on a logarithmic scale. as expected, execution times increase proportionally with the number of subjects and are quadratic with the number of snps included in the analysis.
+
+the single thread cpu configuration takes more than  <dig> days to analyze the data on  <dig>  <dig> snps and  <dig>  <dig> subjects. running twelve threads in parallel, one on each of the cpu cores, speeds up the computation by a factor of  <dig> and reduces the execution time to approximately  <dig> days. increasing the number of threads to twenty-four reduces the time to perform the analysis to around  <dig> days with the speedup peaking at  <dig>  compared to a one thread configuration. memory bottleneck is the main factor for the poor speedup, which is far below the theoretical value of  <dig>  interestingly, similar speedups are achieved on all  data sets, meaning that there is enough data parallelism to keep the cpu busy.
+
+nvidia k <dig> provides for considerable reduction in execution times, with the analysis of the largest data set taking only around  <dig> hours, demonstrating a speedup of  <dig> in comparison to a single cpu thread. sharing the work between both gpu cards doubles the speedup and reduces the execution time to  <dig> hours. increasing the number of subjects leads to a noticeable decrease in speedup, as more data is being transferred between the main memory and the gpu. on the other hand, increasing the number of snps introduces more data parallelism into the computations, reflecting in an improved speedup.
+
+xeon phi is positioned somewhere in-between k <dig> and cpu-only implementation. it achieves a speedup of nearly  <dig> on the largest data set, making the analysis run a day and a half, which is double the time needed on a k <dig>  the speedup behaves similarly for xeon phi as for k <dig> – it increases with the number of snps and decreases with the number of subjects. this confirms that the drop is caused by transferring larger amounts of data without introducing additional parallelism.
+
+using only cpus to analyze the data is unfeasible except for small data sets since the computations can take days to complete even on multiple cores. xeon phi provides a considerable performance boost with a maximum speed-up of nearly  <dig> and lots of on-board memory to store the data. nvidia k <dig> clearly outperforms every other configuration in terms of speed and is the perfect choice when one wants to cut on the execution times as much as possible. this comes at a price of cumbersome programming and less on-board memory, which limits the size of data.
+
+technical specifications presented in table  <dig> show similar trends: nvidia k <dig> offers the highest theoretical performance in terms of tflops and has the most complex design. xeon phi has considerably less computing power, but interestingly draws the same amount of power as k <dig> at maximum load. the xeon e5- <dig> cpu is the least efficient of all and lacks the performance to remain competitive at computationally intensive tasks.
+
+CONCLUSIONS
+we investigated how modern heterogeneous architectures cope with a selected computational problem typical for bioinformatics. the proof-of-concept implementation of snpsyn on heterogeneous systems greatly reduces the  time needed for analysis of large gwas data sets. gpus proved to be a mature platform that offers a large amount of computing power to address inherently parallel problems, but is demanding for the programmer. a user who is only interested in using snpsyn to analyze their data will profit the most by having multiple gpus in their system. the new mic architecture greatly alleviates programming but lacks in performance. its ease of programming combined with good performance has a lot to offer to developers who don’t want to spend too much time optimizing their algorithms. nevertheless, mic is a general platform capable of tackling a wider range of more complex problems. this makes it very promising to excel in more complex analysis of snp-snp interactions such as adjustment for covariates  <cit> .
+
+availability and requirements
+project name: snpsyn
+
+project home page:http://snpsyn.biolab.si
+
+operating systems: linux, windows, mac os
+
+programming language: c++
+
+other requirements: cuda  <dig>  or higher, intel composer xe  <dig> or newer, make
+
+license: gnu gplv3
+
+restrictions to use by non-academics: none
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+ul, ds, tc, and bz designed the study. ds implemented the cuda and mic software and measured the performance of the software. tc implemented the cpu and python part of the software. ds wrote the first draft of the manuscript. all authors have written, read and approved the final manuscript.
+

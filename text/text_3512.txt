@@ -1,0 +1,532 @@
+BACKGROUND
+unbiased surveys of the transcriptomes of higher eukaryotes by multiple techniques
+            ranging from tiling arrays and short-read sequencing to large-scale sequencing of
+            full-length cdnas have dramatically changed our perception of genome organization: at
+            least 90% of the mammalian genomes are transcribed, the vast majority of this
+            transcription is non-protein-coding, and there is mounting evidence that a significant
+            fraction of the non-coding transcripts are functional  <cit> . the investigation of non-coding rnas has thus developed into a focal topic
+            in molecular biology and bioinformatics alike. most of the ancient house-keeping rnas
+             and many of the newly discovered regulatory rnas,
+            including microrna precursors, form evolutionarily well-conserved secondary structures,
+            reviewed e.g. in  <cit> . these structures are tightly linked to the molecules' functions. it is
+            therefore a core task in rna bioinformatics to compute in particular the consensus
+            structures of evolutionarily conserved rnas.
+
+it has long been known that the accuracy of thermodynamic structure predictions for
+            individual sequences is rather limited. on the other hand, computing the consensus
+               structure common to several related rna sequences can drastically improve the
+            prediction  <cit> . the conceptually most elegant approach towards consensus structure
+            prediction is to solve the alignment and the structure prediction problem
+            simultaneously. the sankoff algorithm  <cit>  provides a solution that is practically applicable and has been implemented
+            in various variants including dynalign  <cit> , stemloc  <cit> , foldalign  <cit> , locarna  <cit>  or consan  <cit> . still, these approaches are computationally too expensive for large-scale
+            routine applications. one basic alternative is to first compute structures for the
+            individual sequences and then to align these sequences taking into account the
+            structural information. this can be achieved in different ways using sequence-based
+            , tree-based  <cit> , or sankoff-style alignment algorithms  <cit> . alignment-free approaches include rnaspa  <cit>  and consensus shapes  <cit> .
+
+a large group of methods pre-supposes a  alignment. most methods of this type
+            use the alignment to super-impose predicted structures to global  <cit>  or local structures  <cit> . rnaalifold  <cit> , on the other hand, in essence averages the contributions of the standard
+            turner energy model  <cit>  according to a given alignment a and then solves the thermodynamic folding problem w.r.t. these
+            averaged energies. a special case is the construct package  <cit> , which besides acting as a front-end for several prediction tools provides an
+            interface for changing rna alignments using expert knowledge.
+
+methods
+original rnaalifold
+the original rnaalifold approach combines a thermodynamic energy minimization  <cit>  with a simple scoring model to assess evolutionary conservation. both an
+               energy minimization and a partition function version are implemented in the vienna
+               rna package  <cit> . energy minimization uses the following recursions:
+
+ fi,j=min⁡ci,j=βγ++min⁡{∑α∈aℌmin⁡i<k<l<j+ck,l)min⁡i<k<jmi,j=min⁡{mi+ <dig> j+cmin⁡i<k<jci,k+mk+ <dig> j+bmi,j1mi,j1=min⁡ 
+
+as in single-sequence folding, the arrays f
+                  ij
+               , c
+                  ij
+               , m
+                  ij
+               , and mij <dig> hold, for every sub-sequence from i to j, the
+               energies of the optimal folds of unconstrained structures, of structures enclosed by
+                   base pairs, of multi-loop components, and of multi-loop
+               components with a single branch, respectively  <cit> . the turner energy parameters for hairpin loops delimited by alignment
+               positions i and j in sequence α ∈ a are denoted by ℌ; similarly ℑ encodes the energies of interior loops including stacked base
+               pairs. multi-loops are modeled by a linear model with a "closing" contribution a, and contribution b and c for each branch and unpaired position, respectively. note that
+               these values are the tabulated single-sequence parameters multiplied by the number
+                  n = |a| of aligned sequences, since the recursion above computes the sum
+               of the folding energies. rnaalifold modifies the energy model by introducing a  conservation score γ that evaluates
+               the corresponding alignment columns w.r.t. evidence for base pairing. in  <cit> , we used
+
+  γ′=12∑α,β∈aα≠β{h+hif ∈ℬ∧∈ℬ0otherwise 
+
+where the hamming distance h =  <dig> if a =
+                  b and h =  <dig> if a ≠
+                  b and ℬ = {au, ua, cg, gc, gu,
+                  ug} is the set of possible base pairs. the full covariation score
+                  γ also includes penalties for sequences in which the
+                base pair cannot be realized:
+
+  γ=γ′+δ∑α∈a{0 if ∈ℬ <dig>  if αi∧αj are gaps1 otherwise 
+
+potentially paired columns, in which less than a user-defined number or fraction of
+               sequences can form the pair, are considered to be forbidden. rnaalifold therefore
+               predicts the structure common to most of the sequences in an alignment. a
+               prediction for a single molecule that is consistent with the consensus structure can
+               be obtained by using the result of rnaalifold as a constraint for single molecule
+               folding. both mfold  <cit>  and rnafold  <cit>  can be used for this purpose.
+
+the purpose of this contribution is to explore several avenues for improving the
+               performance of rnaalifold. intuitively, there are two leverage points:  the
+               details of the energy evaluations in the presence of gaps, and  the rather ad
+                  hoc covariance bonuses and penalties.
+
+improved energy evaluation
+the  <dig> implementation of rnaalifold uses a very simplistic way of treating gaps in
+               order to save computational resources: gaps within unpaired regions are simply
+               ignored, because then only alignment positions appear as indices and loop sizes, for
+               instance, do not need to be evaluated separately for every sequence. this can,
+               however, distort the energetics in particular if there are many gaps, and in extreme
+               cases can lead to the inclusion of unrealistically short hairpins, see figure  <dig>  a second source of error is that gaps do not contribute to the
+               dangling end energies in this setting.
+                     the alignment in the middle is predicted once with gaps treated as if they were
+                     bases , and once by removing them before computing the energies . the
+                     predicted structures  are shown to the left. as can be seen
+                     in  <dig>  sequence  <dig> can form a perfect hairpin. in  <dig>  the sterically
+                     impossible hairpin for the other two sequences is shown. two of the three
+                     sequences cannot form the predicted structure. on the other hand, the new
+                     version of rnaalifold predicts a stem that has a bulge , but only in
+                     one sequence, the other two sequences can form the perfect stem shown in
+                      <dig> 
+
+the new implementation thus evaluates ℌ and ℑ by first mapping the alignment indices back to the positions in
+                  α. then the correct energy parameters according to the turner
+               model are retrieved. in the same way, the handling of dangling ends is fixed. in
+               practice, this is achieved by introducing three arrays of dimension n
+               × n, where n is the length of the alignment of n
+               sequences. for each sequence α and each alignment position,
+               these arrays hold the 5' neighboring base, the 3' neighboring base, and the position
+               in the original sequence. since in typical applications we have n
+               ≪ n, this does not significantly change memory consumption.
+               still, the problem remains that in some sequences hairpin loops with less than three
+               unpaired positions may arise. we penalize these sequences with a contribution of the
+               same order of magnitude as that of non-canonical base pairs. from here on, we will
+               refer to this "gap free" energy computation as the "new rnaalifold".
+
+energy parameters
+instead of the usual turner energy parameters, one may use other parametrizations.
+                  andronescu et al.  <cit>  introduced energy parameters that increase the performance of single
+                  stranded rna folding, with striking results in particular on ribosomal rnas. we
+                  found, however, that they provide no significant over-all performance gain for
+                  rnaalifold on the broad range of datasets we used to assess performance . the results obtained for
+                  andronescu's energy parameters, together with those of other unsuccessful attempts
+                  to increase performance, are tabulated in the additional file  <dig> 
+
+sequence weighting
+in practice, many input alignments have a very unbalanced distribution of
+                  sequences. often most sequences are very closely related and outweigh one or a few
+                  divergent ones. in this case it seems appropriate to down-weight the influence of
+                  closely related sequences  <cit>  similar to the weighted sum of pairs score frequently used for multiple
+                  alignment. the problem with this approach is that distant sequences receive the
+                  highest weights, but are also more likely to be misaligned, and hence a rational
+                  weighting scheme will also increase the impact of alignment errors.
+
+one can try to minimize this effect by dividing the score of rnaalifold in two
+                  parts, one which does not contain the outliers, thus scoring a smaller alignment,
+                  and one which contains all sequences. if the smaller alignment scores
+                  significantly better than the complete one, one can assume that the divergent
+                  sequence is either misaligned or at least does not share the consensus structure.
+                  at present, we have not been able to devise a fail-safe automatic procedure to
+                  identify these cases. since sequence weighting leads to a significant increase in
+                  cpu time because the weighting has to be introduced in the inner-most loop of the
+                  energy evaluation, we have decided against including the weighting option into the
+                  public version of rnaalifold.
+
+improving the evaluation of sequence-covariation
+ribosum matrices
+the covariance term γ' of the old rnaalifold implementation is
+                  based on qualitative arguments only. a more quantitatively sound approach is to
+                  use scoring matrices akin to the ribosum scheme  <cit> . as a training set, we selected  <dig>  sequences in total from the
+                  about  <dig>  sequences in the ssu alignment of the european ribosomal rna database  <cit> , which are available in the dcse file format. when reading in the dcse
+                  format, one needs to correctly assign helix numbers to concrete helices of the
+                  sequences. in some cases, this assignment could not be done in an automated way.
+                  avoiding possible mis-assignments, such base pairs were ignored in the
+                  computation. we also kept only sequences with less than 5% undetermined
+                  nucleotides and at least 50% of the maximum possible number of base pairs. this
+                  set was clustered using single linkage clustering to determine clusters where the
+                  sequence identity between different clusters is ≤ p. for each
+                  cutoff value p we determined the frequencies f of
+                  nucleotides of type a and c being aligned and
+                  f of base pairs of type ab and cd
+                  being aligned in sequences that are within different clusters. besides being
+                  more different than p, the sequences had to have at least a sequence
+                  identity of q. for each pair q, p, we define the
+                  modified ribosum scores as the log-odds scores
+
+  r = log
+                        /ff) 
+
+in practice, we vary p and q in steps of 5% sequence identity
+                  and obtain altogether  <dig> matrices. note that this procedure is somewhat different
+                  from the approach reported in  <cit> . the frequencies can be determined either for all base pairs including
+                  the non-canonical ones or restricted to the six types of canonical base pairs.
+                  only the latter version has proved useful in our context, and will be referred to
+                  as ribosum in the following.
+
+the covariance term is computed as
+
+  γ′=12∑α,β∈aα≠βxr, 
+
+i.e., the ribosum matrices replace the hamming distances h + h, and are scaled by a factor x so that the entries are in the same
+                  range as the entries of the hamming distance matrix. in order to determine which
+                  matrix to use, we determine the minimum q and maximum p sequence
+                  identity in the alignment and select the ribosum matrix with smallest p
+                  and q so that p ≤ p and q
+                  ≤ q.
+
+rnaalifold uses two parameters to fine-tune the impact of the covariance score.
+                  the first parameter, β, controls the influence of the covariance
+                  score γ' relative to the total folding energy. the second one,
+                     δ, weights the impact of non-standard pairs. the old default
+                  value for both parameters is  <dig> 
+
+simply leaving them as they are would lead to a large change in the balance
+                  between the thermodynamic and the covariance score. in the old rnaalifold program,
+                  less than 10% of the total score is derived from the covariance score. if
+                     β and δ were kept at  <dig>  this fraction would
+                  increase to more than 50%. this would presumably overemphasize covariance over
+                  thermodynamics. to find appropriate values for β and
+                     δ, we use k-fold cross validation, with k =
+                   <dig> on the cmfinder-sarse benchmark dataset described below.
+
+pfold-like scoring
+inspired by the approach used in pfold, we also tested a covariance scoring based
+                  on an explicit phylogenetic model. more precisely, we used the log-odds ratio of
+                  the probabilities of a base pair given a tree and the alignment, and the product
+                  of the corresponding probabilities of unpaired bases given the same tree and
+                  alignment  <cit> . a neighbor joining tree computed from the distances measured within
+                  the alignment was used. the probabilities were then computed from this tree using
+                  the pfold rate matrices. this ansatz, however, did not result in more accurate
+                  predictions. therefore, it was not included into rnaalifold.
+
+additional features
+in addition to increasing the performance, additional functionalities are included in
+               the new rnaalifold software.
+
+centroid structure
+the partition function computation now includes the computation of the
+                     centroid structure, which is defined as the structure with minimal
+                  mean base pair distance to all the structures of the ensemble:
+
+  d=∑i,j∈b{1−)ifi,j∈bpelse 
+
+here, d is the distance of a structure to the ensemble, b
+                  denotes the set of all possible base pairs in the ensemble,
+                  b is the set of all base pairs of structure s, and
+                     p is the probability of the base pair
+                  i, j in the ensemble. it can easily be seen that the structure
+                  with minimal d is the structure that contains all base pairs
+                  with a probability greater than  <dig> . this centroid structure can be seen as the
+                  single structure that best describes the ensemble  <cit> . the centroid structure usually contains less base pairs than the
+                  minimum free energy structure, and is therefore less likely to contain false
+                  positives.
+
+stochastic backtracking
+when trying to find out about statistical features of the structure ensemble other
+                  than base pair probabilities, it is sometimes of interest to compute a sample of
+                  suboptimal structures according to their boltzmann weights. this can be achieved
+                  efficiently using so-called stochastic backtracking. in this variation of the
+                  standard backtracking scheme, one uses the matrices of the partition function
+                  computation to determine the probability of base pairs or unpaired bases that are
+                  included in the structure instead of choosing the alternative with the minimum
+                  free energy at each step. the principle of stochastic backtracking in rna folding
+                  has been used already in  <cit>  for the generation of uniformly distributed random structures. later,
+                  sfold  <cit>  and the vienna rna package  <cit>  also implemented energy-weighted variants. these implementations differ
+                  from the original algorithm only by the inclusion of the boltzmann factors of the
+                  loop energy contributions instead of treating all structural alternatives with
+                  equal weight. the generalization of the stochastic backtracking algorithm to
+                  consensus folds is straightforward. see additional file  <dig> for a detailed description. stochastic backtracking is now implemented
+                  in the rnaalifold software.
+
+performance evaluation
+a trusted set of aligned sequences with corresponding structures is needed in order
+               to evaluate the performance of consensus structure prediction tools. most papers on
+               this topic use some subset of the rfam  <cit> . however, the structures and alignments contained in rfam pose several
+               problems. the database consists of a large number of snornas  and micro rnas . furthermore, many of the rfam entries contain
+               short sequences that can only form simple one stem structures. a serious problem is
+               the fact that many of the rfam structures are predictions, some of which were created
+               by the very programs that are to be tested. not even all of the structures flagged as
+               published within the database have been experimentally derived. mostly because of
+               this reasons, only  <dig> of the more than  <dig> rfam families are contained in rna strand  <cit> , a recently created, curated database of high quality single rna secondary
+               structures.
+
+we therefore chose several different datasets for performance evaluation. in addition
+               to the complete rfam  seed alignments, we use here the cmfinder-sarse
+               subset compiled from  <cit> , which contains  <dig> high quality seed alignments , the seeds of  <dig> rfam families contained in rna strand, and the dataset
+               of knetfold  <cit> . a list of these rfam subsets can be found in the additional file  <dig> or including links in the online supplement.
+
+the script refold.pl of the vienna rna package is used to remove gaps and
+               non-standard base pairs from the rnaalifold predictions. the resulting structure is
+               compared to the reference structure. for each alignment only the first sequence is
+               used for performance evaluation to avoid a bias from the unequal sizes of the aligned
+               sequence sets. as performance measure we use the mathews correlation coefficient
+                as introduced in a previous benchmark  <cit> : base pairs that are not part of the reference structure are counted as
+               false positives only if they are inconsistent with the reference structure, while
+               they are ignored if they can be added to the reference structure. thus additional
+               stems and elongated stems are not penalized. while this is a physically reasonable
+               way to compute the mcc, the question of comparability might arise. to address this,
+               we also used the more simple way of defining false positives as all base pairs
+               predicted that were not part of the reference structure, and called it "other mcc".
+
+for the comparison procedure, we used the web-servers of pfold  <cit>  and knetfold. in case the rfam seed alignment contained more than 40
+               sequences, only the first  <dig> were used; all-gap columns were removed from such
+               alignments. the mccaskill-mea software mcc_mea  <cit>  was installed locally. the predictions were also filtered with refold.pl
+               before scoring.
+
+in order to evaluate the dependence on the alignment quality, we also realigned the
+               rfam alignments of the cmfinder-sarse dataset using clustal  <cit> , and then proceeded as described above. furthermore, we also computed the
+               mcc for all rfam seed alignments for those programs that can be run locally .
+
+the rnaalifold algorithm has been extensively used for the prediction of
+               thermodynamically stable and/or evolutionary conserved rnas  <cit> . the alifoldz program  <cit>  evaluates stability and structural conservation at the same time simply by
+               comparing the consensus free energy of an alignment to the consensus free energies of
+               a large number of randomly shuffled alignments, relying entirely on rnaalifold. rnaz  <cit> , on the other hand calculates two separate scores for stability and
+               conservation. structural conservation is assessed by means of the folding energy
+               based structure conservation index . here, the consensus energy is set in
+               relation to the mean free energies of the single sequences. the lower bound of the
+               sci is zero, indicating that rnaalifold is not able to find a consensus structure,
+               while a sci close to one corresponds to perfect structure conservation. here, we
+               investigate whether the improved performance of rnaalifold in terms of correctness of
+               the predicted structure can also improve the performance of ncrna gene finders.
+
+in order to evaluate the performance of alifoldz and the sci, we re-consider a
+               sub-set of the test-set used in a previous benchmark  <cit> . as usual, we compute roc curves to determine our ability to discriminate
+               between truly conserved alignments and randomized controls. for simplicity, only the
+               area under the roc curve  is reported below as a measure of the discrimination
+               power.
+
+RESULTS
+predicting consensus structures
+we first compared the new implementation of rnaalifold with the  <dig> version. as
+               shown in figure  <dig>  the proper treatment of gaps in the new
+               version leads to a consistently improved accuracy. the data also shows that the
+               covariance contribution in the  <dig> version was too large. using ribosum matrices
+               instead of the naïve hamming distance score substantially increases the
+               beneficial effect of the covariance score. however, if the same parameters as in the
+               original rnaalifold were used, the relative portion of the covariance term within the
+               score would be greater than the thermodynamic score. we remark that for large values
+               of β, where the covariance contributions dominate, the performance
+               becomes much worse than for a purely thermodynamic energy computation . as a new default, we therefore use β =  <dig>  and
+                  δ =  <dig> . still, the portion of the covariance term in the
+               combined energy term is much higher  in the ribosum than in the other
+               rnaalifold variants . we want to remark that with the exception of very low
+                  β, the performance of the ribosum variant always exceeds the
+               performance of the new variant without ribosum, which in turn always performs better
+               than the  <dig> variant of rnaalifold .
+                        and δ parameters. it can be seen that except for
+                        β =  <dig> , using ribosum matrices improves the performance
+                     of the new rnaalifold, which is in turn always better than the  <dig> 
+                     variant. furthermore, for the ribosum variant, the size of the plateau, i.e.
+                     the subset of parameters with a mcc ≥  <dig>  is quite big, containing
+                      <dig> of  <dig> combinations of parameters . top: 3d-plot of the mcc against the
+                     parameters β and δ. bottom: vertical
+                     section along the diagonals β = δ and
+                        δ + β =  <dig> .
+                           δ.a: for all three rnaalifold variants, the
+                     accuracy of the structure prediction, measured here as mcc for the
+                     cmfinder-sarse dataset , depends on the weight β of
+                     the covariance term . b: the auc value for
+                     the sci computation also depends strongly on the values of β
+                     and δ. the green square indicates the optimal parameters
+                        , the red dot is the
+                     default . as the default is close to the maximum, there is little room
+                     for improvement.
+               predictions for five alignment-based programs on the cmfinder-sarse dataset. the new
+               rnaalifold with ribosum matrices often yields perfect predictions and appears to have
+               a good worst case performance: the smallest observed mcc is  <dig> , and in this case
+               the input alignment is clearly flawed, see additional file  <dig> 
+
+performance comparisons on the cmfinder-sarse dataset. we list the mcc for
+                     different alignments. best performance bold.
+
+in table  <dig>  the performance of the same five programs on the
+               rna strand-rfam dataset is shown. this curated dataset, in contrast to the other
+               datasets we used, has many pseudo-knotted structures  and only  <dig> of the 19
+               alignments have simple one-stem structures. in this regard, it is a good extension to
+               our other datasets. while the total mccs of all programs are lower, again the ribosum
+               variant of rnaalifold outperforms the other programs – however, on this
+               dataset, the centroid structure computed using ribosum rnaalifold has the best
+               performance, with an mcc of  <dig> . for this table, knetfold was run using the "check
+               pseudoknots" option. still, it only correctly predicted a part of a single
+               pseudo-knot.
+
+performance comparisons on the rna strand-rfam dataset. we list the mcc for
+                     different alignments. best performance indicated in bold, n.a. means
+                     that data is not available due to length restrictions on the respective server,
+                     pk denotes structures that contain a pseudo-knot. as there are many
+                     pseudo-knotted structures in this dataset, knetfold was used in the "check
+                     pseudoknot" mode. the mccs take into account the pseudo-knots.
+
+we also used the rfam subset that was used to evaluate the performance of knetfold  <cit> . however, we did not use the same procedure to prune alignments down to a
+               maximum of  <dig> sequences. therefore, the mccs reported here cannot directly be
+               compared to the ones in  <cit> . the mcc we achieve with the ribosum variant of rnaalifold is  <dig> . this
+               is again a significant improvement over the mcc of  <dig>  achieved by the 2002
+               variant.
+
+when considering an almost complete set of about  <dig> rfam alignments , the mean mcc of
+               rnaalifold  <dig> is  <dig> , the new rnaalifold with ribosum matrices achieves a mean
+               mcc of  <dig> , while mcc_mea achieves  <dig> .
+
+in table  <dig>  the performance of the new rnaalifold variants
+               using the "other mcc" variant and the results when using clustal realigned sequences
+               are shown.
+
+performance comparisons on the cmfinder-sarse dataset. we list the mean mcc for
+                     different programs. best performance indicated in bold. other mcc is the
+                     variant counting every wrongly predicted pair as false positive, clustal mcc is
+                     the mcc as introduced by gardner et al.  <cit>  applied to alignments realigned using clustal  <cit> .
+
+effects on predicted structures
+over all, there are two main reasons why prediction using the ribosum variant of
+                  rnaalifold will give better predictions than the  <dig> variant. by treating gaps as
+                  if they were bases, the  <dig> implementation sometimes assigns much too unfavorable
+                  energies to loops containing gaps in a small number of sequences. as a
+                  consequence, these loops cannot be part of the consensus structure. examples for
+                  this effect are gcvb, where an interrupting bulge loop in the consensus
+                  structure actually exists in only one sequence, or the hammerhead ribozyme, where
+                  a large insertion within a hairpin loop is present in about a third of the
+                  sequences.
+
+the beneficial effect of using the ribosum matrices is mostly due to the
+                  possibility to assign covariance boni to certain base pairs even if not much  covariation actually occurred. this makes it possible to compensate for a
+                  few contradicting base pairs, whether they are due to alignment errors or to a
+                  slightly different structure for some sequences. predictions that benefit from
+                  that effect are e.g. the enterovirus 5' cloverleaf, the snake h/aca box small
+                  nucleolar rna or the unal <dig> line 3' element. a mixture of both effects is seen in
+                  the r <dig> rna element as well as in the hammerhead ribozyme. the detailed results for
+                  these molecules can be seen in the additional files  <dig> 
+                      <dig>   <dig>   <dig>   <dig> and  <dig> or in
+                  the online supplement.
+
+detection of ncrnas
+alifoldz detects structural non-coding rnas by comparing the energy of the native
+               alignment to the energies of a population of randomized control alignments via a
+                  z-score. here, the better predictive power of the new ribosum approach
+               directly translates into increased ability to distinguish evolutionary conserved rnas
+               from randomized controls. the ribosum approach achieves an auc of  <dig>  compared to
+                <dig>  for both the  <dig> implementation and the new rnaalifold. the performance boost
+               comes mainly from additional bonus energies derived from covariance scoring. in the
+               ribosum approach these energies have a much higher contribution than in the
+               conventional model thereby favoring true conservation patterns by giving a lower
+               total free energy and hence a lower z-score. this beneficial effect is not
+               observed in the case of the sci, where the ribosum covariance energies even result in
+               a performance drop  compared to the other two implementations . the sci is a conservation measure that compares the consensus free
+               energy to the mean free energy of the single sequences. the covariance energies are
+               important for the high discrimination capability of the sci, but with the ribosum
+               scoring model the over-emphasis of the covariance energy contributions blurs the
+               signal for true conservation. if we neglect the covariance score for the computation
+               of the sci, the effect is much smaller . we expect, however, that the
+               ribosum approach will perform well on purely structure-based similarity or distance
+               measures.
+
+computational requirements
+theoretically, the new and the old rnaalifold variants have the same space ) and time ) complexity, with n sequences in
+               an alignment of length n. however, neglecting possible base pairs with a
+               conservation score below a certain cutoff  dramatically reduces computation time without affecting the
+               results. as an example, folding a subset of five randomly chosen sequences of a
+               ribosomal ssu alignment  takes an average of about  <dig>  seconds,
+               while using  <dig> sequences of the same alignment takes about  <dig>  seconds on an intel
+               xeon  <dig>  ghz processor . the ribosum matrices make it
+               much harder to exclude base pairs from the outset. thus, the ribosum variant is by
+               far the slowest option on alignments with many rather diverse sequences.
+                     folding different alignments with  <dig> sequences and different lengths. b:
+                     folding a different number of random sequences from the same alignment .
+
+CONCLUSIONS
+we have shown here that the performance of rnaalifold can be improved to be competitive
+            with all recently published alignment-based consensus structure prediction tools. this
+            improvement is reached by a more accurate treatment of gaps and an elaborate model for
+            the evaluation of sequence covariations that resembles the ribosum matrices. the gain in
+            performance is achieved at negligible extra computational cost and without dramatic
+            changes to the implementation. while a sequence weighting scheme apparently can yield
+            further improvements on good alignments, this makes the procedure less resilient towards
+            mis-alignments. it seems, therefore, that the approach is essentially limited by the
+            quality of the input alignments.
+
+authors' contributions
+shb designed and implemented the new version of rnaalifold, ilh and pfs initiated the
+            study and contributed to the theory, sw derived and calculated the ribosum-like scores,
+            arg evaluated the performance for structured rna detection. all authors closely
+            collaborated in writing the manuscript.
+
+availability and requirements
+rnaalifold is part of the viennarna software package, the new version can be downloaded
+            for linux as a tar archive at: .
+
+the electronic supplement of this paper can be found at
+               
+
+supplementary material
+additional file 1
+additional results. results of various unsuccessful approaches to
+                        increase the accuracy of rnaalifold.
+
+click here for file
+
+ additional file 2
+stochastic backtracking. detailed description of stochastic
+                        backtracking algorithm for consensus structure prediction using
+                     rnaalifold.
+
+click here for file
+
+ additional file 3
+datasets. list of the datasets used for evaluating performance.
+
+click here for file
+
+ additional file 4
+alignment and structure of snord <dig>  the rfam alignment and reference
+                     structure of snord <dig> together with the energies of the structure on the single
+                     molecules.
+
+click here for file
+
+ additional file 5
+enterovirus 5' cloverleaf structure. analysis of the effects leading
+                        to better prediction of the enterovirus 5' cloverleaf structure.
+
+click here for file
+
+ additional file 6
+gcvb structure. analysis of the effects leading to better prediction
+                        of the gcvb structure.
+
+click here for file
+
+ additional file 7
+snake h/aca snorna structure. analysis of the effects leading to
+                        better prediction of the snake h/aca snorna structure.
+
+click here for file
+
+ additional file 8
+hammerhead rybozyme structure. analysis of the effects leading to
+                        better prediction of the hammerhead rybozyme structure.
+
+click here for file
+
+ additional file 9
+r <dig> rna element structure. analysis of the effects leading to better
+                        prediction of the r <dig> rna element structure.
+
+click here for file
+
+ additional file 10
+unal <dig> line 3' element structure. analysis of the effects leading to
+                        better prediction of the unal <dig> line 3' element structure.
+
+click here for file
+
+ acknowledgements
+this work was supported in part by the european union as part of the fp- <dig> embio
+               project as well as by the austrian gen-au project "bioinformatics integration
+               network" and deutsche forschungsgemeinschaft as part of spp- <dig> "sensory and
+               regulatory rnas in prokaryotes".

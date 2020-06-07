@@ -1,0 +1,262 @@
+BACKGROUND
+single-cell rna sequencing, one of the most significant advances in recent genomics  <cit> , is fast becoming the norm in whole-transcriptome expression profiling, providing unique insights into the exact state of individual cells throughout biological processes, such as cell differentiation or tumorigenesis. in opposition to traditional batch sequencing, single-cell expression measurements are not affected by cell heterogeneity within the sample and give an exact snapshot of gene activity at a specific time. the very low noise level and virtual absence of sample variance opens the door to more exact statistical modelling of gene regulatory activity and might be the key to successful regulatory network inference  <cit> .
+
+to fulfil these promises, many challenges specific to single-cell expression data analysis must first be solved  <cit> , such as the difficulty to infer the true hierarchy  of individual cells sampled in the same conditions . for instance, due to the destructive nature of rna-seq measurements, time-series analysis is approximated by repeated sampling at intervals, introducing new confounding factors tied to the biological specificities of each cell sampled, as well as the risk of “pollution” by unrelated cell lines and difficulties in identifying multiple sub-differentiation branches. analysing the similarities between cells’ expression profiles seems the key to inferring the true structure of the cell population but is made especially complex by the very high dimensionality of gene expression measurements.
+
+when cell populations can be assumed to belong to a temporal continuum, the standard approach is to assign each cell a biological “pseudotime” along which they can be ordered. in the absence of known subsets of marker genes  <cit> , the vast majority of existing methods for pseudotime estimation crucially rely on classical dimension-reduction techniques to produce an embedding where pairwise cell distances can be more easily computed  <cit> : independent component analysis   <cit> , principal component analysis   <cit>  or multidimensional scaling   <cit> .
+
+such dimension-reduction methods can be applied with no knowledge of the underlying structure of the data. but this versatility comes at the cost of clarity in the embedding: it is difficult, often impossible, to find a plausible biological representation of the lower-dimensional components obtained  <cit> . furthermore, the aggressive pre-treatment thresholding commonly required  runs the risk of over-simplifying the model by discarding low-variance genes that may play a role in some aspects of the process studied. in the case of methods like ica , the assumption of statistical independence between components is highly questionable: due to the heavy overlap between regulatory pathways, gene expression levels would presumably show correlation between different stages of a cell process. while these approaches can typically give good results on straightforward cell differentiation along a single path , they show their limits when multiple lineages are mixed together. not only can they fail to recognise the heterogeneity of differentiating subtypes, but they also cannot easily assign any biological interpretation to the model used.
+
+by contrast, our proposed method uses a bayesian model better adapted to known models of gene regulation, and can produce an embedding that uses a larger number of input features without such stringent thresholding step:
+
+when considering a number of single-cell expression measurements taken over time  or space , we expect specific metabolic pathways, and the genes that compose them, to be activated according to the current biological state of the cell sampled. we can therefore hypothesise the existence of groups of genes, and their respective regulatory subnetworks, that broadly characterise each of the steps in the cellular process studied. because of the nature of regulatory networks, such groups could potentially involve hundreds or even thousands of genes , with a lot of potential overlap between groups.
+
+to identify and utilise this group structure, our suggested method adapts a new statistical approach, borrowed from natural language processing, known as latent dirichlet allocation . lda assumes the existence of a number of underlying “topics” that contribute, as a mixture, to explain each cell’s transcriptional activity. by comparing the different per-cell topic histograms, we can evaluate their similarity and infer complex hierarchical structures. by looking at the topics themselves, we can obtain useful biological insights on the gene sets characterising the different stages of that hierarchy .
+
+much like other methods, an important step in our approach is the construction of a visual representation of the cell population based on this lower-dimensional model. to better help this visualisation, we introduced “backbone trees”: a new type of tree structure specifically designed to easily visualise cells along complex differentiation paths . in contrast with existing methods, however, we are able to analyse the latent groups of genes, called “topics” in the lda model, that are used to model the cell population. an overview of these topics can directly be obtained as a list of genes ranked by their probability in each per-topic distribution, making it easy to verify if certain genes are particularly attached to a stage. for a more in-depth analysis, we use gene ontology  terms  <cit> : statistical testing allows us to select gene ontology terms that are enriched for a topic. looking at these terms, as a list or as a subgraph of the overall go graph, gives a quick overview of the cellular components, biological processes and molecular functions associated with each topic and provide a helpful narrative for the results obtained.
+
+implementation
+using latent dirichlet allocation
+latent dirichlet allocation  is a bayesian mixture model, initially developed for the analysis of text documents, that allows sets of observations to be explained by unobserved groups. in text analysis, the model assumes that each document is a mixture of topics  and each word is the result of one of the document’s topic.
+
+in the context of single-cell data analysis, documents become cells and discretised gene expression levels replace word frequencies. the fitted lda model for our data is therefore composed of a set of topic distributions for each cell, and per-topic gene distributions. per-cell topic histograms can then be used as a low-dimensional embedding to evaluate cell similarity and infer hierarchical relationship, while analysis of the topics themselves can provide useful biological insights on the sets of genes driving the different stages of the process studied.
+
+given m cells, v expressed genes and a choice of k topics, the model is therefore made up of two sets of dirichlet distributions:  ϕk∼dirichletv,k=1…kθd∼dirichletk,d=1…m 
+
+where α and β are vectors of length k and v representing the prior weights of per-cell topics and per-topic genes, respectively. the use of smaller values of α and β makes it possible to control the sparsity of the model .
+
+the parameters to the posterior distributions that make the lda model are learnt from the data  using approximate inference techniques  <cit> . initially solved with variational inference  <cit> , this problem is now more efficiently tackled using gibbs sampling : a type of markov chain monte carlo algorithm that converges iteratively toward a stationary distribution that satisfyingly approximates the target joint distribution. in the particular case of lda, the implementation of gibbs sampling makes use of some of the features of the model to greatly reduce the size of the joint distribution that must be evaluated, in a method called collapsed gibbs sampling.
+
+for an in-depth explanation of the mathematics behind the general lda model, we recommend consulting david blei’s original paper  <cit>  along with more recent work on lda inference methods  <cit> .
+
+among the many advantages of lda as a dimension reduction method, its ability to handle very large-dimensional data and control model sparsity  make it easy to handle unknown data with relatively little pre-treatment. generally, it is sufficient to log-transform expression values and removes genes with low standard-deviation, without more advanced method of gene set selection .
+
+choosing number of topics
+the main parameter to the lda fitting procedure is the desired number of topics: k . as often with such statistical methods, a large number of topics  can lead to overfitting, and it is therefore preferable to use the smallest possible number that provides a good explanation of the data. it must be noted, however, that while very large number of topics  would likely adversely affect performances, the population structure inferred by celltree is relatively resistant to small variations in the number of topics used.
+
+because of the loose significance of the concept of ‘topics’ in the context of gene expression in a cell, it is difficult to reliably pick an exact number, based on biological knowledge alone. the standard method is to use cross-validation and likelihood maximisation, however the computation time for such an approach can be prohibitive on large data sets. a more time-efficient approach was suggested by matthew taddy  <cit> , that uses model selection through joint maximum-a-posteriori  estimation and iteratively fits models of increasing complexity  to exhaustively look at a large range of topic numbers in a relatively small amount of time.
+
+it is nonetheless possible to evaluate the sparsity of a fitted model associated to a chosen number of topics, by examining the gene ontology terms enriched for each topic : a lot of redundancy between enriched sets is a good indicator that the model could be made sparser.
+
+extracting hierarchical structures
+extracting a hierarchical structure of the cell population from the lower-dimensional model follows the same general idea as other methods that rely on pca or ica for dimensionality reduction: by first computing a matrix of pairwise distance. we use the chi-square distance  <cit>  to compare the topic histograms assigned to two cells x and y:  χ=∑k=1…k2xk+yk 
+
+this distance matrix obtained can be used with methods such as hierarchical clustering, or with various tree-building algorithms, to identify the underlying tree structure of the cells.
+
+in the general case, the cell population is measured in batches of samples obtained in similar conditions  that spread along a continuum between the different stages. one natural way to visualise such a structure is using a minimum spanning tree .
+
+although many efficient algorithms exist to produce a minimum spanning tree from a distance metric, rooting such a tree is non-trivial and different choices for the root node can lead to very different structures. in some cases, sample labels can be used to identify the group of cells where the root should logically be . in that case, celltree can use this information to pick the most central cell in the initial group using one of two main approaches: by first identifying the longest shortest path in the mst  and picking the correct end, based on knowledge of the starting group. this approach would be particularly indicated if the dataset is known to represent a linear continuum of cells .
+
+in cases where branching in the cell population is expected, it may be preferable to pick one of the starting group cells, based on the structure of the group, i.e. pick the cell that is most central  to the rest of the group.
+
+
+
+if no ordering of the groups can be inferred from experimental labelling of the samples, celltree first attempts to identify the starting group with the lowest average intra-group distance, based on the biological assumption that intra-group variance would increase as the experiment progresses. not only is this variance hypothesis confirmed in labelled datasets such as trapnell et al.’s  <cit> , but also in studies of embryonic cells presented here, where celltree correctly identified initial stages of development with no further biological input past gene expression and cell grouping .
+
+however, the mst approach relies to some extent on the assumption that cell distances are uniformly distributed, whereas in fact, we can expect cells inside a batch to have much lower variance than across batches.
+
+the “ideal” structure of a series of cell observations in a differentiation experiment would look like a single path connecting all cells or, in the case of subtype differentiation, a tree with a very small number of branches . because the samples are in fact physically different, rather than the evolution of a single cell, we must expect small variations around such a theorised continuum. our suggested approach is to identify cells that are most representative  of the biological continuum: a “backbone”, such that all remaining cells in the experiments are similar enough to a representative in that backbone. hence the following definition:
+
+given a set of vertices v and a pairwise-distance function d:v×v→ℝ+, we call backbone tree a tree t, such that: t is a tree with vertices v and edges e.
+
+its backbone b is a subtree of t with vertices vb⊆v and edges eb⊆e.
+
+all vertices of t in v∖vb  are less than distance δ to at least one vertex in the backbone tree b: ∀v∈v∖vb,∃vb∈vb such that d≤δ.
+
+all ‘vertebrae’ vertices of t  are connected by a single edge to the closest vertex in the backbone tree: ∀v∈v∖vb,∀v′∈v:∈e⇔v′=argminv′∈vbd.
+
+
+
+the choice of the parameter δ  of course greatly affects the resulting backbone tree optimisation, and may require adjustment depending on expectations over the structure of the cells . in order to find a good estimate for δ, we look at the probability density function of pairwise distances , and select the first mode of the distance distribution if it exists.
+
+additionally, it is generally desirable to relax the last condition of the definition by allowing a proportions of outliers that are at distance >δ from any vertices in vb.
+
+using the above definition, we can define an optimal backbone tree, t∗, as a backbone tree that minimises the sum of weighted edges in its backbone subtree:  t∗=argmint∑e∈ebd 
+
+such an optimal backbone tree aims to give a clear hierarchical representation of the cells relationship: the objective function puts pressure on finding a  group of prominent cells  that are good representatives of the major stages in the cell’s biological process , while redundant cells that closely resemble a chosen representative are ignored.
+
+finding an optimal solution to this problem is unfortunately np-complete , but we propose a fast heuristic relying on the mst that produces a close approximation .
+
+analysing topics with gene ontology terms enrichment
+because of their bayesian mixture nature, ‘topics’ obtained through lda fitting do not always match clear and coherent groupings , subject to the sparsity of the model and complexity of the input data. in particular, less sparse models  may lead to better cell distance computation, but be harder to interpret.
+
+in most cases, however, enrichment analysis of per-topic gene distribution can help characterise a given topic and its role in the cell’s process, and even provide potential biological insight, by outlining the general processes most active in specific sections of the cell tree.
+
+topic analysis is conducted using gene ontologies: testing for terms that are significantly enriched within a topic. first, celltree orders genes for each topic by their per-topic probability, then applies a kolmogorov-smirnov test to compute a p-value for each of the go terms associated with the ordering, using the weight algorithm presented in  <cit>  to account for graph relationship between terms. bonferonni-corrected significant p-values can then be used a tool for identifying the biological meaning of each topic.
+
+because of the statistical nature of lda models, a fair amount of overlap exists between the genes assigned to each topic . in order to identify the biological specificity of each topic, it is therefore helpful to study go terms that are either unique to a given topic or appear in a minority of topics .
+
+RESULTS
+a major obstacle in obtaining quantitative comparison metrics for single-cell ordering methods, is the difficult to establish a gold standard for cell ordering annotation: the large number of misattributed cells in standard time-series experiments is one of the driving factor behind the need for such tools in the first place. to address this issue, we used a set of single-cell measurement taken during the embryonic development of mus musculus  <cit> : the ability to assess development stages visually in such instance provides some level of guarantee on chronological labelling.
+
+in order to further evaluate the performance of celltree and demonstrate its ability to infer biologically-motivated dynamic models of cell populations out of gene expression data, we applied it to a wide range of publicly available single-cell rna-seq datasets, showing our results alongside existing tools when possible.
+
+although all results are presented here using visual backbone tree plots, a more detailed tabular format, with full lists of ordered cells for each branch, is available as additional file  <dig> 
+
+comparison to other methods
+for comparison, we selected two of the most prominent tools currently publicly available to treat high-dimensional single-cell data, each representative of a different dimension-reduction approach: monocle  <cit> , which uses ica, and tscan  <cit> , which relies on pca.
+
+other single-cell data analysis tools which focus exclusively on low-dimensional mass cytometry data  fell outside the scope of our method and were not considered. the sincell package  <cit> , which presents a general framework to treat single-cell data, but mainly relies on ica or pca for dimension reduction, was also excluded from this comparison.
+
+to provide a baseline comparison, we ran a naive approach using a travelling salesman problem  algorithm to compute a cell ordering that approximatively minimises the total euclidean distances between each vector of gene expressions. once a tour has been found, the starting group, provided as a parameter, is used to shift the tour as needed, and the ordering is reversed if necessary, much in the same way that monocle and tscan function .
+
+results were measured in terms of accuracy over all pairwise combination of cells between the candidate ordering and perfect ordering and are shown in table  <dig>  from a data set of  <dig> cells with  <dig>  gene levels each, all methods start with a coarse thresholding , resulting in a smaller effective number of genes for use by the statistical model . for the tsp-based approach, results were averaged over  <dig> iterations.table  <dig> comparison of single-cell gene expression ordering tools, using mouse embryo data
+
+
+
+as can be seen, not only does celltree outperform all other methods on this task, but it is many orders of magnitude faster than monocle, which requires upward of an hour to proceed with its dimension-reduction step: this step could be greatly sped-up by providing a set of known marker genes, but it is assumed here that an experimentalist might not have such knowledge about the data. it is also worth noticing that, while tscan performs data-reduction much faster, it starts with a much-reduced input of  <dig> genes , before proceeding with pca. this drastic thresholding may result in a loss of information, especially in genes that are only active in a small subset of the cells.
+
+although matters of visualisation techniques are essentially subjective and difficult to evaluate quantatively, we surmise that our suggested visualisation as a backbone tree provides the clearest overview of the cell hierarchy.
+
+importantly, as illustrated in the next sections, celltree’s superior accuracy is not obtained at the expense of model legibility: unlike other methods, celltree’s models can be readily analysed to produce useful biological insights about the process studied.
+
+myoblast differentiation
+skeletal myoblasts are known to undergo a well-established sequence of morphological and transcriptional changes during differentiation. in their introductory paper for ica-based single-cell analysis tool monocle, trapnell et al.  <cit>  studied the trajectory of  <dig> single-cell rna-seq measurements of human myoblasts taken  <dig>   <dig>   <dig> and  <dig> hours into the differentiating process.
+
+we ran celltree on the provided dataset, with no further pre-treatment, other than log-normalising the expression values and removing genes with a standard deviation below  <dig>   and using the  <dig> topic-model automatically selected by the lda inference method .
+
+the backbone tree generated from the results shows a clear two-phase trajectory , with a small branch of non-differentiating cells. the ordering of cells along the tree also follows the expected chronological order from time  <dig> to  <dig>  although we can observe the expanding variance at later stages, previously noted by the authors of the sincell package in their own analysis of this data  <cit> .fig.  <dig> myoblast backbone tree. backbone tree obtained from the dataset of differentiating myoblasts with celltree. larger nodes indicate backbone cells , whereas smaller nodes represent cells that only show slight variations from the backbone cell they are attached to. cell nodes have been coloured according to a their sampling time  and b their distribution over topics
+
+
+
+the results obtained are qualitatively similar to that of monocle , although it could be argued that the visualisation as backbone tree used by celltree is easier to interpret than the type of mst used by monocle. in stark contrast to other methods, however, not only does celltree not require any pre-existing knowledge about the cell population , it can in fact attach biological information to the different parts of the cell tree through analysis of the gene expression data.fig.  <dig> myoblast mst. comparison of minimum spanning trees obtained from the dataset of differentiating myoblasts by celltree  and monocle . cell nodes have been coloured according to their sampling time . c shows the final tree structure obtained directly by monocle
+
+
+
+as can be observed on the version of the tree annotated with topic distributions, undifferentiated cells are dominated by topic  <dig>  a look at go terms uniquely enriched for that topic , reveals a large number of terms indicative of highly mitotic conditions, such as cell division , mitotic nuclear division , transcription-coupled excision repair  and gtpase mediated signal transduction . within the first  <dig> h , there is a shift of the myocyte differentiation to more transcriptional processes . at  <dig> h , the myocytes undergo intracellular protein transport . at the  <dig> h time-point  the myocytes undergo protein translational processes, while developing structural component of z-disks  and stress fibers  allowing filament sliding  and mapkk activity  for cellular fusion in high-mitogenic conditions. furthermore, although not unique to one topic , wnt signalling pathway , which regulates crucial aspects of cell fate determination  <cit> , appears significantly enriched for topic  <dig>  and  <dig> .table  <dig> list of biological process go terms significantly enriched and uniquely appearing in each topic for myoblast differentiation
+
+
+
+the branch of non-differentiating cells is dominated by topic  <dig>  which shows strong enrichment for cellular protein metabolic process  and 7-me mrna capping , but also viral transcriptional regulation , which may suggest a virus coevolution in the myocytes  <cit> . this non-differentiated set shows expression of the actin-related arp2/ <dig> protein complex , suggesting the potential to further mature to either skeletal or cardiac myocyte. it also regulates the endoplasmic reticulum and plasma membrane junction with proteins such as stim , to control signalling and metabolic processes for the proper regulation of calcium within the striated muscle  <cit> .
+
+significantly enriched go terms for all topics can be conveniently visualised as a subgraph of the directed acyclic graph  for cellular component go terms .fig.  <dig> cellular component go terms for myoblasts. subgraph of the cellular component go terms dag showing terms significantly enriched for each topic. darker colours indicated lower p-values and terms shared between topics use a combination of the topics colours 
+
+
+
+without the need for further manual analysis or expert input, celltree was able to infer and label major stages of the myoblast differentiation process, along with the biological specificities of the set of undifferentiated cells, in line with existing biological knowledge on myoblast differentiation  <cit> .
+
+study of embryonic development
+in order to highlight the robustness of our approach on highly heterogeneous cell population, we analysed two data sets following embryonic cells at different stages of differentiation: a study profiling lncrnas of human-induced embryonic stem cells   <cit>  and a study of autosomal monoallelic genes from oocyte to blastocytes in mus musculus  <cit> . we show that celltree facilitates the identification of physiologically meaningful subpopulations that clearly define the continuum along the process of differentiation.
+
+both datasets were analysed with four topics, privileging a sparse model with clearly delineated topics, over a more complex model with more topics, which may better explain the cells relationship but present more functional overlap between topics .
+
+in both cases, we observe that the differentiation continuum was overall consistent with general biological knowledge and published analysis of the data: the trees  show a sequential ordering of cellular stages by their progress through embryonic cell development in a linear fashion .fig.  <dig> embryonic cell differentiation. backbone trees obtained by celltree for hesc  and mouse embryo cell differentiation . both trees are shown annotated with cell type  and topic distributions 
+
+
+
+for the hesc data  <cit> , the authors noted that stage-specific lncrna expression patterns emphasise the critical role it plays in development. in other words, maternal-inherited lncrna dominates early stages, before decreasing as the embryo develops, which suggests the critical role hesc-specific lncrnas play in pluripotency maintenance till the morulae stage  <cit> . in agreement with this analysis  <cit> , our model shows oocytes and zygotes clustered together in the same development stage , while x <dig>  x <dig>  and x <dig> cells are clustered under topic  <dig> 
+
+by looking at the go analysis for the different topics using terms for biological processes , cellular components  and molecular function  and additional file 8), we can identify with very good accuracy the successive stages of differentiation at a whole-genome scale:table  <dig> list of biological process go terms significantly enriched and uniquely appearing in each topic for hesc differentiation
+
+
+
+oocytes progress into stages of differentiated cell types in a process that requires cellular components to regulate gene expression patterns appropriately  <cit> . go terms for topic  <dig>  indeed show mitosis  as its dominating biological process.
+
+looking directly at the top genes in the distribution for topic  <dig>  also highlights oocytes’ unique ability to remodel the chromatin to closely coordinate the cellular and chromosomal events of oogenesis: actb , ptma , rps <dig> , rpl <dig> , rps <dig> , spl <dig>  and rpl <dig>  are all involved in several transcription regulatory factors that are regulators of ribosome biogenesis and protein synthesis.
+
+as development progresses to the morulae stage , we see a strong enrichment for nuclear ribonucleoproteins  such as the mll <dig> complex  which activate spliceosomes   <cit> .
+
+in agreement with the published analysis, celltree properly segregates the blastocyst  <dig> trophectoderm layer  from the inner cell mass , emphasising the critical differentiation stage of the morulae  <dig> embryo.
+
+looking at the topic distributions around the point of separation between te and icm, we see the contribution of topic 1: initiating self-renewal and pluripotency in blastocysts  <dig> by developing the endogenous extracellular matrix  <cit> . due to the intensive restructuring, the critical demand that drives mitochondrial activity is met by atp synthases . fbxo <dig> , dido <dig> , psrc <dig> , ppp2r3c  are responsible for the nucleosome structure of the chromosomal spindles  to remodel the nucleosome. stau <dig> transports and localizes mrna to different subcellular compartments  <cit> , while rpl <dig>  is required for the regulation of transcription within the cell body  to regulate stem cell pluripotency and neoplastic progression  <cit> .
+
+in agreement with the published analysis, passage  <dig> hesc cells are closest to the blastocysts, emphasising the gene expression landscape of hesc derivation, defined by the different stages of blastocyte  <dig> epiblasts  within the outgrowth of hescs  <cit> , highlighting the continuum of hesc development in contrast to simple hierarchical clustering. although passage  <dig> and  <dig> of hesc outgrowth are in the same branch of the tree, as could be expected since only  <dig>  %  of the genes show differential expression between the two outgrowth passages, celltree correctly identifies the two groups where the initial publication was unable to obtain that level of clustering  <cit> .
+
+the initial publication’s authors report the possibility of misclassification within the inner mass portion  of the blastocysts, which can result in some late blastocyte stage cells labeled as te cells, which accounts for the lack of uniformity within these groups in the structure inferred by celltree. the similarity between the icm lineages of pe and epi, as indicated by blastocytes  <dig> and  <dig> respectively, can be observed within the tree structure. throughout the development process, mtrnr2l <dig>  gapdh, mtrnr2l <dig>  and ptma are all neuroprotective proteins that stabilise the cell during its reconstructive development.
+
+the trees obtained for mouse embryonic cell development  <cit>  present very similar topic enrichment:
+
+the maternal-zygotic transition dominates at the 2-cell stage , indicated by the initiation of the mitotic processes  that leads to the gradual of maternal dna. cell cycle processes  include ubiquitinone-specific proteases  and the mediator complex  and inhibit apoptotic processes  <cit>  for the maternal-zygotic transition.
+
+in the mid and late 2-cell stage , the decline of high-mitogen conditions is coupled with an increase in ribosome biogenesis  which mitigates snorna assembly , and transcriptional regulation of spliceosomes  and proteosomes .
+
+finally, topic  <dig> is mainly associated with the translation processes  and transport processes  of the blastocytes, while the maturity of fibroblast and liver cell controls  is clearly visible in topic 4’s association to metabolic and catabolic processes, such as xenobiotic metabolic process  and glutathione metabolic process , dna methylation patterns  and receptor ligand binding .
+
+as we can see from this go analysis of the gene models used, the sequential developmental process of the cells is perfectly aligned with the topics found by celltree, and regions that are susceptible to perturbation during embryo differentiation are highlighted by the topic distributions.
+
+although focussing on terms uniquely enriched for each topic is generally sufficient to link each of the model’s topic to a clearly delineated type of cellular or molecular activity, especially when the general subtype of cell is already known, it is also possible to look at a more comprehensive list of enriched terms that allow overlap between topics to gain new biological insights . there too, a good overview of each topic’s role in the differentiation can be obtained by looking at go subgraphs .fig.  <dig> enriched go terms subgraph for hesc. subgraph of the go dag showing terms significantly enriched for each topic in hesc differentiation: a using bp go terms. b using cc go terms
+
+
+
+cortical cells
+although celltree is typically best suited to handle cell differentiation data over time, we also show that it can reveal interesting insights about latent subtypes in heterogeneous cell populations.
+
+deciphering the cellular taxonomy of brain cells is still a work in progress  <cit> . neuronal diversity is supported by functional complexity, as overlapping characteristics of interneuron subtypes would otherwise be difficult to explain, such as is the case with interneuron diversity within the rostrocaudal axis in mus musculus  <cit> .
+
+we applied celltree to single-cell rna-seq measurements of mouse cortical cells  <cit>  to see if it could help deciphering cells subtypes based on genomic profiles alone.
+
+the resulting backbone tree  overall shows a structure in line with known subtype labels in the dataset and enriched go terms  deliver biologically-coherent explanations for each topic.fig.  <dig> mouse cortical cell subtypes. backbone trees obtained by celltree for mouse cortical cell subtypes annotated with cell subtype  and topic distributions 
+
+
+
+the combined effect of topic 2’s decrease and topic 3’s increase matches the biological activity expected in a progression from interneurons to pyramidal cells: as interneurons differentiate into pyramidal neurons, they move away from synaptic vesicle exocytosis  to a more calcium-based and electrical signalling through atp hydrolysis  and calmodulin regulation of neurites’ tips by syntaxin- <dig> , which binds to the plasma membranes. this is aligned with studies showing that interneurons and pyramidal cells are both derived from progenitor neocortical cells  <cit> .
+
+the increasing importance of topic  <dig> in the left branch corresponds to the appearance of more prominent structural features in myelinated neuronal cell types, turning protuberances from the triangular shaped soma of the pyramidal neurons  <cit>  into the branching protrusions of the oligodendrocytes  <cit> : the excessive myelin glycoprotein present in oligodendrocytes membranes is reflected by the significant protein folding  activity.
+
+the other branch comprised mostly of non-myelinated glial cells, such as microglia and astrocytes, is dominated by topic  <dig>  defining functional features of topic  <dig>  such as oxidation reduction processes  and transport  in the blood vasculature appropriately outline the structural closeness of epidermal mural cells and microglia  <cit> , along with more specific roles such as the participation in metal ion homeostasis  of endothelial mural cells and negative regulation of angiogenesis  usually observed in epithelial mural cells  <cit> .
+
+astrocytes are clustered by celltree at the end of the differentiation spectrum in the non-myelinated branch, in line with the similarities in vasculature linkage functionality between these neuronal subtypes. topic  <dig> accurately marks the stimulated proliferation at the astrocyte stage  <cit>  with the poly rna binding process .
+
+through gene expression values alone, celltree not only automatically identified myelination as one of the major differentiating characteristic within glial cells: splitting oligodendrocytes and non-myelinated glial cells into two separate branches, it also identified many of the major structural and functional features linking different cortical cell subtypes.
+
+CONCLUSIONS
+with celltree, we introduced an entirely novel approach to single-cell gene expression analysis that not only can infer complex underlying hierarchical structures in cell populations from expression data alone, but also provide biological backing for the model it creates. the representation of cells as statistical mixture of topics allows for the capture of subtle evolving characteristics between cells along a continuum, and deals well with heterogeneous populations.
+
+although rooted in a strong bayesian statistical framework, the package is designed to be useable by experimentalists with only minimal bioinformatics skills and absolutely no knowledge in machine learning. using data meta-analysis, the package can provide reasonable default values for most of the parameters used by the model inference, visualisation and analysis algorithms, making it possible for an unfamiliar user of the software to quickly evaluate a new dataset in a few simple lines of r code. finally, in addition to letting users manipulate the results as standard r objects, all graph visualisation, ranking tables and result summaries can be rendered to file in pdf or late xformat, for easy reuse in scientific communication.
+
+as with most machine learning models, model complexity is a crucial aspect of the lda techniques used by celltree: while denser models  may yield a better distance matrix between cells , they are also harder to interpret and subject to the risk of overfitting. a balance must therefore be found with models that produce biologically-useful results, yet remain sparse enough to avoid overfitting and maximise clarity.
+
+in addition to the likelihood-based model selection method  <cit>  currently used by celltree, we are hoping to offer improved approches for automatic model selection, based on recent advances in topic modelling  in our next release. similarly, we are planning to take advantage of recent improvements to the field, to offer a more comprehensive semantic analysis of topics  <cit> .
+
+we also plan to refine the go enrichment method used by celltree by taking advantage of techniques for better multiple-hypotheses testing correction  <cit>  and replacing the current rank-based test on the per-topic gene list by statistical testing of the probability distribution itself.
+
+the next step in our development roadmap is the addition of a number of standard methods for both dimensionality-reduction  and population structure inference, in addition to the topic-based methods already implemented, in order to offer experimentalists an integrated interface to quickly run and compare different analysis pipelines on their single-cell gene expression dataset.
+
+availability and requirements
+the celltree r/bioconductor package is available for free under an open-source licence and can be easily obtained and installed by following the instructions at: http://bioconductor.org/packages/celltree/ it is designed to run on any recent personal computer  and any operating system, as long as the necessary r language software has been installed.
+
+additional files
+additional file  <dig> approximate backbone tree construction algorithm. pseudo-code of the algorithm and heuristics used by celltree to build a backbone tree representation of the cell population. 
+
+
+
+additional file  <dig> gene probability distribution for topic  <dig>  per-topic gene probability distribution for topic  <dig> of the hesc data model computed by celltree. 
+
+
+
+additional file  <dig> go bp terms for myoblast data. full table of enriched go bp terms for each topic in myoblast data. 
+
+
+
+additional file  <dig> go cc terms for myoblast data. full table of enriched go cc terms for each topic in myoblast data. 
+
+
+
+additional file  <dig> celltree summary for hesc data. full list of cell samples in the hesc data set, ordered and annotated by celltree. 
+
+
+
+additional file  <dig> go bp terms for hesc data. full table of enriched go bp terms for each topic in hesc data. 
+
+
+
+additional file  <dig> go cc terms for hesc data. full table of enriched go cc terms for each topic in hesc data. 
+
+
+
+additional file  <dig> go mf terms for hesc data. full table of enriched go mf terms for each topic in hesc data. 
+
+
+
+additional file  <dig> gene probability distribution for topic  <dig>  per-topic gene probability distribution for topic  <dig> of the hesc data model computed by celltree. 
+
+
+
+additional file  <dig> celltree summary for mouse embryonic cells data. full list of cell samples in the mouse embryonic cells data set, ordered and annotated by celltree. 
+
+
+
+additional file  <dig> celltree summary for mouse cortical cells data. full list of cell samples in the mouse cortical cells data set, ordered and annotated by celltree. 
+
+
+

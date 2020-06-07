@@ -1,0 +1,429 @@
+BACKGROUND
+high throughput sequencing is generating huge amounts of sequence data even from single experiments. the raw sequence data will typically be too much to keep in the memory of most off-the-shelf computers, and with sequencing technologies progressing faster than the improvements in computer memory, the memory challenge is likely to increase in the future.
+
+one key property of the raw sequencing data is that it is highly redundant. genomes are usually sequenced at high coverage, which means there will frequently be at least 30– <dig> reads covering the same region of the genome, differing primarily by sequencing errors. processing of sequencing reads for genome assembly usually involves two crucial steps: error correction to remove or correct sequencing errors, and assembly of overlapping reads to produce a smaller number of assembled sequences.
+
+a common approach for simplifying the processing of the sequence data is to consider all the k-mers of the reads: i.e. all the k-substrings of the reads if we view them as strings. this set of k-strings is then thought of as a subgraph of the de bruijn graph of order k − 1: i.e. one which has vertices corresponding to all k − 1-substrings and edges corresponding to the k-substrings. even if sequenced at high coverage, each k-mer is thus represented only once, reducing the redundancy of the sequence data considerably. however, direct storage of all k-mers in a single list will require k letters per k-mer, i.e. 2k bit of information for dna sequences, which can be quite memory consuming when k is large.
+
+naively, one might expect that this could be greately improved. from each vertex in the graph, there may be  <dig> possible out-going  edges if the graph represents dna sequences: one for each of the nucleotides. encoding which of these exist in the graph should require only  <dig> bit of information per vertex; if most vertices have only one out-edge, this might even be reduced towards  <dig> bit of information per vertex by only encoding which of the  <dig> possible edges is actually found. of course, this approach requires that the vertices be known, but one might envision that the information about the vertices could be reconstructed when walking the graph: when walking k− <dig> steps, all k− <dig> letters of the resulting vertex will be known.
+
+a traversable representation of the de bruijn subgraph is equivalent to storing a searchable index of all the k-substrings. by traversable, i mean that it is possible to efficiently walk the graph starting at any vertex, to check if any k-mer or k−1-mer is present as an edge or vertex in the graph, and preferably also to be able to retrieve the k-mers and k−1-mers represented by the graph. thus, it is not only important that the data structure be compact, but efficient algorithms for using it are just as important.
+
+a number of data structures exist that provide more compact storage of the de bruijn subgraph than naive k-mer lists or maps. conway et al.  <cit>  were able to represent a de bruijn subgraph with  <dig> g edges in  <dig>  gb, i.e.  <dig>  bit per edge, by using a compressed array. other approaches reduce memory by storing only a subset of the k-mers  <cit> .
+
+an entirely different approach uses a bloom filter to store a hashed set of k-mers  <cit>  using only  <dig> bit per k-mer. this is a probabilistic data structure with a known false positive rate, but where false positive edges can be identified by not being part of longer paths. however, while this data structure is effective for checking if a k-mer is contained in the graph, it does not easily allow listing of all vertices or edges. an enhancement of this method, minia  <cit> , avoids critical false positives and also allows retrieval of all vertices, but at the cost of higher memory consumption.
+
+another memory-efficient solution uses the fm-index  <cit> , which is based on the burrows–wheeler transform  <cit>  used to represent a suffix array  <cit> , to store the collection of reads in a compressed form  <cit> . the burrows–wheeler transform was originally developed for text compression and has the property that recurrent substrings in the text before the transform result in single-letter repeats in the transformed string. the fm-index adds auxiliary information on top of the burrows–wheeler transformed sequence that effectively turns it into a compactly stored suffix array. when concatenating the reads, the coverage makes the burrows–wheeler transformed sequence dominated by single-letter repeats which are highly compressible  <cit> . effectively, it requires  <dig> bit per edge to store the nucleotide, which corresponds to specifying the in-edge  of a vertex, and additional memory to store the run-length of the nucleotide, which corresponds to the k-mer count. at least up to  <dig> times coverage, this data structure should be able to store one edge per byte if used to represent the de bruijn subgraph of k-mers.
+
+it should be noted that the ability of different methods to handle read errors varies. some of the cited methods are intended to perform error correction by filtering k-mers by their frequency, while other methods assume that read errors for the most part have been corrected or excluded in advance.
+
+i here provide a data structure with strong similarities to the fm-index, but which stores the de bruijn subgraph representing the k-mer substrings rather than entire sequences. it is based on the idea of storing for each vertex which of the possible in-coming edges are actually present. for each vertex it thus needs one bit of information per letter in the alphabet, i.e.  <dig> bit per vertex for dna sequences, plus some additional data. the additional data consists of a grouping of vertices which requires one extra bit per vertex, plus the equivalent to the fm-index for mapping in-coming edges to their parent vertices. this version of the fm-index, which i call the kfm-index since it applies to an index of k-substrings, can be generated from the stored data, but for computational speed a subset of the index is kept in memory. all in all, a de bruijn subgraph for dna sequences, including the stored subset if the index, can be stored using 5– <dig> bits per vertex if memory consumption is critical. in the case where most vertices are of degree  <dig>  i.e. have one in-edge and one out-edge, the stored data may be compressed down to approximately half the size.
+
+like the fm-index, the kfm-index stores only one strand of dna sequences, and is suitable for walking the graph in one direction. for genome assembly, one does not know in advance which strand the read is on, and so normally are required to ensure that both the k-mers of the reads and their reverse complements are added to the graph. some data structures, e.g. most hashing strategies, can combine k-mers and their reverse complements, and thus require roughly half the number of items. for the kfm-index, however, it is necessary to add both the reads and their reverse complements. in doing this, one may walk in the opposite direction by switching to the reverse complement, although there will be some computational overhead in doing so.
+
+the basic operations available on the kfm-index are similar to those of the fm-index. each vertex is identified by it’s index position, i =  <dig> ,…,n− <dig> where n is the number of vertices in the de bruijn subgraph and the vertices are lexicographically ordered. for a given string, the vertices having that string as a prefix, identified by the interval of index positions, can be found efficiently: the computational time is proportional to the length of the string. given a vertex, identified by it’s index position i, one can look up directly in the stored data which in-coming edges exist for that vertex. the index positions of the vertices from which the in-edges come can be computed efficiently. thus, checking if a string exists as a path in the de bruijn subgraph can be done. the reverse operation of identifying the string representation of a given vertex identified by index position i also exists, but is slower: time complexity is o.
+
+the kfm-index can be generated directly from a sorted list of in-edges, which is appropriate for amounts of sequence data that fit into the computer memory, although it should also be feasible to extend this by sorting the in-edges on disk: the time complexity is o where n is the total length of the sequence data, and thus the number of items to be sorted, and nk lgσ is the amount of data being sorted. generation of kfm-indexes in memory from sequentially read sequence data can be done by splitting the raw sequence data into parts, generate kfm-indexes for each part, and then perform pairwise merges of these kfm-indexes. the time complexity of generating the kfm-index in this manner is essentially o), where n is the number of vertices in the final de bruijn graph , σ is the alphabet size, and m is the number of parts the initial sequence data is partitioned into. this has proven to be quite time consuming: in part because of the time complexity of the provided merge algorithm, but probably also in part due to an inefficient implementation. i expect that there is room for major improvements. in addition, these operations are all open to parallelisation.
+
+readers familiar with the fm-index will see the similarities to it, despite the fact that the fm-index represents all suffixes while this new data structure only stores information about k-substrings. not only is the data structure very similar, but the functions and algorithms are also similar, or at least analogous, to those used with the fm-index. i therefore refer to this data structure as the kfm-index: an fm-index for k-substrings. and instead of pointing out the similarities throughout the article, i will point out differences where these are noteworthy.
+
+a java implementation of the data structure is provided as a demonstration.
+
+methods
+notation
+let Σ denote an alphabet of size σ = |Σ|, i.e. an arbitrary set whose elements we refer to as letters: for dna sequences, Σ = {a,c,g,t} and σ =  <dig>  a string of length l, or an l-string, is an element of x ∈ Σl. let Σ∗=∪l=0∞Σl denote the set of all strings, including the empty string denoted ε. we denote the length of the string by |x|. if x and y are strings, xy denotes the concatenated string of length |x|+|y|; for sets u and v of strings, the set of concatenated strings is denoted u∘v = {uv|u ∈ u,v ∈ v}.
+
+we write x<y to indicate that string x sorts lexicographically before y based on an ordering of the letters in Σ. in addition to the letters in Σ, we have two special characters $ and ∞ with the properties that $ <a<∞ for all a ∈ Σ.
+
+if x is an l-string, we write x = x1…xl where xi ∈ Σ are the letters. for p≤q, the  substring x=xp…xq is a string of length q−p+1: x is the empty string. a substring x at the start is referred to as a prefix, while a substring x at the end is referred to as a suffix. the operation of trimming away the last letter is denoted x−=x=x1…xl− <dig> 
+
+for s= a list of strings, i.e. si ∈ Σ∗, let s⊂Σk denote the set of length k substrings: i.e. x ∈ Σk is contained in s if and only if there is a string s∈s with x = s for some position p.
+
+we denote the base  <dig> logarithm by lgx = log2x which is convenient for quantifying information. thus, the information required to specify one out of n options is lg n bit.
+
+problem description
+given a set  of strings, e.g. a set of sequencing reads, we will construct a compact representation of s, i.e. the set of length k substrings, suitable for quickly checking if any particular k-string is present.
+
+the data structure is best understood in terms of the de bruijn subgraph representation of s. this has vertices v=s and edges e=s where e ∈ e is an edge from e to e. it is a subgraph of the de bruijn graph of order k− <dig>  i.e. with vertices Σk− <dig> and edges Σk. some authors may refer to this as a word graph, or even just a de bruijn graph. since the set of vertices can be deduced from the edges, storing s is effectively the same as storing the information encoded in the de bruijn subgraph. however, the graph structure highlights the overlap between edges meeting at vertices.
+
+while some authors focus on k as the length of the strings represented by the edges, others focus on the order of the graph which is the k− <dig> length of the strings represented by the vertices. since our purpose is to represent the k-mer composition of the sequences, it is natural to focus on k as the k-mer length. however, the implementation of the algorithms is more naturally centered around the vertices, and so the java implementation focuses on the order of the de bruijn subgraph which is k− <dig> 
+
+the kfm-index data structure
+the data structure for storing the k-substrings s from a set of strings  has similarities to the fm-index and the burrows–wheeler transformation. one similarity is that the data structure stores the prefixing letters, which represent the in-edges to vertices, and backtracks the de bruijn subgraph through these in-coming edges rather than walking paths from beginning to end; the sequences, including the strings the vertices and edges represent, are thus reconstructed from the in-edge data when backtracking through the graph.
+
+the initial de bruijn subgraph representing the k-string composition s may contain any number of finalvertices: i.e. vertices for which there are no out-going edges. these final vertices correspond to k−1-strings found only as suffixes of the strings in , and represent a problem as they cannot be reached by backtracking the de bruijn subgraph. as the data structure does not store the k−1-strings for each vertex, but instead reconstructs these strings when walking the graph, these final vertices cannot be thus reconstructed. the solution is to add extra vertices and edges leading from these final vertices to a special final vertex from which we may start the reconstruction. see figure  <dig> for an example.
+
+let vfinal⊂s be a set that includes all k−1-strings which are final vertices in the graph with edge set s: i.e. if v∈s and v is not a prefix of any string in s, then v has to be in vfinal. ideally, in order to get the most compact representation of s, we want vfinal to contain only these strings. however, we might start off by letting vfinal contain all k−1-suffixes of the strings in , knowing that the vertices required to be in vfinal have to be a subset of these, and then later prune away superfluous edges and vertices. hence, we permit vfinal to be bigger than strictly required.
+
+we now define the final-completed de bruijn subgraph with paths added from each v ∈ vfinal to a special vertex, $k−1=$…$ which we refer to as the final vertex, having vertices
+
+  v=s∪vfinal∘$k−1∪{$k−1} 
+
+and edges
+
+  e=s∪vfinal∘$k− <dig> 
+
+where vfinal∘$k− <dig> = {v$…$ ∣ v ∈ vfinal} denotes the strings from which these additional paths are constructed. these are strings over an extended alphabet Σ∪{$}, where $ is a special character that is sorted before any of the letters of Σ. the added vertices, i.e. those containing one or more $ at the end, are referred to as final-completing vertices and are parts of paths leading to the final vertex. in fact, the final-completing vertices form a tree with the final vertex, $k− <dig>  as the root. note that, for the case where vfinal is empty, we explicitly add the special vertex $k−1: this is purely a matter of convenience.
+
+by this extension of the de bruijn subgraph, we have ensured that there is exactly one final vertex that cannot be reached by backtracking the graph, namely the final vertex $k− <dig>  when sorting the vertices lexicographically, this will always come first. note that we do not require that the final vertex be reachable from the rest of the graph. if the original graph had vfinal empty, this would be the case.
+
+we may identify e with a subset of Σ×v describing the set of in-coming edges to each vertex, and will by abuse of notation say that the pair  ∈ Σ×v is an edge if the concatenation av ∈ e. we denote the in-coming edges to v by ev⊂Σ: i.e. ev = {a ∈ Σ ∣av ∈ e}.
+
+note that backtracking through this de bruijn subgraph corresponds to reading the strings in the backwards direction, from the end of the string towards the beginning, just as with the fm-index. a variant of the data structure which naturally reads the strings in the forward direction can be obtained by performing the construction on the reversed strings, the only effect of which is on the sorting of strings in the index which would then be based on the reversed string.
+
+main data
+let n = |v| be the number of vertices of the final-completed de bruijn subgraph, and let v <dig> …,vn− <dig> denote the vertices of v in lexicographic order; in particular, v <dig> = $k− <dig>  which is the only final vertex of the final-completed de bruijn subgraph. the basic information required to store the final-completed de bruijn subgraph of s is: 
+
+edges: the set evi⊂Σ of edges from each vertex vi is stored; i.e. the edge set e identified as a subset of Σ×v. this may be encoded as a σ×n array, η, with binary values: i.e. η∈{false,true} indicates if avi∈e. the in-edges ei={a∣avi∈e} to vertex vi may be represented as a bit-mapped number on which set operations correspond to binary operations.
+
+group end flags: we group vertices v ∈ v with the same k−2-prefix together: i.e. u and v are grouped together if u− = u and v− = v are identical. we indicate the group end by a flag fi which is true if vi is the last vertex in its group, false otherwise. this requires one bit of information per vertex.
+
+more formally, these binary arrays take logical values, true or false, as defined by
+
+  η⇔defa∈evi 
+
+and
+
+  fi⇔defvi−≠vi+1−ori=n− <dig> 
+
+where vi<vi+ <dig> follows from the lexicographic sorting of the vertices. we could have added as a convention that vn=∞k− <dig>  in which case special handling of the final position would not have been required.
+
+the grouping of vertices with the same k−2-prefix allows us to check which in-edges originate from the same vertices: for a,b ∈ Σ, u,v ∈ v, edges au and bv originate from vertices au− and bv− respectively, which is the same vertex if a = b and u−=v−, which corresponds to checking if u and v are in the same vertex group.
+
+index to previous vertex position
+in addition to the main data, there is an indexing function which may be generated from the main data. these are values per vertex group, i.e. constant within the groups of vertices with the same k−2-prefix. storing the entire indexing function as auxiliary data would take a lot of memory, while computing everything from scratch would take a lot of time. instead, a balance between memory and speed is obtained by storing a sparse subset, e.g. at regular intervals, and recompute the values in-between on demand. this index corresponds to the fm-index and provides a map from a vertex to the origin vertex of its in-edges.
+
+for each letter a ∈ Σ, let τ denote the number of vertex groups that contain an a in-edge. for i =  <dig> …,n, let c denote the number of vertex groups prior to position i that contain an a in-edge: the vertex group containing vi is not included in this sum. this makes τ = c, since the vertices all have positions i<n.
+
+for a ∈ Σ, i =  <dig> …,n, let
+
+  ρ=1+∑b<aτ+c 
+
+where the summation of b <a is for all b ∈ Σ lexicographically prior to a, and the  <dig> corresponds to skipping the vertex v <dig> = $k− <dig>  note that if a′ is the letter following a in the alphabet Σ, i.e. a′ = a+ <dig> if we consider the letters to be enumerated  <dig> …,σ− <dig>  then ρ = ρ; and for a the last letter of Σ, i.e. a = σ −  <dig>  we have ρ = n.
+
+the position array, ρ, has the property that if vertex vi has an in-coming edge avi∈e, i.e. a∈evi, this edge comes from vertex vρ. a more general definition is that
+
+  ρ=min{j∣vj≥avi−orj=n} 
+
+where, as before, v− = v for k−1-strings v ∈ v and u≥v refers to the lexicographic ordering of strings.
+
+we may also note that, if we represent letters a by integers  <dig> …,σ− <dig>  we have ρ = ρ, and may define ρ = ρ, where ρ is again a non-decreasing function for j= <dig> …,n×σ with ρ= <dig> and ρ=n. representing ρ in terms of ρ is sometimes convenient, e.g. when we want to compute the inverse, and similarly we may use an+i to represent an in-edge, or potential in-edge, .
+
+as may be noted, the role of ρ in mapping from one vertex to another is essentially the same as the fm-index for mapping from one suffix to another. the main difference is in the grouping of vertices into groups, where counts are over vertex groups rather than individual vertices. the reason this vertex grouping is required is that the de bruijn subgraph allows branching, i.e. for vertices to have more than one out-edge; the vertices in a vertex group share the same set of in-edges. the traditional fm-index could be envisioned as a de bruijn subgraph with no branching, where each vertex has exactly one in-edge and one out-edge, and so the vertex groups would all consist of just one vertex.
+
+auxiliary data stored for computation speed
+storing ρ ) as an array of integers requires σ×lg n bit for each vertex. however, if ρ are known for some nearby j, the number of computational steps to compute ρ from ρ is proportional to |i−j|. so by storing only a subset of the ρ, e.g. every qth position, the memory required for storing the auxiliary data is greatly reduced, but at the cost of computational time for determining ρ. the partial storing of ρ is essentially the same as for the fm-index, and can be done in a number of different ways.
+
+let 0=i0<⋯<iζ=n be the position for which ρ is to be stored, with ir−ir−1≤q for some chosen q. the stored values then consist of an array κ=ρ where a =  <dig> …,σ− <dig> represent the letters. thus, we have κ for 0≤j≤σζ with increments 0≤κ−κ≤q. storing the entire κ array is, however, still space consuming unless q is allowed to be big, in which case computing ρ will take time.
+
+knowing that κ increases by values between  <dig> and q, we can write κ=uj+quj where uj=⌊κ/q⌋ and 0≤uj<q and store the uj in a bit-packed array. the values uj now have increments Δuj=uj−uj−1∈{ <dig> }. we store the increments Δuj as an array of bits, and a subset of the uj from which the remaining uj can then be computed efficiently. this allows us to select a much smaller value for q than would otherwise be feasible.
+
+java implementation
+the java implementation stores η and fi as a σ+ <dig> bit block for each vertex i. these blocks are then packed into  <dig> bit words . for dna sequences, each  <dig> bit word thus stores  <dig> vertices, each using  <dig> bit.
+
+the stored values of ρ are expressed in terms of κ=uj+quj. the uj are bit-packed into an array to preserve memory. for reconstruction of the uj, every 64th uj is stored, i.e. u64r, and the increments Δuj are stored in blocks of  <dig> bits. any uj can then be computed efficiently from u64r, r = ⌊ j/64⌋, and the increments Δu64r+ <dig> …,Δuj using operations on  <dig> bit words.
+
+fundamental functions for utilising the data structure
+for a string x and a ∈ Σ, we define the function γ recursively by
+
+  γ=γ= <dig> γ=n,γ=ρ,γ=ρ). 
+
+this function has a natural interpretation. if |x|<k,γ is the smallest non-negative integer i for which x≤vi, or i = n if none such exists. if |x|≥k,γ is the smallest integer i for which x≤viy for some string y ∈ Σ∗ so that viy can be realised as a path in the de bruijn subgraph , i.e. all k-substrings of viy are in e, or i = n if no such string exists. this property is formally proved in lemma  <dig> in the proofs of results appendix.
+
+in order to utilise the data structure, for strings x with length |x|<k, we define two utility functions: the first vertex v ≥ x is
+
+  α=γ=min{i∣vi≥xori=n} 
+
+while the first vertex with v>x∞ is
+
+  β=γ=min{i∣vi>x∞ori=n} 
+
+recall that ∞ >a for all a ∈ Σ, so β for x ∈ Σl, l<k, finds the first v ∈ v for which v>x, while α finds the first v for which v≥x. thus, α and β are defined by the property
+
+  {v∈v∣v=x}={vi∣α≤i<β} 
+
+for all x ∈ Σl, l<k, making them exactly the functions we need to identify all vertices starting with a given prefix.
+
+note that if we add the vertex vn=∞k− <dig> to the list, we wouldn’t have to specify the i = n case in the above definitions. again, this addition would purely be a matter of convenience and not have any practical impact.
+
+algorithms for using the data structure
+the above described data structure encodes a de bruijn subgraph representation of the k-substring composition of the strings . however, to utilise this representation, we need efficient algorithms.
+
+throughout the algorithms, vertices of v will be identified by their position i ∈ { <dig> …,n−1} in the lexicographically sorted list v <dig> …,vn− <dig> where n = |v|. the string that each vertex represents will generally not be known.
+
+the alphabet Σ is known from the start and the letters ordered. computationally, it is natural to represent the letters by numbers  <dig> …,σ− <dig>  since they are to be used as array indexes. however, for added readability, i will denote them as letters a ∈ Σ in the algorithms rather as numerical indexes.
+
+computing the previous position ρ for arbitrary positions
+a first step is to be able to compute ρ for arbitrary positions based on the stored data.
+
+let 0=i0<…<iζ = n be the values for which ρ is stored, i.e. ρstore=ρ, and define functions
+
+  ι+=min{ir|ir≥i},ι−=max{ir|ir≤i} 
+
+for pointing to the next or previous stored value. we may then compute ρ by aggregating from the vertex group containing ρ) as in algorithm  <dig> 
+
+algorithm  <dig> compute arbitrary ρ from previous stored value  
+
+an alternative is to start at ρ) and subtract contributions from vertex groups prior to this position, which can be done with a similar algorithm . to speed up the procedure, one may identify the nearest stored value, either previous or later, and use whichever of the two algorithms is appropriate. this will on average double the speed, and is done in the java implementation.
+
+find all vertices with a particular prefix
+the functions α and β for strings x with length |x|<k are both naturally expressed in terms of the the function γ. we note that γ gets called either as γ = γ or as γ, and so we can express these as γ=γ = γ and γ = γ where γ=ρ) and for x = ε the empty string γ=i. algorithm  <dig> details the computations.
+
+algorithm  <dig> algorithm for computing γ: then, α=γ=γ and β=γ=γ  
+
+by combining the call to α and β into one function , it is possible to exploit the fact that when the interval is empty the two computations become identical. the return value [ α,β〉 represents the interval α,…,β− <dig>  and may be represented by a pair . if α=β, the interval is empty: the function could be modified to abort once it is clear that the resulting interval will be empty, or at least reduce computations by half once it is clear that α=β.
+
+algorithm  <dig> compute [α,β〉  
+
+when merging two kfm-indexes, [ α,β〉 is computed numerous times on one kfm-index with x being vertices  from the other kfm-index. when the result maps a vertex in one to an vertex in the other kfm-index, the two are merged; when a vertex v is mapped to an empty interval in the other kfm-index, the position α=β tells the merge procedure into which position it should be merged.
+
+backtracking through the de bruijn subgraph
+for a string x of length |x|=l≥k, walking the de bruijn subgraph path corresponding to x is most easily done by starting at the end of x and backtracking the graph towards the start of x. algorithm  <dig> provides the algorithm for doing this: it will start at the k−1-suffix x and backtrack one step at a time, exiting if the string leaves the graph.
+
+algorithm  <dig> backtrack the de bruijn subgraph for a string x ≥ k  
+
+identifying the string value of a vertex
+if we start with a vertex identified by its position i, we can determine the string that vertex represents. in order to do so, we need a function ρinv:{ <dig> …,n−1}→Σ×{ <dig> …,n−1} which has the property that
+
+  ρinv=⇔ρ=i,ρ=i+ <dig> 
+
+and where ρinv=. the pair  can be found through a binary search. however, since the computation of ρ is done in a stepwise manner starting at one of the stored values, a binary search should be performed on the stored values to identify the interval that contains the solution, and the stepwise procedure then followed until the solution is found.
+
+the interpretation of ρinv= is that a is the first letter of vi, while j is the last vertex in the vertex group with k−2-prefix equal to the k−2-suffix of vi: i.e. there is an edge from vi to a vertex in the same vertex group as vj. however, since the vertices in the same vertex group only differ by the last letter, and we don’t have to determine this letter, we do not have to determine which vertex  in this vertex group has an edge from vi. by iterating this procedure k− <dig> times as in algorithm  <dig>  we can find the string vi.
+
+algorithm  <dig> return string vi for position i  
+
+generating the kfm-index from a set of strings
+the simplest way to generate the main data, i.e. the in-edge list and vertex group end flags, from a set of strings, is to generate the set of all k-substrings, including the final-completing strings with one or more more $ attached at the end, sort and group them by their k−1-suffix, and then generate the in-edge list and group end flags directly from this. once the main data, i.e. the binary arrays η and fi representing the edge set e and the group end flags, have been generated, the auxiliary data can be generated from these.
+
+this brute force approach requires a fair amount of memory since all k letters need to be stored for all k-substrings. the list of k-substrings thus takes up k times as much memory than the original strings from which they are generated, and so is only feasible when the original string data is moderate in size.
+
+if the string data is large, so that not all k-substrings of s can be kept in memory, the job may be split up. the set  of strings may be split up into smaller subsets, the kfm-index generated for each subset, and pairwise merging of kfm-indexes may then be performed to combine the subset based indexes into a kfm-index for the whole set.
+
+note that this procedure will generate a full set of final-completing vertices, i.e. those containing $ at the end, even when they are not required by the kfm-index. we may reduce the kfm-index by checking which final-completing vertices are actually required in order to be able to reach the entire graph by backtracking from the final vertex. however, even if we do this for the initially generated kfm-indexes so as to ensure these contain minimal sets of final-completing vertices, when we merge the kfm-indexes for the string subsets, superfluous final-completing vertices may again occur when final-completing vertices required in one kfm-index are rendered superfluous by the edges of the other kfm-index. hence, we may wish to prune away these final-completing vertices at the end, or in some of the intermediary merges.
+
+merging two kfm-indexes
+if we have two kfm-indexes denoted a and b, one with na elements and the other with nb elements, these can be merged in two steps. first, we merge the two lists into a list of length na+nb. in the process of merging the two lists, rows representing the same vertex are not combined, but instead we mark the occurences where one vertex merged list is identical to the next one so that these may later be combined. in addition, vertex groups found in both a and b must be merged into one vertex group, which involves removing the group end flag from any vertex not at the end of the merged vertex group. after that, we sequentially pass through the na+nb-length merged list, combining identical vertices into one vertex.
+
+instead of generating the na+nb-length list in full, which would require the same amount of memory as the two original kfm-indexes of length na and nb, we can represent the merge by a na+nb bit array indicating which of the two lists go into each position. another bit array is used to mark identical vertices, which only needs na bit since we only need to store which vertices in a are also found in b. finally, we use an na+nb bit array to mark vertices in the merged list that should not keep whatever group end flag it might have: this is required for vertex groups found in both a and b to ensure that only the final vertex in the group retains it group end flag.
+
+algorithm  <dig> merge two kfm-indices  
+
+it is sufficient to find the positions in the na+nb-list of the na vertices from the kfm-index a. we may assume na≤nb since that will require only na lookups; the nb vertices from the kfm-index b will then be in the remaining positions. to do this, for all items i =  <dig> …,na− <dig> in the a list, compute the string via of that vertex. we then look up the position of via in the kfm-index b by computing [αb,βb〉. if the interval is empty, i.e. αb=βb, the vertex goes into position i+αb and so we mark this position as containing a vertex from a. if the interval is not empty, the vertex via is found in position αb in the b list =αb+1), and so again we mark position i+αb as containing an a vertex, while the vertex from b takes position i+αb+1; in addition, we mark vertex i in the a list as having a duplicate in the b list.
+
+we similarly need to iterate over all vertex groups in a, i.e. all non-empty [ αa,βa〉 for u ∈ Σk− <dig>  if the vertex groups [ αa,βa〉 and [ αb,βb〉 are both non-empty, we know that the vertices in the interval [ αa+αb,βa+βb〉 correspond to the u vertex group in the preliminary merged list. the last vertex, i.e. the one in position βa+βb− <dig>  will have its group end flag set from either list a or b. however, there will be another vertex with its group end flag set from the other list which may be in any of the other positions in the interval, and to ensure that this is unflagged, we mark positions αa+αb,…,βa+βb− <dig> for group end flag removal.
+
+rather than process the items i =  <dig> …,na− <dig> sequentially, which requires computing vertex for each and then looking these up in b, it is more efficient to recurse over all p-mers for p =  <dig> …,k− <dig>  each recursion adding all possible one letter prefixes. thus, l =  <dig> corresponds to vertices, l= <dig> to vertex groups, [ α,β〉 refers to index intervals corresponding to a given p-mer prefix in a or b. the function premerge performs this recursion. it is called from merge where l=k−1−p is the number of trailing $.
+
+algorithm  <dig> prepare merge: recurse over a intervals  
+
+once we have the na+nb bit array indicating which positions in the na+nb merge comes from a or b, another na bit array telling which vertices in a are also found in b, and a third na+nb bit array marking vertices for group end flag removal, we can merge the two lists sequentially using performmerge.
+
+algorithm  <dig> merge subroutine: perform merge based on merge information  
+
+the three bit arrays used to facilitate the merge require 3na+2nb bit of extra data. the merge requires na lookups to find via and then [αb,βb〉 followed by the copying of all na+nb elements combining them into one when they represent the same vertex. in addition, the creation of the target list requires a temporary duplication of all the vertex and edge data, but this could be avoided by using a data structure in which the merged list is being created gradually as needed while memory used by a and b is gradually released as they are being merged. the java implementation provided does this.
+
+pruning away superfluous final-completing vertices
+the removal of superfluous final-completing vertices, i.e. vertices ending with one or more $ characters that are not required in order to avoid final vertices that have no out-edge, can be done by a few simple rules. we can perform these checks by a recursive approach, exploiting that the final-completing vertices form a tree with the final vertex, $k− <dig>  as the root. we start at the final vertex, which is in position  <dig> of the kfm-index, and recursively backtrack through all in-edges at most k− <dig> steps to reach all final-completing vertices in v, performing the tests depth-first. we then identify edges and vertices that can be removed. after all final-completing vertices have been processed in this manner, we condense the list by removing the superfluous edges and vertices from the list.
+
+algorithm  <dig> prune the index of unneeded final-completing vertices  
+
+if v ∈ v is a final-completing vertex, it is superfluous and can be removed if it has no in-edges. by having no in-edges, i include cases where the in-edges from vertices marked for exclusion have been removed: this is the reason why the tests must be done depth-first. since ρ depends on which in-edges exist in each vertex group, superfluous in-edges can be removed immediately only for final-completing vertices where there is another vertex in the same vertex group with an in-edge from the same vertex . in general, edges and vertices must be marked for removal while the final-completing vertices are checked, and only removed after the checking is finished.
+
+if v = u$ ∈ v is a final-completing vertex ending with a single $ and e = av is an in-edge to v for some a ∈ Σ, the edge av can be removed if there is an a-in-edge to another vertex in the same vertex group as v: i.e. if there is another vertex ub ∈ v which has an in-edge aub ∈ e, the in-edge av=au$ can be removed from the in-edges to v. the edge au$ is superfluous since au can be reached by backtracking from ub. if all in-edges to v can be removed by this rule, the previous rule then allows v to be removed.
+
+algorithm  <dig> prune recursal from vertex i ending in $l, return true if unneeded  
+
+the pruning away of superfluous final-completing vertices is not required for the kfm-index to work, but it can reduce the memory required in cases where the number of such vertices is big. as such, depending on the number of final-completing vertices at any point of the processing or merging of kfm-indexes, one may choose to perform this pruning at the end or at some of the intermediary merges.
+
+pre-assembly
+as a first step of sequence assembly, and a good task for assessing both the resulting de bruijn subgraph and the efficiency of its use, uniquely determined paths of the graph are determined. this consists of two steps. first, the list of vertices are checked to identify all vertices that have in-degree or out-degree different from one:an algorithm is provided in the additional file  <dig>  the remaining vertices are simple, non-branching vertices that paths just pass through. iterating over all branching/ending vertices, all possible paths passing through degree-one vertices are generated. when generating the sequence corresponding to a path, the sequence of the last vertex of the path needs to be found using algorithm  <dig>  while the rest is determined when backtracking through the in-edges.
+
+the result is a list of non-simple vertices, and a list of all uniquely determined paths between these. an estimate of the number of such paths can be found simply from summing over the in-degrees of all branching vertices, but this may include paths consisting entirely of final-completing vertices. when generating the list of uniquely determined paths, those containing only final-completing vertices are excluded.
+
+RESULTS
+memory usage
+the main data kept in memory is the σ×n binary array η and the binary flags fi for marking the end of each vertex group. direct storage of these in bit-packed arrays requires σ+ <dig> bit of information per node, so the total memory for storing the in-edge list and vertex group flags is
+
+  meme,f=n×bit. 
+
+for efficient computation of the previous vertex position ρ, a subset ρ is permanently stored for positions 0=i0<⋯<iζ=n. direct storage of κ=ρ, where a= <dig> …,σ− <dig> represents the letters, would require σζ lg n bit since each position requires lg n bit. however, decomposing κ=uj+quj where ir−ir−1≤q, and storing the ui and Δuj=uj−uj−1∈{ <dig> }, requires only lgq+ <dig> bit for each value in κ: i.e. σζ bit where ζ≈n/q if the ir are evenly spaced.
+
+in order to efficiently compute arbitrary uj, the java implementation stores u64r. since each of these values require lg bit of memory, the total memory requirement for storing the in-edge list, vertex group flags, and the data used to compute the previous vertex position, is
+
+  memρstore≈nσqlgq+1+lg64bit. 
+
+the memory saving construction used to compress κ could be repeated for the stored values κr′=uωr by writing this as κr′=ur′+64ur′, but at an additional computational cost. however, for most practical cases, the term lg/ <dig> is already a very minor part of the memory cost and not worth the computational overhead. by the time n> <dig> becomes an issue, we have probably moved beyond  <dig> bit computers, in which case increasing the block size of  <dig> to the higher word size ω changes the memory term to lg/ω without increasing the computational time.
+
+under the assumption that n<2ω, where ω= <dig> is the word size of a  <dig> bit computer, the total memory requirement is
+
+  meme,f,ρ<n×σ+1+σqbit 
+
+although there may be some additional overhead depending on how the data is bit-packed into arrays.
+
+for dna, σ= <dig>  which requires  <dig> bit of data per vertex. however, storing  <dig> vertices packed into a single  <dig> bit word leaves  <dig> unused bits, and so it effectively consumes ≈  <dig>  bit per vertex in the present java implementation. for stored previous vertex positions, ρstore, natural step sizes q between stored values are q= <dig>   <dig> and  <dig>  which adds  <dig>  bit,  <dig>  bit and  <dig>  bit of memory usage per vertex, respectively.
+
+computational speed
+estimates of computational speeds are based on the assumption that n<2ω where ω is the word size: i.e. ω= <dig> on a  <dig> bit computer. this means that a number in the range  <dig> to n can be read from memory in one operation: for arbitrarily large n, this would require at least /ω operations. it also means single operations can operate on ω bits at the same time, although this is largely unexploited by the implementation.
+
+the central algorithm that influences most kfm-index computations is that of computing arbitrary ρ: algorithm  <dig>  or the extension of this provided in the additional file  <dig> and implemented in the java program. a subset of the values are stored in a compressed form and can be retrieved in constant time. if every qth value is stored, the time required to reconstruct and arbitrary ρ will on average be of order o. however, since we will in practice select a fixed q of moderate size, which is sufficient to keep memory costs of the auxiliary data at a low level, and a fixed computational time remains even as we let q drop towards  <dig>  we may consider the computation of ρ to be of constant time.
+
+algorithm  <dig> for computing γ for any string x requires |x| calls to ρ, and thus has time complexity o. consequently, identifying the interval of vertices with prefix x  has time complexity o. algorithm  <dig> for backtracking the graph from vertex i along edges provided by the string x is essentially the same as the computation of γ, just with checks that the edges exist, and also has time complexity o. the reverse computation of finding the string representation of a given vertex index, provided in algorithm  <dig>  requires solving for ρinv using a binary search, and is thus of time complexity o).
+
+constructing a kfm-index in memory, provided the memory is sufficient to hold a complete list of k-mers from the strings, has time complexity o where n=∥s∥ is the total length of the string data. the time is primarily required for sorting the list of in-edges generated from the strings, while construction of the kfm-index from the sorted list is linear in n.
+
+merging two kfm-indexes of sizes p and q using algorithm  <dig> has worst case time complexity okσ). this is due to algorithm  <dig>  the factor σ stems from checking sequentially for in-edges and could most likely be replaced by something more efficient should large alphabets be of interest. there is also room for improvement, as detailed in hte additional file  <dig>  e.g. by reducing the number of computations once conditions like αb=βb are met.
+
+construction of a kfm-index in memory by dividing the initial string data into m parts, generating kfm-indexes from each, and then merging these pairwise until a single kfm-index remains, has time complexity o) using the present algorithms. at the lowest level, m kfm-indexes are generated, each from sorting approximately n/mk-words, which takes o) time and is generally fast. during the first roughly lg rounds of pairwise merges, while the number of partitions is higher than the coverage, the total sizes of the kfm-indexes may still be ≈n, and so each round requires time o. after that, since none of the kfm-indexes have more than n vertices, which is the size of the final de bruijn subgraph, the time complexity drops by a factor of two for each new round of pairwise merges until a single kfm-index remains. the main part of the computations are the first lg or so rounds of pairwise merges, and so the final kfm-index takes o. as n cannot increase without m increasing in proportion, since n/m in-edge k-words must be kept in memory, but m can increase independently if less memory is to be used, it is more natural to write this o).
+
+benchmarking of the java implementation
+the java implementation has not been optimised for speed: it runs on a single core, and prioritises memory consumption and code generality and readability over speed. however, it can still give a fair indication of the computational speeds, and indicate which are the bottlenecks.
+
+the benchmarks on e. coli and simulated data were run on java  <dig> under  <dig> bit windows  <dig> on a standard office laptop: dell latitude e <dig> with intel core i7- <dig>  <dig>  ghz cpu and  <dig> gib ram. for c. elegans and the soil sample, it was run on a server with more memory and roughly twice the computational speed. the amount of ram available to java was set with the option -xmx. note that for specifying computer memory, i use iec prefixes ki-, mi-, and gi- which represent powers of  <dig>  while si prefixes k-, m-, and g- represent powers of  <dig> 
+
+all kfm-index constructions from read data added both reads and their reverse complements, discarding pairing information. quality filtering consisted of removing bases with quality score less than  <dig>  splitting the reads into fragments with higher quality bases. unless otherwise stated, k= <dig> were used: note that the java implementation specifies the order k− <dig>  i.e. length of the vertex strings. the distance between stored values ρstore was q= <dig>  this should require  <dig>  bit per vertex as the actual memory usage on the data, including  <dig>  bit due to the  <dig> unused bits in the pack of  <dig> vertices stored in a  <dig> bit java long integer, although there would be some additional memory overhead from the program itself.
+
+memory usage during kfm-index construction was largely determined by the size of partitions, i.e. the maximal number of k-mers processed in each partition, which was set to different values to assess the time required to generate kfm-indexes by merging smaller indexes. for runs on the laptop, it was set to process at most  <dig> m words in each partition, which for k≤ <dig> would require  <dig> gib of memory with each word using 2× <dig> bit integers; on the server, the partition size was limited by implementation of the buffer as a java array with at most  <dig> g  <dig> bit values, allowing at most  <dig> g words in each partition when k≤ <dig>  however, the peak memory usage reported here includes memory used and released by java, but not yet garbage collected, and may reflect available memory more than actual use.
+
+e. coli str. k- <dig> substr. mg1655
+the implementation was evaluated on e. coli str. k- <dig> substr. mg <dig>  with  <dig> m  <dig> nt reads after discarding pairing information.
+
+the quality filtered graph contained  <dig>  m vertices and  <dig>  m edges. this was processed in  <dig> parts and then merged, taking  <dig>  minutes, with roughly a fifth of the time spent on merging kfm-indexes. without quality filtering, the graph contained  <dig>  m vertices and  <dig>  m edges. for kfm-index construction, this was divided in  <dig> parts, which were then merged, taking  <dig> minutes, half of which was spent on merging the kfm-indexes together.
+
+once the final kfm-indexes had been constructed and the temporary memory freed up, the java program used  <dig> mib holding the quality filtered graph, and  <dig> mib holding the unfiltered graph. at startup, before adding data, the java program used 6– <dig> mib of memory.
+
+when given access to  <dig> gib of ram, the peak usage was a bit over  <dig> gib. however, by reducing the available memory, peak usage could be reduced to just over  <dig> gib, with no substantial change in computational time. the difference is due to memory that has been used and released, but not garbage collected. the main limitation was java’s ability to allocate the approximately  <dig> gib block required to collect and sort in-edges for kfm-index construction.
+
+in the quality filtered graph,  <dig> % of the vertices were simple, i.e. had in- and out-degree one. pre-assembly took  <dig>  seconds and produced  <dig> k uniquely determined paths. in the unfiltered graph, only  <dig> % of the vertices were simple, and as a consequence it produced  <dig>  m uniquely determined paths using  <dig> seconds.
+
+simulated read data
+simulated sequence data were generated from two  <dig> mnt dna sequences, which were identical random sequences except from  <dig> % random differences, intended to simulate a diploid organism with snps. random  <dig> k  <dig> nt reads were generated with error rates 0%,  <dig> %, and 1%, intended to represent the true sequences, reads with partial error correction, and raw reads at  <dig> times coverage.
+
+the reads with no errors resulted in a graph with  <dig>  m vertices and  <dig>  m edges. this corresponds to 2× <dig> mnt plus  <dig> extra vertices from each strand of the  <dig> % snps. accordingly, pre-assembly produced  <dig> uniquely determined paths, which corresponds to the sequence between the snps and two variants for each snp.
+
+when the reads were given  <dig> % error rate, which may be a realistic error rate after mild error correction, the graph size increased to  <dig>  m vertices and  <dig>  m edges. pre-assembly resulted in  <dig> k uniquely determined paths
+
+including the full 1% read errors, as is common in uncorrected reads, the size increased to  <dig>  m vertices and  <dig>  m edges. pre-assembly resulted in  <dig>  m uniquely determined paths.
+
+the time for constructing the kfm-index was  <dig>   <dig>  and  <dig> seconds, respectively, for the three cases when enough memory was allocated to process all the data in one part. when the reads were spilt in  <dig> partitions and then merged, this time increased to  <dig>   <dig>  and  <dig> seconds, respectively. the pre-assembly time was proportional to the size of the graph, and was  <dig> ,  <dig> , and  <dig> seconds, respectively.
+
+c. elegans str. n2
+a kfm-index was generated from  <dig>  m  <dig> nt reads on c. elegans str. n <dig> .
+
+with k =  <dig>  this resulted in a graph with  <dig> m vertices and  <dig> m edges. with reads processed in  <dig> parts and merged, this took  <dig>  hours on the server. pre-assembly took  <dig>  minutes and resulted in  <dig>  m uniquely determined paths.
+
+after completion of the kfm-index, the program holding the index used  <dig> mib, some of which is unreleased memory after pruning away  <dig> m final-completing vertices at the end. the buffer used to store each of the  <dig> partitions took  <dig> gib, while peak memory usage was  <dig> gib.
+
+soil sample
+an additional run was made on a soil sample  with  <dig> m  <dig> nt reads.
+
+quality filtering left  <dig>  g 23-mers to be processed, including the reverse complements. the resulting graph consisted of  <dig>  g vertices and  <dig>  g edges: the increase relative to the number of words added is due to final-completing vertices which represent read suffixes. this took  <dig>  hours to generate, processing the data in  <dig> partitions before merging them. most of this time was spent merging the kfm-indexes.
+
+after completion, the program only occupied  <dig>  gib of memory, i.e.  <dig>  bit per vertex including all overhead, indicating approximately 6% memory overhead relative to the  <dig>  bit per vertex required by the data structure. during kfm-index construction, peak memory usage was  <dig> gib.
+
+pre-assembly took  <dig>  hours and resulted in  <dig>  m uniquely determined paths. these appeared to be mostly from single reads.
+
+discussion
+memory requirements
+the memory required to store e=s as a list of strings would be |e|×k lgσ bit. if the edge set had been an arbitrary subset e⊂Σk, optimal storage would require
+
+  meme⊂Σk=lgσk|e|bit≈|e|×klgσ−lg|e|ebit 
+
+where the approximation assumes that e is a sparse subset of Σk. this is slightly better than storing e as a list of strings since it takes into account that the list of edges is unordered and contains each edge at most once. however, the claim that this is minimal required memory  <cit> , is not strictly true, as e=s is not an arbitrary subset of Σk: it is induced by the sequences in . if most of the strings in  are much longer than k, this gives us ample room for reducing the memory usage.
+
+storing the sequences of , i.e. the data from which s is generated, requires
+
+  mems=∥s∥×lgσbit 
+
+where ∥s∥=∑x∈s|x| is the total length of the strings, assuming we do not have to store information about the lengths of the strings: this is true if all strings x∈s have the same length |x|=l, and a good approximation if the average length of the strings is much greater than the alphabet size.
+
+if the strings of  are very different, in the sense that they do not share k-substrings to any particular extent, it will be more memory efficient to store the strings of  directly than storing s, and little can be done to reduce this memory requirement. this was the case with the soil sample data analysed. in this case, the fm-index  <cit> , which is based on the burrows–wheeler transform, provides a compact index for representing all substrings of : the burrows–wheeler transform requires ∥s∥×lgσbit, i.e. no more than the raw sequences.
+
+when there is substantial overlap between the strings in , there are more compact representations of s. for example, if the strings of  can be assembled into a smaller number of strings, ’, of which the strings of  are substrings, we could use these strings instead to represent s: if each k-string in s is found on average ν times, this would approximately reduce the required memory by a factor of ν. however, since assembly is a difficult problem, this is not a practical approach. in addition, the strings may not assemble well, e.g. due to read sequencing errors.
+
+one fairly direct way to represent a de bruijn subgraph, without storing a complete list of all k-mers, is to represent edges as pointers between vertices: e.g. an out-edge from a vertex may be stored as a pointer to the target vertex. storing edges as pointers as well as the letters they correspond to requires |e|× bit of memory, which can be quite demanding for large graphs. for the  <dig>  m graph representing the quality filtered e. coli reads, this would be  <dig>  bit per vertex: more than four times as much as the kfm-index.
+
+if most vertices are simple, i.e. have only one in-edge and out-edge, the number of pointers required may be drastically reduced by combining them into uniquely determined paths in the graph, as is done in velvet  <cit> . only one pointer would then be required for each such path, which for the quality filtered e. coli graph would be  <dig> k pointers each requiring  <dig>  bit, resulting in 2+ <dig>  bit per vertex for storing the nucleotide and the pointers. by combining vertices representing reverse complements into duplex vertices, the number of vertices and paths is halved, but pointers in both directions must be maintained, making this 2+2× <dig>  bit per duplex vertex.
+
+even if merging non-branching vertices allows the graph itself to be stored more compactly, a map from arbitrary k−1-mers to vertices of the graph is required, and storing these pointers would cost at least |v|× lg|v| bit of memory. a regular hash map would use additional memory to identify v⊂Σ, but that is not strictly needed and could be avoided by smart hashing schemes. still, for the quality filtered e. coli reads, a full map for the  <dig>  m 22-mer vertices would require at least  <dig> bit per duplex vertex, and this would increase for larger graphs. if the 22-mers are mapped to the uniquely determined paths rather than to the individual vertices, this could be reduced to  <dig>  bit per duplex vertex, which with the  <dig>  bit per duplex vertex for storing the graph, still adds up to twice as much as required by the kfm-index, and would increase with the size and complexity of the graph. many genome assemblers, such as abyss  <cit> , hash either vertices or edges, and are thus subject to this requirement. in fact, for any data structure that does not throughout make use of the fact that the vertices and edges tend to form long paths, the memory bound of equation  applies.
+
+a natural method to compare the kfm-index against is the compressed burrows–wheeler transform of the concatenated reads used by sga  <cit> , due to the similarity between the kfm-index and the burrows–wheeler based fm-index. the burrows–wheeler transform of the reads would result in runs of identical bases corresponding to the coverage of the reads , and the sga stores each run by its base and run length in a single byte. a naive comparison of memory requirements could be made against the in-edge data of the kfm-index which requires  <dig> bit per vertex; if most vertices have degree one, the in-edge data can be stored more compactly using only 2– <dig> bit per vertex since most vertices only require the base of the single in-edge to be stored. however, this is an unfair comparison since the kfm-index only stores the k-mers for a specific k, while the burrows–wheeler transform used by sga stores all substrings, and thus allows k-mer frequencies to be found for all k. while the kfm-index specifically stores the de bruijn k-mer subgraph, sga uses overlap-based assembly and was not made with de bruijn graphs in mind. sga also does frequency based read error correction.
+
+memorywise, the kfm-index is comparable to the probabilistic de bruijn graph using a bloom filter  <cit> , which requires approximately  <dig> bit of data per vertex. however, this can merge k-mers with their reverse complements, and this reduces the memory requirement by a factor of two relative to data structures like the kfm-index which has to store both. on the other hand, the bloom filter is probabilistic, with a risk of introducing false vertices. while it can be used for checking if an arbitrary vertiex is present in the graph, although this requires a lower error rate and thus a little more memory spent per vertex, additional information is required to actually reproduce the graph. certain removal of false vertices as well information required to reproduce the graph can be added  <cit> , but requires more memory. in comparison, on the same e. coli read data, minia  <cit>  represented  <dig>  m “solid” 23-mers  using  <dig> + <dig>  bit per duplex vertex, where each duplex vertex represents both a k-mer and its reverse complement. the  <dig>  bit were used to store the marking structure required to reconstruct the graph. as such, the amount of memory per vertex is just slightly above the kfm-index, given that kfm-index needs two vertices to represent reverse complements where minia only needs one.
+
+as can be seen, the different data structures have different strength and weaknesses. reductions in memory consumption tends to come at the expense of accessibilty of the stored information, computational speed and simplicity. choice of a suitable data structure for any given problem thus depends on the computational needs, and there is no single best data structure for storing k-mer data from high throughput sequencing reads. the kfm-index is particularly made for storing the k-mer de bruijn subgraph representation of sequence reads in a compact manner, yet allowing efficient random access of vertices and edges.
+
+further reduction in memory usage
+the main memory usage of the kfm-index is the bit arrays η and fi representing the in-edges and group end flags. these contain σ+ <dig> binary values per vertex:  <dig> bit per vertex for dna sequence data. for arbitrary de bruijn subgraphs, little can be done to reduce this substantially.
+
+de bruijn subgraphs constructed from real sequence data will, however, tend to be dominated by vertices with exactly one in-edge and no other vertices in its vertex group. in this case, for the majority of vertices, the data could simply be summarised by one letter, ai∈Σ, representing the letter of the in-edge to vertex i: i.e. ei={a} and fi=true. this would reduce the required memory from σ+ <dig> bit per vertex, and potentially towards lg bit per vertex. the current implementation targets cases with small alphabets, like dna which has σ= <dig>  and little emphasis has been placed on handling large σ where lg bit per vertex would make a big difference.
+
+since not all vertices can be thus represented, there would have to be some way of representing more general vertices as well, which would require both some memory overhead as well as computational overhead. for dna sequencing reads, the conditions might be met where this approach could be useful, and could possibly reduce the memory consumption for storing the kfm-index by a factor of  <dig>  the entropy of the vertex data, in-edge sets and group end flags, for typical kfm-indexes on dna sequencing read data tends to be  <dig> to  <dig>  bit per vertex, even for sequence data with read errors included.
+
+effects of read errors
+i have not explicitly addressed to problem of read errors. each read error may result in up to k− <dig> additional vertices, one for each of the k−1-substrings containing the read error. if the error rate or coverage is high, this may result in a substantial increase in the number of vertices. for example, if the error rate is ε, the chance that a particular k-word from a sequence will contain an error is approximately kε. if the average coverage is γ, this means there will tend to be γkε incorrect vertices for each correct vertex: i.e. the number of vertices in the de bruijn subgraph when incorrect vertices are included will be n≈ncorrect where ncorrect is the number of correct vertices. e.g. with 1% error rate,  <dig> times coverage, and k= <dig>  this would make ten times as many incorrect vertices than correct vertices. the simulated read data illustrate this trend.
+
+by also storing vertex counts, the kfm-index could be used for error correction based on k−1-mer frequencies. however, there already exist multiple algorithms and applications for excluding infrequent k-mers  <cit> . furthermore, much of the advantage of the kfm-index over the compressed burrows–wheeler transform of the concatenated reads  <cit>  is lost if the frequency count is to be stored, which is needed for error correction. hence, the basic assumption has been that the primary usefulness of the kfm-index occurs when the majority of read errors have been removed or corrected in advance, and that error correction is more efficiently done prior to kfm-index construction.
+
+the java implementation allows filtering by base quality scores, removing bases with low reliability and splitting the sequence accordingly. on a number of benchmarking runs, this simple approach seemed to be able to remove the majority of read errors, and reduce the size of the resulting de bruijn graph substantially. however, for genome assembly, further error correction would be required.
+
+effect of adding final-completing vertices
+the vertices v consist of s with vertices added to allow paths from vfinal to $k− <dig>  there may be up to k− <dig> vertices added to v for each vertex in vfinal. however, as long as |vfinal| is small compared to |s|, this has little impact on the memory requirements. we may note that we can always get |vfinal|≤|s|, so if the strings on average are much longer than k letters, the contribution of vfinal is likely to be small.
+
+for final-completing vertices to contribute substantially to the memory usage, there would have to be a substantial portion of read ends not found internally in other reads. this could happen for read data consisting of short reads with low coverage. it could also happen if there are frequent read errors at the flanks of the reads which are not filtered out or corrected.
+
+computational speed
+the central operation in most uses of the kfm-index is the computation of the in-coming vertex position, ρ. algorithm  <dig> gives an implementation whose time complexity on average is o, where q is the distance between the stored values ρstore.
+
+the java implementation combines algorithm  <dig> with a similar algorithm provided in the additional file  <dig> for computing ρ from the next stored value rather than the previous one, and selects the closest stored value, effectively halving the number of steps needed. a good balance between speed and memory usage is then to use q= <dig> 
+
+in the java implementation, the average computational time of ρ is linear in q as could be expected. in the benchmarking, time per call to ρ during large kfm-index was estimated to  <dig> + <dig> q ns. although some of this is likely overhead related to the merge operations, and the numbers will depend on the computer and implementation, it does give an indication that reducing q much below  <dig> is of limited use. one likely reason for this is the time required for random memory access is high, while repeated accessed to the same block of memory is fast due to caching.
+
+i will treat calls to ρ as constant time in the subsequent analyses, although the present implementation does depend on q, under the assumption that q will remain fixed, typically between  <dig> and  <dig>  and that in this range the memory overhead of the stored values ρstore is moderate.
+
+low-level parallel computing of ρ using  <dig> bit words
+algorithm  <dig> works by processing one bit at a time. when doing this, the average number of steps required to compute ρ is proportional to the distance, q, between the stored values. it is, however, possible to parallell process these bit operations and thus exploit that e.g. a  <dig> bit processor can process a  <dig> bit word in one operation.
+
+one such method is described in the additional file  <dig>  in which the number of steps for processing one word of data is proportional to the alphabet size σ. this method requires that the flags indicating if a∈ ej for consecutive j are stored in one word, and the same for the group end flags fj, so that the data for an entire interval of j positions can be retrieved from memory in a single operation. a replacement for algorithm  <dig>  provided in the additional file  <dig>  will then compute arbitrary ρ from one word of containing in-edge data for the letter a and one word with group end flags, allowing a distance q=64−σ+ <dig> between stored values: reducing the distance below this has no benefit.
+
+the present java implementation, however, does not use this approach.
+
+construction of the kfm-index
+the main bottleneck at present consist of constructing the kfm-index from the strings. the provided algorithm in which the strings are partitioned into subsets, each subset converted to kfm-indices, and these kfm-indices recursively merged together, introduces substantial overhead in terms of memory and in computational time during construction.
+
+in the fm-index setting, where n=n, a similar approach would have required time o: if we split the data into 2r sets, each iteration merges these pairwise using time o per round, with r rounds required. however, for the kfm-index, in the initial steps when the sequences are partitioned, the total number of vertices may be much greater due to k−1-words present multiple times in the reads and thus entering into a large number of the subset kfm-indexes. the time consumption may therefore increase by a factor proportional to the coverage and become of order o) where n=∥s∥ is the total size of the sequence data and m is the number of partitions into which it is divided.
+
+the algorithm for merging kfm-indexes could most likely be improved substantially, and the java implementation provided is far from optimal: neither in terms of speed, nor in memory usage. some minor improvements have been made in the implementation, reducing the number of calls to ρ when certain conditions are met . however, even with further improvements, the method of partitioning and pairwise merging is inherently slow.
+
+the construction of the kfm-index may be split up and run on separate cpus; even the final mergers of two kfm-indexes can be split up, e.g. into σr different threads based on the first r levels of recursion. however, if the reads have high coverage, each of the subset kfm-indexes may already contain many of the same high-coverage vertices, and thus require almost as much memory and processing power as the final kfm-index.
+
+for constructing the burrows–wheeler transform and the fm-index, there are more efficient algorithms  <cit>  which rely on reformulating the burrows–wheeler transform in terms of a shorter sequence over a larger alphabet. these do not easily generalise to the kfm-index. in particular, a k-word in the original kfm-index may correspond to multiple different sequence locations, and these may appear as several different k-words in the the reformulated sequences. however, i have some hope that the induced sorting approach  <cit>  may be adapted, although perhaps not quite as successfully as for the fm-index.
+
+an alternative approach to kfm-index construction in memory is to split the reads up into edges representing the k-words of the sequences, and use the disk to help make a sorted list. a simple way to do this can be to partition the read data into parts that are small enough that the in-edge set can be stored as k-words and sorted in memory, write each partition to disk as a single file, and then merge these files to construct the final kfm-index. while this may require substantial temporary disk space, particularly for high coverage sequence data, it will most likely be much faster than the in-memory construction of the kfm-index presently implemented. this approach could also be divided between several computers.
+
+use with large alphabets
+the algorithms, and the java implementation, have been written with small alphabets in mind: in particular, dna with σ= <dig>  technically, they work for general alphabets, although the java implementation cannot at present handle alphabets with σ >  <dig> since the vertex data are packed into a  <dig> bit word. however, the routines for merging two kfm-indexes involve iterating over the entire alphabet, adding a time factor σ to the merge procedure. for large alphabets, one might store the in-edge data in a more compact form than a bit vector, and could identify the relevant letters without having to check them one by one.
+
+CONCLUSIONS
+the kfm-index is a data structure that stores the k-words corresponding to the edges of a de bruijn subgraph in a compact manner, while allowing efficient random access to vertices and edges. the data structure is made compact by avoiding the direct storage of k-words and pointers, which often are the main memory expense for storing de bruijn subgraphs. the vertex and edge information is stored in a direct manner with each line in the data table representing a vertex, and each bit set in the in-edge bit array representing an edge. thus, the compactness of the kfm-index data structure does not rely on compactification of the graph or compression of the data, and additional compression of the index is feasible.
+
+the presently implemented method for in-memory construction of the kfm-index is uncompetitive for large data sets. however, there are multiple ways in which this could be improved. also, as with the fm-index used by sga  <cit> , after the index has been constructed, the user can reuse it to try different assembly options and parameters.
+
+one of the main approaches to de novo genome assembly using high throughput sequencing is to generate the de bruijn subgraph representing the k-mers of the reads, and multiple applications exist already for doing this. for large genomes and in meta-genomics, the memory required for representing the de bruijn subgraph is one of the limiting factors. the kfm-index could replace existing, more memory demanding, data structures in existing genome assembly applications to allow them to process larger genomes or to run on off-the-shelf hardware where special, high-ram computers have previously been required.
+
+availability
+a java implementation of the data structure and algorithms, together with additional technical documentation of the implementation, are freely available from http://folk.uio.no/einarro/projects/kfm-index/. improvements to the implementation, removing memory limitations and introducing parallel processing, and updated benchmarks, are provided on this web site.
+
+appendix
+mathematical approximations
+based on stirling’s approximation, lnn!≈n·lnne, we can approximate binomials by
+
+  lnnx=lnn⋯x!≲x·lnnx/e 
+
+which is a good approximation as long as x ≪ n. another bound is
+
+  lnnx≤xlnnx+lnnn−x≤nln <dig> 
+
+where the first inequality follows from nxpxn−x≤ <dig> upon entering p=x/n, where nxxn−x≈n/2πx indicating that the inequality is fairly tight, while the second inequality follows from ∑x=0nnx=2n and is only tight for x/n≈1/ <dig> 
+
+proofs of 

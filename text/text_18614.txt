@@ -1,0 +1,100 @@
+BACKGROUND
+a protein is a long sequence of amino-acids, called residues. under normal physiological conditions, various forces  lead the protein to fold into a compact structure made of secondary structure elements, α-helices and β-strands, connected by bends . an h-bond corresponds to the attractive electrostatic interaction between a covalent pair d—h of atoms, in which the hydrogen atom h is bonded to a more electronegative donor atom d, and an electronegative acceptor atom a. due to their strong directional character, short distance ranges, and large number in folded proteins, h-bonds play a key role in both the formation and stabilization of protein structures  <cit> . while h-bonds involving atoms from close residues along the main-chain sequence stabilizes secondary structure elements, h-bonds between atoms in distant residues stabilize the overall 3d arrangement of secondary structure elements and loops.
+
+h-bonds form and break while the conformation of a protein deforms. for instance, the transition of a folded protein from a non-functional state into a functional  state may require some h-bonds to break and others to form  <cit> . so, to better understand the possible deformation of a folded protein, it is desirable to create a reliable model of h-bond stability. such a model makes it possible to identify rigid groups of atoms in a given protein conformation and determine the remaining degrees of freedom of the structure  <cit> . since most h-bonds in a protein conformation are quite stable, it is crucial that the model precisely identifies the least stable bonds. the intrinsic strength of an individual h-bond has been studied before from an energetic viewpoint  <cit> . however, potential energy alone may not be a very good predictor of h-bond stability. other local interactions may reinforce or weaken an h-bond.
+
+methods
+i. problem statement
+let c be the conformation of a protein p at some time considered  to be  <dig> and h be an h-bond present in c. let m  be the set of all physically possible trajectories of p passing through c and π be the probability distribution over this set. we define the stability of h in c over the time interval Δ by:   
+
+where i  is a boolean function that takes value  <dig> if h is present in the conformation q at time t along trajectory q, and  <dig> otherwise. the value  can be interpreted as the probability that h will be present in the conformation of p at any specified time t ∈ , given that p is at conformation c at time  <dig>  our goal is to design a method for generating good approximations σ of . we also want these approximations to be protein-independent.
+
+ii. general approach
+we use machine learning methods to train a stability model σ from a given set q of md simulation trajectories. each trajectory q ∈ q is a sequence of conformations of a protein. these conformations are reached at times ti = i × δ, i =  <dig>   <dig>   <dig>  …, called ticks, where δ is typically on the order of picoseconds. we detect the h-bonds present in each conformation q using the geometric criteria given in  <cit> . note that an h-bond in a given protein is uniquely identified  by its donor, acceptor, and the hydrogen atom. so, we call the presence of a specific h-bond h in a conformation q an occurrence of h, denoted by h.
+
+for each h, we compute a fixed list of predictors, some numerical, others categorical. some are time-invariant, like the number of residues along the main-chain between the donor and acceptor atoms. others are time-dependent. among them, some describe the geometry of h, e.g., the distance between the hydrogen and the donor. others describe the local environment of h, e.g., the number of other h-bonds within a certain distance from the mid-point of h.
+
+we train σ as a function of these predictors. the predictor list defines a predictor space ∑ and every h-bond occurrence maps to a point in ∑. given the input set q of trajectories, we build a data table in which each row corresponds to an occurrence h of an h-bond present in a conformation q contained in q. so, many rows may correspond to the same h-bond at different ticks. in our experiments, a typical data table contains several hundred thousand rows. each column, except the last one, corresponds to a predictor p and the entry  of the table is the value of p for h. the entry in the last column is the measured stability y of h. more precisely, let h be the h-bond of which h is an occurrence. let l = Δ/δ, where Δ is the duration over which we wish to predict the stability of h, and m ≤ l be the number of ticks tk, k = i +  <dig>  i +  <dig> …,i + l, such that h is present in q. the measured stability y of h is the ratio m/l. we chose l =  <dig> in most of the tests reported below, as this value both provides a ratio m/l large enough for the measured stability to be statistically meaningful, and corresponds to an interesting prediction timescale . typically, most h-bond occurrences are quite stable: over 25% have measured stability  <dig>  about 50% higher than  <dig> , and only 15% less than  <dig> .
+
+we build σ as a binary regression tree  <cit> . this machine learning approach has been one of the most successful in practice. regression trees are often simple to interpret. the method can work with both categorical and numerical predictors in a unified way, as shown in section iii. each non-leaf node in a regression tree is a boolean split. so, each node n of the tree determines a region of ∑ in which all the splits associated with the arcs connecting the root of the tree to n are satisfied. we say that an h-bond occurrence falls into n if it is contained in this region. the predicted stability value stored at a leaf node l is the average of the measured stability values by all the h-bond occurrences in the training data table that fall into l. we expect this average, which is taken over many pieces of trajectories, to approximate well the average defined in equation .
+
+once a regression tree has been generated, it is used as follows. given an h-bond h in an arbitrary conformation c of an arbitrary protein, the leaf node l of the tree into which h falls is identified by calculating the values of the necessary predictors for h in c. the predicted stability value stored at l is returned.
+
+iii. training algorithm
+we construct a model σ as a binary regression tree using the cart method  <cit> . the tree is generated recursively in a top-down fashion. when a new node n is created, it is inserted as a leaf of the tree if a predefined depth has been reached or if the number of h falling into n is smaller than a predefined threshold. otherwise, n is added as an intermediate node, its split is computed, and its left and right children are created. a split s is defined by a pair , where p is the split predictor and r is the split value. if p is a numerical predictor, then r is a threshold on p, and s ≜ p <r. if p is a categorical predictor, then r is a subset of categories, and s ≜ p ∈ r. we define the score w of split s =  at a node n as the reduction of variance in measured stability that results from s. the algorithm chooses the split—both the predictor and the split value—that has the largest score. only a relatively small subset of predictors selected by the training algorithm is eventually used in a regression tree.
+
+to prevent model overfitting, we limit tree depth to  <dig> in most of our experiments and limit the minimal number of training samples in an intermediate node to be  <dig>  we further prune the obtained tree using the following adaptive algorithm. we initially set aside a fraction of the training data table called validation subset. once a tree has been constructed pruning is an iterative process. at each step, one intermediate node n whose split has minimal score becomes a leaf node by removing the sub-tree rooted at n. this process creates a sequence of trees with decreasing numbers of nodes. we compute the mean square error of the predictions made by each tree on the validation subset. the tree with the smallest error is selected.
+
+RESULTS
+i. experimental setup
+we used  <dig> md simulation trajectories picked from different sources and called hereafter 1c9oa, 1e85a, 1g9oa_ <dig>  and 1g9oa_ <dig> from  <cit> , complex from  <cit> , and 1eia . in all of them the time interval δ between two successive ticks is 1ps. table  <dig> indicates the protein simulated in each trajectory, its number of residues, the force field used by the simulator, and the duration of the trajectory. each trajectory starts from a folded conformation resolved by x-ray crystallography.
+
+
+                              1c9oa
+
+                              1e85a
+
+                              1g9oa_1
+
+                              1g9oa_2
+
+                              complex
+
+                              1eia
+from each trajectory we derived a separate data table in which the rows represent h-bond occurrences. last two columns in table  <dig> list the number of distinct h-bonds detected in each trajectory and the total number of h-bond occurrences extracted. note that complex was generated for a complex of two molecules. all h-bonds occurring in this complex are taken into account in the corresponding data table.
+
+the values of the time-varying predictors are subject to thermal noise. since a model σ will in general be used to predict h-bond stability in a protein conformation sampled using a kinematic model ignoring thermal noise   <cit> , we chose to average the values of these predictors over l' ticks to remove thermal noise. more precisely, the value of a predictor stored in the row of the data table corresponding to an h-bond occurrence in q is the average value of this predictor in , where . our analysis shows that l' =  <dig> is near optimal.
+
+the performance of a regression model can be measured by the root mean square error  of the predictions on a test dataset. for a data table t = {, },…, }, where each xi, i =  <dig> …,n, denotes a vector of predictor values for an h-bond occurrence and yi is the measured stability of the h-bond, and a model σ, the rmse is defined by: . as rmse depends not only on the accuracy of σ, but also on the table t, some normalization is necessary to compare results on different tables. so, in our tests we compute the decrease of rmse relative to a base model σ <dig>  the relative base error decrease  is then defined by:  in most cases, σ <dig> is simply defined by , i.e., the average measured stability of all h-bond occurrences in the dataset. in other cases, σ <dig> is a model based on the h-bond energy.
+
+ii generality of models trained on multiple trajectories
+our goal is to train models to predict the stability of h-bonds in any protein. so, we trained models on data tables obtained by mixing subsets of  <dig> data tables and we tested these models on the remaining data table. for each combination of  <dig> data tables, we trained  <dig> groups of models varying in the tree’s maximal depth  and in the fraction of h-bond occurrences randomly taken from each data table . for each group we trained  <dig> models. hence, in total,  <dig> models were generated. table  <dig> shows the mean rbed value for each combination of data tables and each group of models. in columns  <dig> through  <dig> we indicate the data table used for testing the models trained on a combination of the  <dig> other data tables. figure  <dig> shows a partial tree trained with combinations of all tables, except 1c9oa.
+
+                              1c9oa
+                              1e85a
+                              1g9oa_1
+                              1g9oa_2
+                              complex
+                              1eia
+                              average
+rbed values show that regression tree model significantly reduces base error and keeps predictive power when applied to a protein not present in the training data. moreover, the variance of rbed values is very small, meaning that the training process yields models that are stable in performance. furthermore, the rbed values are lower for models tested on complex. recall that the trajectory complex was generated for a complex made of a protein and a ligand, while every other trajectory was generated for a single protein. so, it is likely that complex contains h-bonds in situations that did not occur in any of the other trajectories. both deeper trees and larger data fractions tend to improve model accuracy, but the very small gain is not worth the additional model or computation complexity.
+
+iii. comparison with first-energy model
+we've checked whether regression models can predict the stability of h-bonds more accurately than potential energy alone. table  <dig> presents the mean rbed value for a model obtained in the first row of table  <dig> relative to the base model that is a regression tree built from the same training data using first_energy as the only predictor. first_energy is a modified mayo potential  <cit>  implemented in first   <cit> . comparison on all  <dig> data tables show that the more complex models are significantly more accurate than the models based on first_energy alone.
+
+
+                              1c9oa
+                              1e85a
+                              1g9oa_1
+                              1g9oa_2
+                              complex
+                              1eia
+iv. identification of least stable h-bonds
+most h-bond occurrences tend to be stable. so, accurately identifying the weakest ones is important if one wishes to predict the possible deformation of a protein  <cit> . to evaluate how well our models identify the least stable h-bonds occurrences, we first identify the subset s of the 10% h-bond occurrences with the smallest measured stability in each test table t. using a regression tree σ obtained in section ii, we sort the h-bond occurrences in t in ascending order of predicted stability and we compute the fraction w ∈  <cit>  of s that is contained in the first 100×u% occurrences in this sorted list, for successive values of u ∈  <cit> . we call the function w the identification curve of the least stable h-bonds for σ.
+
+discussion
+in all our regression trees the root split was done with predictor dist_h_a , which therefore appear as the single most discriminative attribute to predict h-bond stability. this observation is consistent with previous findings. levitt  <cit>  found that most stable h-bonds have dist_h_a less than  <dig> Å. jeffrey and saenger  <cit>  also suggested that dist_h_a is a key attribute affecting h-bond stability, with a value less than  <dig> Å for moderate to strong h-bonds. consistent with these previous findings, the split values of the deepest dist_h_a nodes in all our regression trees are around  <dig> Å. this distance was observed in  <cit>  to sometimes fluctuate by up to 3Å in stable h-bonds, due to high-frequency atomic vibration. this observation supports our decision to average predictor values over windows of l’ ticks.
+
+predictor first_energy is often used in splits close to the root. this is not surprising since it is a function of several other pertinent predictors: dist_h_a, angle_d_h_a , angle_h_a_aa , and the hybridization state of the bond. some other distance-based predictors , angle-based predictors and ch_type  predictor appear often in regression trees, but closer to the leaf nodes. they nevertheless play a significant role in predicting h-bond stability. for example, as shown in figure  <dig>  if angle_h_a_aa is at least 105Â°, the stability is very high ; otherwise, it drops to  <dig> . the preference for larger angle matches well with the well-known linearity of h-bonds  <cit> .
+
+in order to get a more quantitative measure of the relative impact of the predictors on h-bond stability, we define the importance of a predictor p in a regression tree by: , where np is the set of nodes where the split is made using p, w is the score of the split s, and n is the number of h-bond occurrences falling into the node where split s is made. we trained  <dig> models on data tables combining 10% of each of the  <dig> data tables. importance scores for each predictor were averaged over these models and then linearly scaled to adjust the score of the least important predictor  equal to  <dig>  the average importance of every predictor appearing in at least one model is shown in figure  <dig>  the figure confirms that distance-based and angle-based predictors, as well as first_energy, are the most important. it also shows that a number of other predictors—including resi_name_h, resi_name_a, and range  —have less, but still significant importance.
+
+overall, we observe that predictors that describe the local environment of an h-bond play a relatively small role in predicting its stability. in particular, we had expected that descriptors such num_hb_spacenbr and num_hb_spacergdnbr, which count the number of other h-bonds located in the neighborhood of the analyzed h-bond, would have had more importance. however, this may reflect the fact that the md simulation trajectories used in our tests are too short to contain enough information to infer the role of such predictors. indeed, while transitions between meta-stable states are rare in those trajectories, predictors describing local environments may have greater influence on the stability of h-bonds that must break for such transitions to happen. so, longer trajectories may eventually be needed to better model h-bond stability.
+
+CONCLUSIONS
+we have described machine learning methods to train protein-independent regression trees modeling h-bond stability in proteins. test results demonstrate that trained models can predict h-bond stability quite well. in particular, their performance is significantly better  than that of a model based on h-bond energy alone. they can accurately identify a large fraction of the least stable h-bonds in a given conformation. however, our results also suggest that better results could be obtained with a richer set of md simulation trajectories. in particular, the trajectories used in our experiments might be too short to characterize the stability of h-bonds that break and form during a transition between meta-stable states.
+
+we believe that the training methods could be improved in several ways:
+
+- it would be better to averaging predictor values before sub-sampling md simulation trajectories. this would reduce the risk of filtering out changes in predictor values that are important for h-bond stability. unfortunately, in our trajectories we only had access to the data after sub-sampling.
+
+- more sophisticated learning techniques could be used. for example, instead of generating a single tree, we could generate an ensemble of trees, such as gradient boosting trees  <cit> .
+
+- finally, the notion of stability itself could be refined, for example by distinguishing between the case where an h-bond frequently switches on and off during a prediction window and the case where it rarely switches.
+
+authors' contributions
+all four authors, ic, py, mm, and jcl, participated in the formulation of the problem, the design of its solution, and the analysis and the interpretation of the results. py prepared the experimental data. ic adapted a previously available cart software package and ran the experiments. all authors contributed to the writing of the manuscript, read and approved the final manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+

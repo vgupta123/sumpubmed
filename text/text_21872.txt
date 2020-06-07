@@ -1,0 +1,158 @@
+BACKGROUND
+the permutation test  is a nonparametric procedure for determining statistical significance based on rearrangements of the labels of a dataset  <cit> . due to its non-parametric nature, this test is commonly used in bioinformatics applications, where there is often no solid evidence or sufficient data to assume a particular model for the obtained measurements of the biological events under investigation. for example, significance analysis of microarrays   <cit>  and gene set enrichment analysis   <cit> , which detect differentially expressed genes and gene sets, respectively, are two well-known techniques that use permutation tests to compute statistical significance.
+
+in a permutation test, a test statistic, which is computed from the dataset, is compared with the distribution of permutation values. these permutation values are computed similarly to the test statistic, but under a random rearrangement  of the labels of the dataset. the p-value of a permutation test, which expresses its statistical significance, is obtained by performing all possible label permutations and computing the fraction of permutation values that are at least as extreme as the test statistic obtained from the unpermuted data. however, in practical situations, it is  not feasible to perform all possible permutations. thus, the p-value is typically approximated by computing a limited number of permutations, say n, and then computing the fraction of the n permutation values that are at least as extreme as the test statistic. this empirical approximation to compute the p-value directly couples both the minimal obtainable p-value and the resolution of the p-value to the number of permutations. therefore, it requires a very large number of permutations when small p-values are to be accurately estimated. to improve upon the empirical estimator, we have employed a tail estimation procedure based on extreme value theory to estimate the tail of the distribution of permutation values and subsequently the p-value  <cit> . we showed using both theoretical and practical examples that up to several orders of magnitude fewer permutations are necessary to compute small p-values with the same accuracy as with the empirical approach. this results in an enormous gain in terms of computation time. for realistic datasets using the standard number of  <dig> permutations, this speed-up will lead to a decrease in cpu time on the order of a couple of minutes to several hours for more complex statistics . the approach is outlined in figure  <dig> and described in detail in  <cit> .
+
+the aim of epept is to make this approach available to the computational biology community as a general and easily accessible tool. epept, which stands for enhanced p-value estimator for permutation tests, is a restful web api that offers dynamic programmatic access. users submit job requests over the web either using their programming language of choice or using the website. epept returns a unique uri corresponding to the submitted job. using this uri the status of the submitted job can be checked, and upon completion, the results, i.e. the estimated p-values, can be retrieved.
+
+epept can be used in two different settings. in the first and most general setting, the user submits permutation values and epept estimates the p-values, i.e. epept does not generate the permutation statistics. in the second setting, the user submits a labeled dataset from which epept first generates the permutation values and then estimates the p-values. two commonly used experiment designs in computational biology are implemented: sam and gsea  for detection of differentially expressed genes and gene sets, respectively.
+
+of course, there are numerous strategies to compute permutation statistics from a labeled dataset other than the t statistic or kolmogorov-smirnov  statistic employed in sam and gsea, respectively. in general, the research question and the employed dataset determine the definition of the recipe  to compute permutation statistics from the labeled data set. the specification of such a recipe can be quite elaborate and complex. forcing users to submit such a specification in a specific format/language would very much constrain the accessibility and usability of epept. this is the reason why either permutation values should be submitted, or a common experiment type should be chosen. in consultation with users, additional experimental designs  will be added to the epept functionality.
+
+implementation
+ruby validation script
+the validation script checks whether all required inputs are present and populates optional parameters with default values if they are not defined by the user. warning and error messages are logged. the script is also responsible for conversion of excel files  to .csv  format. this conversion is necessary when the user submits an excel file instead of a comma or tab separated text file, the latter two file types being required as input for the matlab scripts.
+
+matlab p-value estimation scripts
+the matlab scripts perform the p-value estimation as described in algorithm  <dig> of  <cit> . basically, if less than ten permutation values exceed the test statistic, the estimation procedure based on tail estimation is used. otherwise, the standard empirical procedure provides a reliable estimate and is therefore applied. 
+
+the tail of the distribution of permutation values is modeled using a generalized pareto distribution . before estimating the p-value based on this tail approximation, a statistical test is performed to evaluate whether the exceedances of the employed test statistic can be modeled as a , . this is described in the original paper in detail in  <cit> . if this is not the case, our approach cannot be used, and no p-value estimate will be returned. so far, we have not encountered statistics based on biological datasets that could not be fit with the gpd.
+
+two additional options have been added to the p-value estimation functionalities:
+
+ <dig>  optimal order preserving transform
+the tail estimation procedure is based on the exceedances, i.e. the amount by which the permutation values exceed a particular threshold t . these exceedances are per definition positive. therefore, power transforms raising the exceedances  to the n-th power  are order preserving, i.e. the order of the exceedances and the test statistic after transformation remains the same. thus, the original formulation of the p-value for permutation tests, i.e. the fraction of permutation values that are at least as extreme as the test statistic, also remains the same. however, the power transform does change the weight of the tail. power transforms with n >  <dig> will make the tail more heavy, while powers n <  <dig> will lead to a lighter tail. we have observed for both theoretical probability distributions as well as permutation value distributions based on gene expression data that, in general, larger powers will lead to a more conservative p-value estimate with a smaller variance  <cit> .
+
+when this option is selected, power transforms are applied for a range of values of n. the power transformation that leads to the smallest variance on the p-value estimate is chosen and the corresponding estimate and its variance are given. this option is recommended in cases where there is a large variance on the standard p-value estimate. this situation can occur when the p-value to be estimated is very small  while using relatively few permutations .
+
+ <dig>  convergence criteria
+epept estimates whether the p-value has converged or whether more permutations are necessary for a reliable estimate. two heuristic criteria need to be satisfied for convergence:
+
+ the coefficient of variation  is smaller than one.
+
+this cv is defined as follows: cv=12log10pest16-log10pest84-log10pest, where pest is the p-value estimate and pestα is the value of the α-th percentile of the estimated p-value. the 16th and 84th percentile values are plus/minus one standard deviation from the mean under normality assumptions. transformation into the log <dig> domain typically makes the data more normal-like.
+
+ bootstrapped p-value estimates derived from all permutation values and from 10% of the permutation values should not differ in median value.
+
+ <dig> p-value estimates are derived from all permutation values using bootstrapping. also,  <dig> p-value estimates are derived by sampling only 10% of the permutation values . a wilcoxon rank sum test is applied on these two sets of  <dig> samples to test for equal medians. if this null hypothesis is rejected with p <  <dig>  medians are said to differ.
+
+the convergence criteria in our original work  <cit>  were based on the actual correct p-value. in practical situations epept will be used to estimate the p-value, so the correct p-value is obviously not known. we have developed epept's convergence criteria based on the theoretical probability distributions and gene expression datasets described in our previous work  <cit> . across these data, the performance of the proposed convergence criteria  was the most robust. specifically, different criteria and different parameterizations  were used to call a p-value estimate converged or not. of all different scenarios tested, the proposed convergence criteria agreed in most cases with the convergence criteria of our original work 
+
+html user interface
+on top of this web service, a user interface was built using html and extjs, an open source cross-browser javascript library . this website enables the user to upload the permutation values or labeled dataset and configure optional input parameters. further, the results pane dynamically displays the program execution status and, on completion, visually represents the estimated p-values and allows the user to download them as a tab delimited text file. the results pane also displays execution time and error messages. a screenshot of this website with an example result is found in figure  <dig> 
+
+RESULTS
+this section describes the inputs that are expected by epept and the logs and outputs that are generated. also, we explain how jobs can be submitted and how the results can be obtained, using either the web service or the website.
+
+inputs
+• setting of epept 
+
+epept can be run in three different settings. in the first setting , epept expects that the user uploads permutation values. in the second and the third settings, 'sam' and 'gsea', epept assumes that a gene expression dataset is uploaded.
+
+• file with test statistics and permutation values or a labeled gene expression dataset  
+
+the file should be a tab delimited text file, a comma separated text file or an excel file. epept checks the extension of the file to decide upon its format: excel files should have the .xls or .xlsx extension and the data should be on the first sheet. comma separated files should have the extension .csv. all files with other extensions are assumed to be tab delimited text files.
+
+in the 'pv' setting, each column in the file should contain one test statistic and its corresponding permutation values. since multiple columns are allowed, different events  can be tested simultaneously, yet independently. the file is allowed to have one header row. in case of a header row, the test statistics should be on the second row. in case no header row is used, the test statistics should be on the first row. all numerical values in the rows below the test statistic are assumed to be the permutation values. non-numerical values, nan's  and inf's  are ignored. at least  <dig>  permutation values per column should be reported in order for the tail estimation procedure to be used.
+
+in the 'sam' and 'gsea' setting, each column should contain the expression levels of all genes in the dataset. the first row should contain the class labels or other response type assigned to the columns. possible configurations of the first row should match the 'resp.type' options of the samr package .  the first column can be used as a header column for the gene names.
+
+• estimation method 
+
+three different methods are available to estimate the parameters of the generalized pareto distribution : probability weighted moments , maximum likelihood , and method of moments . using theoretical distributions and practical applications we found that all methods performed comparably to each other. some studies have been done comparing these estimators, often favoring ml  <cit> .
+
+• confidence interval 
+
+the confidence interval of the estimated p-value indicates the reliability of the estimate. the confidence interval is determined by the confidence level . loosely speaking, the confidence level indicates how sure  we can be that the actual p-value is within the confidence interval. this level can be set between  <dig> and  <dig> 
+
+• confidence interval flag 
+
+a flag determining whether the confidence interval should be computed.
+
+• optimal order preserving transformation flag 
+
+a flag determining whether the optimal order preserving transform action should be applied.
+
+• convergence criteria flag 
+
+a flag determining whether the convergence criteria should be applied.
+
+• random seed 
+
+if a numerical value between  <dig> and  <dig> , <dig> is given, this will be used as a random seed allowing the user to reproduce epept runs. when the  value  <dig> is selected, the random seed will be chosen arbitrarily.
+
+• email 
+
+a mail will be sent to the email address  when the epept run has completed. this mail contains links to the results and logs.
+
+• response type 
+
+when epept is used to generate permutation values in the 'sam' or 'gsea' setting, the user can choose the response type.
+
+• number of permutations 
+
+when epept is used to generate permutation values in the 'sam' or 'gsea' setting, the user can choose the number of permutations to be performed. in the 'sam' setting the maximum is  <dig> .  in the 'gsea' setting the maximum is  <dig> .
+
+• gene set file 
+
+when epept is used to generate permutation values in the 'gsea' setting, a file with gene set annotations in gene matrix transposed  format has to be given. such a tab delimited text file contains one gene set per row. the first two columns contain the gene set id and description. the following columns contain the genes for that particular gene set. the annotation of these genes should match the gene annotation in the header column of the gene expression data file.
+
+• gsea statistic 
+
+when epept is used to generate permutation values in the 'gsea' setting, the user can choose the statistic used to summarize genesets .
+
+logs
+during the execution of the job, addama, ruby and matlab are creating log files containing standard output, warnings and errors, which are made available to the user.
+
+outputs
+the main output of epept is the set of estimated p-values. these are reported in a tab delimited text file. if headers were provided in the original file, the output file contains the same headers. if confidence intervals were requested the two rows under the row with the p-value estimates indicate the lower and upper bound of the confidence intervals. finally, if the convergence criteria were applied another row is added with binary values indicating whether the estimate converged  or not .
+
+besides this text file, two picture files  are generated that visually depict the estimated p-values and their confidence bounds.
+
+web service
+epept is web service enabled which means that epept can be accessed programmatically via any programming language with http support, such as c, java, matlab, perl, ruby, r, etc. the programmatic flow to make a request to the epept processing host is as follows:
+
+ <dig>  the user  initializes the set of input parameters and sets them to the user-defined values.
+
+ <dig>  the client makes a post request with the input parameters to the epept host. a unique uri is returned.
+
+ <dig>  the client checks the status of the submitted request using the unique uri. the status can be: running, completed or error. the client program will loop until the status is completed or error.
+
+ <dig>  the client retrieves the output and/or log files from the host and stores these locally.
+
+in summary, after the request has been made, everything  evolves around the assigned uri. the inputs, logs and outputs are accessible via uri/inputs/, uri/logs/and uri/outputs/, respectively, where uri is the uri assigned to the user by epept.
+
+website
+the website is a simple html input form, where the file with the permutation values or labeled dataset can be uploaded and all options can be set using sliders, drop down menus, check boxes and text fields. the results are presented back to the user in the results pane, which depicts the estimated p-values both as text as well as graphically and gives download links for these output files. see figure  <dig> 
+
+a manual for the html input form is hosted on the epept google code project http://code.google.com/p/epept/. in addition to the manual, this site also hosts the source code, examples datasets and web service client examples. links to the epept google code website are found on the epept website.
+
+source code
+the latest version of the source code for the complete epept package is available for download from the epept google code project http://code.google.com/p/epept/. a stand alone version of epept for matlab is also included.
+
+CONCLUSIONS
+due to the enormous increase in biological data and in the computational complexity of its analysis, computational biology is shifting towards client-server based computing models. in these models computational analysis is no longer performed on the desktop, but tasks are farmed out to different  service providers, such as network clusters, web services or cloud computing environments. indeed, besides programmatic access to databases, programmatic access is also becoming available for more and more bioinformatics tools  <cit> .
+
+here, we have presented epept, a web service tool to estimate p-values for permutation tests based on extreme value theory. the epept estimator forms a valuable alternative to the standard empirical estimator, since it can provide accurate p-value estimates in  situations, where no or only very few permutations values exceed the test statistic even when a considerable number of permutations have been performed. the programmatic access to these routines is practical for computational biologists that aim to systematically test many hypotheses  using the programming language of their choice. moreover, epept can easily be integrated into automatic workflows.
+
+at this moment, epept uses a linux server  for computation . however, the web application and computation used for epept can and will be deployed as cloud computing services, if scaling up is necessary.
+
+because epept utilizes the addama service architecture  <cit> , the core epept service executes outside the web server domain. consequently, this design promotes rapid development, debugging and deployment. that is, bug fixes, updates and additional functionalities can be implemented by simply adapting the matlab p-value estimation scripts, which are then immediately available both via the website and via programmatic access. one future enhancement will be to allow for uri file access, such that clients can provide the uri of the file with permutation values in stead of sending the complete file when making a job request. additionally, in the future epept will provide the client with the estimated time left before the job is completed both via a progress bar on the website and via the status check using the job-specific uri.
+
+availability and requirements
+project name: enhanced p-value estimator for permutation tests 
+
+project home page: http://informatics.systemsbiology.net/epept/
+
+operating system: platform independent
+
+programming language: any language that can interact with the web
+
+license: gnu lesser general public license 
+
+abbreviations
+api: application programming interface; epept: enhanced p-value estimator for permutation tests; http: hypertext transfer protocol; rest: representational state transfer; uri: uniform resource identifier
+
+authors' contributions
+tak implemented the matlab p-value estimation scripts and matlab web service client example. jl implemented the ruby validation script, the robot component, the html website and the other web service clients examples. hr designed the robot architecture and assisted with integration of epept into the addama service architecture. tak and jl drafted the manuscript. jb and is supervised the project. all authors have read and approved the final manuscript.
+

@@ -1,0 +1,178 @@
+BACKGROUND
+high-density microarrays and massively parallel sequencing have made genome-wide detection of genetic variants from human dna samples systematic, efficient and inexpensive. in these experiments, it is common to observe hundreds of thousands or even millions of loci in the dna of a studied sample that differ from the reference genome. to explore possible links between these variants and the phenotypes of the sample, it is necessary to first analyze the potential biological significance of each variant.
+
+early-days analysis methods have focused on the potential impacts of genetic variants in coding regions, the functional consequences of which are usually related to alterations to the corresponding proteins. there have been many successful software tools for classifying coding variants into those that are synonymous, missense and nonsense, whether they may affect splicing or cause frameshift, and the level of disruption to protein functions and structures
+.
+
+on the other hand, it is now well-recognized that many functionally important genetic variants do not change the coding sequences directly but rather perturb gene regulation
+ <cit> . for example, a single nucleotide variant  may hit the binding motif of a transcription factor, which affects the proper binding of it and leads to an expression level change of the regulated gene. since currently there is not a complete catalog of regulatory regions in the human genome, in order to determine how likely a genetic variant may affect gene regulation, one needs to examine many types of static and cell/tissue-specific features indicative of functional significance. static features such as evolutionary conservation and sequence motifs help evaluate the possibility for a genomic region to ever play a functional role, while cell/tissue-specific features provide information about regulatory activities in each genomic region in particular cell/tissue types and conditions. combining both types of features provides a quick and low-cost way to pinpoint the potentially most interesting variants for downstream validation and functional studies. for example, dnase i hypersensitivity and certain histone marks together could identify regulatory regions active in particular cell types that are far away from their target genes
+ <cit> , while integrating such information with sequence motifs could further predict the transcription factors involved in the gene regulation.
+
+a large amount of data containing cell/tissue-specific features have been produced for various human cell types in large-scale studies such as encode
+ <cit>  and roadmap epigenomics
+ <cit> . to utilize these data in studying genetic variants, a number of web tools have been developed for automatic large-scale genomic data integration
+. each of them provides a database of genomic features collected from multiple data sources, and a procedure for users to query selected features around their genetic variants. these tools face two common challenges, namely 1) a list of genetic variants in standard variant call format  could take up hundreds of megabytes and need a long time to upload; and 2) integrating a long variant list with a large number of whole-genome features is time-consuming.
+
+concerning the data uploading issue, some tools restrict the maximum number of genetic variants per job to a small value, while others do not set an explicit limit but practically cannot handle full lists of millions of variants
+. some other tools avoid the uploading of large files by allowing local installation and execution, which requires a large amount of genomic features to be downloaded to the user machine
+ <cit> .
+
+regarding the data integration issue, most tools use a relational database to store the collected data. as a result, a table join between a stored feature and the uploaded genetic variants is often performed by time-inefficient algorithms that make use of standard tree-based indices. although more efficient linear-time sort-merge join algorithms are available, it could be difficult to instruct the query optimizer to use them. some tools attempted to solve this problem by pre-computing the results of a large amount of table joins
+ <cit> , which requires extra disk space for storing the pre-computed results and new pre-computation needs to be performed every time a new genomic feature is added to the database.
+
+to overcome these two issues, we have developed vas , a tool for efficient genomic data integration.
+
+implementation
+the overall workflow of vas is shown in figure
+ <dig>  below we describe its different components in detail.figure  <dig> 
+schematic illustration of the vas workflow. genomic features are pre-sorted and stored in data files with pointers for direct access to particular genomic locations. a user supplies the list of genetic variants and selects the genomic features to integrate with the variants at the client side. the variants extractor produces a compressed form of the input variants. the task is then sent to the backend and put into a waiting queue, and the user is shown a waiting page. when an execution daemon becomes available, it fetches the next task in the queue and uses the customized algorithms to perform data integration. the integration results are stored in a tab-delimited file. the user will then be shown a summary page of the integration results. an email notification will also be sent, with a link for a user to retrieve the summary page later. the user can then view the integration details of each input variant, perform interactive analysis on the ucsc genome browser, or download the annotation results in tab-delimited or excel format.
+
+
+
+genomic features in vas
+vas provides a large variety of genomic features collected from different data sources . to help explore genetic variants in non-coding regions, it provides a rich set of whole-genome features about sequence patterns, conservation, chromatin states and expression signals from various experimental and computational data sets. cell/tissue-specific data based on different cell types studied by the encode project consortium and roadmap epigenomics are provided for some features. additional features are provided for referencing previous findings about known variants and their loci, including previously cataloged snps, information about disease snps, and gencode gene annotation, which contains a large number of non-coding rnas.table  <dig> 
+list of genomic features provided by vas
+
+
+ <cit> , roadmap epigenomicsdna methylation
+ <cit> , supervised genomicregion classification
+ <cit>  conservation scores
+ <cit> , transcriptionfactor binding motifs
+ <cit> , sequence uniqueness
+ <cit> ,repeats
+ <cit> , the human gene mutationdatabase
+
+
+feature selection, data compression and data integration
+a user uploads a list of genetic variants and selects the features to be integrated through a user-friendly web interface. multiple data formats are supported for the input list of genetic variants, including vcf and white-space-delimited lists. in our test, uploading  <dig> million genetic variants involved less than  <dig> megabytes of data transfer . the enabling technology behind this small uploading data size is a compression procedure that vas performs on the client side. in a standard vcf file, there is a lot of information not required for the data integration purpose. our flash plugin takes the user-supplied variant file, retains only genomic locations, and removes repetitive text such as chromosome names. the resulting file contains compact arrays of chromosomal locations, one for each chromosome. this compression process is transparent to the user in that a user only needs to specify a standard genetic variant file as input and the compression will be automatically performed before the compressed data is transferred to the server.the genomic features to be integrated with the genetic variants are selected from a web interface that provides a list of the features available. functions are also provided for searching for particular datasets using their attributes such as cell type . for each genetic variant, vas can search for genomic features overlapping its exact location or a flanking window of it up to 1mb, allowing exploration of nearby loci in genetic linkage to the input variants.figure  <dig> 
+amount of data upload and uploading time required at various sizes of the input list of genetic variants in our simulation study, before and after client-side data compression. the data uploading time for the uncompressed case was estimated based on the file size and the data transfer rate when transferring the compressed version of the same files.
+usage of vas.  selecting genomic features to be integrated with the genetic variants.  summary of the annotation results. genomic features identified around each genetic variant  are shown, where a darker color indicates a stronger signal value.  detailed view of a genetic variant, with an embedded ucsc genome browser image in which each genomic feature is shown as a signal track.
+
+
+
+upon submitting the input variants and the selected genomic features, the data integration job is added to a queue on the server side. the back-end system adopts a scalable design that allows executing multiple jobs on different computing nodes in parallel. the user is redirected to a waiting page that provides the latest status of the job. optionally, if an email address is entered, an email notification will be sent to the user when the job is finished.
+
+we store data in a customized file format without relying on a relational database, which facilitated our design of linear-time integration algorithms that can efficiently identify overlapping genomic regions in different data files. specifically, for each feature, the genomic regions containing feature values are sorted according to their genomic locations. special pointers are added to particular locations  in the genome to allow direct access of these locations without a sequential scan of all regions from the beginning of the file.
+
+we provide two types of data integration. the first one is identifying genomic features overlapping exactly the locations of the input genetic variants . the second one is identifying genomic features overlapping a flanking window of each input genetic variant. both types of integration are performed by sort-merge algorithms.for the first type of data integration, we first sort the input variants according to their locations. we then use a pointer to scan through all the genetic variants and all the genomic feature regions sequentially. whenever a region of the genomic feature is encountered, we add it to a feature queue. any genetic variant that is then encountered before the end of the region will be annotated with the region and the result is stored in the variant map . more specifically, during the scanning process, the algorithm takes one of the following actions whenever a point of the corresponding type is encountered:
+
+ location of a variant: annotate the variant with all the regions currently in the feature queue and store the results in the variant map
+
+ starting position of a feature region: add the region to the feature queue
+
+ ending position of a feature region: remove the region from the feature queue
+an example of point-to-region data integration using our algorithm.
+
+
+
+
+for the second type of data integration, the integration algorithm is similar to the one for the first type, except that now instead of considering a single location of each genetic variant, we consider the starting and ending positions of its flanking window. during the scanning process, the algorithm takes one of the following actions whenever a point of the corresponding type is encountered :
+
+ starting position of the flanking window of a variant: add the variant to the variant queue, annotate the variant with all the regions currently in the feature queue and store the results in the variant map
+
+ ending position of the flanking window of a variant: remove the variant from the variant queue
+
+ starting position of a feature region: add the region to the feature queue, annotate all variants currently in the variant queue with the region and store the results in the variant map
+
+ ending position of a feature region: remove the region from the feature queue
+an example of region-to-region data integration using our algorithm.
+
+
+
+
+we have compared the speed efficiency of these data integration algorithms with some alternative methods. for all the methods, we tried to integrate a list of  <dig>  variants with a genomic feature with  <dig>  regions. we tested both types of data integration, with the size of the flanking window set to 100bp in the second type of integration. the time needed for the different methods to perform the integration task is shown in table
+ <dig>  our customized algorithms were found to be the most efficient among the methods in comparison.when the data integration is finished, the results are displayed on a web page that shows information about the selected features around each input variant . in the case of numeric features, the average feature values around each variant and their percentiles among all genomic regions are also shown. details of the features can be displayed in a signal-track image generated by the ucsc genome browser . linking to a corresponding ucsc genome browser session is provided for more visualization options and interactive explorations. integration results can also be downloaded in microsoft excel or tab-delimited formats for further analyses.table  <dig> 
+data integration time of different methods
+
+
+for bigbed reader and interval tree, we used the implementation of bxpython. for relational database, we tried several indexing methods including standard b-tree index and spatial index, and report here the shortest time among these approaches. tabix was called using the pytabix library in python.
+
+
+
+each data integration job is given a unique 512-bit identifier. the user who issues a job can browse and download the results at a later time by using the provided hyperlink with this identifier embedded. all job files are kept on the server for  <dig> days. other users without this identifier are unable to access the uploaded data or the corresponding data integration results.
+
+currently there are several related tools providing genome-wide annotation of genetic variants. each of these tools has its unique features and advantages. we list in table
+ <dig> some of the distinctive properties of vas.table  <dig> 
+some distinctive features of vas as compared to some related tools
+
+
+for gwava and regulomedb, the maximum number of input variants allowed is based on our own tests of the system. properties of the tools are based on their versions on 8th september  <dig> 
+
+
+
+RESULTS
+case studies
+as a demonstration of using vas in exploring potential functional meanings of genetic variants, we used it to analyze two sets of genetic variants with different sets of genomic features.
+
+the first set of genetic variants includes the susceptibility loci for migraine identified in a recent study
+ <cit> . in that study, a genome-wide meta-analysis was performed on the data from  <dig> genome-wide association studies, which together involved  <dig>  individuals with migraine and  <dig>  population-matched controls. twelve loci were identified to be significantly associated with migraine, while  <dig> loci were found to have significant expression quantitative trait loci . we used vas to retrieve information about various types of static and cell-specific data around these  <dig> loci. for static features, we considered evolutionary conservation, known variants in dbsnp and gwas catalog, protein binding motifs and cpg islands. for cell-specific features, we considered histone modifications, open chromatin and transcription factor binding data from encode sequencing experiments for both normal brain and spinal cord cells  and brain cancer lines .
+
+figure
+3b shows part of the annotation results, where the darkness of a table entry indicates how strong the signal value is. it can be seen that many features have strong signals around the susceptibility loci. as an example, figure
+3c shows the detailed view of rs <dig> , which is at position  <dig> , <dig> / <dig> , <dig>  of chromosome  <dig>  it is located in an intergenic region downstream of and close to the tspan <dig> gene. in the original study
+ <cit> , it was found that the susceptibility loci in general had strong open chromatin signals in terms of dnase i hypersensitivity, and they overlapped with some transcription factor binding motifs. consistent with their findings, vas was able to find overlaps between the snp and open chromatin signals in various normal brain cells  and the presence of binding motifs for multiple transcription factors around that region .we also made a number of additional interesting observations based on the vas results. first, the open chromatin signals were found only in normal brain cells but not in the cancer line sk-n-sh_ra. second, in astrocytes , the snp overlapped a local region with strong h3k27ac signals , which suggests that the region could be an active enhancer in this cell type. third, the snp was inside a region with strong evolutionary conservation among placental mammals and among vertebrates , suggesting that the region is under evolutionary constraints. finally, there was active binding of ctcf, rad <dig> and yy <dig> in a nearby region a few kilobases away  with corresponding open chromatin signals. given the closeness of this region and the susceptibility locus, it may be useful to include this region into the study.
+
+the second set of genetic variants comes from the personal genome project
+ <cit>  . we randomly downloaded  <dig> lists of genetic variants with at least one variant reported to have high clinical importance according to the report on the web site . we tested if we could identify these variants of potential clinical importance using vas, by annotating them with the information from gwas catalog
+ <cit>  and the human gene mutation database
+ <cit> . on average, uploading and completing the annotation of each data file took less than  <dig> minutes. vas was able to annotate all  <dig> unique variants reported to be likely pathogenic and rare pathogenic using the information from the two databases, which confirms that vas can be used to quickly integrate information from diverse sources for more in-depth downstream analyses.table  <dig> 
+lists of genetic variants from the personal genome project tested on vas
+
+
+the variants listed in the "pgp variants" column include likely pathogenic and rare  pathogenic variants according to the reports available on the personal genome project web site. the information in the "chromosomal location", "dbsnp id" and "clinical importance" columns was all obtained from these reports.
+
+
+
+data uploading and integration time
+to test the speed performance of vas in handling large data files, we recorded the time required to integrate  <dig>  million genetic variants present in the ceu trio obtained from the  <dig> genomes project with the information of the whole list of snps in dbsnp. we compared the performance of vas with both the reported results and our local execution of gemini
+ <cit> , a tool that allows large-scale genomic data integration by means of local execution and pre-caching of table join results. both vas and our local execution of gemini were tested on a machine with dual quad core xeon cpu at  <dig>  ghz and  <dig> gb of main memory.
+
+the resulting time measurements of the two tools  show that vas finished the data integration in around half an hour. as for gemini, although our time measurements are different from those reported in the original paper due to the use of different machines, in general a long data loading time  was required for the extensive pre-computation, followed by a very quick data integration phase. this pre-computation step needs to be performed whenever a new set of genetic variants is to be annotated.since gemini was executed locally while vas is an online system, there was extra data uploading time for vas. for the data set tested, the data uploading time was negligible as compared to the time needed for data integration. this result is consistent with our above analysis on file size and data uploading time at different numbers of input genetic variants .table  <dig> 
+time measurement of gemini and vas
+
+
+
+gemini 
+average
+ <dig> .0
+ <dig> 
+ <dig> .0
+
+*time for gemini to load the data into database and perform pre-computations, and time for vas to upload the file from the client browser to our server.
+
+
+
+overall, vas is more efficient and flexible in handling new variant lists since it does not require pre-loading of data, while gemini works better in situations where the same list of genetic variants is to be repeatedly analyzed by integrating with many different subsets of genomic data.
+
+CONCLUSIONS
+in this paper, we have described vas, a new web tool that can efficiently integrate millions of genetic variants with tens of whole-genome data sets in a single integration task. the client-side data compression procedure and the customized data store allowed fast uploading and integrating whole lists of genetic variants obtained from genomic studies, making vas a practical tool for routine first-step annotation of genetic variants.
+
+when analyzing large-scale genomic data, the main bottleneck is usually inspecting long lists of results, pinpointing the most biologically or medically significant parts, and making correct interpretations of them. the time spent on data integration is usually relatively unimportant. however, the time difference between a standard data integration method and a customized one could become large when the numbers of input genetic variants and integrating genomic features are large. in addition, since vas can accept multiple job requests from different users simultaneously, having an efficient data integration method can also shorten the time spent on waiting for other earlier jobs in the queue to complete.
+
+currently vas supports job-level parallelization, which means multiple jobs can be run at the same time in parallel on different computing units. in the future, we plan to extend vas to support sub-job-level parallelization, which means a single job can be divided into sub-tasks simultaneously performed on different computing units. as the integration of each genetic variant is independent of the other variants, high-level distributed computing frameworks such as mapreduce should be readily applicable. an additional advantage of adopting such a framework is the distribution of data to multiple machines, which allows for better scalability.
+
+vas is currently implemented as an online system, which enjoys the advantage of requiring no local installation or downloading of genomic features by the user. we have ensured data integrity and confidentiality by providing encrypted network connections and assigning task ids that are only made known to the users who submit the tasks. however, there are situations in which some private data can only be analyzed locally. theoretically a user can install a local version of vas on his/her own machine to perform the analysis offline, but that would also require downloading a large amount of stored data features. we will investigate ways to facilitate data integration in these situations, such as allowing users to easily download a selected subset of features or dynamically download data features at the time needed, and developing privacy-preserving distributed data integration algorithms.
+
+in the case study we have demonstrated that with the data currently loaded into vas, one could already use it to obtain some interesting patterns around each genetic variant. as more and more cell/tissue-specific data are being produced, we will keep updating the data repository of vas to cover more cell/tissue types and more data for each cell/tissue type. we also plan on supporting the grch <dig> human reference genome when most data files in our database have a crch <dig> version available.
+
+availability and requirements
+project name: variant annotation system 
+
+project home page:https://yiplab.cse.cuhk.edu.hk/vas/
+
+operating system: vas can be accessed from any platform by using one of the listed web browsers
+
+programming languages: php, python
+
+other requirements: we recommend accessing vas by using google chrome , microsoft internet explorer , or mozilla firefox , with javascript enabled and a minimum screen resolution of  <dig> pixels x  <dig> pixels
+
+any restrictions to use by non-academics: nil
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+kyy conceived the study. edh, sdl and kyy designed the system. edh and qc collected the data and implemented the system. edh, qc, sdl and kyy tested the system. edh and kyy wrote the manuscript. all authors read and approved the final manuscript.
+

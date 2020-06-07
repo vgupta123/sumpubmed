@@ -1,0 +1,832 @@
+BACKGROUND
+introduction
+de-novo assembly is a fundamental yet difficult  <cit>  computational problem in metagenomics. indeed, there is currently an open challenge for metagenomic assembly using short reads, titled “critical assessment of metagenomic interpretation .” on the other hand, emerging sequencing technologies can provide extra information and make the computational problem more tractable. for example, long reads are increasingly being shown to be valuable in the de-novo assembly of single genomes  <cit> . therefore, it is natural to study metagenomic assembly using long reads. current assembly approaches for long reads focus on developing more optimized assemblers to leverage the power of the data. however, significant engineering effort is usually involved to build an end-to-end assembler.
+
+we take a different perspective, focusing the design effort on a post-processor that improves assembled contigs using the original long read data . the main question is whether we can achieve quality improvement with this approach using typical long reads. this post-pocessing approach is attractive because it leverages existing software. consequently, we can focus design effort and computational resources to specifically address thorny issues arising from the nature of new data, complex repeats, varying abundances and noise. moreover, since the long reads are part of the input, the post-processor can bring back information missed upstream. in single genome assembly, finishersc  <cit>  has demonstrated the effectiveness of this approach. in this paper, we investigate the effectiveness of this post-processing approach for metagenomic assembly.
+fig.  <dig> position of post-processor in an assembly pipeline . improvement in assembly quality using post-processor bigmac on three different datasets . bigmac shows the effectiveness of the post-processing approach for long read metagenomic assembly
+
+
+
+
+bigmac is a post-processor to improve metagenomic assemblies with long read only data. it first breaks contigs at potentially mis-assembled locations and subsequently scaffolds contigs. in our experiments, bigmac demonstrates promising results on several mock communities using data from the pacific biosciences long read sequencer. inputs to bigmac include assembled contigs from hgap  <cit>  and the original raw reads with adapters removed. after assembly and post-processing, we use quast  <cit>  to evaluate and compare the assembly quality of contigs before and after using bigmac. as shown in fig.  <dig>  bigmac improves the quality of the contigs by reducing the number of mis-assemblies while maintaining/increasing n <dig> and n <dig>  this demonstrates the effectiveness of the post-processing approach for metagenomic assembly with long reads.
+
+a top-down design of bigmac
+we use a hypothetical yet representative set of input data to illustrate the design of bigmac in a top-down manner. let g
+ <dig> g
+ <dig> be two genomes of abundances λ
+ <dig> λ
+ <dig> respectively. assume that they share a long repeat in the middle, that is, g
+1=x
+1
+r
+y
+ <dig> g
+2=x
+2
+r
+y
+ <dig>  unfortunately, an upstream assembler mis-assembles the reads and produces two contigs c
+ <dig> c
+ <dig> with incorrect joins at the repeat. that is, c
+1=x
+1
+r
+y
+ <dig> c
+2=x
+2
+r
+y
+ <dig>  as an assembly post-processor, bigmac takes the mis-assembled contigs c
+ <dig> c
+ <dig> and original reads as input. its goal is to reproduce g
+ <dig> g
+ <dig>  to achieve this, we immediately recognize that there should be components for fixing mis-assemblies and scaffolding contigs. in bigmac, they are respectively breaker and merger. an illustration is given in fig.  <dig> 
+fig.  <dig> top-down design of bigmac with an example of how bigmac improves a pair of mis-assembled contigs
+
+
+
+
+breaker is further divided into two subcomponents: signal detector and signal aggregator. signal detector collects signals that indicates mis-assemblies and signal aggregator subsequently makes decisions on breaking contigs based on the collected signals. in our example, the coverage fluctuation between λ
+ <dig> λ
+ <dig> along the contigs c
+ <dig> c
+ <dig> and the presence of long repeat r are useful signals that signal detector collects. after aggregating these signals, signal aggregator decides on breaking both the contigs c
+ <dig> and c
+ <dig> at the starting points of the repeat r. therefore, the output contigs of breaker are x
+ <dig> x
+ <dig> r
+y
+ <dig> r
+y
+ <dig> 
+
+merger is also divided into two subcomponents: graph operator and contig extender. with information from the original reads, graph operator establishes connectivity of the input contigs using string graphs. then, based on the evidence from spanning reads and contig coverage, contig extender extends input contigs into longer contigs. in our example, the input contigs to merger are x
+ <dig> x
+ <dig> r
+y
+ <dig> r
+y
+ <dig>  graph operator forms a string graph with edges x
+1→r
+y
+ <dig> x
+1→r
+y
+ <dig> x
+2→r
+y
+ <dig> and x
+2→r
+y
+ <dig>  contig extender analyzes the coverage depth of the related contigs and decides to merge contigs to form x
+1
+r
+y
+ <dig> and x
+2
+r
+y
+ <dig>  thus reproducing the correct genomes.
+
+finally, we remark that bigmac uses overlap information between reads and contigs or among contigs. in our implementation, the overlap information is provided by running mummer  <cit>  on appropriate strings. however, we note that one can implement the pipeline by replacing mummer with other aligners.
+
+methods
+breaker: breaking inaccurate genome
+after the functional decomposition of bigmac in the previous section, we are ready to investigate its first component: breaker. we note that the goal of breaker is to fix mis-assemblies. in order to achieve that, we need to collect sensible signals related to mis-assemblies and subsequently aggregate the signals to make the contig breaking decisions.
+
+signal detector
+signal detector collects three important signals related to mis-assemblies.
+
+
+palindrome we are interested in palindromes because of their relationship to a form of chimeric reads, the adaptor-skipped reads, which are common in today’s long read technology  <cit> . since assemblers get stuck at these chimeric reads, the palindrome pattern in reads propagates to the corresponding contigs. thus, the pattern of palindrome is a strong signal indicating mis-assemblies, particularly when the palindrome is long. a string tuple  is called a wrapping pair if the reverse complement of a is a prefix of b or the reverse complement of b is a suffix of a. x is called a palindrome if it is the concatenation of a wrapping pair , that is x=a
+b. the wrapping length of x is maxx=a
+b,is a wrapping pair min. for example, x=a
+c
+g
+g
+c
+c
+g is a palindrome of wrapping length 3; = is a wrapping pair because the reverse complement of b is cgg, which is a suffix of a. since the minimum length of a and b is min= <dig> and the wrapping length of x cannot exceed  <dig>  the wrapping length for x is  <dig> 
+
+signal detector collects information about palindromes by aligning each contig against itself. it then identifies palindromes with long wrapping length because that indicates mis-assemblies. the corresponding palindromes’ information is then put into s
+palindrome. to improve sensitivity, signal detector allows approximate match when searching for palindromes. we note that approximate matches are determined by computing the edit distance of the corresponding strings. to determine approximate matches in bigmac, we use nucmer in mummer  <cit>  with default parameters and with option –maxmatch. two strings are considered as approximately matched when nucmer reports so.
+
+
+repeat since long repeats confuse assemblers, their endpoints are possible candidates for mis-assemblies. let s
+1=a
+x
+b,s
+2=c
+x
+d, a repeat between s
+ <dig> s
+ <dig> is specified by the endpoints of x in s
+ <dig> s
+ <dig>  for example, s
+1=c
+a
+a
+a
+a
+t,s
+2=g
+a
+a
+a
+a
+g, the endpoints of the repeat aaaa are the position specified by ! in c!a
+a
+a
+a!t,g!a
+a
+a
+a!g. signal detector aligns contigs against themselves to find the repeats. it then marks down the positions of the endpoints and puts them in a set called s
+repeat. to improve sensitivity, signal detector allows approximate matches when searching for repeats. we note that approximate matches are determined by computing the edit distance of the corresponding strings. moreover, it only considers repeats that are maximal and are of significant length.
+
+
+coverage significant coverage variation along contigs can correspond to false joins of sequences from different genomes with different abundances. coverage profile is the coverage depth along the contigs. for example, the coverage profile along a string s=a
+c
+g
+t is  if the reads are a
+c,c
+g,g
+t. signal detector aligns original reads to the contigs to find the coverage profile, which is called s
+coverage.
+
+signal aggregator
+after signal detector collects signals regarding palindromes s
+palindrome, repeats s
+repeat and coverage profile s
+coverage, signal aggregator uses them to determine the breakpoints on the input contigs c. the algorithm is summarized in algorithm  <dig> 
+
+
+
+
+
+
+chimericcontigfixing the goal of chimericcontigfixing is to fix the contigs formed from chimeric reads. we simply break the palindromes in s
+palindrome at locations corresponding to their wrapping lengths. after removing redundant contigs, chimericcontigfixing returns the broken palindromes with the unchanged contigs.
+
+
+locatepotentialmisassemblies the goal of the subroutine locatepotentialmisassemblies is to locate potential mis-assemblies caused by repeats. we study the design of this subroutine in this section.
+
+
+motivating question and example we can declare all the endpoints of approximate repeats in s
+repeat to be potential mis-assemblies. while this is a sensible baseline algorithm, it is not immediately clear whether it is sufficient or necessary. it is thus natural to consider the following question.
+
+given a set of contigs, how can we find the smallest set of locations on contigs to break so that the broken contigs are consistent with any reasonable ground truth? to illustrate our ideas, we consider an example with contigs x
+1=a
+b
+c
+d
+e,x
+2=f
+b
+c
+g,x
+3=h
+c
+d
+i with {a,b,c,d,e,f,g,h,i} being strings of equal length l.
+
+the baseline algorithm of breaking contigs at the starting points of all the long repeats breaks the contigs  <dig> times . however, interestingly, we will show that one only need to break the contigs  <dig> times to preserve consistency  and that is optimal.
+
+
+modelling and problem formulation we will formalize the notions of feasible break points, feasible ground truth, consistency between sets of contigs, sufficiency of break points to achieve consistency and the optimiality criterion.
+
+we use a graph theoretic framework. specifically, we study a directed graph g= with m sources s and m sinks t where ∀v∉s∪t,i
+n
+d
+e
+g=o
+u
+t
+d
+e
+g and parallel edges between two vertices are allowed. this is used to model a fully contracted de bruijn graph formed by successive k-mers of the contigs. vertices v are substrings of the contigs and edges e correspond to potentially mis-assembled locations on contigs. in our example, the set of vertices is v={a,b,c,d,e,f,g,h,i} and the set of edges is e={a
+b,f
+b,b
+c
+ <dig> b
+c
+ <dig> h
+c,c
+d
+ <dig> c
+d
+ <dig> c
+g,d
+e,d
+i}. we use subscripts to differentiate parallel edges joining the same vertices. the graph corresponding to our running example is shown in fig.  <dig> 
+fig.  <dig> the graph corresponding to our example contig set x
+1=a
+b
+c
+d
+e,x
+2=f
+b
+c
+g,x
+3=h
+c
+d
+i is shown. we note the optimal set of break points by the red dotted line
+
+
+
+
+
+given such a graph g, we note that e is the set of all feasible break points because each edge in the graph corresponds to a potentially mis-assembled location on contigs. a feasible ground truth corresponds to a set of m edge-disjoint source-to-sink trails that partitions the edge set e. for simplicity, we represent a trail as a sequence of the vertices in g, where the edges linking the vertices are ignored. for example, {a
+b
+c
+d
+e,f
+b
+c
+d
+i,h
+c
+g} is a feasible ground truth while {a
+b
+c
+g,f
+g
+d
+e,h
+c
+d
+i} is another feasible ground truth. the set of all feasible ground truths is gt.
+
+we recall that our high level goal is to choose a set of feasible break points r⊆e so that the broken contigs are consistent with any feasible ground truth. so, we need to define the notion of broken contigs and consistency between two sets of contigs under the current framework. let g
+t∈g
+t, we denote g
+t∖r be a set of trails after the removal of the edge set r. in particular, for the original contig set c∈g
+t, c∖r is the set of broken contigs for the set of feasible break points r. for example, if r={b
+c
+ <dig> b
+c
+ <dig> h
+c} and c={a
+b
+c
+d
+e,f
+b
+c
+d
+i,h
+c
+g}, c∖r={a
+b,c
+d
+e,f
+b,c
+d
+i,h,c
+g}. to capture consistency between two sets of contigs, we use the following definition. given two sets of trails t
+ <dig> t
+ <dig>  we say that t
+ <dig> is consistent with t
+ <dig> if ∀x∈t
+ <dig> ∃y∈t
+2
+s.t. x⊆y and ∀x
+′∈t
+ <dig> ∃y
+′∈t
+1
+s.t. x
+′⊆y
+′. we call r a sufficient breaking set with respect to  if ∀g
+t∈g
+t,c∖r is consistent with g
+t∖r. in other words, r is a set of feasible break points that allows the broken contigs to be consistent with any feasible ground truth. although this notion of sufficient breaking set is a natural model of the problem, it depends on the original contig set c, which is indeed not necessary. specifically, we show that we have an equivalent definition of sufficient breaking set without referring back to the original contig set. let us call r a sufficient breaking set with respect to g, or simply a sufficient breaking set, if ∀g
+t
+ <dig> g
+t
+2∈g
+t,g
+t
+1∖r is consistent with g
+t
+2∖r.
+
+proposition 1
+
+r is a sufficient breaking set with respect to  if and only if r a sufficient breaking set with respect to g.
+
+proof
+the backward direction is immediate because c∈g
+t. we will show the forward direction as follows. let g
+ <dig> g
+2∈g
+t and we want to show that g
+1∖r is consistent with g
+2∖r. since r is a sufficient breaking set with respect to , g
+1∖r is consistent with c∖r. therefore, ∀x∈g
+1∖r∃y∈c∖r
+s.t. x⊆y. but since g
+2∖r is consistent with c∖r, we have ∃z∈g
+2∖r
+s.t. y⊆z. by transitivity, we have x⊆y⊆z∈g
+2∖r. by symmetry, we can also show that ∀x
+′∈g
+2∖r∃y
+′∈g
+1∖r
+s.t. x
+′⊆y
+′. thus, g
+1∖r is consistent with g
+2∖r. □
+
+now, we state our optimization criterion. the goal here is to minimize the cardinality of the sufficient breaking set, formally as eq.  <dig>  
+  <dig> opt=minr⊆e|r|s.t.ris a sufficient breaking set withrespect tog 
+
+
+we will show that if we solve eq.  <dig> for our running example, the answer is  <dig>  this thus shows that the baseline algorithm of breaking contigs at all starting points  of all long repeats is not optimal.
+
+proposition 2
+for our running example, opt =  <dig> 
+
+proof
+first, by inspecting the  <dig> feasible ground truths in gt, we note r={b
+c
+ <dig> b
+c
+ <dig> h
+c} is a sufficient breaking set with respect to g. second, we note that the edge set need to disconnect sources and sinks, otherwise, we can find g
+ <dig> g
+2∈g
+t such that g
+1∖r,g
+2∖r are inconsistent. this means |r| need to be ≥ mincut of the graph, which is  <dig>  □
+
+
+algorithm development and performance guarantee next we describe an algorithm that finds a sufficient breaking set with respect to g. let us denote a boolean variable b
+e on each edge e∈e, with b→=e∈e. for v∈v, i
+n
+e
+d
+g
+e
+s,o
+u
+t
+e
+d
+g
+e
+s are the sets of incoming edges and outgoing edges at v respectively. p
+r
+e
+v,s
+u
+c
+c are the sets of predecessor vertices and successor vertices of v respectively. our algorithm solves the following minimization problem  as a proxy to . 
+  <dig> minr⊆b→:r=true⇒Φ=true|r| 
+
+
+where, 
+  <dig> Φ=∧v:|prev|≥2and|succ|≥2∧e∈inedgesbe∨∧e∈outedgesbe 
+
+
+in other words, it includes either all the incoming edges or all the outgoing edges for every vertices with at least  <dig> successors and at least  <dig> predecessors to r. we then seek r with minimum cardinality among the choices available. if g can be decomposed into connected components, we can optimize Φ independently on each connected component. in our implementation, if the size of the connected component is not too large, we optimize the objective function by exhaustion. beyond a certain threshold, we simply output a feasible solution without optimizing. indeed, in our experiments on real data, most of the connected components are not that large and this step typically takes a few minutes. but we remark that for more complex applications, one can further optimize the algorithm. for example, one can first topologically sort the vertices and then use dynamic programming to solve eq.  <dig> along the sorted vertices.
+
+we note that the algorithm described gives an optimal solution for our running example. moreover, we show performance guarantee of the algorithm as follows.
+
+proposition 3
+solving eq.
+ <dig> gives a sufficient breaking set r if the graph g is fully contracted.
+
+proof
+let r be the set of edges selected by the algorithm. for any two g
+t
+ <dig> g
+t
+2∈g
+t, we want to show that g
+t
+1∖r and g
+t
+2∖r are consistent. by symmetry, it suffices to prove that if x∈g
+t
+1∖r, then ∃y∈g
+t
+2∖r
+s.t. x⊆y. if |x|= <dig>  it is immediate because every edge other than those in r are covered. if |x|≥ <dig>  we will show that it is also true using proof by contradiction. if ∀y∈g
+t
+2∖r,x⫅̸y, we can find a sub-trail x
+′= of x such that ∃y
+′∈g
+t
+2∖r
+s.t. x
+″=⊆y
+′ but ∀y∈g
+t
+2∖r,x
+′⫅̸y. this implies ∃a
+∗≠a
+k+1
+s.t. ⊆z for some z∈g
+t
+2∖r. since the edge ⊆x∈g
+t
+1∖r, we know that  is not in r. similarly, ∉r because ⊆y
+′∈g
+t
+2∖r. but since |s
+u
+c
+c|≥ <dig>  the fact that our algorithm does not include , in r implies that |p
+r
+e
+d|= <dig>  namely p
+r
+e
+d={a
+k−1}. note that we are considering a fully contracted graph. so, the fact that a
+k− <dig> exists implies that |s
+u
+c
+c|≥ <dig>  but our algorithm has not removed edge . this gives |p
+r
+e
+d|= <dig>  inductively, we get |p
+r
+e
+d|=1∀2≤i≤k. but we know that ⊆w for some w∈g
+t
+2∖r. since the edges along  are not in r, this gives, x
+′=⊆w∈g
+t
+2∖r. this contradicts the assumption about x
+′. □
+
+proposition 4
+if the graph g is fully contracted dag without parallel edges, then solving eq.
+ <dig> returns a sufficient breaking set that is of optimal cardinality, opt.
+
+proof
+it suffices to show that for any sufficient breaking set r, ∀v∈v where |s
+u
+c
+c|≥ <dig> |p
+r
+e
+d|≥ <dig>  we have either i
+n
+e
+d
+g
+e
+s⊆r or o
+u
+t
+e
+d
+g
+e
+s⊆r. we prove it by contradiction. if not, ∃v∈v where |s
+u
+c
+c|≥ <dig> |p
+r
+e
+d|≥ <dig> but i
+n
+e
+d
+g
+e
+s⫅̸r and o
+u
+t
+e
+d
+g
+e
+s⫅̸r. because it is a dag, it means we can find g
+t
+1∈g
+t such that ∃x,y,x
+′,y
+′ such that ∈g
+t
+ <dig> and ∈g
+t
+ <dig>  now consider g
+t
+ <dig> to be a clone of g
+t
+ <dig> except that it has , instead of ,. we note that g
+t
+2∈g
+t. and because there are no parallel edges,  is not a subset of any of the trails in g
+t
+ <dig>  so, we find two distinct g
+t
+ <dig> g
+t
+2∈g
+t such that g
+t
+ <dig> g
+t
+ <dig> are not consistent. this contradicts the fact that r is a sufficient breaking set. □
+
+it is noteworthy that if we are given any set of contigs from any g
+t∈g
+t, we still obtain the same set of broken contigs after the operation of removal of redundant trails, removeredundant . this can be formalized as follows.
+
+proposition 5
+if r is a sufficient breaking set, then for any g
+t
+ <dig> g
+t
+2∈g
+t,r
+e
+m
+o
+v
+e
+r
+e
+d
+u
+n
+d
+a
+n
+t=r
+e
+m
+o
+v
+e
+r
+e
+d
+u
+n
+d
+a
+n
+t.
+
+proof
+let s
+i=r
+e
+m
+o
+v
+e
+r
+e
+d
+u
+n
+d
+a
+n
+t for i∈{ <dig> }. by symmetry, it suffices to prove that s
+1⊆s
+2∀x∈s
+1⊆g
+t
+1∖r,∃y∈g
+t
+2∖r, such that x⊆y. note that we can also find some x
+∗∈s
+ <dig> such that y⊆x
+∗. this gives x⊆y⊆x
+∗. however, since we have no redundant trails in s
+ <dig>  we get x=x
+∗. thus x=x
+∗∈s
+ <dig>  □
+
+to apply bigmac to real data, we have to implement the described algorithm with some further engineering. this includes methods to tolerate noise, to handle double stranded nature of dna, and to construct de bruijn graph from the repeats. interestd readers can refer to the additional file  <dig> : appendix for these implementation details.
+
+
+confirmbreakpoints the goal of confirmbreakpoints is to utilize the coverage profile s
+coverage to confirm breaking decisions at potentially mis-assembled locations specified in s
+filter. for the sake of simplicity, we now consider a string s of length l, and a set of positions y={y
+i}1≤i≤k of s which are potential mis-assemblies. furthermore, let us assume that all mis-assemblies are caused by mixing genomes of different abundances. using y, we can partition s into segments {s
+i}0≤i≤k of lengths respectively as {ℓ
+i}0≤i≤k. we let x
+i be the number of reads that start in segment s
+i, which can be estimated from s
+coverage. the question is how to classify the points in y as true mis-assemblies or as fake mis-assemblies.
+
+one can use heuristics, like comparing coverage depth difference before and after each y
+i. however, this is not ideal. for example, if we have coverage depth before and after y
+ <dig> differing by 1x, we would expect it to be a much stronger signal for true mis-assembly if the lengths ℓ
+ <dig> ℓ
+ <dig> are of order of  <dig> k rather than of  <dig> and this cannot be seen by considering coverage depth difference alone. for the case of just two segments of equal length and if we assume the x
+i’s are independent poisson random variables, there is a popular statistical test, c-test  <cit> , that can make the decision. formally, if x
+1∼p
+o
+i
+s
+s
+o
+n and x
+2∼p
+o
+i
+s
+s
+o
+n, then c-test is a test to decide between the hypothesis of h
+0:m
+1=m
+ <dig> against h
+1:m
+1≠m
+ <dig>  c-test first considers x
+1+x
+ <dig> to compute the decision boundary and it then decides whether to reject h
+ <dig> based on x
+1/x
+ <dig> and the previously derived decision boundary. the intuition is that x
+1+x
+ <dig> corresponds to the amount of data, which determines the confidence of a statistical test. thus, if x
+1+x
+ <dig> is large, a small perturbation of x
+1/x
+ <dig> from  <dig> can still be very significant and can correspond to a confident rejection of h
+ <dig> 
+
+however, we still need to think carefully about how to apply c-test to our problem. one method is to directly apply k independent c-test on each of the junctions y
+i. however, that method cannot take advantage of the information from neighboring segments to boost the statistical power at a junction. therefore, we develop the algorithm iterativectest. iterativectest performs traditional c-test but in multiple iterations. initially, it directly applies k independent c-test on each of the junctions y
+i. some of the segments are merged and we aggregate the counts from the merged segments to continue to the next c-test at the remaining unmerged junctions in y. this process is repeated until the algorithm converges. finally, we use the breaking decisions from iterativectest to break the incoming contigs and return the fixed contigs.
+
+merger: merging assembled contigs
+after fixing mis-assemblies, we are ready to study another pillar of bigmac: merger. merger establishes connectivity among contigs and subsequently makes decisions to extend contigs.
+
+graph operator
+the goal of graph operator is to identify candidates for contig extension. it forms and transforms a string graph using the overlap information among original reads and contigs. it subsequently analyzes the graph to find candidates for contig extension. the overall algorithm is summarized in algorithm  <dig> 
+
+
+
+
+
+mapping
+we obtain mapping among contigs and reads. this provides the fundamental building block to construct the connectivity relationship among contigs and reads.
+
+formgraph
+the goal of formgraph is to establish connectivity among contigs. we use contig-read string graph as our primary data structure. contig-read string graph is a string graph  <cit>  with both the contigs and the reads associated with their endpoints as nodes. the size of the graph is thus manageable because most reads are not included in the graph. then, we construct an overlay graph  such that the nodes are the contigs with weights on nodes being the coverage depth of contigs. in the contig graph, there is an edge between two nodes if there is a sequence of reads between the associated contigs. with these data structures, we can switch between macroscopic and microscopic representation of the contig connectivity easily.
+
+graphsurgery
+graphsurgery simplifies the contig graph. this includes removal of transitive edge and edge contraction.
+
+for nodes u,v,w, if we have edges u→v,u→w and w→v, then we call u→v a transitive edge. we perform transitive reduction  <cit>  on the contig graph to remove transitive edges. removing these transitive edges prevents us from finding false repeats in the next stage. to improve robustness, there is a pre-processing step before transitive reduction. if the contig w is too short and there are no reads that form head-to-tail overlap between w,u or w,v, then we can have a missing edge for transitive reduction to operate properly. thus, we add the missing edge  back when we find contigs and related reads that suggest the missing edge might be there.
+
+an edge u→v is contractable when the outgoing degree of u and the incoming degree of v are both  <dig>  we contract edges to fill gaps. our experience with finishersc is that data are dropped in the assembler and so reconsidering them as a post-processing step can potentially fill some gaps. however, there is a caveat. in establishing connectivity in contig-read string graph, we only use reads close to each contig’s endpoints , we may miss some legitimate connections. therefore, very long repeats prevent the detection of linkage of contigs, thereby allow contigs to be erroneously merged. to address that, if there exists contig w that is connected  to a region close to the right end of u/left end of v, then we avoid contraction of u→v.
+
+findextensioncandidates
+findextensioncandidates identifies candidates for contig extension by identifying local patterns in the contig graph. one form of extension candidates is a pair of contigs that are connected without competing partners. this corresponds to the contigs joined by a contractable edge. another form of extension is a set of contigs that are connected with competing partners. this corresponds to the contigs linked together in the presence of repeats. in the contig graph, the repeat interior can either be represented as a separate node or not. if the repeat interior is represented as a separate node, the local subgraph is a star graph with the repeat node at the center. otherwise, the local subgraph is a bipartite graph consisting of competing contigs. after identifying the contigs associated with a specific repeat, we can then merge contigs in the next stage.
+
+contig extender
+after the operations by graph operator, we have extracted the potential contig extension candidates from the contig graph. it remains to decide whether and how to merge the corresponding contigs. in a high level, contig extender aims at solving the contig merging decision problem.
+
+contig merging decision problem
+given a set of incoming contigs i and a set of outgoing contigs o whose coverage depth and read connectivity information is known. decide how to form an appropriate bipartite matching between i and o.
+
+while we do not intend to rigorously define the statement of contig merging decision problem now, it is clear that appropriate matching corresponds to one that achieves high accuracy. contig extender carefully analyzes the read connectivity and contig coverage to make decisions on merging contigs. in the coming discussion, we first study an effective heuristic that captures the essence of the problem. after that, we will study how to rigorously define the contig merging decision problem in a mathematical form and suggest an em-algorithm in solving that.
+
+heuristic in solving the contig merging decision problem
+when the cardinality of the set of incoming contigs i and the set of outgoing contigs o are both  <dig>  a natural decision is to merge them. thus, the focus here is to study the case when |i|> <dig> or |o|> <dig>  we select the reads that uniquely span one contig a in the incoming set and one contig b in the outgoing set. if there are multiple such reads, then we decide that a,b should be joined together provided that there does not exist any paths of reads that lead a to other contigs in the outgoing set and similarly for b. moreover, we perform similar tests using contig coverage. if the coverage depth between two contigs is very close, they will be declared to be a potential merge pair. then, we test whether there are any close runner-ups. if not, they should be merged. to combine the decisions made using spanning reads and coverage depth, we have a subroutine that discards all conflicting merges. we find that this heuristic for decision making works quite well in our datasets. however, in the coming discussion, we will study how to make the extension decisions in a more principled and unified manner.
+
+general framework in solving the contig merging decision problem
+the challenge for the contig merging decision problem is the tradeoff for many physical quantities . we address this by defining a confidence score based on parameter estimation. for simplicity of discussion, we assume that k is the cardinality of both the set of incoming contigs and the set of outgoing contigs. the goal is to find the best perfect matching with respect to a confidence score.
+
+let m be a perfect matching of contigs among incoming and outgoing groups i and o. under m, there are k merged contigs. let the observation be the set of related reads x={r
+i∣1≤i≤n}. we define the parameters θ={1≤j≤k}, where λ
+j is the normalized abundance of contig j and i
+j is genomic content of the contig j. note that ∑1≤j≤kλj= <dig>  so, the parameter estimation problem can be cast as s
+m= maxθ
+p
+θ, where s
+m is the confidence score of the matching m. finally, the best perfect matching can be found by comparing the corresponding confidence score.
+
+note that we have hidden variables z=1≤i≤n which indicate the contigs that reads x are extracted from . if we assume the length of the contig j to be ℓ
+j and q to be the indel noise level , then we can use an em-algorithm to obtain an estimate of θ. specifically, the expected value of the log likelihood function eq)logpθ is 
+  <dig> ∑1≤i≤n∑1≤j≤kmj)logλjℓj+|ri|log+d)logq1−2q 
+
+
+where mj)=δj=argminjd) is the assignment of reads to the most similar contig ), d is the best local alignment score, i=)1≤j≤k are the genomic contents of the contigs at iteration t and λ
+=1≤j≤k are the estimated abundances at iteration t. by maximizing the log likelihood function with respect to θ
+, we have the update formulas as 
+  <dig> λj∗=∑1≤i≤nmj∗)∑1≤j≤k∑1≤i≤nmj) 
+
+
+
+  <dig> ij∗=argmini∑1≤i≤nmj∗)d 
+
+
+note that the update of ij∗ requires multiple sequence alignment. in general, the problem is np-hard  <cit> . however, for noisy reads extracted from several contigs, the problem is not as difficult. for example, in the case of pure substitution noise, an efficient optimal solution is a column-wise majority vote. despite the elegance and feasibility of this approach, it is still computationally more intense than the heuristic. therefore, in our implementation of bigmac, the heuristic is the default method used in contig extender. but we also provide an experimental version of the em-algorithm which can be used when users specify –option emalgo=true in their commands.
+
+RESULTS
+end-to-end experiments
+synthetic data
+we verify that bigmac correctly improves the incoming contigs using the following synthetic data. we generate two synthetic species of different abundances . they are composed of random nucleotide sequences of length  <dig> m each and share a common segment of length  <dig> k. we uniformly sample indel noise corrupted reads of length  <dig> k from the genomes, with coverage depth of 20x and 50x respectively. we also artificially construct mis-assembled contigs by switching the genome segments at the  <dig> k repeat.
+
+the contigs and the reads are passed through bigmac. bigmac breaks the contigs at the mis-assembled point and joins them back correctly. one can see the sample run on  <cit> . this is also the example that we discuss in the top-down design of bigmac.
+
+real data
+we test the performance of bigmac in improving metagenomic assembly on pacbio only data. we use different datasets of different characteristics. dataset  <dig> consists of a mock community of  <dig> species  <cit> , with genomes of high similarity. dataset  <dig> consists of a mock community of  <dig> species  <cit> , with genomes of diverse abundances. we also remark that we have tested bigmac on a third pacbio only dataset : a real experiment involving desulfuromonas biwabikus, d. soudanensis and some other unknown genomes. we note that we know the complete ground truth for the metagenomes in both dataset  <dig> and  <dig> but only know part of the ground truth for dataset  <dig>  we take the output of hgap and use the raw reads to improve them using bigmac. we observe that in these datasets, bigmac reduces the number of mis-assemblies while maintaining/increasing n <dig> and n <dig>  the results of bigmac is summarized in table  <dig>  where the quantity of mis-assemblies is obtained from the quast reports. by default, quast’s statistics are based on contigs of size >=  <dig> bp. interested readers can refer to the additional file 1: appendix for more details of the assessment. the data is provided in our online distribution and users can reproduce the results by issuing a single command python reproduce.py.
+bigmac consistently improves assembly quality by simultaneously increasing contig contiguity and decreasing the number of mis-assemblies
+
+
+
+
+comparison with other post-processing tools
+synthetic data
+we use the synthetic data in “synthetic data” section to evaluate and benchmark bigmac, finishersc  <cit> , sspace_longread  <cit>  and pbjelly  <cit> . bigmac is the only tool among the tested tools that fix the mis-assembled contigs and merge them back correctly. other tested tools output the same mis-assembled contigs.
+
+real data
+we perform end-to-end testing to compare performance of different tools. the comparison is shown in table  <dig>  bigmac shows the largest n75/# mis-assemblies on all three datasets and largest n50/# mis-assemblies on two out of three datasets. indeed, in the only dataset that bigmac does not have the largest n50/#mis-assemblies, the number of contigs beyond n <dig> is  <dig>  due to the small number of contigs, this particular measurement on that dataset may not be significant. we also remark that bigmac is the only tool that improves contiguity  and the number of mis-assemblies.
+621817
+39257
+14200
+2702
+7134
+40883
+bigmac shows the largest n75/# mis on all three datasets and largest n50/# mis on two out of three datasets. we also remark that bigmac is the only tool that can improve n <dig> and n <dig> while reducing the number of mis-assemblies. note that # mis is an abbreviation for the number of mis-assemblies
+
+
+
+
+simulation and testing on independent components
+we perform micro-benchmarking on individual components of bigmac. the settings and results are summarized as follows.
+
+analysis of locatepotentialmisassemblies
+we test our break point finding algorithm used in locatepotentialmisassemblies of breaker on the synthetic data of x
+1=a
+b
+c
+d
+e,x
+2=f
+b
+c
+g,x
+3=h
+c
+d
+i discussed in the previous section. the algorithm succeeds in identifying the minimum number of break points as  <dig>  also, it succeeds in identifying the minimum number of break points as  <dig> in the presence of double stranded dna, in the test case of x
+1=a
+b
+c
+d,x
+2=e
+c
+′
+b
+′
+f, where b
+′,c
+′ are the reverse complement of b,c respectively.
+
+analysis of confirmbreakpoints
+we test iterativectest used in confirmbreakpoints of breaker on synthetic data. we simulate mis-assemblies and variation on abundances by generating a sequence of poisson random variables and compare the performance of the algorithms on the simulated data as follows. we generate a sequence of  <dig> numbers by  <dig> independent poisson random variables. the poisson random variables have parameters of either  <dig> or  <dig>  to select the parameters, we simulate  <dig> steps of a two-states markov chain with transition probability of  <dig> . we then evaluate the performance of c-test and iterativectest on finding the true transition points, which correspond to the junctions of mis-assemblies. taking average from  <dig> rounds of simulation, the recall of both c-test and iterativectest are  <dig> , meaning that they both can identify almost all transition points. c-test has precision of  <dig>  while the precision of iterativectest is of  <dig> , meaning that iterativectest can avoid more fake mis-assemblies.
+
+analysis of merger
+we compare merger with other tools on synthetic data as follows. we use a synthetic contig set {x
+ <dig> x
+ <dig> r,y
+ <dig> y
+2} where the ground truth genomes are ,. the coverage depth of  and  are 20x and 50x respectively. we pass the reads together with the contig set to finishersc, pbjelly, sspace_longread to perform scaffolding. we note that bigmac is the only tool the can scaffold the contigs correctly into  <dig> contigs by using the abundance information among the tested tools. other tools either do not change the input or simply merge r with some of {x
+ <dig> x
+ <dig> y
+ <dig> y
+2}, resulting in  <dig> contigs.
+
+runtime of bigmac
+the runtime of bigmac is summarized in table  <dig>  we use  <dig> threads to run the tool on a server computer. the server computer is equipped with  <dig> amd opteron processor  <dig> with frequency  <dig> mhz and  <dig> gb ram. we note that the majority of the time is spent on alignment of contigs and reads by mummer.
+
+
+
+discussion
+there are two main implications from the experiments performed. first, we show that post-processing assemblies is a feasible alternative in improving assembly quality to building another assembler from scratch. this is demonstrated by bigmac showing simultanous improvement in terms of number of mis-assembly and contiguity. we note that this is a non-trivial feature because all other tested tools fail to achieve it. second, bigmac is competitive when compared to the existing post-processing tools. in particular, it shows better n75/# mis-assemblies than all other tested tools in all tested datasets. moreover, bigmac is also the only tool that can handle abundance information, which makes it an attractive candidate for improving metagenomic assembly.
+
+future work
+we remark that the creation of bigmac sheds light on many interesting future direction. for example, it would be interesting to apply similar ideas to hybrid data, which has a lot of potential in the context of metagenomics. moreover, it would also be useful to try bigmac and other post-processing methodology on more real data to better characterize the approach.
+
+CONCLUSIONS
+we study an agile approach in developing de novo metagenomic assemblers: post-processing metagenomic assemblies with original input data. bigmac demonstrates the effectiveness of the post-processing approach in improving the quality of metagenomic assemblies using long reads. bigmac thus serves as an example that developing post-processors is a good alternative to building end-to-end assemblers, which typically involves more engineering efforts.
+
+additional file
+
+additional file  <dig> supplementary materials include implementation details, data analysis, theoretical analysis and commands used to run different tools. 
+
+ 
+
+

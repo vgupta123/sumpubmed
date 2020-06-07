@@ -1,0 +1,153 @@
+BACKGROUND
+deep sequencing platforms such as the illumina's solexa genome analyzer and abi's solid, have simplified the generation of large short-read datasets  <cit> . many of these datasets are now deposited in publicly-accessible repositories such as the sequence read archive  at the ncbi  <cit> .
+
+however, a researcher interested in exploring the public datasets is faced with two problems,
+
+• identifying the right libraries. the short-read datasets are neither uniformly annotated, nor are they organized to make searches easy.
+
+• analyzing the libraries for features of interest. the sheer magnitude of the data in these datasets poses computational challenges.
+
+each experiment can result in tens of millions of reads and requires specialized software to conduct proper analysis. the analysis of these datasets can be unwieldy without proper computer hardware and software solutions.
+
+the usual solution to this problem is to map the reads from the datasets to the genome and use these mappings for further analysis. in such a framework, if a sequence needs to be analyzed against the dataset, then the sequence is also mapped to the genome and the intersections of the two sets of mappings are used to infer biology. a popular tool for such analysis is galaxy  <cit> .
+
+in many cases, a user simply wants to look at the representation of a few sequences  within one or more short-read datasets. this is difficult to do using the existing tools without precomputing mappings for every dataset against every potential query sequence.
+
+we can use a suffix-array based technique to precompute indexes of short-read datasets and rapidly calculate coverage over any query sequence. such queries can be made fast enough to allow a web-based solution, where a client can rapidly request analyses from many remote servers.
+
+geoseq is a tool that solves the problems of both navigating public sequencing datasets and quickly performing small-scale analyses on these. the geoseq user-interface provides a controlled vocabulary that makes it easy to locate short-read libraries. the geoseq analysis service then allows rapidly mapping sequences against the short-read libraries for analysis of genes, mirnas and other sequence types. we demonstrate its utility in this paper on data from a variety of types of experiments, such as mrna-seq and srna-seq.
+
+implementation
+we describe here the software underlying geoseq, as well as the algorithms. the use of the tool is described in the results section.
+
+geoseq algorithms and software overview
+web-based applications have many advantages over desktop software including server-side data management, seamless updates and cross-platform usability. however, one factor that often prevents developers from using the web as an application platform is speed. geoseq attempts to find a balance between speed and precision by implementing a tile-based, exact-match search algorithm.
+
+geoseq algorithm implementation
+we use the pre-existing libfid  <cit>  suffix array library to build indexes of sequencing experiments and later query these datasets to quantify the representation of each tile in the dataset. suffix arrays require a costly one time indexing of the sequence data, allowing for subsequent rapid exact-match searches. sra datasets are downloaded and run through a pipeline where suffix arrays are built and description information is saved for later location of the dataset. this pipeline is automated and can be run periodically to update the local database. the process ensures the latest public datasets are available for analysis.
+
+suffix arrays allow substring lookups to be conducted very quickly at the expense of flexibility, providing only the ability to lookup exact matches. this is suboptimal for sequence alignment where gaps and deletions are often necessary.
+
+geoseq uses exact matches of sub-strings from a string to find inexact matches. first, a query of length n is split into k-mers  of length k, specified by the user. a k-mer at a given position i is the substring of length k starting at i. the tiles are all possible k-mer tiles that cover the sequence. these tiles are then searched individually using the exact-match suffix array algorithm. by changing the tile-size, the user can control the precision of the matches pulled from the dataset.
+
+choosing a smaller tile-size will cause smaller substrings of the query to be searched against the dataset. the smaller the substring, the greater the chance it will match the reads by random chance. in essence, by decreasing the tile-size specificity is decreased while sensitivity is increased. if tile-size is increased, sensitivity is decreased but specificity is increased. by modulating the tile-size the user can find the best balance of precision and misalignment that best suits his or her needs.
+
+browser
+the sra from ncbi associates a set of xml files with each submission that contains information about the experiment, runs, instrument, samples, and submitters. however, the website provides little categorical organization of the information, and the user is forced to rely on the 'search' box, which is not easy to use. our database schema succintly characterizes the datasets, and associates with each the following information,
+
+• organism: signifies the species that is the source of the samples used to generate the dataset.
+
+• experiment type: datasets are also specified by the type of sequencing experiment, using the following sub-categories,
+
+ <dig>  genomic dna: whole genome sequencing as well as targeted sequencing efforts.
+
+ <dig>  chip-seq: sequencing of immuno-precipitated chromatin.
+
+ <dig>  rna-seq: transcriptome studies.
+
+ <dig>  srna-seq: short rnas sequencing experiments 
+
+• tissue type: the source of the dna/rna when it can be identified. .
+
+hardware and software architecture
+an overview of the system is presented in figure  <dig>  the software infrastructure consists of three components.
+
+• a pre-processing/population component which downloads and pre-processes datasets,
+
+• a browsing component that allows the user to view the datasets that are available, and
+
+• an analysis component which allows datasets to be searched with specific queries and presents the results through the browser.
+
+the pre-processing component is a pipeline that collects sequencing and meta data and organizes them in a database. this is automated by a collection of perl scripts which populate a mysql database. these scripts are run periodically to ensure our repository is synchronized with sra's database. the sequencing files are indexed using the libfid  library. the index files of a sequencing experiment can range in size from  <dig> gb to  <dig> gb. because of their large size, these libraries are stored on an isilon storage cluster which is connected over a  <dig> gbe network to a cluster of processing machines.
+
+the front-end allows the user to browse the datsets available in our repository. this component is written in java using the google web toolkit http://code.google.com/webtoolkit/. the site is designed to make browsing the datsets as painless as possible.
+
+once the libraries are selected in the front-end, their indexes are loaded into ram on the processing server. to spread requests evenly over the processing cluster, a python wrapper was written around the c search functions and deployed as a json-webservice onto every processing machine. on the user's submission, the front-end website randomly selects a processing machine to perform the analysis. once the analysis is complete, the results are returned to the user's browser, formatted for display.
+
+RESULTS
+here, we will describe geoseq and apply it to different types of sequencing datasets.
+
+tool description
+geoseq consists of two parts, a browser  that helps the user identify short-read libraries of interest, and an analyzer  that can be used to query the selected libraries with a user-specified reference sequence.
+
+geoseq's analysis software tiles the input sequence in steps of one, using a user-specified tile-size and searches for matches of each tile against a library of short-reads . the choice of tile-size determines the output, for example, while searching for mirnas in a small-rnaseq experiment, choosing a tile-size greater than the mature mirna length will result in no matching tiles . thus, optimum tile-size is dependent on the information that is desired and the experiment under consideration.
+
+browser for short read datasets
+the browsing interface  allows the user to identify datasets of interest, by filtering libraries on the basis of organism, type of experiment and type of tissue. the vocabulary for the filtering criteria was created by studying the meta-data provided by the researchers. manual curation was used to classify libraries that have not been properly annotated.
+
+analysis of libraries with a user-supplied sequence
+the primary goal of geoseq is to provide a means of determining how well a sequence of interest is represented in a dataset. users can choose to query against known genes and mirnas or against a custom sequence that they upload. these search sequences are broken up into tiles  and used to query a dataset. the number of times each tile occurs in the dataset of interest is reported back in the form of a lightweight genome viewer graph  <cit>  and corresponding downloadable spreadsheet.
+
+additional features for srna-seq data
+in the case of mirnas, the user can generate a summary report for the library that provides the number of hits in the dataset for all known mirnas in the species. this is useful in characterizing the mirna spectra represented in the library. a complementary feature allows the user to pick a specific mirna and get a listing of all srna-seq libraries that show it expressed.
+
+application of geoseq
+we demonstrate the utility of geoseq by applying it to the exploration of a few short-read sequence datasets.
+
+mrna-seq
+mrna-seq is the deep sequencing of mrna transcripts from cells . this is a primary method for the analysis of known and novel genes and their isoforms  <cit> . geoseq allows the users to select one of the known refseq transcripts or to specify their own sequence and then to visualize the coverage of short reads across it. this allows for measurement of expression across a given transcript and for identification of the particular isoforms that are expressed .
+
+chip-seq
+chip-seq is the deep sequencing of dna bound to proteins that are immunoprecipitated. this is used to enumerate dna-protein interaction sites and to identify specific sequence binding-motifs for dna-binding proteins. geoseq has several indexed chip-seq datasets. the binding of the proteins to dna can be studied, by analyzing dna sequence fragments that might contain potential binding motifs against the indexed libraries on geoseq.
+
+srna-seq 
+srna-seq is the deep sequencing of small rnas  isolated from total-rna, for the purpose of studying the expression patterns of mirnas, pirnas , and other small rna molecules  <cit> .
+
+geoseq allows several kinds of analyses for small rnas.
+
+ <dig>  identify libraries that contain a particular mirna. on picking the experiment type srna-seq, geoseq allows the option of filtering libraries by the occurrence of a particular mirna .
+
+ <dig>  identify expression levels of mirnas in a particular library. after the selection of the library, in the analysis window, geoseq will allow the user to generate summary reports of the mirna expression in the selected library.
+
+ <dig>  identify the mature and star sequences of a mirna. using the profiles generated by geoseq, it is possible to identify the mature and start sequences, as shown in figure  <dig> 
+
+micrornas are small non-coding molecules involved in post-transcriptional regulation, among other possible functions. on transcription, the pre-mirna forms a hairpin, which is processed to a short double-stranded rna . one of the strands, called the mature, is biologically active, while the complementary strand, called the star, is degraded. geoseq holds information  on micrornas, such as their pre-mirna and known mature and star sequences.
+
+identification of mis-annotated micrornas
+we demonstrate the application of geoseq to identify potentially mis-annotated mirnas. geoseq can be used to systematically scan the expression patterns of the pre-mirnas across libraries to detect anomalies. an anomalous, or non-canonical, expression pattern is shown in figure  <dig> which is different from what is normally seen for pre-mirnas as shown in figure  <dig>  non-canonical profiles can potentially signify a mistaken identification of another non-coding rna, such as a snorna  or trna, as a mirna.
+
+we use the following metric to identify several mis-annotated mirnas that we list in table  <dig>  using a tile-size of  <dig> we assign a value to each position, i, equal to the number of occurrences  of the tile starting at that position in the library. if the total of the number in the mature  and number in the star  sequences is less than 95% of the total over the whole primary mirna sequence,
+
+a list of micrornas that have either another potential function or incorrectly identified mature and star sequences. 
+
+these were analyzed by studying the distribution of reads over the pre-mirna. .
+
+   < <dig> *∑ini 
+
+then the mirna is deemed to be potentially mis-annotated. in order to conclusively prove a mis-annotation, we examine the underlying genomic annotations, study the fold structure, and use sno-rna predictions to infer the actual function. an example of this is shown in figure  <dig> for the expression pattern for mmu-mir- <dig> in library srr <dig>  after examining the annotation of that region in the genome browser at ucsc we conclude that this is most likely a trna.
+
+this metric has allowed us to identify several micrornas  whose identification as mirnas probably need to be revisited.
+
+discussion
+geoseq aggregates and organizes libraries of short-read sequencing data allowing users to quickly find datasets of interest and query them using geoseq's tiled-search algorithm.
+
+benefits of the browsing function
+a comparison of the browsing function with the interface provided by sra quickly reveals the advantages of geoseq. searching for the term small rna mouse in the sra interface  <cit> , returns  <dig> libraries. using geoseq's interface, a user can filter for organism and experiment type  and find over  <dig> libraries . these results can be filtered further by tissue type, with the tissue drop-down box populated by existing tissues types for m. musculus and srna-seq in our database. new datasets are continuously being added as they become public. geoseq organizes the meta-data more efficiently, letting the user access and analyze more of the public data. geoseq currently contains small rna libraries for m. musculus, h. sapiens, d. melanogaster and c. elegans . additionally, there is information on over  <dig>  libraries, comprising mrna-seq and chip-seq experiments from a variety of species. the accuracy of the classification and the ability to access these datasets is the result of a manual curation of the libraries. occasionally, the manual curation has resulted in the correct reclassification of some libraries that are imprecisely described in the original meta-data.
+
+comparison of geoseq analysis to existing tools
+the current generation of short-read analysis tools work by building indexes of reference genomes or other target sequences and mapping the short reads to these reference sets. some of these tools include the new burrows-wheeler or suffix-array based tools like soap  <cit> , bowtie  <cit> , and maq  <cit>  and older sequence alignment tools such as blat  <cit>  and blast  <cit> . in all of these tools, the unit of analysis is a single read and each short read is either mapped back to the reference sequence or is discarded. coverage for a target sequence of interest is measured by counting the number of reads that align across it.
+
+the deepbase database http://deepbase.sysu.edu.cn/ is a browser-based tool that lets users browse through deep sequencing datasets  <cit> . deepbase presents some precomputed analyses  and links to relevant papers and snorna predictions . in comparison, geoseq has a more comprehensive collection of libraries and allows more criteria for filtering, and the analyses offered is more versatile, by allowing the users to explore the datasets using their own sequences.
+
+geoseq turns the paradigm of mapping reads to a reference on its head. we build suffix-array indices for each short-read sequencing dataset  and then use a tiling approach to find coverage across a target sequence of interest. our algorithm takes a user specified target sequence and breaks it into smaller substrings  that are independently searched against a short read index. coverage for a target sequence is measured by the number of times each tile is found in the short read index.
+
+specificity and sensitivity are two important variables in estimating target sequence coverage. specificity here corresponds to the number of allowed mismatches in a read-alignment. current short read analysis tools such as blast allow the user to increase the specificity of a search by reducing the number of allowed alignment mismatches. in geoseq, more specific matches can be ensured by increasing the tile-size. sensitivity, in the context of short-read analysis, refers to the ability to pick up more partial matches of short reads to target sequence. in geoseq, reducing the tile-size allows shorter, partial matches and increases the sensitivity . the current short read analysis tools offer no method to modulate sensitivity, as the unit of analysis must always be an individual short read. geoseq's tiled-search approach thus allows a way to simultaneously tune sensitivity and specificity of short-read mapping.
+
+geoseq's tiled-search algorithm also has strong benefits in a web-based environment where speed is of the utmost importance. geoseq indexes short read databases using suffix array algorithms that trade an expensive pre-processing operation for the benefit of fast subsequent searches.
+
+limitations of geoseq
+geoseq is best used for the analysis of small sets of sequences, against a short-read dataset. if large sets of sequences need to be analyzed, or the genomic distribution of the short-read dataset is desired, then it is better to perform the traditional analyses of mapping the short-reads to the genome and using that as the basis of analysis.
+
+the suffix-array indices for short-read datasets consists of many large files . creating and storing public indices en-masse is thus prohibitively resource intensive. we have addressed this by indexing a cross-section of the available data and allowing users to request that particular data be indexed. in addition, the analysis of datasets is memory intensive as each suffix-array must be loaded into ram before it can be queried. to keep the load on the processing cluster manageable, we currently limit the number of datasets the user may query at one time. though there are multiple servers handling analysis requests, the web-based service is still limited by network latency, and the presence of multiple concurrent users may impact the time it takes for results to be returned. the time taken for a single query can range from 30- <dig> seconds, depending on the size of the sequencing library and the input sequence.
+
+CONCLUSIONS
+geoseq has made public datasets available for exploration and analysis. useful datasets can be located using a controlled vocabulary and links are given for accessing the source of the datasets. a subset of these datasets have been downloaded and pre-processed. the pre-processed datasets can be queried with user-supplied sequences. we have demonstrated geoseq's utility by using it to analyze micrornas against several srna-seq libraries, as well as isoform expression in mrna-seq.
+
+we plan to continue improving the classification of libraries, based on user-feedback. in the future, more sophisticated searches, such as those based on mesh terms or on gene expression profiles will be allowed, by preprocessing the sets for mrna expression profiles and adding additional annotations. we do not currently index every library in the public domain due to constraints of space and resources, but we plan to address this incrementally by allowing users to request indexing of particularly interesting data.
+
+availability and requirements
+geoseq is browser-based and publicly accessible through the internet at http://geoseq.mssm.edu. there are no restrictions on academic use. geoseq has been tested on several browsers and works on safari, firefox and internet explorer.
+
+authors' contributions
+rs came up with the general idea, the details were fleshed out by jg. jg programmed the analysis software, the user-interface and several back-end components, ac developed the initial version, as well as the software used to return the results. rs designed the database and several back-end components. rh. independently developed libfid and helped us use it in geoseq. hs helped develop the software and infrastructure. ag helped with comparisons to other tools and applications to public datasets. jg and rs wrote the manuscript. all authors read and approved the final manuscript.
+

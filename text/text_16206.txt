@@ -1,0 +1,84 @@
+BACKGROUND
+the university of california, santa cruz  genome database  <cit>  is one of the most common gateways to access genomic sequence and annotation data of humans and other organisms. besides a web-based genome browser  <cit> , the database is programmatically accessible through three interfaces: the official command-line tools and libraries  <cit> , the distributed annotation system   <cit>  server, and direct access to a public mysql database server. ucsc’s official tools consist of command-line executables and api libraries written in the c language. the c api widely supports the functionality of the database with good performance. these tools and libraries are available at the kent source tree  <cit> . the ucsc das server, which supports previous das version  <dig> , offers a simple interface for programmatic access to the database. however, it has a limitation in supported types of annotations and has disadvantages in its performance. the public mysql server, finally, offers access to almost the same up-to-date database for the genome browser but requires the user to program raw sql statements. given the pervasive use of scripting languages in this field of research, there is a significant demand for simple apis that allow construction of automated queries in these languages. in particular, the ruby programming language has been widely adopted in the bioinformatics domain  <cit> . libraries including bioruby  <cit>  and the ruby ensembl api  <cit>  have shown the value of database apis for ruby.
+
+here, we describe the ruby ucsc api, an api to query the ucsc genome database.
+
+implementation
+object-relational mapping
+the ruby ucsc api is based on the activerecord  <dig> framework—a component of ruby on rails  <cit>  —for the object-relational mapping . a database in the ucsc genome database is represented as a module under the bio::ucsc name space and a table in the database is represented as a class  under the database module. for example, the “snp132” table in the human genome assembly “hg19” database is referred to as bio::ucsc::hg19::snp <dig>  query apis to a table are automatically defined from the database schema as class methods following the activerecord’s method naming convention. for example, if the “snp132” table has a field  “name”, the snp <dig> find_by_name method is readily available. records  are instances of the corresponding table class, for which values of any field can be obtained.
+
+dynamic class definition
+the ucsc database is optimized to serve the genome browser, resulting in a very large number of tables  for which the api has to provide access. furthermore, these database components are updated frequently. static definitions of many table classes would make api code maintenance difficult. therefore, we employed dynamic class definition in the ruby ucsc api. when a table is referred to for the first time, the api fetches the database schema of that table to determine the data types and then creates an appropriate ruby class for that table. this lazy generation of the classes also contributes to accelerate the initialization of this api when compared to having static classes for thousands of tables.
+
+supporting auxiliary flat files
+a subset of the ucsc genome database, including genome sequences, is not stored in the mysql database but needs to be downloaded locally for access. the ruby ucsc api offers methods to access these downloaded genome sequences .
+
+dependencies and environment
+the ruby ucsc api depends on activerecord  <dig> and is designed as a bioruby plugin using the biogem system  <cit> , which organizes rubygems packages and their dependencies for the bioruby library.
+
+the ruby ucsc api is written purely in ruby. this increases the compatibility of the api for various operating systems and implementations of the ruby interpreter. the api currently supports different ruby interpreters including ruby version  <dig> . <dig> or later, ruby version  <dig> . <dig> or later, and jruby  <dig> . <dig> or later.
+
+RESULTS
+features and usage
+database connection
+after loading the ruby ucsc api library , a connection to a database can be established by the ‘connect’ method . while the default connection is made against the ucsc public mysql server, alternative full or partial mirror servers can be used as well . the api can connect to multiple databases simultaneously.
+
+table query
+users can query the database by series of “find” class methods which are dynamically defined for each table class by the activerecord. first of all, find_by_ and find_all_by_ class methods retrieve the first or all matching records, respectively. example queries for the “name” field are shown in line  <dig>  multiple conditions joined by the _and_ operator are also accepted . according to the activerecord’s convention, values of the other fields in a retrieved record can be referred to by using instance methods denoted by the field names .
+
+query by genomic intervals
+a genomic interval can be expressed by a string like “chr1: <dig> - <dig> ” as used in the graphical web interface of the ucsc genome browser . an interval query condition is passed by the with_interval method . this method automatically absorbs the difference of genomic coordinate conventions between intuitive 1-based coordinates and database internal 0-based coding system . the with_interval method allows retrieving all features that are overlapping with the given interval . instead, the with_interval_excl method only returns features that lie completely within the region and features partially overlapping with the region are excluded .
+
+bin indexing system
+to achieve high query performance for large tables, the ucsc database uses a bin indexing system  <cit> . in this system, genomic positions in a chromosome are separated into hierarchies of bins that are sized into 512mbase, 64mbase, 8mbase, 1mbase and 128kbase. any annotation in a genomic interval is stored in the minimum sized bin that encompasses the whole interval. for a genomic interval query, if the target table has a “bin” field, the api automatically calculates a list of bins that potentially contain annotations for the interval and applies the list to generate an sql statement to narrow the target record. this is a key feature of the api because multiple queries for genomic intervals without using the bin index take excessive times, especially for large tables such as dbsnp.
+
+building sql statements
+methods to specify search conditions, such as with_interval, select, where, order, limit and group, can be combined by chaining . when a find method or one of the methods to access arrays  is called for the condition, the constructed sql query is executed and the results are returned .
+
+methods to access information of exons, cdss, and introns
+instances of “genepred” table classes, such as refgene, ensgene, and knowngene, have exons, cdss, and introns methods. these methods return arrays of bio::genomicinterval objects sorted according to the gene strand .
+
+table association
+the joiner schema file describes the links between the tables of the ucsc genome database. the bio::ucsc::schema::joiner.load class method takes an uri of the schema file. if the uri is not given, ucsc’s all.joiner file  <cit>  is used . the format of the joiner file is documented in the kent source tree  <cit> . variables in the joiner file can be overwritten. for example, overwriting the gbd variable that stores whole databases can restrict databases used for the link search . the define_association method takes a table class and defines all the associations of given table . unconnected databases and undefined tables are ignored during definition. linked results are always returned as an array . the table association also can be defined manually. when a record in a table can be joined with a record of another table by sharing the same value , the has_one / has_many methods are used to declare the association . once the table association is declared, a table can refer to the associated table using a method of its record object .
+
+retrieval of genomic sequences
+extraction of genomic sequences in the given genomic intervals is a frequent task. the ucsc genome database does not store the genomic sequences in the mysql databases. instead, they provide the sequences as *.2bit files. these files are usually processed by ucsc’s tools written in c. to improve the compatibility, we implemented the same functionalities in ruby. with the bio::ucsc::file::twobit class, *.2bit files are interpreted in ruby and subsequences can be extracted by the subseq method .
+
+current limitations
+the current version of ruby ucsc api uses information of the joiner schema file to find table associations. the all.joiner file, however, describes additional information of including which tables are chromosome- rather than genome-based, field values that have to be transformed to define table associations, and tables with exceptional structures. in future versions, the api will use this information to make user scripts simpler and to follow database structure updates immediately. so far, manual definition of table associations still has an advantage in performance by minimizing table association definitions, especially in some tables that have complicated associations.
+
+for some tables including subsets of the encyclopedia of dna elements   <cit> , the actual data are not stored in the mysql database itself but are stored as references to bigwig, bigbed  <cit>  and bam  <cit>  files. bigwig and bigbed can be accessed by the ucsc tools in c. bam files can be processed by third-party tools such as samtools  <cit> , and picard  <cit> . to date, the ruby ucsc api does not support these yet, however, users can use the bio-samtools bioruby plugin  <cit>  for these tasks.
+
+existing ucsc apis for scripting languages
+apis for the ucsc genome database using scripting languages are still limited. for perl, the genoman module  <cit>  offers interfaces to databases including the ucsc genome database. for python, the cruzdb library  <cit>  offers an sqlalchemy-based api for the ucsc genome database. the biggest advantage of ruby ucsc api described here is that ruby and the active record framework enable simplified query and retrieved record description. moreover, the ruby ucsc api does not depend on ucsc’s command-line tools. this makes its installation easier and increases interoperability for various environments including a java-based ruby interpreter, jruby.
+
+CONCLUSIONS
+ucsc’s official executables and c libraries are the most comprehensive and fastest api for the ucsc genome database; however, apis for scripting languages still have significant advantages for users because their concern is not only a runtime speed but also a total time required for the programming to obtain the results. the ruby ucsc api offers effective productivity and can therefore have a significant impact in the field.
+
+the ruby ucsc api already supports all organisms in the ucsc genome database . in future releases, more comprehensive supports for new organisms and older or updated genome assemblies will be added.
+
+the ruby ucsc api is freely available as a rubygem package. source code and documentations are also available at https://github.com/misshie/bioruby-ucsc-api/. documentation and feedback are available at the userecho site at http://rubyucscapi.userecho.com/.
+
+availability and requirements
+project name: the ruby ucsc api
+
+project home page: https://github.com/misshie/bioruby-ucsc-api
+
+feedback and help: http://rubyucscapi.userecho.com/
+
+operation systems: platform independent
+
+programming language: ruby
+
+other requirements: ruby interpreter , and activerecord .
+
+license: the ruby license
+
+any restrictions to use by non-academics: none
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+hm and ja conceived the project and implemented the api. tk, rjpb and ky reviewed the api design and implementation. hm, ja, tk, rjpb and ky wrote the manuscript. all authors read and approved the final manuscript.
+

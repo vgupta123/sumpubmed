@@ -1,0 +1,132 @@
+BACKGROUND
+sequence similarity search is an initial choice for structural and functional inference of unknown biological sequences, for which blast  <cit>  is widely used. blast uses an amino acid substitution matrix such as blosum <dig>  <cit>  to score similarities between amino acid pairs. starting from the original blast, it has evolved in several aspects, such as gap treatment  <cit>  and composition-based adjustment  <cit> . using an iterative search, blast  can employ patterns of amino acids varying among homologs and among positions within homologs. it can therefore detect more distant homologs than the original blast does.
+
+the multiple sequence alignment  of closely related homologous sequences detected by blast is expected to contain such homolog-specific and position-specific information. an msa can be transformed into a position-specific scoring matrix , which is a more sophisticated model for sequence similarity search than the substitution matrix because scores for amino acids are modeled for individual positions. iterative search methods including psi-blast  <cit>  construct a pssm from an msa obtained from the previous search. then such methods use the pssm for another similarity search. it has been demonstrated that much more distant homologs can be detected by iterating these steps. because of its usefulness and availability, many modifications have been proposed since psi-blast was first published, including introduction of composition-based statistics, optimizing cache utilization, and revising pseudo-count strategy . overcoming the problem of “homologous over-extension ” also improves the psi-blast accuracy  <cit> . in this study, we describe that psi-blast can be improved further by slightly changing the sequence weighting method.
+
+because sequences in public databases are highly biased into organisms that are medically and commercially important, and because they are easy to culture, it is crucially important to adjust amino acid observations in the msa of homologous sequences before pssm calculation. sequence weight is a straightforward way for attaining such adjustment, where a sequence with more closely related counterparts in the msa should be assigned a smaller weight. psi-blast calculates the position-specific sequence weight  using a procedure derived from the formula proposed  <cit>  as wi=∑j=1l1/rj*naj*l where wi stands for the weight of ith sequence in a msa, r
+j denotes the number of unique amino acids found at the position j, l signifies the length of the alignment, and n
+aj represents the number of amino acids a found at j. after sequences are weighted, the probability of a at j  is calculated as paj=∑i=1nwi∗t, 
+ t=1ifuij=a0ifuij≠a, where u
+ij stands for the amino acid at j in the ith sequence, and n signifies the number of sequences in msa.
+
+this formula lacks the consideration of gaps. simply put, gaps  can be treated as the 21st amino acid. an important problem of this approach is that the weights of gappy sequences in a gappy msa will be underestimated. one can avoid this problem by considering an msa subregion with few or no gaps for pssw calculation. this is expected to be advantageous for dealing with msas constructed from local alignments that are likely to include many gaps. psi-blast defines such blocks for individual positions. psi-blast first selects a subset of sequences  in an msa, such that no gap is included at a position of interest j. psi-blast then collects starting and ending positions of all pairwise alignments between query and subjects in the reduced msa to define the boundary of the block as the starting and ending positions closest to j  <cit> . this approach also has an important limitation: the block width can be extremely narrow, failing to reflect actual evolutionary information.
+
+this study demonstrates that such narrow blocks are created during the pssm construction of psi-blast, which gives rise to inaccurate calculation of pssw and pssm, and which thereby drastically hampers the homology detection performance. we propose a simple method for better pssw calculation, which boosts the psi-blast performance.
+
+implementation
+narrow blocks result in wrong sequence weight calculation
+to exemplify the effect of narrow blocks, we show two artificial msas presented in fig.  <dig>  the msa in fig. 1a  is a subset of aaa atpase msa in the pfam database  <cit> . the msa in fig. 1b  is identical to msa-a except for 10th and 11th sequences, which were derived from the 10th sequence in msa-a by dividing it into two pieces with an overlap at position  <dig>  the two msas were converted to pssms  by psi-blast search against a dummy database with “-in_msa”, “-num_iterations 1” and ‘-out_ascii_pssm’ options.fig.  <dig> examples showing the sequence weight calculation of psi-blast and psi-blastexb. a sequence weights  of all positions in the msa were calculated from a single block covering the whole alignment. b psi-blast divided the msa into three blocks  and calculated sequence weights for each block. sequence weights calculated from the blocks are shown on the right side with the same color. for the orange block that is one aa long, psi-blastexb extends the block such that the block width becomes mbw . weights calculated from the red block are also shown. see methods for detailed procedures. “seq7” has no amino acid at position  <dig>  for that reason, the sequence weights of other sequences are calculated ignoring “seq7” at the position
+
+
+
+
+we checked the inner variables of psi-blast to mark blocks on msa-a and msa-b . a block that covers the whole msa was used for all positions in msa-a because it lacks gaps, whereas three blocks were generated for msa-b, where the block width  at position  <dig> is one . at position  <dig>  the weights of the sequences not only of seq10a and seq10b but also of seq1- <dig> in msa-b deviate drastically from those in msa-a. consequently, at position  <dig> of msa-b, the weighted percentage of alanine, leucine, isoleucine, and serine were equally  <dig> . because when l is one, the number of sequences which have a at j is n
+aj. the weighted probabilities of amino acids are 1/* n
+aj = 1/r
+j. in msa-a, the weighted percentage of those  <dig> amino acids were  <dig>   <dig>   <dig>  and  <dig>  respectively , demonstrating the limitation of psi-blast pssw calculation when the block width is tiny.
+
+block extended psi-blast 
+a simple and direct solution of this problem is to prevent block widths from being narrower than a certain width by exceptionally allowing gaps in the blocks. these gaps might cause the underestimation of gappy sequences in an alignment as discussed above, which however would certainly be a better estimation than the weights calculated for blocks having width of several residues.
+
+the psi-blast source code in the blast+ package  <cit>  was downloaded from the blast ftp site . we revised the psi-blast code and added lines after line  <dig> of ncbi-blast- <dig> .0 + −src/c++/src/algo/blast/core/blast_psi_priv.c, as shown below.
+
+
+
+
+
+it implements the minimum block width , which is “1” in the original code. blocks with widths < mbw are extended front and rear by mbw- <dig> until the termini of the msa. for example, when mbw is  <dig>  the deviated weights of msa-b  became similar to the weights of msa-a . the resulting pssm of msa-b with mbw <dig> is provided as additional file  <dig>  the source code was configured with “--with-bin-release” and “--with-ncbi-public” options and compiled by the make command with no options. we designate the modified psi-blast as psi-blastexb.
+
+benchmark dataset
+the search performance was compared using scop20_training, scop20_validation and cath20-scop datasets, as established in our previous study  <cit> . the scop20_training and scop20_validation datasets were derived from the non-redundant set of  <dig> proteins , which was provided by the astral compendium  <cit> . the  <dig> sequences were divided into two groups for parameter optimization  and performance evaluation . cath20-scop dataset was derived from the cath database  <cit>  excluding sequences in the scop database. the sequences in the datasets were filtered so that the sequences did not have > 20% mutual sequence identity. finally, our dataset included respectively  <dig>   <dig>  and  <dig> sequences. all datasets are available from http://csas.cbrc.jp/ssearch/benchmark/.
+
+pssm construction
+pssms for individual sequences in the benchmark datasets were constructed using psi-blast and psi-blastexb against the uniref <dig> dataset   <cit>  downloaded from the uniprot ftp site . in this study, pssms for iteration x were generated using the following command: psiblast -query < query > −db < uniref <dig> db > −out_pssm < pssm path > −num_iterations < x > −num_alignments  <dig> 
+
+
+
+
+we also extracted an msa consisting of hits from a psi-blast search with “-num_interation 1” option, and used the msa directly to another search against uniref <dig> using the “-in_msa” option, which is an alternative method of running an iterative psi-blast search with an msa instead of a query  or checkpoint pssm .
+
+performance evaluation
+similarity searches were conducted respectively against benchmark datasets using the constructed pssms and msas as queries using the “-in_pssm” and “-in_msa” options. we followed the rule set proposed by julian gough   <cit>  to define true positive  and false positive  hits at the superfamily level. superfamily definitions of the rule set differ from the original ones of scop. the rule set also excludes hits with a potential homologous relation from fps.
+
+to evaluate the performance, we introduced a receiver operating characteristic  curve plot, which has been used widely for performance evaluation  <cit> . hits from all queries were pooled and ranked by their e-values. then tp and fp hits until various e-value thresholds were counted and shown, with weighting of the tp and fp counts by 1/ for each query.
+
+we also calculated the roc <dig> score for hits with e-values less than  <dig> , which indicates the search performance of individual queries using the following equation: roc5=15t∑i=15ti. 
+
+
+therein, t signifies the total tp count; t
+i denotes the tp count until the i-th fp appears  <cit> .
+
+RESULTS
+we first investigated how many narrow-width blocks, which are potentially causing the problem of sensitivity reduction, are generated during psi-blast searches. we therefore measured the distribution of block widths used for individual query positions by psi-blast at the second to eighth iterations for three independent benchmark sets . about 35%, 35%, and 25% of the blocks had widths of less than  <dig> amino acids  at the eighth iteration of scop20_training, scop20_validation, and cath20-scop datasets, respectively. this fact demonstrates that psi-blast produces the narrow-width blocks constantly.fig.  <dig> distributions of block widths used for pssw calculation with varying numbers of iterations. results of searches against scop20_training, scop20_validation, and cath20-scop are presented, respectively, in   and . searches that converged before the eighth iteration were not used. numbers of sequences  used in   and  are, respectively,  <dig> ,  <dig> , and  <dig> . numbers of searches that had not converged before each iteration are provided in additional file 4: table s1
+
+
+
+
+using the scop20_training dataset, we analyzed the psi-blastexb performance with varying mbw values  at the fifth iteration. psi-blast corresponds to psi-blastexb with the mbw of one. as fig. 3a shows, the performance of psi-blastexb is much higher than that of psi-blast across all mbw values. the performances are almost identical when mbw values are  <dig>   <dig>  and  <dig>  and are slightly low when mbw is  <dig>  which suggests that  <dig> aa long blocks are insufficient to calculate the correct pssw. the weighted tp count was highest when mbw was  <dig> at the false discovery rate  of 10%. therefore, we use the value as the default in the following experiments.fig.  <dig> roc curves of psi-blast and psi-blastexb. a roc curves of psi-blast  and psi-blastexb  at the fifth iteration against scop20_training. b roc curves among searches with different numbers of iterations against scop20_validation. narrow, normal, and thick lines respectively show the second, third, and fifth iterations. c roc curves of psi-blast and psi-blastexb at the fifth iteration against cath20-scop. black lines represent fdr of 10%
+
+
+
+
+the performance improvement was also clear for scop20_validation and cath20-scop . however, the performance improvement for cath20-scop was slight compared with those of scop20_training and scop20_validation. that result is consistent with the result of the distributions of block widths. the fractions of narrow-width blocks in cath20-scop are smaller than those of scop20_training and scop20_validation , which is expected because our new method would be of no use if few narrow-width blocks existed.
+
+to observe the relation between performance improvement and the block extension for each query, the incremental roc <dig> scores  are shown against the ratio of positions with one aa long blocks at the second iteration for each query . when the ratio is larger than  <dig> , in other words, when more than 10% of pssm positions are derived from one aa long blocks,  <dig>   <dig>  and  <dig> psi-blastexb searches among  <dig>   <dig>  and  <dig> achieve higher performance than psi-blast searches. only for  <dig>   <dig>  and  <dig> cases are psi-blastexb searches worse, respectively, than psi-blast searches against scop20_training, scop20_validation, and cath20-scop. in contrast, improvement of queries with the ratio less than  <dig>  appears to be more random, although psi-blastexb searches are also effective for many queries with the ratio less than  <dig> . these results show how widening the widths of narrow blocks improves the search performance.fig.  <dig> relations between the roc <dig> score improvement and the fraction of narrow blocks. the x-axis shows /. the y-axis shows the roc <dig> score of psi-blastexb replaced by that of psi-blast. each dot represents the result of a single query. the results of queries which have only one tp hit  were ignored. results of scop20_training , scop20_validation , and cath20-scop  at the second iteration are presented respectively in a, b, and c
+
+
+
+
+psi-blast supports a search using an msa as an input with “-in_msa” option. we constructed msas from the outputs of psi-blast and psi-blastexb to use them as queries for the next search . as fig.  <dig> shows, the performance of psi-blast with “-in_msa” option is distinguishably lower than that of normal psi-blast search with the corresponding number of iterations. from our understanding, when “-in_msa” is used, psi-blast divides a sequence in an msa into multiple pieces if large gaps exist within . therefore, more narrow-width blocks are generated with the “-in_msa” option. block extension by psi-blastexb effectively suppresses performance degradation using msas as queries . therefore, psi-blastexb can facilitate the use of msas prepared in advance as queries, e.g. pfam seed alignments  <cit> , hmm-hmm alignments by hhblits  <cit> , and progressive alignments by mafft  <cit>  for distant homology detection.fig.  <dig> roc curves with “-in_msa” option of psi-blast and psi-blastexb against scop20_validation. thick and narrow lines respectively show roc curves at the fifth and third iterations. the black straight line shows fdr of 10%
+
+
+
+
+we presume that troubles of at least two types can be sources of narrow-width blocks in an msa, although such blocks might also arise from other sources. one is an hoe  <cit>  related problem. we present an example of this phenomenon in fig.  <dig>  when multiple conserved regions  exist in a query, narrow-width blocks are likely to be included in the resulting msa attributable to overlaps between extended non-homologous residues flanking a conserved region and an adjacent conserved region. mainly, this is a query-dependent problem. some solutions have been proposed  <cit> . the other is an issue of the sequence library. as shown in fig. 1b, fragmented sequences in libraries can produce narrow-width blocks caused by their overlaps. therefore, dividing queries such that each query has only one conserved region or removing fragmented sequences from the library should be workarounds to reduce the number of narrow-width blocks. however, the practical applications of these procedures might require further consideration . consequently, our simple adjustment of the sequence weight algorithm is a more practical way of handling narrow-width blocks in a msa produced by psi-blast.fig.  <dig> schematic representation of narrow-width block generation by hoe. when we performed a psi-blast search  <cit> , at the ncbi website, of a protein sequence  that contains two conserved domains  against the uniprotkb/swiss-prot database  <cit> , we found that a hit  consisting of a single-domain protein  with hoe  has an overlap with another hit  matched only to the domain of pf <dig>  resulting in a  <dig> aa-long block 
+
+
+
+
+CONCLUSIONS
+because of sequence weighting scheme limitations, the psi-blast performance has been penalized until now. we developed a customized psi-blast, designated as psi-blastexb, which solved such problems with extremely simple modification of the psi-blast code. psi-blastexb significantly outperformed psi-blast. therefore, it is expected to be useful not only for distant homology search, but also for many downstream methods that depend on psi-blast with trivial effort.
+
+additional files
+
+additional file 1: the ascii pssm file made from msa-a using psi-blast. 
+
+ 
+additional file 2: the ascii pssm file made from msa-b using psi-blast. 
+
+ 
+additional file 3: the ascii pssm file made from msa-b using psi-blastexb with setting minimum block width as  <dig>  
+
+ 
+additional file 4: table s <dig>  the number of searches which were not converged before each iteration of psi-blast. 
+
+ 
+
+
+abbreviations
+aaamino acid
+
+fdrfalse discovery rate
+
+fpfalse positive
+
+hoehomologous over-extension
+
+mbwminimum block width
+
+msamultiple sequence alignment
+
+pssmposition-specific scoring matrix
+
+psswposition-specific sequence weight
+
+rocreceiver operating characteristic
+
+tptrue positive
+
+electronic supplementary material
+
+the online version of this article  contains supplementary material, which is available to authorized users.
+

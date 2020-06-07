@@ -1,0 +1,282 @@
+BACKGROUND
+the most important and the most frequently used algorithms in computational biology are probably the needleman-wunsch  <cit>  and the smith-waterman  <cit>  algorithms for global and local pairwise alignments of dna  sequences, respectively. these algorithms are based on dynamic programming. as a result, one gets an optimal alignment, but the approach requires a lot of time and memory. the problem becomes more serious when pairwise alignments have to be computed for a set of thousands of sequences . a natural extension of the pairwise alignment is a multiple sequence alignment  problem, which is much more complex. theoretically, the msa problem can be also solved by dynamic programming, but it was proved that for a sum-of-pairs score this problem is np-hard  <cit> . thus, heuristic approaches are frequently used . the most common ones, based on the so called progressive algorithm, require the alignment of every input sequence pair. sometimes, such pairwise alignments are performed with highly specialized methods like in case of  <cit> , but often it is the needleman-wunsch or smith-waterman algorithm  <cit>  resulting in time-consuming methods. hence, the increasing number of sequences is perceived as one of the upcoming challenges for the msa problem in the nearest future  <cit> .
+
+recently, modern graphics processing units  have been widely exploited for solving many bioinformatic problems. an example may be the problem of scanning databases for sequences similar to a given query sequence. a few efficient implementations addressing this problem have been developed . however, it should be stressed that scanning a database is considerably different from aligning every possible pair of sequences from a given input set. both problems, seemingly the same, vary in many aspects, especially in case of low-level gpu optimizations. moreover, it is worth noting that all the methods mentioned above compute only the alignment score, not the alignment itself. yet, many real-life applications require also the alignment to be computed. one of the known approaches, by khajeh-saeed a. et al.  <cit> , partially solves this problem but the application has been designed for a very specific benchmark. additionally, the method adopted for backtracking procedure is not clear and not very efficient either. hence, the software is not applicable in practice, e.g. to the msa or the dna assembly problem. however, the idea presented by liu y. et al.  <cit>  seems to be a quite successful approach to the former of these two problems. the proposed solution uses the myers-miller algorithm  <cit>  to compute the alignment. the main advantage of this algorithm is the possibility of aligning very long sequences as the backtracking procedure works in linear space. the main drawback, on the other hand, is the necessity of conducting additional computations - the backtracking routine has quadratic computational complexity here. but yet, many practical applications require dealing with a large number of short sequences, e.g.  <cit> . in these problems a special emphasis should be put on efficient processing without any redundant or repeated computations and not necessarily on saving memory.
+
+the main goal of this work derives from the discussion above. it is a construction of gpu-based dynamic programing algorithms for pairwise alignment. one difference between our approach and the previous ones is that we have optimized the algorithm for aligning every sequence with each other from a given input set. the second difference is that our method, unlike others, performs the backtracking procedure in linear time. although special data structures are used here, no redundant computations are needed. in contrast to the myers-miller algorithm, it was designed for the gpu architecture. moreover, the three basic pairwise alignment algorithms, i.e. local, global and semiglobal, differ only in details, so all of them have been implemented. as a result we got a valuable tool for multi-sequence pairwise alignments which is fast and can be run on a common personal computer equipped with nvidia gpu . extensive computational tests show its advantage over cpu-based solutions like the emboss package or the highly optimized farrar's implementation. moreover, our task manager is able to use more than one gpu. performed tests show that the multi-gpu support influences the execution time considerably.
+
+gpgpu and the cuda programming model
+there are a few substantial differences between cpu and gpu architectures that make a gpu a more powerful tool for some applications. the same differences cause some difficulties in programming of graphics cards. firstly, gpus have many more cores, which are the main computational units, e.g. nvidia geforce  <dig> has  <dig> cores. secondly, there is much less cache memory available on the gpu. moreover, the cache memory on the graphics card is not managed automatically, but by a programmer.
+
+such an architecture gives opportunities to utilize the hardware more efficiently. on the other hand, writing parallel algorithms on gpu is more time-consuming, because it requires in-depth knowledge and understanding of the hardware. as a result the algorithm can be much faster than its cpu version. although there are a few gpgpu  technologies like ati stream  <cit>  or opencl  <cit>  on the market, one of them - cuda  <cit> , is a bit more established than others. our implementation of alignment algorithms was done using this technology. the cuda environment is an extension of c/c++ programming languages which enables programmers to access the resources of the gpu.
+
+to understand the essentials of cuda, one has to be aware of different types of available memory. the main differences between these memory types have been shown in table  <dig>  the proper usage of memory is the key to good performance. however, not only the type of memory used is important, but also their correct usage. different kinds of memory have different access patterns. it means that for instance, the order of reading/writing data can be also crucial  <cit> . because ram  is much slower than the memory on the chip, most of the cuda programs follow this simple rule: fetched data from the global memory is processed locally as much as possible, using registers, shared memory and caches, then the results are written back to the global memory. in this way one can limit expensive data transfers from or to the global memory.
+
+differences between memory types in cuda . for more information see cuda best practices guide  <cit> .
+
+another significant property of cuda-enabled graphics cards is that the gpu consists of many multiprocessors and each multiprocessor has a number of cores working as one or more simt  units. one such unit is able to execute one and only one instruction at the same time, but in many threads and on various parts of data. as a result, during the process of designing an algorithm, one must take this into consideration.
+
+being conscious of the architecture described briefly above, one can design and implement alignment algorithms efficiently.
+
+algorithms for pairwise sequence alignment
+there are three basic algorithms for performing pairwise sequence alignment: needleman-wunsch  <cit>  for computing global alignment, its modification for semiglobal alignment and smith-waterman  <cit>  for computing local alignment. all these algorithms are based on the idea of dynamic programming and to some extent work analogically. taking into consideration gotoh's enhancement  <cit> , the algorithms are described briefly below.
+
+let us define:
+
+• a - a set of characters of nucleic acids or proteins,
+
+• si - the i-th sequence,
+
+• si ∈ a - k-th character of the i-th sequence,
+
+• sm - substitution matrix,
+
+• sm - substitution score for ci and cj pair,
+
+• gopen - penalty for opening a gap,
+
+• gext - penalty for extending a gap,
+
+• h - a matrix with partial alignment scores,
+
+• e - a matrix with partial alignment scores indicating vertical gap continuation,
+
+• f - a matrix with partial alignment scores indicating horizontal gap continuation,
+
+needleman-wunsch algorithm
+to compute the alignment of two sequences, the algorithm  has to fill the matrix h according to the similarity function. the similarity function determines a score of substitution between two residues. this relation is given in a substitution matrix, like one from blosum  <cit>  or pam  <cit>  families. the matrix h also takes gap penalties into account, described by gopen and gext. the size of the matrix h is  × , where n is the number of residues in the first sequence s <dig> and m - in the second sequence s <dig> 
+
+the matrix h is filled using the following formulae:         
+
+where i =  <dig> ..n and j =  <dig> ..m.
+
+the first row and the first column are filled according to the following formulae:      
+
+moreover, the e and f matrices are initialized by putting -∞ value into the first row and column. the result for this part of the algorithm is the value of similarity, so called score. let us denote the coordinates of the cell with the similarity score by . in case of the nw algorithm, this value can be found in the h cell of the matrix h.
+
+the goal of the second stage - backtracking, is to retrieve the final alignment of two sequences. the idea of backtracking is that the algorithm performs backward moves starting from the  cell in the matrix h until it reaches the  cell. every time when the algorithm moves to the upper cell, a gap character is inserted into the sequence s <dig> in the final alignment. if the algorithm moves left, a gap is added analogically to the sequence s <dig>  and finally the diagonal move means that the corresponding residues are aligned. the backtracking procedure is deeply analyzed in section "the idea of backtracking procedure and gpu limitations".
+
+the semiglobal pairwise alignment
+a semiglobal version of dynamic programming for pairwise alignment differs from the previous one in three points. the first one is the way how the matrix h is initialized. for semiglobal alignment the formulae  and  should be replaced respectively by:      
+
+the second difference concerns the coordinates of the cell where the similarity score can be found in the matrix h. for semiglobal alignment this cell is the one with the highest value from the last row or column of the matrix h.
+
+the last difference involves the stop criterion for the backtracking procedure. in this case backtracking is finished when the cell  or  is reached, where k =  <dig>  ..., n and l =  <dig>  ..., m.
+
+smith-waterman algorithm for the local pairwise alignment
+the smith-waterman algorithm  also differs from the needleman-wunsch algorithm in three points. the first one is again the way of initializing the matrix h. the initializing values should be the same as in the semiglobal version of the algorithm.
+
+the second difference concerns the formulae describing the process of filling the matrix h. the formula  should be replaced by the following one:   
+
+where i =  <dig> ..n and j =  <dig> ..m.
+
+the next difference covers the coordinates of the cell with the final score for the local alignment. in this case the  cell is the one with the highest value within the entire matrix h.
+
+the last difference concerns the stop criterion of the backtracking procedure. the smith-waterman algorithm is finished when a cell with zero value is reached.
+
+implementation
+the idea of backtracking procedure and gpu limitations
+to obtain the alignment efficiently four boolean matrices have been defined in our approach, each of size  × . the purpose of these matrices is to indicate the proper direction of backward moves for the algorithm being at a certain position during the process of backtracking. although their memory usage is quadratic, the advantage is that they enable to perform the backtracking procedure in a linear time, in contrast to the mayers and miller's idea.
+
+the backtracking matrices are defined as follows:
+
+• cup - indicates whether the algorithm should continue moving up,
+
+• cleft - indicates whether the algorithm should continue moving left,
+
+• bup - indicates whether the algorithm should move up, if it does not continue its way up or left,
+
+• bleft - indicates whether the algorithm should move left, if it does not continue its way up or left.
+
+two special cases should be stressed:
+
+• if cup = false, cleft = false, bup = true and bleft = true then the algorithm should move to the diagonal cell in the up left direction,
+
+• if cup, cleft, bup and bleft have logical value false then the backtracking procedure is finished.
+
+in the case of global and semiglobal alignment algorithms, the matrices are filled according to the following formulae:            
+
+the additional condition of hi,j ≠ ei,j in the formula , as compared to the formula , prevents the algorithm from an ambiguous situation, when both directions, up and left, are equally good. in this case, to avoid non-deterministic behavior, the algorithm should prefer only one, predefined direction.
+
+for the local alignment algorithm, the cup and cleft matrices are filled according to formulae  and , respectively. however, the bup and bleft matrices are filled using the following formulae:      
+
+an important issue, one should take into consideration, is that during the process of filling the matrix h any cell value can be computed only if the values of the left, above and diagonal cells are known. it means that only these cells that are on the same anti-diagonal can be processed simultaneously. as a result, there is not much to parallelize  in a single run of nw or sw algorithm. however, progressive multiple sequence alignment algorithms require aligning of many sequences . our idea was to design an algorithm for efficient execution of many pairwise alignment instances running concurrently. to utilize the gpu resources properly one has to load it with a sufficient amount of work. to fulfill this requirement at least  <dig> ×  <dig> nw/sw instances should be computed concurrently . the problem to overcome was that the amount of available ram on graphics cards was, for this purpose, relatively small . in fact, the h, e and f matrices do not have to be kept entirely in ram . however, the backtracking tables  must be kept in the global memory. hence, they would take a lot of memory space if they were held in normal c/c++ boolean arrays, e.g. for sequences with lengths of  <dig> residues one would need  <dig> ×  <dig> ×  <dig> ×  <dig> bytes i.e.  <dig>  mb only for backtracking arrays. thus, a special emphasis has been put to make this figure smaller, so that the algorithm can be run on any cuda-capable device.
+
+implementation of the algorithms
+all the algorithms in our implementation, namely the nw algorithm, its semiglobal version and the sw algorithm, have a few input parameters such as a substitution matrix, gopen and gext values, a file in fasta format with sequences to be aligned, etc. when the algorithm is launched, it performs an alignment of every given sequence with each other. the result of the algorithm consists of the score and the alignment for each pair of sequences.
+
+let s be the set of input sequences. the total number n of sequences' pairs to be aligned is given by the following formula:   
+
+because the problem of aligning many sequences simultaneously is a memory-consuming task, it has been split into subproblems. the whole matrix of tasks, where a single task is a pairwise alignment, was divided into smaller matrices, called windows . the size of each window, denoted by window size, is a trade-off between the amount of global memory required and the number of tasks running concurrently. obviously, the global memory is limited and the number of tasks running concurrently is directly connected with the efficiency. performed tests showed that a good value for the window size parameter is  <dig> - this number can vary depending on the hardware. the vast majority of memory allocated by the algorithm is used for backtracking matrices. therefore, one of the most significant problems was to store them properly. it is crucial to pack backtracking matrices into as small memory space as possible. to achieve this, any single cell of previously defined boolean matrices  is represented by one bit. hence, in one 32-bit memory word, a total of  <dig> values can be stored. these enhancements, i.e. windowing and backtracking matrices with their binary representations, enable the algorithm to run on any cuda-capable device.
+
+one window can be considered as a grid consisting of constant-sized blocks, as shown in figure  <dig>  any single window is executed entirely on one gpu. many windows, though, can be executed on many different gpus. the block size is set to  <dig>  because of our low-level optimizations of the algorithm. it means that in one block there are  <dig> ·  <dig> =  <dig> threads. each thread is responsible for aligning one pair of sequences. although the window size value must be divisible by the block size, the algorithm ensures that all input sequences will be aligned, despite of their number. execution of a block is over if its last thread finishes. hence, to fully utilize the hardware resources, the lengths of all of the sequences within a block should be similar. the same applies to any window and its blocks. therefore, the input sequences are sorted from the longest to the shortest one in the preprocessing step. this enhancement improves the algorithm performance significantly.
+
+all alignment algorithms are divided into two main procedures, called kernels. the first kernel computes the alignment score and fills the backtracking matrices, the second one performs the backtracking stage. in the first kernel every thread fills its h, e and f matrices as well as its backtracking arrays cup, cleft, bup, bleft horizontally. in each iteration a total of eight cells are computed, as shown in figure  <dig>  the global memory is accessed at the beginning of the iteration  and at the end . a pair of h and e elements are stored together as one 32-bit word.
+
+also the elements of backtracking arrays are stored in a 32-bit word - eight elements in each of four matrices give totally  <dig> bits. moreover, one can notice that the elements of the matrix f do not have to be transferred from/to the global memory, because they can be stored in the fast, shared memory. although utilization of the shared memory greatly speeds up the algorithm, not all the solutions, e.g. manavski et al.  <cit> , leverage its potential. additionally, in our implementation the elements of the substitution matrix are stored in the constant memory and the sequences are stored as a texture. as a result, to process eight elements of the dynamic programming matrix one 32-bit word is read from the slow, global memory and two 32-bit words are written back. apart from this all the operations are performed using registers, shared memory, cached constant memory and textures. the pseudocode of the first kernel has been shown in figure  <dig> 
+
+the idea of processing the dynamic programming matrix in vectors of eight elements in the first kernel is similar to the one proposed by liu y. et al. in cudasw++  <cit> . however, cudasw++ kernel performs a database scan and, as such, takes advantage of storing the query sequence in the constant memory what results in significant performance boost. this idea was further exploited in cudasw++ <dig>   <cit>  by using so called query profile. these improvements are not applicable for our solution in which there is no single query sequence that could be effectively shared across all the threads.
+
+the second stage of the algorithm - backtracking, is executed by the second kernel. also in this case, one thread is responsible for processing of only one alignment. the kernel starts from the  cell, computed in the first stage, and performs the up, left or diagonal moves, depending on the backtracking matrices, until the stop condition is fulfilled. when the algorithm moves up, the elements of cup, cleft, bup and bleft matrices do not have to be read from the global memory, because in most cases, they are already in registers - one 32-bit word contains the information about eight elements of backtracking arrays. however, when the algorithm moves left or diagonal, one word is read from the global memory. this kernel, launched in grids of blocks, produces the final alignments of every sequence with each other. its pseudocode has been shown in figure  <dig>  the second stage of the algorithm is very quick and usually comprises less than  <dig> percent of total runtime.
+
+the advantage of using the backtracking arrays is that the backtracking stage can be performed very quickly in a linear time leading to very good solutions for short and medium-length sequences. however, its main drawback is quadratic memory complexity, discussed in section "the idea of backtracking procedure and gpu limitations". thus, the question is: what is the length of the longest sequences that can be processed by our program? table  <dig> shows the maximum lengths of sequences, that can be aligned by the algorithm, depending on the amount of ram available on the graphics card and the value of window size parameter. e.g. to utilize the resources of the geforce gtx  <dig> with  <dig> gb of ram properly, it is sufficient to set window size parameter to  <dig>  it means that the input sequences, regardless of their number, can be as long as about  <dig> residues each. processing of longer sequences is also possible, but the window size parameter should be decreased, e.g. the proper window size value for sequences with the length of  <dig> residues is  <dig>  although this change will have an influence on the overall performance of the algorithm, its speed may be still satisfactory. taking this into consideration, we can conclude that the algorithm can process sequences with reasonable length. on the other hand, while aligning short sequences, one can try to increase the value of window size. this may improve the algorithm's performance.
+
+estimated length of the sequences that can be processed by the algorithm depending on the amount of the global memory  and the window size parameter.
+
+bearing in mind, that nowadays many computer systems are equipped with more than one graphics card, we have designed and implemented a multi-gpu support. to ensure that all graphics cards used are equally loaded with work, regarding to their individual speeds, we have also implemented a task manager. its role is to balance work among available gpus. first, it sorts the tasks  in descending order of their estimated complexity. then, the tasks are assigned consecutively to any gpu that becomes idle. this type of scheduling, i.e. largest processing time first , although not optimal, ensures that the upper bound of execution time is equal to , where topt is the optimal execution time and m - number of processing units  <cit> . in practice, applying lpt rule results in very good run times.
+
+RESULTS
+the main goal of this section is to compare the performance of the algorithm to other state-of-the-art approaches. however, before proceeding to the actual tests, the measure of cell updates per second  should be well understood. the measure represents the average time needed to compute one cell in the matrix h, including the time of all side operations like computation of the values in the e and f matrices or performing the backtracking procedure. in practice, the number of computed cells in the matrix h is divided by the overall runtime of the algorithm. in our case it is:   
+
+where n is the number of input sequences, lengthi is the length of the i-th sequence, t represents the time in seconds and the result is given in giga  cups.
+
+it should be stressed, however, that this measure underestimates the performance of the algorithms with a backtracking routine, because while the number of cells in the matrix h does not change, the time needed by backtracking is added.
+
+the first implementation of the sw algorithm taking advantage of cuda-capable gpus has been developed by manavski s. et al.  <cit> . the sw-cuda algorithm running on two nvidia geforce 8800gtx graphics cards achieves its peak performance of about  <dig>  gcups. another approach, developed by ligowski l. et al.  <cit> , with optimized shared memory usage was able to achieve up to  <dig>  gcups using one and up to  <dig>  gcups using both gpus of the geforce  <dig> gx <dig>  the cudasw++ implementation by liu y. et al.  <cit>  achieves a performance close to  <dig> gcups on a geforce gtx  <dig> graphics card and up to  <dig> gcups on a dual-gpu geforce gtx  <dig>  this approach has been further explored by its authors resulting in optimized simt and partitioned vectorized algorithm cudasw++  <dig>   <cit>  with an astonishing performance of up to  <dig> gcups on a geforce gtx  <dig> and  <dig> gcups on a dual-gpu geforce gtx  <dig>  in the meantime also a couple of solutions addressing the cell/be  <cit>  or fpga  <cit>  processors have been developed, all showing a great potential of new computing architectures. however, all implementations mentioned above solve a different problem - they perform a database scan, which is an easier problem to optimize for a couple of reasons, e.g. the query sequence may be kept all the time in fast on-the-chip memory. moreover, all mentioned approaches concentrate on computing only the alignment score, not the alignment itself.
+
+in search for an application to which our algorithm could be compared, we have come across the khajeh-saeed a. et al. solution  <cit> . this application, in one of its configurations, is able to perform the sw algorithm together with the backtracking stage and moreover apply this for any possible pair of sequences from a given input set. thus, it is quite similar to our algorithm, but its performance is rather poor. tests shown in the article indicate a performance of around  <dig>  gcups for a geforce gtx <dig> and about  <dig>  gcups for four such graphics cards. another application that performs the same computations is msa-cuda  <cit> . to be more precise, the first step of implemented clustalw algorithm requires every input sequence to be aligned with each other. unfortunately, the authors have not reported how fast this step is. only the overall msa times have been presented. moreover, although the algorithm of myers and miller has been applied as a backtracking routine, sequences up to only around  <dig> residues have been tested in the article. because the application is not available, we could not include it in our comparison. since the number of state-of-the-art applications performing a backtracking procedure is very limited, we have decided to compare our algorithm to score-only implementations. in order to make them more similar to our approach, the score in a reference application should be calculated for any pair of sequences from a given input set. this assumption, however, ruins the performance of all gpu-based database scan solutions. in this case, they would have to be launched n -  <dig> times, where n is the number of input sequences, each time with decreased size of the database. obviously, a good parallelism with a small database cannot be obtained for these algorithms. hence, it would be unfair to include such tests in the paper. instead, we decided to make use of a well-established algorithm of farrar m.  <cit>  which is a cpu-based, highly optimized database scan method. yet, because a single run of the smith-waterman algorithm for two sequences is parallelized here, it can be easily modified into a version that computes a score for each pair of sequences without any loss of its performance. a detailed description of such a modification is provided is the next subsection.
+
+comparison to the farrar's implementation
+in this test our algorithm is compared to the farrar's implementation of the smith-waterman algorithm  <cit> . farrar's approach utilizes the set of sse <dig> instructions available in modern cpus which makes the algorithm very efficient. the strength of the method does not rely on the great number of input sequences which can be processed simultaneously, but on simd operations performed within a single run of the sw algorithm. therefore, the algorithm could be easily converted from scanning a database to computing scores for each pair of sequences from a given input set. all changes needed were made in the source code, so that the application does not have to be launched many times. special tests were conducted to assure that the performance of the algorithm  has not been affected.
+
+for testing purposes we used the ensembl databases - release  <dig>  <cit> , which contains genomic information regarding selected vertebrate species. all tests were performed on randomly selected subsets of sequences from the homo sapiens translation predictions.
+
+in order to see if the performance of the algorithms depends on the length of the sequences, the input data was divided into six groups with different average lengths:  <dig>   <dig>   <dig>   <dig>   <dig> and  <dig> amino acids. moreover, for each group three sets with different number of sequences are considered to see if their number has any significant impact on the performance. the substitution matrix  as well as gap penalties  were fixed the same for all tests.
+
+the tests were run on the following hardware:
+
+• cpu:  <dig> × intel xeon e <dig>   <dig>  ghz,
+
+• gpu: nvidia tesla s <dig> with  <dig> gb of ram,
+
+• ram:  <dig> gb,
+
+• os for our algorithm: 64-bit linux,
+
+• os for farrar's method: 64-bit microsoft windows  <dig> 
+
+each algorithm was launched with each input data ten times. table  <dig> presents the average execution times measured in seconds whereas table  <dig> shows the performance in gcups. the standard deviation values σ have been omitted, because they do not give any significant information . additionally, our algorithm has been tested in one and four gpu configurations, respectively.
+
+mean times  for the smith-waterman algorithm applied to different sets of sequences. average lengths of sequences as well as cardinality of sets are given. the farrar's implementation computes only scores while our gpu-based implementation computes scores and alignments.
+
+mean values of gcups  for the smith-waterman algorithm applied on different sets of sequences. the gcups value is mainly used for score-only versions of the algorithm. here, the performance of the gpu-based method is understated, because the value does not count in any additional operations  needed by the backtracking stage while the entire computational time is always considered.
+
+the performance of the farrar's algorithm grows significantly with increasing sequence length, reaching around  <dig>  gcups for the sets with the longest sequences. in contrast, our algorithm with the performance of about  <dig>  gcups seems to be insensitive to the sequence length. its speed slightly decreases only for the groups with long sequences . the reason behind this is that longer sequences require more global memory and thus the value of the window size parameter needs to be reduced. this corresponds directly to the number of tasks running in parallel. hence the slowdown.
+
+farrar's solution, that has been used in this test, uses only one cpu core, but obviously we can expect a speedup close to linear if all cpu cores were used. however, our approach is also scalable - the execution times drop by a factor of nearly four when all four gpus are used and the algorithm reaches up to  <dig>  gcups. the number of input sequences does not affect the performance of farrar's approach and it was high enough to have no influence on the performance of our algorithm. we can conclude that for sequences of average length  both implementations run comparably fast, but the gpu-based algorithm tends to be much faster when short sequences are processed. moreover, it is worth noting that our algorithm additionally performs the backtracking step and computes the actual alignments of the sequences.
+
+the speedup is much higher if the algorithm is compared to the one presented by khajeh-saeed a. et al. in  <cit> . up to our knowledge this is the only gpu-based solution addressing the same problem where the performance is reported. our approach is about  <dig> and  <dig> times faster for one and four graphics cards, respectively.
+
+time comparison to the emboss implementation
+apart from comparison to the state-of-the-art solutions, we decided to compare the algorithm to the implementation available in a popular package with bioinformatics tools - the emboss  <cit> . the input sequences were also chosen from the ensembl databases - release  <dig> . we tested ten sets of sequences, each containing  <dig> entries with lengths between  <dig> and  <dig> amino acids. the execution times of our nw and sw algorithms' implementations were compared with needle and water programs, which are available in the emboss package. the needle program performs semiglobal alignments using the nw algorithm, the water program computes local alignments using the sw algorithm. these programs have been designed for aligning one sequence with a set of sequences. instead of changing the source code, a special shell script was prepared that allows to align every sequence with each other. as a side effect, the programs from the emboss package had to be launched  <dig> times. in order to make the comparison reasonably fair their execution times have been reduced appropriately. we prepared a set of  <dig> sequences with lengths equal to  <dig>  then, we measured the execution times of the programs from the emboss package for this special set. the times were subtracted from the execution times of the test cases containing real sequences. it is worth noting that needle and water programs work using one cpu thread. obviously, the nw and sw algorithms are deterministic - they always find the optimal solution. therefore, there is no need to compare the quality of the results.
+
+the tests were run on the following hardware:
+
+• cpu: intel core  <dig> quad q <dig>   <dig>  ghz,
+
+• gpu: nvidia geforce gtx  <dig> with  <dig> gb of ram,
+
+• ram:  <dig> gb,
+
+• os: 64-bit linux.
+
+each algorithm was run ten times . figure  <dig> shows the average execution times measured in seconds. the standard deviation values σ have been omitted, because they do not give any significant information .
+
+the average times of computation for the needle and water programs were  <dig> and  <dig> seconds respectively , whereas the times for our implementation were as follows:  <dig>  seconds for the nw and  <dig>  seconds for the sw algorithm. thus, the gpu implementation of the semiglobal version of nw was about  <dig> times faster than the cpu-based needle. in case of the sw algorithm the difference was even higher: the gpu version was about  <dig> times faster. to show this relationship properly, the scale of the time axis in figure  <dig> is logarithmic.
+
+multi-gpu test
+the multi-gpu test was performed to see how the time of the computations depends on the number of graphics cards used. the sets of input sequences were the same as in the case of the test from section "comparison to the farrar's implementation".
+
+the tests were run on the following hardware:
+
+• cpu:  <dig> × intel xeon e <dig>   <dig>  ghz,
+
+• gpu: nvidia tesla s <dig> with  <dig> gb of ram,
+
+• ram:  <dig> gb,
+
+• os: 64-bit linux.
+
+the smith-waterman algorithm was launched using one, two, three and four gpus in turn. the algorithm was run ten times for each input set and the mean values of the computational times are shown in table  <dig>  to make the comparison easier, we added the columns with speedups. the execution times of the algorithm were nearly two times shorter for two graphics cards, nearly three and four times shorter when using three and four graphics cards, respectively. this shows that using more than one gpu one can gain almost linear speedup.
+
+mean computational times  of the sw algorithm depending on the number of gpus used. the algorithm was run on tesla s <dig> in u <dig> rack case containing four graphics cards. the speedup refers always to the one gpu configuration.
+
+to see if the same applies to the nw algorithm and its semiglobal version, we prepared a simple test. the input sequences were taken from the ensembl databases - release  <dig> and the set of sequences contained  <dig> entries with lengths between  <dig> and  <dig> amino acids.
+
+all three algorithms, namely global and semiglobal versions of the nw, and the sw algorithm, were launched using again one, two, three and four gpus, respectively. each algorithm was run ten times and the mean values of the computational times as well as the speedups are shown in table  <dig>  the execution times of the algorithms strongly depend on the number of gpus and the obtained speedup is almost linear. note that in our implementation multi-gpu support with load balancing works for each alignment algorithm.
+
+mean computational times  for  <dig> input sequences depending on the number of gpus used. the algorithms were run on tesla s <dig> 
+
+number of sequences needed to load the gpu
+according to gustafson's law  <cit> , to gain a good speedup on a parallel system, the problem instances have to be sufficiently large. to investigate how large the problem instances must be, the following test was designed. each dynamic programming algorithm was launched for different problem sizes. the smallest instance consisted of  <dig> randomly selected sequences from the ensembl databases - release  <dig> . each subsequent instance contained additional  <dig> sequences, the largest instance had  <dig> sequences. the lengths of the sequences varied between  <dig> and  <dig> amino acids. the adopted measure was the average time needed to compute a single alignment of two sequences. to be more precise, the time needed to perform all alignments for a given problem instance was measured and then divided by the total number of computed alignments. the goal was to determine the minimal number of input sequences that could guarantee good performance.
+
+the tests were run on the following hardware:
+
+• cpu: intel core  <dig> quad q <dig>   <dig>  ghz,
+
+• gpu: nvidia geforce gtx  <dig> with  <dig> gb of ram,
+
+• ram:  <dig> gb,
+
+• os: 64-bit linux.
+
+the reasonable times of  <dig> ,  <dig>  and  <dig>  ms, respectively, have been achieved for an instance with  <dig> sequences. the chart is limited to the maximum instance size of  <dig> sequences, because the curve almost reaches its asymptote. for an instance of this size the times were  <dig> ,  <dig>  and  <dig>  ms, respectively. all three algorithms needed only around  <dig>  ms if  <dig> sequences were processed. although further incrementing of the problem size resulted in some decreases in time, the benefits were not considerable. it means that even for relatively small instances the algorithms were able to gain a good speedup.
+
+test on the fermi architecture
+the algorithm was designed during the time when only the g <dig> and the gt <dig> gpu architectures were available on the market. however, recently a new architecture, called fermi  <cit> , has come along. hence, we set out to check if the application can benefit from a doubled number of cuda cores that are on the new chips.
+
+the sets of input sequences were the same as in the case of the test from section "comparison to the farrar's implementation". only the longest sequences were excluded, because of more limited memory on the graphics cards.
+
+the tests were run on the following hardware:
+
+• cpu: intel core i <dig>  <dig>   <dig>  ghz,
+
+• gpu: 2× nvidia geforce gtx  <dig> with  <dig>  gb of ram,
+
+• ram:  <dig> gb,
+
+• os: 64-bit linux.
+
+each method, i.e. the sw algorithm as well as the nw algorithm and its semiglobal version, was launched ten times for each input data. table  <dig> presents the average performance measured in gcups. the standard deviation values σ were insignificant  and hence omitted. additionally, the table includes the performance of the previous generation architecture - gt <dig>  represented here by one gpu from the tesla s <dig> .
+
+mean performance  for different versions of the algorithm running on two architectures: gt <dig>  and fermi . the columns with speedup always refer to the configuration with one gt <dig> gpu.
+
+the test shows that with the fermi architecture the performance of the algorithms increases by a factor of nearly two, especially for short sequences. in case of longer sequences this dominance is slightly reduced, because only  <dig>  gb of ram was available on our fermi graphics card whereas one tesla has  <dig> gb. obviously, fermi gpu with  <dig> or  <dig> gb of memory may solve this performance issue. however, one should remember that the solution aims to process mainly short and medium-length sequences.
+
+the backtracking routine overhead
+although the algorithm has been designed especially to deal well with backtracking routine, we also carried out a special test to investigate its performance when the backtracking is not performed, i.e. for score-only version. in other words we set out to check the overhead needed by the backtracking procedure. the kernel responsible for the actual backtracking is very quick and as stated before comprises less than  <dig> percent of total runtime of the algorithm. it, however, requires the backtracking arrays to be filled by the kernel  <dig>  since these arrays are not used for any other purpose, we excluded them from computations.
+
+tests were conducted on workstation already described in section "test on the fermi architecture". this time, though, only one gpu was used. the sets of input sequences were also the same. the results are presented in table  <dig> 
+
+mean performance  for different versions of the score-only algorithm - without the backtracking procedure. the bt share columns refer to the overhead of corresponding algorithms with backtracking routine. tests were run on a single geforce gtx <dig> 
+
+the performance of the score-only algorithm increases considerably reaching up to  <dig>  gcups. the results are not as good as e.g. in cudasw++ <dig> , but one should be aware of the fact that our algorithm was optimized to work well together with the backtracking routine. moreover, our method has a few assumptions  that distinguish it from other implementations but at the same time make it more elaborate.
+
+the bt share values were computed in the following way: the computational times of the algorithm with the backtracking routine were divided by the runtimes of corresponding score-only versions of the algorithm. as we can see the overhead of the backtracking is mainly caused by the necessity of filling the cup, cleft, bup and bleft matrices. however, the additional 45% - 65% is still low in comparison to the method proposed by myers et al.  <cit> . their approach requires twice as much computations and hence the overhead is around 100%. moreover, we expect that the overhead on gpu would be even higher because of multiple reads of entire input sequences from the global memory. we may conclude that for short and medium-length sequences our method appears to be more suitable.
+
+CONCLUSIONS
+although a few gpu-based implementations of the sw algorithm are already known  <cit>  most of them address the problem of database scanning and computing only the alignment scores. our algorithm is able to compute scores and pairwise alignments. apart from the sw algorithm, we have also implemented global and semiglobal versions of the nw algorithm. performed tests show that the efficiency of the implementation is excellent. the algorithm is able to align sequences in roughly the same time as the farrar's solution needs to compute only scores. yet, its real dominance reveals while short sequences are processed with no performance loss. moreover, the speed of our gpu-based algorithms can be almost linearly increased when using more than one graphics card. we have also checked what is a minimum reasonable number of input sequences. performed tests show, that even for about  <dig> sequences our algorithms are able to gain a good speedup. what is worth noting, all the tests were performed using real sequences.
+
+the nw and sw algorithms with a backtracking routine may have a lot of applications. they can be used as a robust method for multi-pairwise sequence comparisons performed during the first step in all of the multiple sequence alignment methods based on the progressive approach. another area of interest can be the usage of a gpu-based semiglobal alignment procedure as a part of the algorithm for the dna assembly problem, being one of the most challenging problem in current biological studies. it has already been shown that in this case a parallel solution can be successfully applied  <cit> . using gpu-based approaches we expect that its execution time would be even shorter, because the large number of short sequences is perfectly in line with the benefits of our algorithm.
+
+availability and requirements
+• project name: gpu-pairalign
+
+• project home page: http://gpualign.cs.put.poznan.pl
+
+• operating system: linux
+
+• programming language: c/c++
+
+• other requirements: cuda  <dig>  or higher, cuda compliant gpu, make, g++
+
+• license: gnu gplv3
+
+• any restrictions to use by non-academics: none
+
+abbreviations
+nw: the needleman-wunsch algorithm; sw: the smith-waterman algorithm; cpu: central processing unit; gpu: graphics processing unit; gpgpu: general-purpose computing on graphics processing units; cuda: compute unified device architecture; ram: random access memory; os: operating system.
+
+authors' contributions
+wf, mk and pw conceived of the study and participated in its design. wf proposed the idea of backtracking arrays. wf and mk contributed equally to algorithm design and implementation. mk carried out computational tests. jb and ep participated in the coordination of the project. all authors were involved in writing the manuscript and all of them read and approved its final version.
+

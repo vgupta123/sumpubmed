@@ -1,0 +1,240 @@
+BACKGROUND
+the genomic localization of dna bound proteins, such as transcription factors or  histone proteins, is frequently used to identify regulatory relationships between regulators and the regulated genes in different cell types. the state-of-the-art method for this purpose is chip-seq . first, dna is fragmented. fragments bound to the protein of interest are extracted and subsequently sequenced. the resulting sequencing reads can then be mapped onto the genome. as neither the experimental procedure nor the mapping of the reads to the genome are perfect, the existence of a read at a specific genomic location does not always imply that the measured protein was bound. additional measurements with unspecific or without antibodies serve as background measurements and allow to cope with the noisy signal. peak-calling compares the signals of the chip-seq experiment with background measurements to find genomic regions where the experiment is significantly enriched over the background. thus, the genomic location of the protein measured is determined.
+
+several peak-callers are available for single experiments. the largest difference between the different methods is the statistical framework used to model the background. peaks are annotated at positions where the observed number of reads is significantly higher than the one expected by chance given the background model. koohy et al.  <cit>  and wilbanks et al.  <cit>  give a good overview and comparison of state-of-the-art peak-callers used in several published studies.
+
+peak-calling for replicated chip-seq experiments, however, is not well supported. in the following, we refer to the replicated chip-seq experiments as ‘replicates’ and to their combined analysis as ‘multiple-replicate peak-calling’. only two approaches exist that use a single experiment peak-caller and either combine the replicates before peak-calling or combine the peaks obtained from the single experiments . combining the replicates before peak-calling requires equal library sizes  across all replicates or down-sampling to a common library size. for example, the nih roadmap epigenomics project uses the down-sampling approach to avoid artificial differences in the signal strength with uniform depth of at most  <dig> million reads before merging the replicates  <cit> . similarly, macs scales the two libraries which are compared to the same amount of reads to make experiment and background library comparable  <cit> . down-sampling, however, may lead to an overestimation of the noise level. it is not possible to incorporate weights for the replicates based on their quality or to backtrack the source of a specific signal to the supporting replicates.
+fig.  <dig> overview of the multiple-replicate peak-calling process showing the basic steps of multiple-replicate peak-calling for sierra platinum, pepr, macs-cr , and macs-sa . all peak-caller extract the parameters of the underlying model  from the background data  and use it to calculate p-values  indicating how significantly enriched the experiment  is. based on the p-values, peaks  are calculated. quality control  is provided usually alongside with the peaks. only sierra allows to examine the quality during the peak-calling process, while all other methods only allow to examine the quality of the peaks obtained
+
+
+
+combining the peaks of the single experiments includes all peaks in any of the replicates. thus, replicates with poor peak-call quality can have a large effect on the final result. furthermore, very long peaks can occur in the final peak set by merging neighboring narrow peaks from different replicates. while none of the replicates predicts those broad peaks, the final result contains them.
+
+further, only pepr  <cit>  explicitly supports replicates of the same condition during peak-calling . it uses a binomial model that expects the same dispersion for experiment and background. however, for, e.g., experiments performed at different sequencing centers, it is unknown if this condition holds and consequently it is not guaranteed that the results obtained using this model are reliable. also, pepr down-samples all libraries to the same size and thus might overestimate the noise level.
+
+besides the so far mentioned peak-caller, there are several peak-callers for differential peak-calling, i.e., finding peaks which occur in only one of two groups of samples. the underlying statistical model assumes that there are basically three types of peaks: peaks occurring in both groups of samples and peaks occurring in only one of the two groups. in particular, none of the groups is treated as background for which no peak should be found. similar to pepr, those peak-callers apply methods from differential gene expression which fit two negative binomial distributions to the two groups for each locus and compare the data based on these distributions. for example, csaw  <cit>  uses the edger package  <cit>  to find differential peaks, while diffbind  <cit>  uses peaks predicted on each sample and compares the peaks based on read counts within the peaks using the edger package  <cit> . we do not aim at finding differential peaks but peaks with respect to a background measurements which is a very different task from a statistical point of view  <cit> . we will therefore not further evaluate those peak-callers in detail.
+
+the currently available approaches for replicate peak-calling are neither designed to assess the replicates’ quality nor to handle replicates of different quality. moreover, the replicates’ quality can not be incorporated during peak-calling. in the case of combining the peak-calls of the single experiments, it is in principle possible to introduce weights to account for different qualities of the replicates. however, doing this in a statistically sound way is hardly possible since non-significant positions are not provided by the peak-caller.
+
+to close this gap, we propose sierra platinum, a new, fast and robust peak-caller for replicated chip-seq experiments with visual quality-control and -steering. sierra platinum uses a model based on the poisson distribution together with the inverse normal method to combine the replicates. multiple quality measures are computed and visualized. this allows to judge the replicate’s quality as well as the quality of the resulting peaks. a subset of replicates can be selected and weighted to obtain the combined peaks. figure  <dig> shows the principal differences and commonalities between the current methods for multiple-replicates and sierra platinum .
+
+we optimized the computation of the combined peaks to keep time and memory requirements minimal .
+
+currently, no benchmark data set for assessing the quality of peak-calling methods is available. peak-calling methods are evaluated against real data without known ‘ground truth’. to be able to assess the quality of peak-calling methods based on ‘ground truth’, we created a benchmarking data set .
+
+based on this benchmarking data set we assessed and compared the quality of sierra platinum, pepr, and existing approaches using single-experiment peak-callers. it shows that our approach allows an optimized combination of the replicates yielding less false positive peaks and stable true positive ones, while avoiding also false negative peaks, that is, avoiding missing peaks .
+
+finally, we applied sierra platinum to h <dig> chromatin methylation and acetylation data. we found that our predictions match the results known from literature better than previously published ones .
+
+methods
+the multiple-replicate peak-calling process of sierra platinum is depicted in fig.  <dig>  sierra platinum computes the multiple-replicate peak-calls in three phases:  construct p-values per replicate,  combine these p-values,  compute the final peaks and additional information based on the combined p-values. the individual steps of each phase are described next .
+
+phase i the steps of this phase are computed for each data set—experiment and background of each replicate—or each replicate separately. first, the windows are constructed. each window has a start position and a size. all tags overlapping this window are counted. empty windows are discarded.
+
+afterwards, the poisson distribution of the tag counts of the windows is computed. similar to the approach by zhang et al.  <cit> , this serves as a model for computing the single experiment p-values. as in general the amount of used and mapped material differs between experiment and background, the experiments are scaled. this allows the comparison between experiment and background.
+
+next, the  <dig>   <dig>  and  <dig> k neighborhoods of each window are determined. now, single experiment p-values are calculated for each window and each replicate based on the global λ of the normalized poisson distribution and the λ values computed for each neighborhood. 
+  <dig> λ=max{λglobal,λ1k,λ5k,λ10k} 
+
+strong but very local changes in the tag distribution along the genome might lead to significant changes in both background and experiment compared to the λ computed. therefore, we check whether the background is significant given the chosen λ. if this is the case, then we use the tag count of the corresponding window as λ estimate instead and recalculate the corresponding p-value. these p-values determine the peaks of each replicate. to reduce the effect from the correlation between the p-values computed, they are transformed into so-called q-values. as the q-values are corrected p-values, they are subsequently called p-values.
+
+phase ii during this phase, the information computed for the replicates is combined. sierra calculates for each window and replicate one p-value. to obtain a single p-value for each window, the inverse normal method  <cit>  is used to combine p-values of the different replicates of the same window. first, the correlation between the replicates is determined. this information is used for adapting the combination of the replicates performed next. on the one hand, the replicates need to be correlated to compute justified, combined peaks. on the other hand, correlation is problematic for applying the combination method proposed. therefore, the combination has to be corrected for the correlation found.
+
+the replicates are filtered and weighted based on their quality assessment. to compute the combined p-values for each window, the inverse normal method is applied. during this step, replicates, which are filtered out, are discarded, and the correlation coefficients and weights established previously are applied.
+
+phase iii during this phase, the combined p-values are used for computing additional quality information as well as narrow and broad peaks. the combined p-values are again correlated and therefore converted into q-values. as the q-values are corrected p-values, they are subsequently called p-values again. finally, the narrow peaks and the broad peaks of the final combined result are determined.
+
+quality parameters sierra assesses several quality parameters for the single experiments, the combined p-values, and the final peaks . this allows the user to assess and control the quality of the peak-calls. for each replicate, sierra provides the following quality measurements. we provide the theoretical and empirical read distributions allowing the user to judge whether the poisson distribution is a good fit for the data. since the background model has to be comparable to the experiment’s read count distribution, experiment and background are scaled to the same library size . sierra allows to inspect the normalized distribution to judge the comparability of both models. to evaluate the quality of the reads used for peak-calling, the base quality distribution of the mapped reads is depicted. the p-value distribution indicates if the significance level allows peak-calls of high quality. the median p-value distribution calculated across all replicates allows to assess whether a replicate is an outlier or fits into the replicate ensemble. similarly, the distribution of significant windows for all chromosomes of the replicate and the respective medians across all replicates allow to draw conclusions about the replicates fit to the ensemble of replicates. furthermore, they allow to identify chromosomes with an odd number of significant windows.
+
+to support the calculation of the combined p-value, the correlation between the replicates is calculated based on the so-called probits. probits are a transformation of the p-values of the single experiments and are a by-product of the inverse normal method. the correlations indicate how strong the replicates agree on a common signal. we provide the distribution of the combined p-values which allows to adjust the cut-off and p-value correction method to the data. after peak-calling, we provide the overlap of the final significant windows with the significant window in each replicate. in contrast to the correlation, this measurement already incorporates the chosen p-value cut-off .
+
+RESULTS
+benchmark
+we evaluate the results of sierra platinum and compare it to pepr  <cit> , and macs-sa and macs-cr using macs <dig>  <cit>  based on the benchmarking data set . except for the ‘noise free’ set of replicates, we generated peak-calls using all replicates with equal weight , excluding the ‘noisy’ replicates , and down-weighting the ‘noisy’ replicates . in all data sets, the ‘noisy’ replicates could be identified using at least one quality measurement. additional information is provided in the chapter “evaluation” of the additional file  <dig> 
+
+the results are shown in figs.  <dig>   <dig> and  <dig>  from top to bottom we report recall, positive predictive value , false discovery rate , and number of peaks . in addition to the results obtained by the different peak-calling methods, we also provide the number of peaks that would be optimally found .
+fig.  <dig> evaluation results for the noise-free data set 
+
+fig.  <dig> evaluation results for data sets with noise. first column: low sequencing quality. second column: low enrichment. third column: too low sequencing depth. fourth column: too high sequencing depth. first four rows: one bad replicate; three replicates in total. second four rows: two bad replicates; four replicates in total
+
+fig.  <dig> evaluation results for quality deficits in some of the data sets. first four rows, left to right: one under-sequenced replicate with low enrichment and low quality, two under-sequenced replicates with low enrichment and low quality, and a mixture of quality inspired by real data for h3k4me <dig> in embryonic stem cells. second four rows, left to right: one, two, and three noisy replicates
+
+
+
+first of all, we checked the performance on noise-free data. however, the noise-free data is far away from a data set produced in a laboratory. thus, we introduced different types of noise, which could also be observed in real data. to be able to assess the effects of the factors independently, we generated data sets containing only one type of noise. in the following, we will show the effects of the following factors: pure sequencing quality, too low enrichment, too low sequencing depth , and too high sequencing depth . furthermore, we test for the combination of bad quality, low enrichment, and low sequencing depth , and noisy signals .
+
+noise-free data for the noise-free data , sierra platinum has the highest recall, followed by both variations of macs having more than  <dig> % less recall, while pepr has a recall of ≈ <dig> % less. compared to macs  and pepr also the ppv and fdr are much better for sierra platinum. the high number of peaks generated by pepr comes at the expense of a high fdr. in total, best results are obtained by sierra platinum.
+
+pure sequencing quality for pure sequencing quality, we used two benchmarking data sets. each of them contains two good replicates and either one or two bad replicates . it does not make a large difference whether we add one or two data sets with a low sequencing quality, and thus more sequencing errors, to two high quality data sets: the results are quite similar to those of the noise-free data set. excluding the low quality replicates improves the results a bit with respect to recall, ppv, and fdr. almost as good is the improvement when down-weighting instead of excluding the replicates of low sequencing quality. compared to macs and pepr, any approach of sierra platinum  performs better with respect to all three quality measurements.
+
+low enrichment a low enrichment, i.e., the signal to noise ratio is low, does not much affect the performance of all peak-callers . the result of sierra platinum can be equally well improved by deleting or down-weighting the low enriched replicates.
+
+low sequencing depth a low sequencing depth does not have a strong influence on the peak-calling quality of sierra platinum . deleting or down-weighting the replicates with low sequencing quality improves the results even more. deleting is just marginally better than down-weighting. still, macs-cr and macs-sa have lower recall but a higher ppv than pepr. the recall is about  <dig> % lower than in the noise-free data for macs.
+
+high sequencing depth replicates with a too high sequencing depth are not effecting the peak-calls of macs-cr and macs-sa . this might be an effect of the two good quality replicates always included in the data sets. surprisingly, two replicates with a high sequencing depth produce better results than just one replicate with too many reads in the case of pepr . the results of sierra platinum in its default settings are affected by the replicates with the too high sequencing depth. deleting the replicates with too many reads, the recall drops slightly but the ppv increases. down-weighting these replicate shows similar results. in the case of two over-sequenced samples, the results of the effect of down-weighting or deleting bad replicates can be seen even stronger.
+
+bad replicates we evaluated sierra platinum, macs-sa, macs-cr, and pepr also on data sets with a mixture of noises. the data sets bad <dig> and bad <dig>  are composed of two good replicates, and  <dig> respectively  <dig> under-sequenced replicates with low enrichment and low quality. the recall drops and the fdr tends to increase with the amount of bad replicates in sierra platinum, but this can be efficiently compensated by deleting or down-weighting the replicates. in comparison to the other peak-callers, even the native version of sierra platinum has higher recall and lower fdr.
+
+the data set likek <dig> contains a mixture of qualities , i.e., experiment and background may not have comparable data quality and the quality between replicates differs as well. similarly to the previous data set, recall and fdr are better compared to the other peak-callers independently of the approach used for sierra platinum.
+
+noisy data sets we compared all peak-callers on data sets containing  <dig>   <dig>  or  <dig> noisy replicates , i.e., replicates with a different signal track. each data set is filled up with replicates of perfect quality until they contain  <dig> replicates in total.
+
+the recall of all peak-callers decreases with an increasing amount of noise. in particular macs-sa and pepr show a strong drop in the recall. furthermore, the fdr increases strongly. the strongest increase of the fdr is found for macs-sa since the peaks of all replicates are simply merged. thus, all peaks from the noisy replicates are kept.
+
+summary even using the defaults settings–no deletion or down-weighting of replicates—the performance of sierra platinum on noisy data is superior compared to the performance of other peak-callers on noise-free data. deleting or down-weighting replicates increases the performance of sierra platinum on noisy data reaching the performance of sierra platinum on noise-free data. thus, the method implemented in sierra platinum is robust against any kind of noise in the data. moreover, the implemented user interactions for deleting and down-weighting replicates in combination with the visual quality control features allow fine-tuning of the peak-calling results to obtain the optimal results for each data set.
+
+a detailed description of the benchmarking data set and a more intense evaluation of sierra and its parameters can be found, in the chapters “benchmark data set and quality measures” and “evaluation” of the additional file  <dig>  respectively. furthermore, the justification of the default parameters and a guideline for how to recognize noisy data sets alongside with suggestion for parameter choices for noisy data sets are provided.
+
+real data set
+peak agreement
+the analysis of the agreement of the peaks predicted by sierra platinum and by different publicly available peak caller is based on h3k4me <dig> measurements of all three replicates of bmp <dig> trophoblast cells in the geo series gse <dig>  we predicted peaks with sierra platinum, the macs-sa and macs-cr approaches, pepr, and csaw. the overlap of the peak predictions is shown in fig.  <dig>  a large amount of the peaks are predicted by both macs approaches, pepr, and sierra platinum. many peaks predicted by sierra platinum are also predicted by macs-cr and macs-sa. only csaw does not show a significant overlap with the peak prediction of the other peak caller. the reason for this is, that csaw was designed to make differential peak calls but not peak calls of an experiment with respect to a background.
+fig.  <dig> agreement of the peak predictions: the overlap in the peaks predicted by sierra platinum , macs-sa , macs-cr , pepr , and csaw  is shown
+
+
+
+stem cell marker coverage
+we analyzed the stem cell marker coverage and we looked at the genes known to be embryonic stem cell marks, i.e., they are active in embryonic stem cells and their activity is crucial for cell identity and function. we will compare the predicted epigenomic states of the promoters of such markers. the epigenomic state is hereby defined as the collection of peaks for the histone modifications analyzed. three different epigenomic states will be compared. firstly, the epigenomic state predicted with sierra platinum on the h <dig> data set. secondly, the epigenomic state predicted with sierra platinum on the escs data set. thirdly, the consolidated epigenomic state of the h <dig> cell lines downloaded from the nih roadmap epigenomics webportal of the washington university . the calculations of the three epigenomic states is described in the supplemental information.
+
+pepr crashed on the h <dig> and escs data set because it could not find any significant window at all. thus, we cannot compare our results to the epigenetic state generated with pepr. we also run csaw  <cit>  on the h <dig> data. even though csaw found a few “up-regulated” peaks, most differential binding events where enriched in the control  rather than in the chip experiment. this indicates that the results of csaw are very error-prone. in both cases—pepr and csaw—we would argue that due to the high variance of the replicates, it is hard to find windows where the variation between the experiment and the background is much smaller than the variation between the replicates.
+
+we looked at five stem cell markers for embryonic stem cells: snf2h, brg <dig>  ssrp <dig>  oct <dig>  and snf <dig>  <cit> . the peaks generated by sierra platinum for the h <dig> and the esc data set largely overlap these regions even though the signal was different. in particular, they have very similar peaks for h3k4me <dig>  but also for h3k9ac  the agreement of h <dig> and escs peaks is large. comparing the three marks that we downloaded for e <dig> to h <dig> and escs, we see this agreement only—if at all—in h3k4me <dig>  we show the results for snf <dig> in the following and the results for the remaining markers in the additional file  <dig> 
+
+snf5
+around the main promoter for snf <dig>  we found a strong activating signal . all three activating marks, namely h3k4me <dig>  h3k27ac, and h3k9ac, are present in the epigenomic states of h <dig> and escs if this modification was included in the epigenomic state. only in the escs epigenome there are two h3k27me <dig> peaks. one peak locates 5’ of the promoter of snf <dig>  and thus, probably does not influence the transcription. the second peak is located nearby the alternative transcription start site and may repress transcription from the corresponding alternative promoter. e <dig> gives a different picture. the promoter of snf <dig> is at least poised according to e <dig>  i.e., there are peaks for h3k4me <dig> and h3k27me <dig>  there is even a small h3k9me <dig> peak at the transcription start site. therefore, one would conclude that this gene is switched off.
+fig.  <dig> genomic location of snf5: the peak-calls are shown below the transcript annotation of snf <dig>  peak-calls for the different modifications and data sets are color coded as follows: green: h3k4me <dig>  red: h3k27me <dig>  blue: h3k9me <dig>  black: h3k27ac, purple: h3k9ac; light: h <dig>  medium: esc, dark: e <dig> . the position of the described promoter and gene body are marked with ‘p’ and ‘b’, respectively
+
+
+
+overall agreement
+while the stem cell marker may present a very important class of genes for the cell type studied, the overall agreement in the promoter state indicates whether the observed differences are a global trend or just effects restricted to the chosen example. therefore, we ask now, how strong the different epigenomic states agree on the association of a promoter with one single modification. we calculated the venn diagram showing how many promoters are associated with a specific modification in the three data sets . in the overlap of all three sets will be therefore all those promoters which are associated with the mark in all three data sets. association with h3k4me <dig> shows the strongest agreement. all circles have a similar size and the overlap of all three data sets is large . for h3k27me <dig> and h3k9me <dig>  this region represents less than  <dig> % and less than  <dig> %, respectively. the main reason for this is the large number of promoters associated with this mark in e <dig> . even though the agreement between h <dig> and esc is not strong, it is still stronger than the overlap with e <dig> 
+fig.  <dig> venn diagrams for all three modifications showing how often the data sets predict the presence of the mark in the promoters:  h3k4me <dig>   h3k27me <dig>   h3k9me <dig>  blue circles correspond to h <dig>  orange circles correspond to esc, and green circles correspond to e003
+
+
+
+we finally investigated whether the excessive amount of predicted peaks by e <dig> compared to h <dig> and esc is a general, genome-wide trend or specific for the promoter regions. as a measurement, we used the total number of nucleotides that are covered with peaks of each modification for each data set . indeed, e <dig> has a much higher coverage for each of the modifications. the difference for h3k4me <dig> is the lowest but still, e <dig> assigns this modification to more nucleotides than h <dig> and esc. the effect is most extreme for h3k9me <dig> in e <dig> 
+fig.  <dig> sum of nucleotides that are covered with peaks of each modification for each data set
+
+
+
+summary
+e <dig> and h <dig> are based on the same data and nevertheless predict different peak positions. given, that the examples we showed are all embryonic stem cell markers which have to be active, one would expect only activating marks. thus, the sierra platinum peak-calls based on both, h <dig> and escs, fit very well the expectation for the shown markers while the e <dig> peak-calls are suspicious. in particular, the inactivity of snf <dig> would be lethal for embryonic stem cells  <cit> . also for the other stem cell markers shown here, it is reported that inactivity is lethal  <cit> . consequently the active chromatin predicted by sierra platinum is more reliable than the may be inactive chromatin or at least with inactive marks speckled chromatin predicted by e <dig> 
+
+in the chapter “results” of the additional file  <dig>  a more detailed comparison of the epigenomes is shown. besides stem cell marker coverage, we also report the results of our analysis of h3k4me <dig> and h3k9me <dig> coverage in the hox-c and the hox-d clusters as well as of a promoter region coverage analysis.
+
+time and memory consumption
+we compared the time and space requirements of the optimized version of sierra platinum with those of macs-cr, macs-sa, and pepr using real data. for two different sets of window offset and window size, table  <dig> lists the runtime and the maximally used memory for all methods. both, macs-cr and macs-sr, reflect only the time and memory used for peak-calling, i.e., of running macs <dig>  the total time to generate the peaks is longer including additionally the step for combining the input files  or the output files , respectively. while for macs-sa the time for combining the results is negligible, combining the input files for macs-cr can take very long depending on the permanent storage access speed. in the case of pepr, a complete measurement was not possible since pepr crashed after calculating the candidate windows. further steps could not be performed since not a single candidate window was found. this also shows that pepr is not robust against noisy data.
+all results were obtained on the same machine  and with the same input files using a cut-off value of p=10−5
+
+
+
+aelapsed time or maximal memory used until crash
+
+
+
+the results show that sierra platinum is fastest among all tested methods  even though not all steps for macs-cr and macs-sa are included in the time and pepr crashed before finishing. changing the window offset to  <dig> nt and the window size to  <dig> nt does not change the runtime or memory consumption of the methods macs-sa and macs-cr much. sierra platinum uses twice as much time and  <dig> % more memory. pepr also crashes for these settings after more than  <dig> hrs.
+
+the memory consumption of sierra platinum can not be compared to that of the other methods. for pepr the memory needed is unknown, as it crashed pre-maturely. for macs-sa, only one replicate is handled at a time, and for macs-cr all reads are already combined. also, the memory needs of the pre- and post-processing steps are not included. finally, sierra platinum uses the memory not only for computing the peaks, but also for computing quality information, which increases its memory consumption.
+
+discussion
+sierra platinum is substantially better than the existing peak-calling approaches for replicated chip-seq experiments. our benchmarking results indicate that we are able to find peaks with enough precision to obtain good recalls, low false discovery rates, and positive predictive values on the benchmarking data sets. even using the default settings, the performance of sierra platinum on noisy data is superior to the performance of other peak-calling approaches on noise-free data. deleting or down-weighting increases the performance of sierra platinum on noisy data reaching the performance on noise-free data. thus, the method implemented in sierra platinum is robust against any kind of noise in the data.
+
+the visual controls implemented in sierra platinum enable detecting the source and type of noise and thus allow reducing the influence of noisy replicates by down-weighting or deleting them. sierra platinum’s performance is already superior to the other methods for multiple-replicate peak-calling when adapting its parameter settings to those suggested for macs or pepr. with optimal parameter settings recall and positive predictive value can be increased even further. thus, sierra platinum allows high quality peak-calls. furthermore, by fine-tuning the parameter settings guided by the visual quality controls, the calculations of sierra platinum can be adapted to provide optimal results for the given data.we showed that on real data, such as the h <dig> and escs data sets downloaded from the nih roadmap epigenome project  <cit> , peak-calls from sierra platinum fit current knowledge reported in literature better than peak-calls produced with macs-cr. the only other tool able to perform multiple-replicate peak-calling, pepr, was not even able to handle the data but crashed because it could not find any significant window. it is very likely that this is a result of the high variance in the data and its partially low quality. in summary, the strength of sierra platinum lies in its robustness against noisy replicates, and in the additional capability to assess their data quality and to reduce the influence of noisy replicates by down-weighting or excluding them.
+
+CONCLUSIONS
+sierra platinum is a fast and robust multiple-replicate peak-caller. so far, it is the only peak-caller allowing quality control and -steering and therefore leads to better peak-calls compared to current approaches and tools. the procedure and parameters are chosen to produce an optimal result with respect to recall and fdr. sierra platinum is robust against noise and thus allows multiple-replicate peak-calling even for replicates not produced by the same lab or study. alongside with sierra platinum, we provide a benchmark data set which allows to compare the performance of peak-callers with respect to specificity and sensitivity. the implementation of the method is optimized such that we only consume as much memory as required to ensure a fast computation of the peak-calls.
+
+additional file
+additional file  <dig> supplementary information. the supplementary information  contains a very detailed description of the method implemented in sierra platinum and a description of sierra platinum  and its optimization. furthermore, we present a very comprehensive benchmark of sierra platinum, i.e., a comparison to other peak-callers and peak-calling approaches for replicated chip-seq experiments for various conditions and a parameter benchmark for the parameters of sierra platinum. we provide derived parameter settings and guidelines for choosing the right parameters based on the quality measurements implemented in sierra platinum. the supplementary information contains also a more extensive comparison between the result of sierra platinum and macs-cr on real data. 
+
+
+
+abbreviations
+acacetylation
+
+bpnumber of base pairs
+
+brg1protein brahma homolog 1
+
+chip-seqchromatin immunoprecipitation sequencing
+
+dnadeoxyribonucleic acid
+
+escembryonic stem cells
+
+fdrfalse discovery rate
+
+gsgold standard
+
+h3histone h3
+
+h3k27acacetylation at histone h <dig> at the lysine at position 27
+
+h3k27me3trimethylation at histone h <dig> at the lysine at position 27
+
+h3k4me3trimethylation at histone h <dig> at the lysine at position 4
+
+h3k9me3trimethylation at histone h <dig> at the lysine at position 9
+
+k4lysine  at position 4
+
+macs-crcombining the reads of all replicates and calling peaks using macs
+
+macs-sacalling peaks of each replicate using macs and combining the peaks
+
+me3trimethylation
+
+ntnumber of nucleotides
+
+oct4octamer-binding protein 4
+
+pcrpolymerase chain reaction
+
+ppvpositive predictive value
+
+replicatereplicated chip-seq experiment
+
+snf2hsucrose nonfermenting protein  <dig> homolog
+
+snf5sucrose nonfermenting, yeast, homolog-like 1
+
+ssrp1structure specific recognition protein 1
+
+we thank all our colleagues for fruitful discussions and all reviewers for their constructive criticism.
+
+funding
+this work was partially funded by the dfg  within the project ebio , and the german federal ministry of education and research  within the projects internationales krebsgenomkonsortium   and competence center for scalable data services and solutions  dresden/leipzig . the authors acknowledge support from the german research foundation  and leipzig university within the program of open access publishing.
+
+availability of data and material
+we made sierra platinum accessible as open source software at
+
+https://github.com/sierraplatinum/sierra.
+
+a release is available at
+
+https://zenodo.org/badge/latestdoi/20845/sierraplatinum/sierra
+
+.
+
+the corresponding compiled version of sierra platinum  are available at
+
+http://dx.doi.org/ <dig> /zenodo. <dig> 
+
+the benchmarking data set can be downloaded from
+
+https://github.com/sierraplatinum/peakcallerbenchmarkdataset.
+
+the release of the benchmark data set used for this publication is available at
+
+https://github.com/sierraplatinum/peakcallerbenchmarkdataset/archive/v <dig> .tar.gz.
+
+authors’ contributions
+lm proposed and implemented the method. lm designed the benchmark data set. lm analyzed the benchmark results. lm analyzed peak coverage of stem cell marker, hox-c and hox-d cluster, promoter region, and in general. dg designed and implemented the client, the server, and the visualizations. dz debugged and optimized the complete implementation of client and server . dg downloaded all data sets. mf prepared all data sets for peak-calling. dg produced all peak-callings. lm, dg, and dz contributed to the manuscript writing. dg produced all figures. all authors read and approved the final manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+not applicable.

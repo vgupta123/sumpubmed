@@ -1,0 +1,143 @@
+BACKGROUND
+in microarray gene expression analysis, there is an assumption that a probe has the same set of targets in compared groups and therefore differences in probe signal intensity are caused by different levels of gene expression. this assumption does not hold when experimental groups with different genetic makeup are compared, as the target region of a specific probe may contain snps and other sequence differences. experimental groups may also differ in their set of expressed isoforms or cross-hybridizing targets. the latter issue may arise even between genetically identical samples, such as when comparing different tissues, or samples differing in applied treatment. the binding affinity for such probes will differ between exprimental groups and the difference in signal intensity will be confounded with transcript abundance. we termed probes with such binding affinity differences bad probes.
+
+bad probes lead to errors in estimates of differential gene expression  <cit> , disruption of eqtl mapping  <cit>  and errors in resolving cis and trans effects  <cit> . we ourselves have shown that bad probes both introduce spurious gene expression differences and, by disrupting normalization, reduce the power to detect true ones  <cit> . on the other hand, bad probes might be useful as genetic markers distinguishing species or strains   <cit> .
+
+the number of affected probes depends on the genetic distance between experimental groups. even with 1% nucleotide differences, as observed between human and chimpanzee or mus musculus and mus spretus, sfps due to snps alone will appear in ~22% of 25-nucleotide probes.
+
+to overcome this problem, several approaches were employed, including: removal of probes overlapping known polymorphisms  <cit> , adding group as a factor in probe-level analysis  <cit>  and methods based on correlating expression values within a probe set  <cit> . the advantage of the last approach is that information concerning sequences or actual targets  need not be known. it also alows one to discover sfps.
+
+previously, we proposed a method to detect bad probes on affymetrix gene expression microarrays based on the expression values themselves, as we described in  <cit> . briefly, the signal for a given probe is proportional to the amount of rna in the sample and its binding affinity. when one target is measured with several probes , as on affymetrix arrays, the probe signals are correlated for each sample. bad probes correlation differs between groups, hence comparison of pairwise correlations between those groups allows to identify of bad probes, as summarized on figure <dig> 
+
+we present an r package implementing this method for the detection and removal of bad probes from the affymetrix gene expression data. functions in this package improve upon the version that we made available with the original paper  <cit> , are compatible with current r bioconductor framework, and work for both affymetrix 3’ivt and exon-based arrays. the package with a vignette and example data was submitted to bioconductor. we re-validated the method with recently available full genome data for mouse strains and compared its performance with competing software. we also employed masking on a human tumour-healthy tissue data set, to test for presence of bad probes between tissue types and their influence on differential gene expression detection. in such comparisons, the difference in targets between experimental groups and impact of bad probes has been overlooked to date.
+
+implementation
+bad probes detection
+we implemented the method described in  <cit> . briefly, a signal for the probe j on the array i might be expressed as a sum of baseline response due to nonspecific hybridization , abundance of target rna  multiplied by binding strength of probe j  and an error term.
+
+if probes oi <dig> and oi <dig> hybridize to the same transcript, the relationship between their fluorescence levels might be expressed as
+
+  oi2=v2θ2−v1θ2θ1+θ2θ1oi1+∈ 
+
+when samples differ between groups in binding affinities and/or background intensity, this linear relationship still holds within each group, but their slopes differ between groups.
+
+we test the null hypothesis that in both groups the binding strength, as well as the background binding level, are the same,
+
+ <dig>  we estimate the intercept for combined groups
+
+  β=v2θ1−v1θ2θ <dig> 
+
+ <dig>  we test with t-test if distribution of /oi <dig> is the same for both groups and record its p-value.
+
+  oi2−βoi1=θ2θ1+∈ 
+
+ <dig>  the same test  is performed for all probe pairs, in both directions. we thus build a j ×  j matrix of all pairwise tests, less the diagonal.
+
+ <dig>  for each probe in a probe set we calculate the geometric mean of all p-values in the matrix where this probe is involved. we record the probe with the smallest geometric mean of p-values  and exclude this probe’s comparisons from the matrix.
+
+ <dig>  the previous step is repeated, until the matrix contains only two probes – they are both assigned geometric mean of their pvalues.
+
+then a cutoff is chosen and all probes with an mp-value below this cutoff are designated as bad.
+
+description of the package
+the package allows detection of bad probes in affymetrix microarrays designed with several probes measuring a target, 3’ ivt gene expression arrays and whole–transcript expression arrays . standard bioconductor gene expression data structures are supported, thus the package may be easily be used with other bioconductor tools.
+
+as input for detection of bad probes the package requires raw expression data in the form of an affybatch object and a group assignment of all samples. detection of bad probes in expression data works only for probe sets targeting transcripts that are expressed – others, picking background and crosshybridization signal are meaningless. therefore by default, probe sets are evaluated with mas5calls() function from the package affy and only probe sets which are expressed  in at least 90% of samples in each group are retained for bad probes detection. however, the user may choose to analyze a custom set of probe sets or use average probes values to define probe sets to analyze. the masking achieves sufficient power with at least five samples in each group to compare . the resulting list contains a mask - a data frame with quality scores for all analyzed probes.
+
+a low quality score means that a probe is likely to be bad and probes with quality value below a certain cutoff may be removed from expressionset and downstream analysis. ranking of probes by quality scores depends on the data set  and hence a threshold for excluding probes from downstream analysis is data set specific. the package contains several functions to assist with choice of cutoff score. a stringent  cutoff might be used to compare gene expression between groups, whereas a relaxed  cutoff may be used to identify candidate sfps, because then a low rate of false positives is important.
+
+when bad status is known for a subset of probes, a cutoff might be chosen to match desired sensitivity and specificity level, on the basis of this subset analysis. function overlapexpextmasks() computes type  <dig> and type  <dig> errors and its confidence intervals for different cutoffs and then plots them. also, the distributions of quality scores for probes defined as bad and non-bad might be compared using a kolmogorov-smirnov or wilcoxon test, to estimate if cutoff is too stringent and prevents discrimnation of bad and non-bad probes.
+
+in the absence of a reference subset of probes, distribution of quality scores might suggest an appropriate cutoff level.
+
+it is advisable to inspect some probes that have borderline quality score. the function plotprobe() allows comparison of a probe’s intensities against all other probes from the same probe set.
+
+probes may be removed from the original affybatch object with preparemaskedaffybatch(). it returns a new affybatch object and an appropriate cdf environment, which are both devoid of bad probes. at this step the user may decide what is a minimal number of probes left to still keep a probe set in the analysis. for preparemaskedaffybatch() bad probes may be identified by a mask object and a cutoff value or as a list of probes to remove.
+
+after removal of bad probes, expression estimates might be obtained in any way preferred by the user, as for every probe set the remaining probes are treated as a redefined probe set. masking might be coupled also with probe set redefinition by a custom cdf.
+
+the package is compatible with 3’ ivt arrays and gene/exon arrays. the resulting affybatch object may be used downstream as a usual affybatch object.
+
+performance
+we took the opportunity to use the recent sequencing of  <dig> inbred mouse strains as a comprehensive source of information about snps and indels. we detected bad probes in a public dataset of striatum expression from c57bl/6nj and dba/2 j strains , measured on the moe <dig>  <dig>  array based on c57bl sequences. we estimated false positives  and false negatives  of expression-based mask by comparison with polymorphisms in probe target regions in a similar way as in  <cit> .we did the same with snep  <cit> , which is a method to detect bad probes shown to be superior to several other approaches and not compared with ours before.
+
+we also tested for the presence of bad probes and masking effects in a public dataset comprising  <dig> healthy tissue and  <dig> tumour samples from human lung , measured on u <dig> arrays. the mask was produced with default features and a cutoff of  <dig>  , determined from the distribution of probes’ quality scores. probe sets were defined as being differentially expressed if, after gcrma normalization, their benjamin-hochberg corrected t-test p-values were smaller than  <dig> .
+
+RESULTS
+the package maskbad is designed to detect and remove bad probes and the resulting bias in expression estimates. previously we demonstrated the high accuracy and detection rate of the method in detecting artificially introduced bad probes  <cit> . we detected 90% of probes with an artificially introduced difference and masked only  <dig> % of probes without a difference. we estimated also false positive and false negative rates in actual data from two mouse strains and a human-chimpanzee comparison. however, this approach suffered from incomplete mouse polymorphism data at the time, and unknown polymorphisms between human and chimpanzee individuals used in the expression studies. however, with the full genome information for inbred mouse strains it was possible to estimate it with greater accuracy [figure <dig>  according to the sequence data, within the  <dig> expressed probe sets,  <dig> % of probes were affected by either a snp or an indel. at cutoff  <dig>  we detect  <dig> % of known snps/indels, at the same time masking only  <dig> % of probes without any known polymorphism. still, some of the probes without known polymorphisms might differ in binding affinity because of other differences between experimental groups, for example in additional file  <dig> we show a probe  without a known polymorphism between mouse strains and with obvious bad behavior.
+
+we compared the performance of our method with snep  <cit>  using the same dataset. for group sizes  <dig> and  <dig> our method is equally good for low cutoffs and superior for high cutoffs [figure <dig>  when detecting  <dig> % of real snps/indels, it detects as bad  <dig> % probes without snp/indel and with type  <dig> error  <dig> % it detects  <dig> % of known snps/indels.
+
+we find also that bad probes are present in the cancer-healthy tissue comparison and influence de detection. we analyzed  <dig>  probe sets which were expressed in both groups and identified  <dig>  bad probes at cutoff  <dig>  between carcinoid lung tumors and healthy lung tissue. such differences between two human tissues mean qualitative differences in targets, such as cross-hybridizing targets or isoforms between tumour and normal tissue. we enquired how masking influences differential expression detection. there were  <dig> probe sets detected as differentially expressed  both before and after masking, while  <dig> probe sets were only de before masking and  <dig> were only de after masking.
+
+a single bad probe can cause an extreme difference in calling differential expression. for example, a probe set , targeting clathrin, before masking showed no difference in expression . by removing probe  <dig> , the p-value becomes highly significant . the probe response shows the opposite direction of intensity change for this probe than the others, leading to a biased expression estimate.
+
+on the other hand, in probe set 37766_s_at differential expression detected without masking  is an artifact of only one bad probe  in this probe set  and disappears after masking . this detected difference might be still of interest, as it might indicate differential isoform expression or rna editing between two tissues, or identical somatic mutations in tumour samples, but it is not a “simple” difference in expression levels.
+
+if removal of bad probes reveals a real biological signal, and does not not just introduce a random change in expression estimates due to a reduction in the number of probes in probe set, than when discarding bad probes one should see much a bigger difference in de estimates compared to removing probes randomly. to test this, we ran a simulation  <dig> times where we removed the same number of probes, with the same distribution of probes per probe set, as the set of probes we removed as bad. the number of probe sets detected as de was much smaller .
+
+as we have shown previously  <cit> , excluding bad probes both removes artifacts and reveals a real biological signal. previously, it was used in comparisons between genetically different strains or species  <cit> . systematic differences in probes’ targets might also be present between different tissues  or samples subjected to different treatments. whereas regions of known differences might be accommodated in array design , other differences that are not recognized might lead to errors in detecting de. to date, their identification and removal is usually not a part of a 3’ivt arrays data analysis pipeline. as they differ in binding affinity between compared groups, but are still in relation to other probes within a probe set, downweighting of outlier probes, as performed in summarization step of preprocessing methods  does not reduce their interference.
+
+bad probes violate the assumption made in methods for estimating gene expression from microarrays, that there is a common binding affinity for a given probe for all samples. therefore, for de gene discovery, they should be removed from analysis.
+
+as bad probes are a result of systematic differences between compared groups, they might identify candidate loci for further investigation, for example differing in splicing isoforms between compared groups. when using expression data to classify samples, they might be another factor discriminating samples. however, as they obscure real expression levels, by potentially canceling out expression differences with reciprocal signal or by disrupting the normalization process, they should be removed before estimating expression level differences.
+
+therefore bad probe detection should be a part of standard differential gene expression analysis. when a goal is to find both quantitative and qualitative differences in expression between samples, the analysis might be done twice, with and without bad probes. comparison of results for the same dataset before and after masking, along with the localization of bad probes, would help to interpret which probe sets apparently detecting de differ in expression levels and which have rather qualitative target differences.
+
+a set of probes identified as bad for a specific experiment might be removed from analysis of other similar datasets. however, each tissue, developmental stage etc. might differ qualitatively in transcriptome and therefore have a different set of bad probes, so identification of ones specific for the experiment is better.
+
+CONCLUSIONS
+we introduce “maskbad”, the r package to detect and remove probes with different binding affinity in affymetrix array expression data. the method implemented in maskbad performs better than other methods in detecting bad probes. identification and removal of bad probes removes spurious gene expression differences and helps to reveal real ones. in clustering analysis of gene expression, identification of bad probes guides interpretation of discriminating probe sets.
+
+the bad probes are prevalent in comparisons of genetically distinct samples, such as different strains of a species or between species, but systematic qualitative differences in transcriptome might introduce them also when samples differ by treatment, health status or tissue type. all commonly used preprocessing procedures assume constant binding affinity for a probe in all samples and their downweighting of outlier probes does not protect from bad probes. therefore masking should be a routine step in data preprocessing. the “maskbad” package allows identifying, inspection and removing bad probes in r and bioconductor environment and make it a part of standard gene expression analysis pipeline.
+
+availability and requirements
+project name: masking bad microarray probes.
+
+project home page: http://bioinf.eva.mpg.de/masking/test/pmwiki.php/site/maskingmicroarraysprobeswithbindingaffinitydifferences and bioconductor 
+
+operating systems: linux, os x, windows
+
+programming language: r 
+
+other requirements: packages affy, gcrma
+
+license: gnu gpl
+
+links
+package is available at
+
+http://bioconductor.org/packages/ <dig> /bioc/html/maskbad.html
+
+http://bioinf.eva.mpg.de/masking/test/pmwiki.php/site/maskingmicroarraysprobeswithbindingaffinity differences
+
+abbreviations
+bad, binding affinity different; de, differential expression; sfp, single feature polymorphism; snp, single nucleotide polymorphism.
+
+misc
+michael dannemann and anna lorenc contributed equally.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contribution
+al, md and ml conceived the package. md developed the package. md and al tested the package. al wrote the manuscript, all authors have contributed to it and have read and accepted the final version.
+
+supplementary material
+additional file  <dig> 
+a bad probe without known polymorphisms in the targets. examples of fluorescence intensities for probes from the probe set 1415723_at, without any polymorphisms in target region according to sequence data, for mice from c57bl/6nj  and dba/  <dig> j  strains. a. bad probe  b. probe without bad .
+
+click here for file
+
+ additional file  <dig> 
+bad probe introduces spurious de. fluorescence levels of the probe set 37766_s_at for normal lung and tumor lung tissue. each dot represents a sample. this probe set is detected as de  with raw data, but is not significant after masking. intensities and its correlations with some other probes of the probe set are shown for the probe  <dig>  identified as bad  and probe  <dig>  non-bad . in the middle fluorescence levels for consecutive probes.
+
+click here for file
+
+ additional file  <dig> 
+bad probe prevents detection of de. fluorescence levels of the probe set 38657_s_at for normal lung and tumor lung tissue. each dot represents a sample. this probe set is detected as de  only after masking. intensities and its correlations with some other probes of the probe set are shown for the probe  <dig>  identified as bad  and probe  <dig>  non-bad . in the middle fluorescence levels for consecutive probes.
+
+click here for file
+
+ acknowledgements
+we would like to thank three anonymous reviewers for their help in making this manuscript more transparent. we are grateful to jarek bryk, bernhard haubold and jai denton for comments on the manuscript. al, md, ml are funded by max planck society.

@@ -1,0 +1,94 @@
+BACKGROUND
+next generation dna sequencing technology  <cit>  has enabled the use of sequencing to query biological function using methods such as chip seq  <cit>  and rna seq  <cit> . the cost of sequencing is rapidly declining, and as a consequence large repositories of sequencing data have arisen from key biological experiments. early experiments used  <dig> bp tags for chip-seq and generated a few million reads per sample. recently available long reads, paired reads, and read counts over  <dig> reads per sample have enabled rna-seq  <cit>  experiments that detect splice form variants. deep sequencing also permits detection of snps and other variants across populations and between samples and reference sequences.
+
+the number of public, potentially useful datasets is vast. for example, the encode project  has produced hundreds sequencing datasets in human cell lines for histone modifications and transcription factor binding. analyses incorporating these datasets might query the genome in kilobase windows and perform millions of queries against each dataset in an analysis. the full alignment output for a dataset might be hundreds of megabytes to several gigabytes , requiring over a terabyte of space for the complete encode datasets.
+
+space used by readdb, bigwig files, and bam files .
+
+the data requirements for analysis algorithms vary by application. assembly and snp detection algorithms require access to all bases of the read and the quality score of each base. in contrast, some chip-seq analysis algorithms can ignore individual reads and operate only on the histogram of read depth at each base. common formats currently include bam  <cit>  and wig/bigwig  <cit> . bam stores the full alignment output, including the read sequence, read quality, hit position, and mismatch and indel information. wig  is a histogram format that stores positions and values; each position corresponds to a single histogram bin and the value to the number of reads starting in or crossing that bin.
+
+our software, readdb, aims to support chip-seq, rna-seq, dna methylation, and dnase hypersensitivity analysis and visualization applications by providing efficient access to mapped read positions for single and paired end reads. readdb operates as a network server process such that data can be curated by one or a few people for a large group and so that clients do not need access to a shared network filesystem or large amounts of local disk space. the server can respond to queries either with the positions of individual reads or with a histogram generated with arbitrary bin size. the provided client code can then provide quick network access to thousands of datasets. however, readdb does not implement analysis algorithms  or a visualizer itself. rather, we use and expect others to use readdb as the backend storage for these applications.
+
+implementation
+architecture
+readdb implements an abstraction called an alignment that describes where reads from a read set map to a reference genome. a read set may be a collection of reads from a single experiment, or it may combine reads from multiple experiments that are replicates. queries on an alignment are performed with respect to the coordinate space of the reference genome used for the alignment. note that a read set can be aligned to different genomes, or different alignment methods or parameters can be used to align a read set to the same genome; each alignment variant for a given read set is stored as a unique alignment.
+
+an alignment has distinct data structures for each chromosome. three files make up the column store and hold the hits  sorted by position , the strand and hit length , and weight . a fourth file indexes the sorted hits. figure  <dig> provides an overview of the readdb architecture.
+
+readdb's key feature is the index of the sorted hits for a chromosome. the index file is similar to a single block of a b-tree index and points into the main data files every 4- <dig> kb . at four bytes per record in the data file and eight bytes per entry in the index, a  <dig> kb index file is sufficient for eight million  * ) to thirty two million records. as most experiments contain fewer than ten million hits per chromosome, most index files are smaller than  <dig> kb and readdb can cache hundreds of index files in a reasonable amount of memory. the index provides o) accesses into the list of hits, meaning that readdb query operations are o + m) where n is the number of hits stored and m is the number of hits returned.
+
+for compactness, readdb stores chromosomes as integers. client code may either use this directly to store chromosome numbers  or may use an external database that maps chromosomes to numeric identifiers. in the former case, the alignment name ought to indicate the genome assembly, eg "gm <dig> ctcf against mm <dig> " in the latter case, a system such as gse  <cit>  maps the combined genome build and chromosome name to an identifier and maintains metadata about each alignment. in either case, client code can unambiguously specify which genome should be used and could even query both genomes by executing queries against both chromosome identifiers.
+
+while readdb can return individual read positions, many applications benefit from server generated histograms. condensing a potentially large number of hits into a much smaller number of bin positions and counts generates substantially less network traffic between the client and server. the server can also answer aggregate queries such as the total number of reads or the sum of hit weights in a region, chromosome, or dataset.
+
+readdb also supports paired-end read sets and allows queries based on either end of the read. the query specifies, for example, a genomic range for which to query the "left" reads and all read pairs for which the left read maps to that range are returned. paired-end storage is implemented by adding columns for the mate's position, strand, and length and by storing each read twice: once keyed by the "left" read and once keyed by the "right" read. the duplication allows for quick access by either side at a minimal cost of storage space since the data stored per read is only slightly larger than the corresponding key  and pointer.
+
+interface
+the readdb server accepts queries as text and may be queried from any programming language. the interface, described in full in additional file  <dig>  includes methods to
+
+• store single-end and paired-end hits to an alignment. both hit types may be stored to an alignment
+
+• delete hits from an alignment 
+
+• retrieve a list of chromosomes to which reads were mapped in an alignment
+
+• retrieve the number of hits present in an alignment or in a particular chromosomal region of an alignment
+
+• retrieve the hits present in an alignment or in a particular chromosomal region of an alignment. the interface allows only positions or weighs to be retrieved in addition to the full hit information.
+
+• retrieve a histogram either of hit counts or hit weight sums across a chromosomal region. the interface allows the caller to specify the histogram bin width.
+
+all queries may be filtered by hit strand, paired-endness, and weight.
+
+RESULTS
+we tested a java readdb client with a remote readdb server against the following alternatives:
+
+• remote bam  and remote bam index 
+
+• bam and index on local disk
+
+• remote bigwig 
+
+• bigwig on local disk
+
+readdb and bam files were queried to retrieve individual read positions. bigwig files only support queries for histograms and were tested in this mode.
+
+for each setup, we tested results from aligning three read files to the hg <dig> assembly: a small set of  <dig>  pol <dig> chip-seq reads  <cit> , a medium set of  <dig> , <dig> ctcf chip-seq reads , and a large set of  <dig> , <dig> reads dnase hypersensitivity reads . table  <dig> shows the number of reads in each dataset as well as the storage space required for each method.
+
+each test consisted of retrieving all hit positions within some number of regions n  of size  <dig> kb,  <dig> kb, or  <dig> kb. readdb was queried with our java code. bam files were queried with code using the picard http://picard.sourceforge.net library and bigwig files were queried with perl code using the bio::bigfile module . our readdb server machine also provided http access to the bam and bigwig files off the same filesystem that provides readdb storage using apache  <dig> . <dig> 
+
+over a local area gigabit network, remote readdb performs similarly to local-disk access and three to five times faster than remote bam or bigwig files. as shown in figure  <dig>  readdb also outperforms remote bam and remote wig files for all dataset sizes and query region sizes. readdb also outperforms a local bam file in some tests against the large dataset. as expected, the local wig file often provides good performance as one would expect from a local data source that is a pre-computed histogram.
+
+tests performed through the network server  from the server machine itself help separate the effect of file format from the effects of network throughput and latency. as shown in figure  <dig>  readdb access in this situation is as at least as fast as local bam access indicating that readdb's on-disk format provides a performance advantage over the bam format as the dataset size increases. the difference between local bam performance and bam via http in this test indicates the extra overhead incurred by the http server and avoided by readdb's server.
+
+we also performed a subset of tests from a residential broadband connection  to determine the effects of higher latency and lower bandwidth. as seen in figure  <dig>  runtimes increased for all methods. the difference between readdb and bam increased substantially to five to seven fold. wig performed very well in this test as its relatively small size incurred the least network transmission time.
+
+CONCLUSIONS
+readdb's query performance bests that of remote bam and bigwig files on all but the smallest datasets. since readdb's theoretical query time is o + m) , readdb should scale to datasets that are many times larger than those evaluated here. our tests demonstrate that the expected behavior holds over two orders of magnitude in dataset size.
+
+readdb provides fast and compact access to aligned short-read datasets in situations where mismatch information and quality scores are unnecessary. in particular, we have found that readdb provides an excellent back end for visualization and analysis of chip-seq, dna methylation, dnase hypersensitivity, and rna-seq datasets. we currently store over four thousand alignments covering over two thousand lanes of sequencing and enjoy performance nearing that of local disk without incurring the local storage overhead of bam or bigwig files.
+
+competing interests
+the authors declare that they have no competing interests.
+
+availability and requirements
+readdb.jar, provided as additional file  <dig>  contains the java class files, source files, and a howto file describing how to setup the readdb server. readdb requires java  <dig>  to run. the source code is provided under the gpl version  <dig>  updated versions of the jar file are available at http://cgs.csail.mit.edu/readdb.
+
+authors' contributions
+ar designed and wrote the software and performed the comparisons to other storage methods. dkg provided design suggestions and helped designed the comparison methods. ar and dkg wrote the paper and read and approved the final version.
+
+supplementary material
+additional file 1
+a description of the readdb interface and the method calls it contains.
+
+click here for file
+
+ additional file 2
+the java class files, source files, and a howto file describing how to setup the readdb server. updated versions of the jar file are available at http://cgs.csail.mit.edu/readdb.
+
+click here for file
+
+ acknowledgements
+thanks to shaun mahony and yuchun guo for being early adopters of readdb and assisting with bug reporting. we also appreciate dr. mahony's feedback on the manuscript.
+
+par was supported by the nih common fund grant 5tl1eb <dig> and by 5r01hg <dig> p01-ns055923- <dig>  and 1-ul1-rr <dig> to dkg.

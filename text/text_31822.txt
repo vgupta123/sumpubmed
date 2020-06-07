@@ -1,0 +1,209 @@
+BACKGROUND
+the cell is a complex system where its activity is controlled by gene regulatory networks  <cit> . the mrna concentration produced by each gene indirectly reflects its expression level. these concentrations can be an indication of the biological state of the cell, since they represent the proteins synthesized by ribosomes  <cit> . thus, the biological processes studies can be based on the analysis of mrna concentrations  of the genes. dna microarrays  <cit> , sage   <cit>  and rna-seq  <cit>  are among the most common techniques to measure the expression level of thousands of genes at the same time.
+
+a vast amount of transcriptome data has been provided by these large scale techniques, whose analysis requires efficient computational tools. in this context, the inference of gene regulatory networks  aim to obtain the interactions among genes from gene expression data. due to its relevance, several methods for grn inference have been proposed, including bayesian networks based  <cit> , relevance networks  <cit> , aracne   <cit>  clr   <cit> , and sffs-mce   <cit> . for reviews on this topic, the reader can be referred to  <cit> .
+
+although many grn inference methods are available, there are still challenges to overcome, such as noisy data, computational complexity and the curse of dimensionality . solutions based on high-performance computing are interesting when the objective is to infer grns with thousands of genes, although traditional platforms are expensive and difficult to maintain.
+
+in this context, gpu  for general purpose computing  is an emergent technology which allows to perform high-performance computing with relatively low cost  <cit> . cuda  is a programming platform which provides a parallel programming model allowing the nvidia gpu architectures to perform efficient general purpose computing.
+
+the employment of gpus to address the grn inference problem is very recent though. shi et al. proposed a parallelization scheme for grn inference based on information-theoretic framework which involves matrices multiplication, optimizing the benefit obtained by applying gpu  <cit> . this method results in an approximation considering only pairwise relationships between genes, without taking into account the multivariate predictiveness nature of certain predictor genes with respect to the target genes. here we present a gpu-based parallel exhaustive search algorithm, with mean conditional entropy as criterion function, for grns inference with two multivariate gene predictors per target gene. the gene network inference approach of the proposed algorithm is based on probabilistic gene networks  <cit> , which displayed interesting results in obtaining the best predictor pairs for the considered target genes, given a data set with ternary values . we obtained speedups  of  <dig> for ternary data samples and  <dig> for binary data samples when using  <dig> gpus in networks with  <dig> genes and almost linear increases in the speedup versus the number of gpus. consequently, using our algorithm, the exaustive search of predictor genes in grns can be performed in a reasonable amount of time.
+
+the present paper is an extended version of the paper "accelerating gene regulatory networks inference through gpu/cuda programming"  <cit> . the main improvements found in this manuscript include: i - an improved version of the algorithm that works on multiple gpus, instead of a single gpu; ii - a more complete description of the model used to infer gene networks from temporal gene expression data ; iii - novel experiments considering binary and ternary genes  and adopting single and multiple gpus .
+
+identifying predictors by probabilistic gene networks using mutual information
+expression profiles of predictor genes display relevant informative content  about the expression profile of a given target gene. feature selection methods can be employed to find the subset of genes  presenting the largest information content about the target gene values.
+
+we adopted the probabilistic genetic network  approach  <cit>  which follows the feature selection principle: for each target, a search for the subset of predictors that best describes the target behavior according to their expression signals is performed. barrera et al. discusses this approach in the context of the analysis of dynamical expression signals of the plasmodium falciparum , providing interesting biological results  <cit> . this approach assumes that the temporal samples follow a first order markov chain in which each target gene value in a given instant of time depends only on its predictor values at the previous instant of time. the transition function is homogeneous , almost deterministic  and conditionally independent.
+
+lopes et al.  <cit>  provides a comparative study involving this approach  and methods like mrnet  <cit> , aracne  <cit>  and clr  <cit> . such approach showed superior performance for retrieving multivariate predictors. the mean conditional entropy , indicating the average information content of the target gene given its predictors, was adopted as fitness function. mutual information is a measure of dependence between variables that has been employed in many research fields such as image processing  <cit> , physics  <cit>  and bioinformatics  <cit> . the main advantage of mutual information compared to other similarity measures such as pearson correlation is the capability to capture non-linear relationships between variables  <cit> .
+
+the exhaustive search that looks for all possible pairs of candidate predictors for each target was considered as search method. in fact, it is the only way to obtain optimality in feature selection due to the intrinsically multivariate prediction, which may be present in biological systems  <cit> . such phenomenon is related to the nesting effect that occurs when a greedy feature selection algorithm or other sub-optimal heuristics are applied. once the exhaustive search is applied for all genes considered as target, the network is achieved.
+
+search algorithm
+given a set g of genes, the search algorithm identifies, for each target gene y ∈ g, the best subset x ⊆ g that predicts y according to a criterion function. the following algorithm performs an exhaustive search in order to identify the pairs :
+
+algorithm  <dig> : exhaustivesearch
+
+1: for each target gene y ∈ g do
+
+2:    for each predictor genes subset x ⊆ g do
+
+3:        calculates the criterion function h of the prediction of y by x
+
+4:    end for
+
+5: end for
+
+criterion function
+the mean conditional entropy  was adopted as criterion function. the shannon's entropy  <cit>  of a variable y is defined as
+
+ h=-Σy∈yplogp, 
+
+where p is the probability of the variable y be equal to y. the conditional entropy of y given x = x is:
+
+ h=-∑y∈yplogp, 
+
+where x is a feature vector and p is the conditional probability of y be equal to y given the observation of an instance x ∈ x.
+
+lastly, the mean conditional entropy  is defined as the weighted average of the conditional entropies  <cit> :
+
+ h= Σx∈xph. 
+
+gpu architecture and cuda
+gpus  are programmable graphic processor which, in combination with cpus, can be used as a general purpose programming platform. they are optimized to perform vector operations and floating point arithmetics, executing in simd  mode  <cit> .
+
+each gpu has a set of streaming processors , each constituted by an array of processor cores, which are the logical-arithmetic units of the gpu, as shown in figure  <dig>  each sm has a large number of registers, a small control unit and a small amount of shared memory, accessible from the threads executing in the sm. graphical devices normally have a large amount of global memory, which is shared among the sms. the latency for accessing this memory is high and, consequently, the shared memory is normally used as a user controlled cached.
+
+cuda  is a platform that provides an extension to the c language that enables the usage of gpus as a general purpose computing device. a compiler generates executable code for the gpu device from the provided cuda code.
+
+the programmer defines special functions called kernels, which are executed in the gpu. the user defines the number of threads to create, organizing them in thread blocks. the collection of blocks from a single kernel execution is called grid. each thread block runs on a single sm, but multiple blocks can be assigned to the same sm in a time-shared way. the cuda programming model is shown in figure  <dig> 
+
+a gpu/cuda algorithm for grns inference
+the general concept of the parallel exhaustive search consists in distributing the fitness function computation along the sms. the algorithm partitions the set of target genes t into k segments t <dig>  t <dig>  …, tk− <dig> and distributes these segments among the thread blocks. each thread block is responsible for evaluating the criterion function for its assigned target genes tifor every pair of predictors from the set of genes p.
+
+preliminary considerations and user settings
+given g with n genes, the complexity of the exhaustive search is o for each evaluated target, where |x| is the number of predictors. this occurs because for each target we must evaluate the entropy for every p-tuple of predictor genes. if every gene is used as target, we have a total complexity of o.
+
+for larger values of |x|, this procedure becomes impractical for typical values of n . in this way, the number of predictors was fixed in two  to reduce the search space. from the biological point of view, this decision is reasonable since the average number of predictors in grn is between  <dig> and  <dig> according to some previous studies  <cit> . besides, in a typical microarray experiment, only dozens of samples are available, which leads to a weak statistical estimation if one considers subsets with  <dig> or more predictors per target  <cit> .
+
+preprocessing
+initially, the program reads the expression matrix from the disk and replicates it into two matrices t and p in the main memory. matrices t and p represent the expressions of the target and candidate predictor genes, respectively. each matrix has s lines, representing the experiment samples, and n columns, represent each gene. figure  <dig> shows an example matrix with  <dig> genes and  <dig> samples. after loading the data into t and p into the main memory, the program allocates space and transfers the matrices to the gpu global memory.
+
+local exhaustive search
+we consider that k blocks are started, denoted by bl <dig>  bl <dig>  …, blk− <dig>  the algorithm then partitions the set of target genes t into k segments t <dig>  t <dig>  …, tk− <dig> of size n/k and the set of predictor genes p into 2k segments p <dig>  p <dig>  …, p2k− <dig> of size n/2k, as illustrated in figure  <dig>  each thread block is responsible for evaluating the criterion function for its assigned target genes in tifor every pair of predictors from the set of genes p.
+
+each thread evaluates the conditional entropies, for every pair of predictors, of a single target gene in ti. to evaluate the entropies, each thread block transfers to the shared memory of its sms parts of tables t and p containing the set of target genes tiand two sets of predictors pj1and pj <dig>  these data are transferred from the global memory in a coalesced way, which joins up to  <dig> individuals memory reads into a single one, increasing the effective memory bandwidth.
+
+algorithm  <dig> describes the exhaustive search procedure executed by each block. to evaluate the conditional entropies of a target gene in tifor each pair of predictors in pj1and pj <dig>  the thread creates a table, shown in figure  <dig>  this table contains the number of times a gene in tiassumed the values  <dig> or  <dig> for each combination of the predictor genes values, and the associated conditional entropy. the threads maintain this table at the registers of their associated sms during the evaluation of the entropies, preventing expensive global memory accesses.
+
+algorithm  <dig> : localexhaustivesearch
+
+require: segment ti of target genes and segments pj1and pj2of predictor candidates
+
+1: for each target t ∈ tido
+
+2:    for each pair  ∈ {pj1× pj2} do
+
+3:        calculates the power of  to predict t according to a criterion function h
+
+4:    end for
+
+5: end for
+
+global exhaustive search
+the global exhaustive search provides, for each thread block, all pairwise combinations of predictor subsets pj1and pj <dig>  with these permutations along the segments of p, each thread block can evaluate all predictor candidate pairs for every target gene in ti, as described in algorithm  <dig> and illustrated in figure  <dig> 
+
+algorithm  <dig> : globalexhaustivesearch
+
+1: transfers the table values for the genes belonging to ti
+
+2: for j <dig> ←  <dig> to 2k −  <dig> do
+
+3:    transfers the table values for the genes belonging to pj <dig> to all blocks
+
+4:    for j <dig> ← j <dig> to 2k −  <dig> do
+
+5:        transfers the table values for the genes belonging to pj <dig> to all blocks
+
+6:        evaluates the entropy for every pair of predictors  ∈ {pj1× pj2}
+
+7:    end for
+
+8:    end for
+
+as we will analyze in the next section, this algorithm reduces the number of transfers from global memory for each predictor gene from set p. moreover, it transfers each target gene from set t only a single time, in the beginning of the algorithm.
+
+besides reducing the number of global memory transfers for each gene, by dividing the tables into contiguous sets, we can perform coalesced transfers  <cit>  from the global to the shared memory, further increasing the bandwidth of the memory. in this kind of transfer, up to w memory values are transferred as a single memory access. w is architecture dependent and has a value of  <dig> in the tested gpus. consequently, the algorithm works optimally for multiple of  <dig> genes, since the gpus execute the threads in clusters  of  <dig>  thus, the transfers between shared and global memories and the use of gpu cores are optimized. for different grn sizes, dummy genes might be included to the grn.
+
+analysis of the algorithm
+considering a single thread block, for each iteration of the outer loop from algorithm  <dig>  one segment of genes pj <dig> is transferred from the memory. for the inner loop, there are 2k − j <dig> iterations for each value of j <dig>  where on each iteration the segment pj <dig> is transfered. consequently, the number of segment transfers per thread block, considering the inner and outer loops, is:
+
+ ∑j1=02*k-12*k-j1+1=2+3+…+=2k2+3k 
+
+we must add to this value the transfer of tiin the beginning of the algorithm. considering that there are k thread blocks operating simultaneously and that there are n/2k genes per segment, the total number of gene transfers will be:
+
+ k*n2k*=n× 
+
+consequently, we can see that the number of gene transfers from the global memory is o and that each gene is transfered o times. this means that by increasing the segment sizes, we have a smaller k less transfers from the global memory.
+
+also, if the shared memory is not used, the total number of gene transfers would be o, resulting in a memory load  <dig> times higher. for n =  <dig> predictors and segments of size  <dig>  resulting in k =  <dig> blocks, the number of transfers without the segmentation would be  <dig> *  <dig> =  <dig>  *  <dig> times higher. this difference occurs because when a segment is transferred to the shared memory, the values for each gene from the segment are used multiple times.
+
+multi-gpu algorithm
+in order to provide scalability for our method and improve its performance, we extended our inference algorithm to work with multiple gpus. the general idea of the multi-gpu algorithm is to partition the set of target genes among the available gpus and execute algorithms  <dig> and  <dig> in each gpu. consequently, each gpu is responsible for calculating the entropy of a subset of target genes.
+
+suppose we have m gpus denoted by c <dig>  c <dig>  …, cm− <dig>  the multi-gpu algorithm is described as follows:
+
+ <dig>  copy matrix p to the global memory of each gpu. then, partition matrix t in m supersegments of size n/m, which we denote by t <dig>  t <dig>  …, tm− <dig> . copy each supersegment tito the global memory of ci,  <dig> ≤ i ≤ m −  <dig> 
+
+ <dig>  launch the kernels with k/m thread blocks per gpu, where k is the total number of blocks. we denote by blji the block blj started in ci, where  <dig> ≤ j ≤ k/m −  <dig> and  <dig> ≤ i ≤ m −  <dig> 
+
+ <dig>  execute algorithms  <dig> and  <dig> on each gpu, so that gpu cireceives the blocks bl0i,bl1i…,blk/m-1i, which operate on the segments t0i,t1i…,tn/m-1i. here tji denotes the segment j belonging to supersegment i.
+
+ <dig>  copy the best predictor pairs for each target gene along with their corresponding entropy values from the gpu global memory to the cpu main memory.
+
+implementation
+the implementation of the parallel exhaustive search algorithm was performed using cuda. we applied all optimizations described in the algorithm description. the implementation source code can be obtained at https://sourceforge.net/p/inferencemgpu/.
+
+the cpu implementation, which we used to evaluate the speedups, utilizes openmp to enable the usage of all cores from the processor. openmp is an api  designed for implementing parallel algorithms in architectures with shared memory multiprocessors. we divided the target genes among the threads, resulting in a good load-balancing among the cores.
+
+RESULTS
+we executed the cpu version of the algorithm in a machine with a six-core intel i <dig> 3930k  <dig>  ghz processor and 32gb of ddr <dig> ram memory. for the gpu implementation execution, we used a quad-core computer with intel i <dig>  <dig>  <dig>  ghz with  <dig> gb of ddr <dig> ram memory and  <dig> nvidia gtx  <dig> graphic boards, with  <dig> gpus and  <dig> mb of memory on each board. each gpu has  <dig> multiprocessors  with  <dig> cores on each, resulting in a total of  <dig> cores per gpu. we used linux ubuntu  <dig> , with cuda version  <dig>  and gcc  <dig> . <dig> compiler, configured with the option -o <dig> 
+
+in both versions, we measured the elapsed times of the complete execution of the application. in the gpu version, this means that the time necessary to allocate the variables in the cpu and gpu memories and the data transfers are included in the measurements.
+
+the binary data samples used in the experiments presented in this section were generated using the artificial gene network  simulator  <cit> , considering the erdös-rényi boolean network model. such simulator allows to control the number of genes present in the network and the number of samples. we also performed experiments considering ternary data samples, i.e., genes can be underexpressed, normal and overexpressed . for this set of experiments, we considered the plasmodium falciparum database  <cit> , the same database considered in  <cit> , whose expression values were quantized in three values by applying normal transform .
+
+execution times for binary samples
+we performed three experiments to evaluate the performance of our method, comparing the execution times of the cpu implementation with the gpu algorithm running in  <dig>   <dig> and  <dig> gpus. we used datasets with  <dig> binary samples and grns with different sizes .
+
+tables  <dig>   <dig> and  <dig> show the average execution times for each experiment  considering  <dig>   <dig> and  <dig> target genes per block. for a fixed grn dize, larger number of target genes per block implicates in smaller execution times. this happens because the higher the number of target genes processed per block, the higher the number of genes processed in parallel in each block, which leads to less traffic between shared and global memories. experiments with targets/block >  <dig> were not performed, since the gpu shared memory does not support the segment lengths of the expression matrices t and p. the small amount of shared memory is an important restriction of the gpu architecture.
+
+columns from left to right: different sizes of grns ; execution times of the  <dig> core cpu algorithm; execution times for  <dig> experiments using the gpu algorihm:  <dig>   <dig> and  <dig> target genes per block using  <dig> gpu.
+
+columns from left to right: different sizes of grns ; execution times of the  <dig> core cpu algorithm; execution times for  <dig> experiments using the gpu algorihm:  <dig>   <dig> and  <dig> target genes per block using  <dig> gpus.
+
+columns from left to right: different sizes of grns ; execution times of the  <dig> core cpu algorithm; execution times for  <dig> experiments using the gpu algorihm:  <dig>   <dig> and  <dig> target genes per block using  <dig> gpus.
+
+we verified that as we increase the number of targets per block, the execution time decreased as expected, since the number of transfers from global memory for each gene is o. but the number of operations for evaluating the entropies is the same, regardless of the number of targets per block. this explains the almost linear gains in performance when increasing the block size from  <dig> to  <dig> targets per block.
+
+execution times for ternary samples
+the same experiments performed for binary samples were also run considering  <dig> ternary samples . tables  <dig>   <dig> and  <dig> show the average execution times for each experiment  considering  <dig>   <dig> and  <dig> target genes per block.
+
+columns from left to right: different sizes of grns ; execution times of the  <dig> core cpu algorithm; execution times for  <dig> experiments using the gpu algorihm:  <dig>   <dig> and  <dig> target genes per block using  <dig> gpu.
+
+columns from left to right: different sizes of grns ; execution times of the  <dig> core cpu algorithm; execution times for  <dig> experiments using the gpu algorihm:  <dig>   <dig> and  <dig> target genes per block using  <dig> gpus.
+
+columns from left to right: different sizes of grns ; execution times of the  <dig> core cpu algorithm; execution times for  <dig> experiments using the gpu algorihm:  <dig>   <dig> and  <dig> target genes per block using  <dig> gpus.
+
+the same observations stated for the binary samples case are also valid here.
+
+obtained speedups
+we also evaluated the speedups obtained with the gpu algorithm. we defined the speedup as the execution time spent by the multi-core algorithm parallelized on  <dig> cpu cores divided by the execution time spent by the gpu algorithm for the same instance of the problem. figures  <dig>   <dig> and  <dig> show the speedup versus number of genes considering  <dig>   <dig> and  <dig> target genes per block, respectively. these results consider both binary and ternary samples.
+
+the results show good speedups on networks with  <dig> or more genes, especially when using two or four gpus. for example, using four gpus for networks of  <dig> genes, we obtain speedups of approximately  <dig>   <dig> and  <dig>  when using  <dig>   <dig> and  <dig> target genes per block, respectively, for the binary samples case. for ternary samples, the speedup behaviors look similar, with speedups of approximately  <dig>   <dig> and  <dig> for  <dig>   <dig> and  <dig> targets per block, respectively. moreover, the speedup tends to increase with the number of genes, since in this case we use all the cores in the gpus more effectively.
+
+the speedup obtained with the ternary samples was smaller than with the binary samples because each thread uses more state variables. this results in a larger register utilization and, consequently, a smaller number of simultaneously executing threads. however, the obtained speedup is  <dig> when using  <dig> gpus and  <dig> when using a single gpu.
+
+regarding the usage of multiple gpus, figure  <dig> shows that, for the binary coding, there is no advantage in using two or four gpus when we take  <dig> target genes per block and grns with  <dig> genes. with ternary coding, the execution times with two and four gpus were the same. a similar scenario occurs for networks with up to  <dig> genes and  <dig> and  <dig> genes per block, as shown in figure  <dig> and  <dig> 
+
+this result can be explained considering the number of thread blocks required to represent all target genes. for instance, considering  <dig> targets per block, we need  <dig>   <dig> and  <dig> blocks for networks with  <dig>   <dig> and  <dig> genes, respectively. in the experiments we used gpus with  <dig> sms, which can simultaneously execute a number of blocks multiple of  <dig>  with  <dig> genes per block and  <dig> genes, the speedups with  <dig>   <dig> and  <dig> gpus were the same. in this case, it is clear that with one gpu,  <dig> sms executed  <dig> blocks simultaneously, with the others executing a single block, without a performance penalty. with  <dig> genes there are  <dig> blocks and there was a performance gain when using  <dig> or more gpus. in this case, with one gpu some sms had to execute three blocks, which could not be performed simultaneously. consequently, it required almost twice the time when compared to the execution with  <dig> gpus.
+
+finally, for networks with larger number of genes, such as  <dig> genes, the use of multiple gpus provides important gains in the speedup. for instance, considering  <dig> genes per block using  <dig> gpus ), the speedup was  <dig> times higher than the obtained by considering  <dig> gpus and  <dig> times higher than the obtained by considering a single gpu when applying to binary samples. and in the ternary samples case, considering the same settings, the speedup obtained for  <dig> gpus was  <dig> times higher than the obtained by considering  <dig> gpus and  <dig>  times higher than the obtained by considering a single gpu.
+
+number of samples
+to evaluate the dependence of the runtime on the number of samples, we conducted an experiment using four gpus and a network with  <dig> genes. we varied the amount of samples and target genes per block. the results  show that there is a linear dependence between the runtime and the number of samples for both binary and ternary samples cases.
+
+CONCLUSIONS
+in this paper we propose a multi-gpu algorithm that allows the inference of gene regulatory networks  with multivariate predictions in significantly lower times than using multi-core cpus. for instance, the inference of a grn with  <dig> genes, which took about two days in a six core cpu, was executed in less than  <dig> minutes using  <dig> gpu and about  <dig> minutes using  <dig> gpus. the main contribution of the algorithm is to permit the execution of the exhaustive grn inference method using large datasets in a reasonable time.
+
+another important observation is that the proposed multi-gpu scheme is well scalable, since the speedups increased in an almost linear fashion with the employed number of gpus. such speedups results suggest that it is an efficient and low cost solution for researchers that need to infer grns of realistic sizes  from transcriptome data in a reasonable time, considering multivariate  relationships. besides, this paper presents a proof of principle, showing that it is possible to parallelize the exhaustive search algorithm in gpus with encouraging results. although our focus was on the grn inference problem, we developed an exhaustive search technique based on gpu which can be applied to other combinatorial problems with minor adaptations.
+
+as future work, the algorithm will be improved to work with predictor subsets with cardinality greater than  <dig>  which allows to infer grns with more complex interactions. such improvement requires new approaches for gene expression matrices division and for data traffic management between the global and shared memories. also, we will also update the method to execute in clusters of heterogeneous gpus, which will provide more performance, specially for inferences with larger networks and higher cardinalities.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+all authors analyzed the initial problem, conceived the general framework of the proposed approach and discussed aspects of the development and implementation. ffb and ryc worked on development and implementation of the method. all authors idealized the experiments, discussed the results and participated in the production and revision of the manuscript.
+

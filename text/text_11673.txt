@@ -1,0 +1,157 @@
+BACKGROUND
+predicting the genes encoded in the genome of an organism is a crucial part of most pipelines for genomic analysis. driven by the ongoing advances of high-throughput next-generation sequencing techniques, more and more genome sequences are available that need to be annotated to understand the basis and function of processes in a cell.
+
+to allow accurate predictions, several methods for gene identification have evolved, which can be categorized as ab initio and evidence based  gene finders. ab initio approaches  predict genes exclusively depending on the target sequence and perform identifications based on training data and strategies such as hidden markov models  <cit> .
+
+in contrast, evidence based methods compare the sequence of interest to available reference annotations or include external evidence in their prediction, for example est libraries or rna-seq information  <cit> .
+
+ab initio methods are very sensitive, but their accuracy strongly depends on the quality of the training data set  <cit> . further, they have the disadvantage  of providing no information on whether the genes are indeed expressed under a certain condition or not, and  of missing or incorrectly predicting genes that differ from the considered standard codon scheme  <cit> . these criteria are met by evidence based approaches that report genes based on observed evidence and are therefore more robust to non-standard coding schemes. however, these methods are prone to noise in the external information and to incomplete or contradicting evidence  <cit> .
+
+hybrid approaches, such as augustus  <cit>  and jigsaw  <cit> , combine ab initio predictions with other evidence. this allows a more accurate verification of predicted genes, although also hybrid approaches are limited for instance by incomplete evidence or insufficient training data.
+
+combining the output of different gene prediction strategies allows complementing the strengths of single method predictions to obtain the sensitivity of ab initio approaches, while incorporating other evidence to complete and verify identifications, as for example shown in  <cit>  and  <cit> . up to now, to the best of our knowledge, approaches combining predictions treat all identifications independently of their prediction strategy and predominantly introduce weighting schemes to score different predictions. amongst others, these methods include  <cit> . hence, the full complementary potential of the combination of different prediction strategies is not fully tapped. further, current methods often focus on the integration of a specific set of gene finders  <cit> .
+
+therefore, in this article we present ipred , an automated pipeline to process the output of various gene finders  and merge ab initio and evidence based predictions to obtain a new combined set of gene identifications, representing the integrated information of the single method predictions. in particular, ipred is independent of the evidence used to assist gene predictions. it incorporates methods from the full plethora of evidence sources, for instance from est libraries, protein alignments, sequence comparison, or from increasingly popular rna-seq runs. ipred was designed with a focus on combining different prediction strategies to complement their advantages and counterbalance weaknesses of one prediction class with information from another. true positive identifications, for instance highly conserved genes, are likely to be present throughout different evidence information, whereas false positive identifications are not expected to be simultaneously present in the majority of prediction results and can thus be filtered out.
+
+ipred is a flexible and robust method that in contrast to other methods works independently from weighting schemes and does not require any a priori knowledge.
+
+in case a reference annotation is available, all predictions can be automatically evaluated using the framework provided by cuffcompare  <cit> .
+
+ipred provides its own gui for easy usability, but can also be applied from the command line. we demonstrate the benefit of our method in two simulations and in two real data experiments based on escherichia coli and human data.
+
+implementation
+ipred accepts prediction output files in the commonly used gtf annotation format and provides converter scripts for a range of further file formats, for example the augustus gff format or the glimmer <dig> predict format. the interpretation of gtf format styles can differ among methods. we decided to work based on the gtf format used by the cufflinks/cuffcompare suite  <cit>  because we use cuffcompare in the ipred pipeline .
+
+hence, in the following the name gene describes a locus on a genome that is expressed to an amino acid sequence. in eukaryotes, a gene can be expressed in more than one transcript sequence, also referred to as alternative isoforms. further, the transcribed part of a gene including coding sequence  and potentially also untranslated sequence  is called exon.
+
+when providing the output of gene finders, the user needs to categorize the different outputs into either ab initio or evidence based  predictions since ipred was in particular designed for combining complementary strategies.
+
+also hybrid prediction methods and the result of annotation pipelines can be incorporated into ipred. for instance, if a hybrid method is ab initio in its nature, it should be specified as ab initio. when evidence has been integrated in the annotation pipeline, the result can be specified as evidence based.
+
+note that it is not recommended to combine ab initio with ab initio methods since the underlying information, i.e. training sets or employed statistical model, might be very similar and thus could bias the combination of predictions.
+
+however, if an integration of two ab initio predictions is desired, one method can be classified as evidence based. here, it is necessary to keep in mind that potential novel genes that are predicted by the ab initio method  are genes that are not verified by external evidence.
+
+based on the categorization of each method, ipred first processes the loci of the predicted genes separately and then combines the loci of ab initio and evidence based methods. ipred proceeds through the predicted ab initio loci  and tests if an evidence based prediction supports this identification. during this process the supported ab initio predictions are categorized into genes that perfectly overlap with at least one evidence based prediction and minor supported predictions that have only partial overlap. note that ipred per default accepts an overlap as a supporting overlap only if it is greater than a threshold of 80% of the length of the original ab initio prediction . the reason for the acceptance of only partially overlapped genes is that evidence based methods might only partially predict a gene, e.g. due to low coverage in rna-seq experiments. hence, requiring a perfect overlap could result in missed predictions. the threshold for overlap acceptance can be set by the user and is also adjustable to only accept 100% overlaps . in the additional file  <dig> we show that ipred is robust to different threshold settings and that it is not biased by small overlap thresholds.
+
+if at least two evidence based prediction outputs are available, the former described merging process can be extended by also reporting genes that are not predicted ab initio, but have support from different evidence based gene finders. this way, potential novel genes can be identified with greater confidence and also with respect to different approaches and sources for including external information .
+
+ipred distinguishes between combinations of prokaryotic predictions and eukaryotic predictions since the structure of gene loci can differ substantially depending on the organism type. in contrast to prokaryotes, eukaryotes show splicing events and also alternative splicing resulting in alternative transcript isoforms. this needs to be respected when merging eukaryotic gene predictions. hence, for each gene locus all corresponding transcripts are processed separately. it is not only important that an exon of a predicted transcript is supported by other methods, but also that the exon chain - all neighboring exons - is similar for compared transcripts .
+
+hence, in case of eukaryotes ipred only regards support for an exon of a transcript if the overlapping exon is part of a similar exon chain from a second prediction method. a transcript is classified as “perfect" only if all exons are matched perfectly by a different method. in case all exons of a transcript are supported, but with minor differences , the transcript is still classified as “supported" but receives a lower score to indicate less agreement.
+
+if only a part of the exons of a transcript is matched, ipred tests if the overlapping transcripts predicted by other methods have stronger support . if this is the case, the leading transcript is regarded as incorrect and instead the overlapping transcripts with stronger support are taken into account.
+
+if the possibly overlapping transcripts also disagree, the leading transcript is accepted only if the chosen overlap threshold is met by the number of matched exons . since the original overlap threshold is defined as a percentage of nucleotides that need to be covered, the definition of the transcript overlap threshold t is slightly adapted: the number of overlapped exons k must exceed t percent of the total number of exons n that are part of the current transcript: k≥⌊t·n⌋.
+
+ipred outputs a new prediction file in gtf format that includes all genes supported by both prediction strategies, categorized by the reliability of each prediction. in addition, a tracking file reports the original genes that generated each merged ipred prediction. further, additional files reporting genes that were only supported by one strategy are provided, e.g. to allow the analysis of potential novel or not expressed genes. in case a reference annotation is available, all predictions can be automatically evaluated using the framework provided by cuffcompare  <cit>  to allow an easy comparison of different combinations of gene finders.
+
+it is important to keep in mind that ipred is not intended as a new gene finder but rather as an easy-to-use post processing analysis to verify predictions and to filter out false positives. therefore, it strongly depends on the quality and performance of the input gene finders, but is independent of the underlying data sets or the nature of the information used for evidence based prediction. hence, ipred is in principle capable of detecting rare or hard-to-predict events, for instance also ncrna genes or genes following a non-standard coding scheme, as long as at least some of the input gene finders predict those events.
+
+currently, ipred returns predictions following the gtf format as interpreted in the cufflinks suite, e.g. it does not specify utr features. the reason is that currently the output formats of gene finders strongly differ between methods, and often no utrs or cds are reported. hence, to ensure a broad applicability we decided to be independent of these features and concentrated on gene loci and their corresponding transcripts and used the exon feature to specify coding regions.
+
+details on the merging process and system requirements are shown in the additional file  <dig> 
+
+experimental setup
+we evaluated ipred in four experiments on e.coli  and human data . to compare the methods on well-defined known ground truth data, we not only used real data sets but also simulations in our evaluation. in the first e.coli experiment we combined predictions of the widely used ab initio gene finders genemark  <cit>  and glimmer <dig>  <cit>  and the evidence based gene finders giira  <cit>  and cufflinks  <cit> . we simulated rna-seq reads based on the ncbi reference annotation of e.coli as evidence information. in the second experiment we used real e.coli rna-seq reads  as evidence.
+
+the eukaryotic experiments were also analyzed with cufflinks and giira, as well as with augustus  <cit> , a hybrid gene finder that is capable of integrating evidence into its ab initio predictions. in the eukaryotic simulation we again used simulated rna-seq reads as additional evidence. further, real rna-seq reads  served as evidence for the human real data experiment.
+
+all gene prediction methods were applied in their standard settings, using pre-trained models if available. the incorporation of hints to augustus followed the standard pipeline recommended on the augustus web page. note that the use of pre-trained models might introduce a bias favoring the accuracy of ab initio based gene finders, due to possible similarities between training data and the data used in this study. however, the comparison of prediction combination methods is unaffected since all combinations are based on the same single method predictions. full details on the method configurations can be found in the additional file  <dig> 
+
+the simulation setup uses the read simulator mason  <cit>  applied to the ncbi reference annotation for each organism of interest. in this annotation the coding sequence of each known isoform appears as a consecutive sequence. hence, the simulated reads show similar characteristics as real rna-seq reads since they cover alternative isoforms, span introns  and show a coverage profile typical for gene expression. note that only 70% of the annotated genes were used for evidence generation, simulating the fact that not all genes are expressed at the same time. the genes that received rna-seq support were chosen as the ground truth annotation for the simulation experiments. to obtain a ground truth in the real data experiments, we performed an alignment of the rna-seq reads against the reference annotation and counted the number of reads mapping to each annotated gene. then we regarded all genes as present that received an overall coverage of at least one.
+
+the simulated and real reads were aligned to the reference genome using tophat <dig>  <cit> , and the resulting alignment served as evidence for hybrid and evidence based gene prediction. the ab initio gene finders were applied directly on the reference genomes.
+
+ipred was used to analyze and combine the resulting gene predictions. we ran cuffcompare  <cit>  to evaluate all single method predictions and combinations against the ground truth reference annotations. in addition, we compared ipred to gene prediction combinations obtained by cuffmerge  <cit>  and evidencemodeler  <cit> , a current state-of-the-art prediction combiner that is an extension of the combiner idea  <cit>  and was shown to have superior performance to other existing combiners such as glean  <cit>  and jigsaw  <cit> . the simulation framework and evaluation is detailed in the additional file  <dig> 
+
+RESULTS
+e.coli simulationfigure  <dig> 
+e.coli
+ simulation. overview of cuffcompare metrics for the predictions of single methods, evidencemodeler and ipred combinations for the e.coli simulation. note that “ipred_all+novel” reports overall supported genes as well as genes missed by genemark but supported by both of the evidence based methods.
+
+
+
+hence, the overall prediction accuracy is significantly improved for combined predictions, as reflected in the considerable higher f-measures. also the number of missed and novel  genes is reduced when combining methods. genemark and giira originally resulted in a high number of non-annotated predictions. however, when integrating both methods, the merged result shows a substantially reduced number. this indicates that erroneous predictions are filtered out during the merging process because an erroneous prediction by one of the methods is almost always not present in the other method.
+
+further, we see different effects on prediction accuracy depending on the evidence based method combined with genemark predictions. for example, cufflinks appears to yield a set of predictions that is more complementary to genemark than giira predictions because the combination of genemark and cufflinks leads to a higher sensitivity and fewer missed exons than genemark combined with giira.
+
+the significant accuracy improvement of combinations with cufflinks in comparison to predictions from cufflinks alone is due to the fact that cufflinks does not predict structural genes but only the expressed transcript. hence, its original sensitivity and specificity are comparably low, but are substantially increased when combined with other methods predicting structural genes.
+
+although the combination of two gene finders already results in improved accuracy, the combination of all three methods yields the most accurate results. further, when also genes missed by genemark but supported by both of the evidence based methods are taken into account, we note an additional increase in sensitivity while showing comparable specificity.
+
+independently of the chosen combination ipred outperforms evidencemodeler and cuffmerge with significantly increased sensitivity and specificity. cuffmerge and in some cases also evidencemodeler even results in smaller sensitivity and specificity compared to the single method predictions. we assume that the low accuracy of cuffmerge is due to the fact that it does not include any weighting of different prediction methods, as opposed to evidencemodeler and the strategy combination of ipred. a more detailed analysis of the e.coli evaluation is shown in the additional file  <dig> 
+
+human simulation
+ipred was also tested on a simulation of a eukaryotic dataset based on chromosomes  <dig>   <dig> and  <dig> of the human genome. figure  <dig> shows the exon and transcript level comparison of the single method prediction accuracy with ipred, evidencemodeler and cuffmerge combinations. details are shown in the additional file  <dig> human simulation. overview of cuffcompare metrics for the predictions of single methods and method combinations for the simulated human data set. on the left-hand side the exon level evaluation is shown, on the right-hand side the comparison on the transcript level. note that “ipred_all+nov" reports overall supported genes as well as genes missed by augustus but supported by both of the evidence based methods.
+
+
+
+overall, we see that the performance on exon and transcript level significantly differs between methods. on the exon level, the sensitivity of ipred combinations strongly depends on the integration of novel predictions. if only predictions present in both augustus and one or two of the evidence based methods are taken into account, the sensitivity is significantly reduced compared to all other combinations. at the same time the specificity is on a comparable or slightly higher level compared to other ipred combinations, and significantly higher than the evidencemodeler and cuffmerge prediction. this results in an accuracy comparable to evidencemodeler but substantially decreased in comparison to other ipred combinations and also decreased in comparison to the single method predictions.
+
+if predictions are included that do not overlap with augustus identifications , the sensitivity significantly increases, together with only slight decrease in specificity. hence, these ipred combinations clearly outperform the result of evidencemodeler. also the cuffmerge combinations are outperformed since the high sensitivity of cuffmerge is accompanied with significantly lower specificity.
+
+the reason for the performance difference between combinations including and excluding “novel” predictions is that augustus often reports a transcript with an incorrect first or last exon . this is also reflected in the high number of novel exons predicted by augustus and in its low specificity. though a detailed analysis of this phenomenon is beyond the scope of this work, a likely explanation is that augustus is in principle an ab initio gene finder and only integrates hints from other evidence. the additional exons might be an artifact due to the ab initio prediction . hence, in combinations with cufflinks and giira the exon chains of the compared methods disagree and none of the predictions appears to be sufficiently supported.
+
+although including novel genes significantly increases the sensitivity, ipred is still affected by the discrepancies between augustus and evidence based predictions because it shows a sensitivity only comparable to cufflinks and giira and therefore yields comparable results in the overall accuracy.
+
+all in all, on the exon level ipred  yields more accurate results than evidencemodeler and cuffmerge and comparable results to the best single methods.
+
+on the transcript level cufflinks as the best performing method on the exon level yields almost no perfectly predicted transcripts. this is due to the fact that cufflinks is very accurate at predicting intermediate exons but does not predict start and stop codons and therefore beginning and the end of a transcript almost never match the reference annotation. here, ipred proves very useful because it can complement the overall exon accuracy of cufflinks with the start and stop prediction accuracy of other methods, which is reflected in the strong increase in sensitivity and specificity compared to cufflinks alone.
+
+hence, ipred again yields more accurate predictions than evidencemodeler and cuffmerge. further, it also increases the accuracy of the single method predictions. detailed values of the cuffcompare evaluation are shown in the additional file  <dig> 
+
+in addition, we compared the performance of the three gene prediction combination methods in regard to memory consumption and speed. table  <dig> shows the peak memory and overall time necessary to analyze and combine the single method predictions. ipred has the lowest memory and running time requirements of the three compared gene prediction combination methods.overall running time  and peak memory  for the compared gene prediction combination methods to analyze the simulated human data set
+
+
+
+performance evaluation
+
+combination method
+overall time 
+peak memory 
+
+
+e.coli real data set
+for further evaluation we also applied ipred to e.coli predictions based on real rna-seq evidence. figure  <dig> shows the results of the cuffcompare evaluation against the subset of likely expressed reference annotations. a more detailed analysis can be found in the additional file  <dig> e.coli
+ real data. overview of cuffcompare metrics for the predictions of the single methods, evidencemodeler, cuffmerge, and ipred combinations for the real e.coli data set.
+
+
+
+overall, ipred combinations show a pronounced increase in specificity and result in significantly improved prediction accuracy compared to all other methods. glimmer <dig> shows the highest sensitivity of all methods. since none of the approaches that include rna-seq evidence show a comparable sensitivity, this is likely due to the choice of the ground truth annotation set that might still contain genes that are not expressed but are rather mapping artifacts. here, including other evidence, such as protein alignments, might even further increase the accuracy of combined predictions. cufflinks and also cuffmerge show very low accuracy, which indicates that they are more suitable for application on eukaryotes than on prokaryotes.
+
+human real data set
+the results of the evaluation on a complete human data set with real rna-seq reads are shown in figure  <dig> and are detailed in the additional file  <dig> human real data. overview of cuffcompare metrics for the predictions of single methods and method combinations for the complete human real data set. on the left-hand side the exon level evaluation is shown, on the right-hand side the comparison on the transcript level. note that “ipred_all+nov" reports overall supported genes as well as genes missed by augustus but supported by both of the evidence based methods.
+
+
+
+on exon as well as transcript level augustus shows the highest prediction sensitivity, while the ipred combinations  show the highest specificity. this further demonstrates that ipred successfully excludes false positive predictions.
+
+however, on the exon level the overall accuracy of augustus predictions  is slightly higher than the accuracy of combinations by ipred based on cufflinks or cufflinks and giira .
+
+on the transcript level the difference in sensitivity is not as pronounced as on the exon level. hence, here the overall accuracy of ipred predictions  is slightly higher than for augustus, due to the improved specificity of ipred.
+
+on this data set including potentially novel genes also resulted in higher sensitivity ; however, at the cost of reduced specificity and overall reduced accuracy. this indicates that although cufflinks and giira agree on certain expressed regions, these predictions still require further analysis to ensure that they are not mapping artifacts. however, these regions might also hint to novel genes, but additional evidence, for instance from ests or protein libraries would be necessary for further verification, which is beyond the scope of this manuscript.
+
+in comparison with cuffmerge and evidencemodeler, ipred shows improved prediction accuracy, in particular on the transcript level. on the exon level, combinations by evidencemodeler are comparable to ipred. cuffmerge shows the highest exon level sensitivity of all combination methods, but at the cost of the lowest specificity.
+
+CONCLUSIONS
+gene prediction is an important task in genome analysis pipelines. existing approaches aim at accurately identifying genes based on varying strategies, categorized as ab initio and evidence based. since both types have their own strengths and weaknesses, combining ab initio and evidence based methods can complement advantages to improve the overall prediction accuracy. we developed ipred, an automated pipeline to integrate the results of gene prediction methods based on different strategies to enhance the accuracy of the combined gene identifications. the benefit is shown in simulations and on real data: ipred shows favorable sensitivity and specificity compared to single method predictions and to existing combiners.
+
+thus, we believe that ipred is a valuable addition to the set of existing methods for prediction combination. it is an easy-to-use software and allows broad flexibility on combined prediction results.
+
+availability and requirements
+project name: ipred.project home page:https://sourceforge.net/projects/ipred/.operating systems: platform independent.programming language: python  and java .other requirements: java  <dig> is required for using the gui. further, for using ipred from source, python  <dig>  or higher and the packages matplotlib and numpy are required.license: gnu lesser general public license, version  <dig> .any restrictions to use by non-academics: no.
+
+additional file
+additional file  <dig> 
+supplementary material to ipred. pdf document containing supplementary information on methods, system requirements, experimental setup, and results.
+
+ competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+fz participated in designing, implementing and evaluating the software and writing of the manuscript. byr participated in designing and evaluating the software and writing of the manuscript. all authors read and approved the final manuscript.
+

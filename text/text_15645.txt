@@ -1,0 +1,142 @@
+BACKGROUND
+microarray gene differential expression analysis has been widely used to uncover the underlying biological mechanism. researchers utilize this technology to identify potentially "interesting" genes. more specifically, a statistical test is applied to each individual gene to detect whether the mean expression level of this gene is the same or not across different biological conditions or phenotypes studied in an experiment. a chosen multiple testing procedure  is then employed to control certain per-family type i errors. genes work together to fulfill certain biological functions and they are known to be strongly correlated  <cit> . the structure of inter-gene correlation contains rich information that cannot be extracted from mean expression levels. recent years have seen more and more research focusing on gene dependence structures. for example, some procedures, such as gene set enrichment analysis  <cit> , incorporate existing biological gene sets information into statistical procedures. gene cluster analysis uses gene dependence and similarity to group genes  <cit> . gene network analysis, such as method based on gaussian or bayesian networks, employs gene dependence to study gene dynamics and reasoning  <cit> . another approach is to directly select genes based on the phenotypic differences of their dependence structure  <cit> . in this paper, we consider the very last approach and focus on a gene differential association analysis  procedure proposed in  <cit> . unlike traditional differential gene expression analysis, gdaa is designed to select genes that have different dependence structures with other genes in two phenotypes. it complements the analysis of differentially expressed genes. combining both gene differential association analysis and gene differential expression analysis provides a more comprehensive functional interpretation of the experimental results. as an example, gdaa was applied in  <cit>  to two sets of childhood leukemia data   <cit>  and selected differentially associated  genes that could not be detected by differential gene expression analysis. furthermore, the tel group is differentiated from other leukemia subtypes by the presence of t translocation, generating the tel-aml <dig> fusion gene. through the over-representation of da genes, the chromosomal band 21q <dig>  containing the tel-aml <dig> fusion gene was identified. this chromosomal band was not identified by differential gene expression analysis.
+
+a typical microarray data set reports expression levels for tens of thousands of genes. for example, both sets of childhood leukemia data hyperdip and tel  <cit>  have expression levels for m =  <dig>   <dig> genes updated from the original expression levels by using a custom cdf file to produce values of gene expressions. the cdf files can be found at http://brainarray.mbni.med.umich.edu. please see  <cit>  for more details. each slide is then represented by an array reporting the logarithm  of expression level on the set of  <dig>  genes. for convenience, the words "gene" and "gene expression" are used interchangeably to refer to these gene expressions in this paper. due to such a high dimensionality, the computation of traditional gene differential expression analysis is considered to be more time consuming than many traditional statistical analyses in medical research. a gene selection procedure based on gene dependence structures has to be even more computationally intensive. this is because the dependence structure is typically measured by a pertinent association score, such as the pearson correlation coefficient for all gene pairs, of which the multiplicity  is m <dig> instead of m. it is therefore more computationally intensive to detect the differences hidden in the correlation matrix. in particular, for the procedure proposed in  <cit> , the length of the computation is o, where m =  <dig>   <dig> is the number of genes, n =  <dig> is the number of subjects in each phenotypic group, and k =  <dig>   <dig> is the number of permutations for approximating the statistical null distribution. such large number of permutations is necessary because statistical inference for microarray analysis is based on multiple testing adjusted p-values, which demands much finer estimation of unadjusted p-values compared to regular permutation tests. with a large number of genes and a medium sample size, running gdaa can take several days or even a month. for example, a sequential implementation of the procedure in  <cit>  took nearly two months to complete the calculation on a computer with a  <dig> ghz amd opteron processor and 2gb sdram. until about  <dig>  processor designers were able to leverage technology advances that allowed increasing numbers of smaller and faster transistors on a single chip in order to improve the performance of sequential computation. hence, it was possible for computational scientists who wanted their codes to run faster to simply wait for the next generation of machines. however, the reality is that around  <dig>  chipmakers discovered that they were no longer able to sustain faster sequential execution due to the inability to dissipate the heat generated by the computation  <cit> . consequently, designers turned to using the increasing transistor counts to add more processors, each of which execute independent sequential computation. the processors typically share access to the memory subsystem and off-chip bandwidth. these multicore chips now dominate the desktop market and are used to put together multiprocessor servers consisting of multiple processor chips, as well as networked clusters of such servers for high-end computation. parallel computing  that effectively leverages these increasingly multicore clusters of multiprocessors is thus even more critical than in the past in order to obtain results in a timely manner.
+
+in this paper, we propose a new parallel design for the gene differential association analysis procedure in  <cit> . the key to our parallelization strategy is that it takes advantage of both fine and coarse-grain parallelism . the hardware-based memory sharing within a multicore is utilized for the fine-grain parallelism . sharing memory in hardware avoids the need for data replication. since gdaa utilizes a multivariate nonparametric test, it has more memory needs than a comparable gene differential expression analysis. therefore, the memory sharing feature in our strategy is also critical to reducing the bandwidth demands of the gdaa procedure. the results show that our strategy leverages gdaa's characteristics to reduce the memory and bandwidth needs of the application, thereby improving computational efficiency.
+
+implementation
+gene differential association analysis procedure
+we outline the related gdaa procedure below. more details can be found in  <cit> .
+
+statistical hypothesis testing
+assume there are two biological conditions or phenotypes a and b. under each condition n subjects are sampled, each measured with m gene expression levels.
+
+we denote these gene expressions by {xij},  <dig> ≤ i ≤ m and  <dig> ≤ j ≤ n. for the ith gene, we first compute an -dimensional random vector ri = . here rik is the pearson correlation coefficient between the ith and the kth gene, i.e.,
+
+ rik=n∑l=1nxilxkl-∑l=1nxil ∑l=1nxkln ∑l=1nxil2-2n ∑l=1nxkl2- <dig>  
+
+fisher transformation is then applied to these correlation coefficients:
+
+ wik=12log1+rik1-rik, 
+
+where k =  <dig>  ⋯, i -  <dig>  i +  <dig>  ⋯, m. we denote the correlation vectors  by wi. this vector represents the relationship between the ith gene and all other genes.
+
+for the ith gene, its correlation vectors under conditions a and b are denoted by wi and wi, respectively. we test the null hypotheses
+
+ hi:fwi=fwi,1≤i≤m. 
+
+where fwi and fwi are the joint distribution functions of wi and wi, respectively. if hi is rejected, we declare the ith gene to be a differentially associated gene.
+
+the n-statistic
+in order to test hi, we need to create samples of correlation vectors to mimic the joint distributions fwi and fwi, respectively. we divide the dataset under condition a intog subgroups, each subgroup containing ng subjects. in order to compute correlation coefficients, every subgroup must contain at least two subjects. sample sizes of subgroups do not have to be equal. when g does not divide n, the last few subgroups can have a slightly larger or smaller sample size. that being said, an approximately even partition of subgroups is still desirable because it leads to better statistical power than unbalanced partitions.
+
+from these subgroups, we compute a sample of size g correlation vectors for the ith gene, denoted by wi,  <dig> ≤ k ≤ g. similarly, we have a sample of size g correlation vectors for the ith gene under condition b, denoted by wi,  <dig> ≤ k ≤ g.
+
+next, hi is tested by a multivariate nonparametric test based on the n-statistic. this statistic has been successfully used to select differentially expressed genes and gene combinations in microarray data analysis  <cit> . the n-statistic is defined as follows:
+
+  ni=2g <dig> ∑k=1g∑l=1gl,wi)-1g <dig> ∑k=1g∑l=1gl,wi)-1g <dig> ∑k=1g∑l=1gl,wi), 
+
+where l is the kernel defined by euclidean distance, i.e.,
+
+ l,wi)=||wi−wi||=∑1≤j≤m,j≠i−wij) <dig>  
+
+the n-statistic can serve as a measurement of how much the inter-gene correlation structure of the ith gene has changed from condition a to condition b.
+
+permutation-based null distribution and p-value
+denote ni* as the n-statistic associated with the ith gene. to determine the statistical significance of ni*, which is represented by a p-value, we need to model the null distribution of this statistic. this can be done by the following resampling method. first, we combine the gene expression data under both conditions and randomly permute subjects. then we divide them into two groups of equal size, mimicking two biological conditions without differentially associated genes. by applying formula , we get a permutation based n-statistic for the ith gene, which can be considered as an observation from the null distribution of ni, i.e., the distribution of ni when hi holds. repeating this permutation process k times produces k permutation based n-statistics for the ith gene, denoted by nik,  <dig> ≤ k ≤ k.
+
+pi, the permutation based p-value for testing hi, is computed as the proportion of nik that is greater than or equal to ni*:
+
+  pi=#k. 
+
+to control per-family error rate , we apply the extended bonferroni adjustment  <cit>  to the above p-values to obtain the adjusted p-values
+
+  p˜i=pi×m. 
+
+the smaller p˜i is, the more likely wi is different from wi, i.e., the ith gene changes its relationship with all other genes across conditions a and b. if p˜i is less than a pre-defined threshold, we reject hi and declare the ith gene to be a differentially associated gene.
+
+summary of the gdaa procedure
+the above gdaa procedure can be summarized as follows:
+
+ <dig>  divide the subjects  under each condition  into g subgroups such that there are approximately ng subjects for each subgroup.
+
+ <dig>  for each gene, compute its correlation vectors from all subgroups. this step produces g correlation vectors for one gene in each condition.
+
+ <dig>  compute the n-statistic for the ith gene from these  <dig> × g samples using equation and record it as ni*.
+
+ <dig>  pool the subjects in both conditions together. randomly shuffle the subjects, and then split them into two groups of equal size.
+
+ <dig>  divide the subjects in each group into g subgroups and compute g correlation vectors in each subgroup for each gene.
+
+ <dig>  compute the n-statistics for each gene based on these  <dig> × g correlation vectors.
+
+ <dig>  repeat steps  <dig> to  <dig> k times and record the permutation-based n-statistics as nik, i =  <dig>  ..., m, k =  <dig>  ..., k.
+
+ <dig>  obtain the permutation-based p-value, pi, using equation.
+
+ <dig>  adjust p-value by using equation. select differentially associated genes based on the adjusted p-values and a pre-specified pfer level.
+
+computation
+our parallel design is implemented using python and c++. python is in charge of initializing data and all communication between the master process and any slave processes -- sending out computation jobs and collecting results. c++ is used to perform the actual computation within each independent process. a high-level language such as python provides ease of use and flexibility, especially for data initialization and coordination, but at the cost of performance. by limiting the use of python to the initialization and coordination with the slaves  and using c++ for the computationally intensive portions of the program, we get the best of both worlds: the flexibility of python and the performance of c++. the use of other languages such as r instead of python is also possible. the execution proceeds as follows:
+
+ <dig>  read in and initialize data .
+
+ <dig>  calculate ni*,  <dig> ≤ i ≤ m, for the unpermuted dataset using a single core  on the master process.
+
+ <dig>  create k permutations of the original dataset; distribute the permutations k  to independent slave processes  using mpi  <cit> . work is distributed at the granularity of a single permutation -- when a process completes the computation for one permutation, it requests the next permutation.
+
+ <dig>  each worker/slave receives a permutation , permutes its local copy of the data, and then computes the vector of n-statistics using c++, parallelized using the pthreads  <cit>  package. a total number of p threads are created and the per-gene computation is distributed among threads so that each thread performs the n-statistic computation for mp genes. when m is not divisible by p, each thread receives a slightly different number of genes.
+
+ <dig>  once an mpi process has determined that its threads have computed all n-statistics  for the kth permutation it was assigned, it then returns them to the master mpi process.
+
+ <dig>  the master mpi process collects all the nik to calculate p-values pi .
+
+steps  <dig> and  <dig> of the algorithm are performed sequentially. to parallelize the remaining steps, we use a two-tiered approach. at the first level, we distribute the work by spawning processes from python using mpi. one mpi process, the "master" process, is responsible for distributing different permutations to the other "slave" processes. each slave independently permutes the gene data according to the permutation indices received from the master process and computes the n-statistics for the permuted data . the computed values  are then returned to the master using an mpi message, where the python code calculates the p-value. the key to this implementation is that the core computation is performed in optimized c++ code.
+
+the second level of parallelization occurs within the slaves. when computing the n-statistics, each slave  forks off a specified number of threads, each of which computes the permutation's n-statistics for a subset of genes. this allows us to vary the parallelization between mpi processes  and threads . for example, with one quad-core processor on a shared memory architecture, we can run one slave mpi process with four threads,  <dig> mpi processes each with two threads, or four mpi processes each running a single thread. splitting the work between mpi processes versus threads has implications for performance and memory usage, which we will highlight in the evaluation section. this hierarchical design is also illustrated in the flowchart of figure  <dig> 
+
+data sharing
+gene expression level data in each biological condition is represented using a dynamically allocated -dimensional array, where n is the number of subjects and m is the number of genes. this two-dimensional array is read-shared within each mpi process and its size grows as a product of m and n. there are two other dynamically allocated two-dimensional arrays created for each mpi process. these two arrays with sizes proportional to  are used for temporary storage of the correlation computation. one stores the sums of the expression levels within subgroups so that its entry in row i and column j is ∑l∈subgroupjxil. here xil is the expression level for gene i and subject l in the kth permutation. the other stores the sums of squares of the expression levels within subgroups so that its entry in row i and column j is ∑l∈subgroup j) <dig>  they are also read shared within the mpi process. another two-dimensional dynamically allocated array with size proportional to o is created for each thread, storing the correlation vectors for each gene. this array is both read and written by the thread. the n-statistic, which is a vector with the size of the number of genes m, is also shared across all threads within each mpi process. each thread writes to independent regions of this vector based on the genes allocated to it.
+
+RESULTS
+our evaluation is conducted on a cluster of five machines, each with  <dig> gbytes of memory and two  <dig>  ghz quad-core intel xeon  <dig> processors, for a total of  <dig> processors. the machines are interconnected using gigabit ethernet. each quad-core processor chip has  <dig> mbytes of last-level cache per pair of cores. each machine runs linux version  <dig> . <dig> - <dig> -smp. the application was compiled using python version  <dig> . <dig>  pypar version  <dig> . <dig>  and gcc version  <dig> . <dig> at the -o <dig> optimization level.
+
+simulation data
+to gain better insight into the effects of different configurations on performance, we simulate several sets of data. each set has two groups of n =  <dig> slides representing  <dig> subjects in each biological conditions.
+
+each array has m genes, where m takes on values in { <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>  10000}. the slides in each group are divided into g =  <dig> subgroups to calculate correlation vector samples. k =  <dig> permutations of the subjects in the two groups are created in order to generate the null distributions of n-statistics.
+
+performance analysis
+figures  <dig> and  <dig> present the execution time  as a function of the number of genes in the dataset, with the operating system default scheduling  and with each thread/process pinned  so it executes only on one specific processor/core . while we report three times in the figures to show the variation in the results, we repeated the timing-based execution several times to ensure consistency of the results. the quad-core processor running the python script is not used for parallel computation. the number of mpi processes forked, and correspondingly the number of threads used per mpi process, is varied. more specifically, the four sets of curves represent  <dig> single-threaded mpi processes,  <dig> dual-threaded mpi processes,  <dig> 4-threaded mpi processes, and  <dig> 8-threaded mpi processes, respectively. we also applied  <dig>   <dig>   <dig>  and  <dig> threaded strategies to a dataset of  <dig> genes while varying the number of cores  used. figures  <dig> and  <dig> present the speedup  as the number of cores  is varied, using the operating system default scheduling  and with each thread/process pinned so it executes only on one specific processor/core .
+
+as shown in figures  <dig> and  <dig>  using multiple threads per mpi process outperforms the  <dig> thread strategy substantially. as an example, according to figure  <dig>  when the number of genes m =  <dig>   <dig>  the average execution time for the  <dig> threaded strategy is  <dig> seconds, which represents about 70% performance gain compared to the  <dig> threaded strategy . when using only mpi processes , there is no data sharing among the processes. all communication is strictly via messages. as the number of threads increases, figure  <dig> shows that the total amount of memory required per machine goes down as the number of mpi processes decreases and the number of threads per mpi process increases. this is a result of the data sharing in the parallel threaded implementation, as described in the data sharing section. parallelizing purely at the mpi level results in multiple copies of the data structures being created and exerts more pressure on the memory as well as any shared cache in the system. on our experimental platform, the last-level cache has a size of  <dig> mbytes, which is shared between two cores in a physical package . when the working set of the processes/threads executing on these cores exceeds the capacity of the  <dig> mbyte shared cache, some performance will be lost. using threads allows the cores to share space in the cache more effectively and has the added benefit of reducing memory latency due to the prefetching effect of  <dig> core on the other. in addition, reducing the number of permutations  computed on at the same time reduces the pressure on the communication link with the master process, which must coordinate and communicate with each mpi process and can therefore result in a bottleneck. any coarse-grain load imbalance at the permutation level is also mitigated. on our platform, we also observe some anomalies in behavior -- faster performance was observed using  <dig> threads per slave mpi process rather than with  <dig> threads . in addition, the variance in performance across runs is high, especially in the  <dig> threaded runs. the  <dig> threaded strategy represents the sweet spot in terms of leveraging shared resources on this architecture , presuming that the  <dig> threads strategy execute on cores that share a cache. our hypothesis is that the default operating system scheduling of the threads does not ensure this affinity. to confirm our hypothesis, we add code to force thread affinity -- each thread is pinned to a particular core while ensuring that threads within a process share a cache and remain within a single chip when possible. the resulting performance, shown in figure  <dig> and  <dig>  corroborates our hypothesis. the variance in performance is no longer observed. most of the efficiency gains from sharing across threads is observed when using  <dig> threads, i.e., when the parallelization matches the underlying physical characteristics of the machine and leverages the shared cache between  <dig> cores. additional performance benefits beyond  <dig> threads are small. more specifically, the  <dig>   <dig>  and  <dig> threaded strategies show only small differences in performance once the threads are pinned to ensure cache sharing. in figure  <dig>  the  <dig> threaded strategy is a little better if the number of genes is between  <dig> and  <dig>  otherwise, the  <dig> threaded strategy shows slightly better performance. these variations across different numbers of threads come from differences in load balance at the pthread and mpi parallelization levels.
+
+in figures  <dig> and  <dig>  we notice that the speedup curves are not very smooth. this step function can be attributed to several causes. the first is load imbalance due to the granularity of workload distribution -- permutations at the mpi parallelization level and genes at the pthread parallelization level. when using  <dig> thread per mpi process to conduct  <dig> permutations, as one example, with  <dig> processors , each core runs  <dig> permutations . if we increase the number of processors to  <dig> , some cores will still execute  <dig> permutations while others execute  <dig>  so that execution time remains proportional to ⌈100/24⌉ =  <dig>  resulting in practically no increase in speedup. as the number of permutations executed per mpi process decreases , the fraction of idle/wasted time on the cores with one less permutation to execute increases, resulting in lower efficiency. in the case of figure  <dig>  the increased scheduling variability and poor choice of scheduling when adding a quad-core processor within a machine also contributes to the step function in the  <dig> and  <dig> threaded curves. once the scheduling is made both deterministic and ensures appropriate cache sharing, the step function is less pronounced in the multi-threaded runs in figure  <dig> due to their reduced memory bandwidth demands and smoother load function at the mpi level.
+
+CONCLUSIONS
+microarray technology has made it possible for medical researchers to measure and study the behavior of thousands of genes at once. technology advances have been on a fast track in recent years, making it possible to conduct microarray experiments much faster and less expensive than in the past. this trend has been leveraged with the availability of larger and larger datasets. turning so much raw information into knowledge presents a major challenge for both statistical analysis and computation. as of now, microarray data are used for crude screening of differentially expressed genes. exploiting the rich information contained in the inter-gene dependence structure has not become a routine, despite the availability of several gene association analysis procedures. this is largely due to the computing bottleneck.
+
+in this paper, we present a parallelized implementation of gene differential association analysis that is designed to leverage the features of today's multicore platforms in which resources are shared among processors at a much finer granularity than in the past. we apply the conventional wisdom of parallelizing at the coarsest granularity to distribute permutations among the nodes in a cluster, using mpi for communication. in addition, we parallelize at the finer granularity of per-gene computation within a single dual quad-core machine using shared memory . sharing memory across threads helps reduce demand for the shared last-level cache capacity on the chip by allowing independent threads to share a single copy of the gene expression data. our results show that this strategy utilizes the multicore cluster platform much more effectively. in general, the performance sweet spot occurs when using a number of threads that allows the working sets of the corresponding mpi processes to fit within the machine's shared cache. we suggest that practitioners follow the principle of determining what resources are shared when making decisions on how to allocate compute resources among mpi processes and threads for their cluster machines. we believe that the principles of this hierarchical approach to parallelization can be utilized in the parallelization of other computationally demanding kernels.
+
+availability and requirements
+• project name: hierarchical parallelization of gene differential association analysis;
+
+• project home page: http://www.urmc.rochester.edu/biostat/people/faculty/hu.cfm;
+
+• operating system: linux;
+
+• programming language: python and c++;
+
+• other requirements: mpi , python, c++ compilation tools, swig, numpy, pypar;
+
+• licence: gnu general public license, version  <dig>  june 1991;
+
+• no restrictions to use by non-academics.
+
+abbreviations
+gdaa: gene differential association analysis; mtp: multiple testing procedure; mpi: message passing interface; pthreads: posix threads.
+
+authors' contributions
+the basic idea was first proposed by rh, sd, and xq. the detailed study design was developed by all members of the research team. mn carried out the needed computations and simulations and the majority of the software development. all authors have read and approved the final manuscript.
+

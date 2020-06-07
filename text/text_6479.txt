@@ -1,0 +1,289 @@
+BACKGROUND
+a multiple sequence alignment  of orthologous protein sequences not only carries evolutionary sequence information, but also information about functional and structural constraints imposed on the three-dimensional  structure of a protein. conserved or slightly mutated columns indicate important protein positions for protein stability and function. additionally, non-conserved positions may also play key roles in maintaining the functionality when accompanied by compensatory mutations at other positions  <cit> . it is of high interest to develop methods predicting coevolution patterns from msas, because coevolving positions mainly involve protein positions proximal in 3d structure  <cit>  and they serve as a valuable source of distance constraints in protein structure  as well as in protein complex interface predictions  <cit> .
+
+due to the substantial increase in sequence data in the post-genomic era, a broad range of methods have been introduced for detecting residue-residue contacts from msas in the past decades. mutual information  was one of the first metrics to be applied for contact prediction from msas  <cit> . an improved mi version that corrects for background noise and phylogenetic effects  has been introduced by dunn et al.  <cit> . recent methodological improvements are able to distinguish between direct and indirect couplings and have demonstrated enormous accuracy in predicting real couplings and coevolution. such methods include a bayesian network approach   <cit> , direct coupling analysis   <cit> , protein sparse inverse covariance   <cit> , and pseudolikelihood approaches implemented in plmdca  <cit>  and gremlin  <cit> .
+
+most recently, new hybrid methods have been developed, amidst many others such as dncon  <cit> , pconsc  <cit> , coindca  <cit>  or metapsicov  <cit> , where contact detecting methods are combined along with protein physiochemical features to provide more accurate contact predictions.
+
+in the present study, we developed contact prediction using shrinked covariance , a residue-residue contact detecting method approaching contact inference in a similar manner as psicov, by applying the sparse inverse covariance estimation technique introduced by meinshausen and bühlmann  <cit> . here, we used a different covariance matrix shrinkage approach, the empirical bayes covariance estimator, which has been shown by haff to be the best estimator in a bayesian framework  <cit> , especially dominating estimators of the form as, such as the smoothed covariance estimator applied in psicov. by analysing the original psicov benchmark test set  <cit>  and proteins from the critical assessment of techniques for protein structure prediction  <dig>  experiments, we show that couscous significantly outperforms psicov. furthermore, we designed a simple random forest  meta-classifier that includes contact detecting techniques and sequence-derived physiochemical features and showed that replacing psicov with couscous enhances the prediction outcome.
+
+methods
+dataset
+the benchmark dataset used in this study is the original psicov test set introduced by jones et al.  <cit> . we used the same alignments without modification as have been made available to ensure comparability. however, for validation we selected  <dig> out of  <dig> single domain monomeric proteins because the latest psicov version v <dig> b <dig> was unable to provide contact predictions on the remaining four test cases, when used with default parameters. this is due to the insufficient number of effective sequences within the four alignments.
+
+the second test set consists of  <dig> proteins of the casp <dig> experiment . we selected only those proteins where the latest version of psicov successfully provided predictions, to make a fair comparison. the training set introduced by jones et al.  <cit>  was used to build the rf meta-classifier.
+
+coevolution analysis methods
+the residue-residue contact prediction metrics applied in this study are mi  <cit> , mip  <cit> , omes  <cit> , bvn  <cit> , dca  <cit>  and psicov  <cit> . the resulting coevolution between pairs of amino-acids using mi, mip and omes were calculated using evol module of prody  <cit> . bvn results were generated using perl scripts and c++ source code kindly provided by the authors  <cit> . psicov results were calculated using the code available online  <cit> . dca results were obtained using the fast and free software version freecontact introduced by kaján et al.  <cit> . methodological details for the different methods may be found in the original studies.
+
+couscous
+pre-processing
+in our approach, we generate a sample covariance matrix s from the input msa. the msas are composed of n orthologous protein sequences where each sequence represents a row. each protein sequence is made of m amino acids as a result of which we have l columns per alignment row. the size of the covariance matrix s is 21l×21l. this is because we compute the marginal single site frequencies f and f of observed amino acid types  in columns i and j and their corresponding pair site frequencies f: 
+  <dig> sijab=faibj−ff 
+
+
+interestingly the precision matrix Θ which is the inverse of the covariance matrix s will contain the partial correlations of all pairs of variables taking into consideration the effects of all other variables. hence, the non-zero entries of Θ will provide the extent of direct coupling between any two pairs of amino acids at sites i and j.
+
+yet, due to the fact that we are generating a covariance matrix s out of msas representing homologous protein sequences where not all amino acids are present at each site of the msa, it is certain that s is singular and not directly invertible. several approaches have been proposed to approximate the precision matrix in such cases. the most powerful and widely used technique is the sparse inverse covariance estimation using the graphical lasso   <cit> .
+
+glasso
+we briefly summarise the basic motivation and algorithm. consider matrix x=[x
+ <dig> …,x
+p] where x
+i is a random vector of length n with covariance matrix Σ and precision matrix Θ={θ
+ij}1≤i,j≤p. further, let s denote the empirical covariance matrix obtained from the data. the estimation of the precision matrix Θ is challenging when it is sparse. interestingly, this task is closely related to selection of graphical models.
+
+let g= be a graph representing conditional independence relations between components of x. g is composed of a set of vertices v with p components {x
+ <dig> …,x
+p} and an edge set e of ordered pairs , with ∈e, if an edge between x
+i and x
+j exists. the edge between x
+i and x
+j is excluded from the edge set e if and only if x
+i and x
+j are independent given all other components {x
+k,k≠i,j}. assuming that the raw data x is multivariate gaussian ), the conditional independence between x
+i and x
+j given all other components is equivalent to zero in the precision matrix  as shown in  <cit> . hence, for gaussian distributions recovering the structure of graph g is equivalent to the estimation of the support of the precision matrix.
+
+the precision matrix Θ can then be estimated using a l
+ <dig> penalised log-likelihood approach. the glasso algorithm, introduced by friedman et al.  <cit> , efficiently computes the solution by: 
+  <dig> Θ^glasso:=argminΘ≻0tr−logdet+λ∥Θ∥ <dig>  
+
+
+with tr as trace, ∥Θ∥ <dig> as the sum of the absolute values of the elements in Θ and λ as a positive tuning parameter to control the sparsity.
+
+empirical bayes covariance estimator
+the most natural estimator of the covariance Σ is the sample covariance matrix s. the estimator is optimal in the classical settings with large number of samples and fixed low dimensions . however, it performs poorly in high-dimensional settings , see johnstone  <cit> . the glasso approach operates very well in this context, but the computational time required to reach convergence can be large in some cases such as for protein families with low number of sequences. as an alternative to the natural estimator s, several shrinkage estimators have been proposed in the literature  <cit> . they take a weighted average of the sample covariance matrix s, with a suitable chosen target diagonal matrix. jones et al. applied a smoothed covariance estimator that shrinks the matrix towards the shrinkage target f=diag  <cit> . in this work, we applied the empirical bayes estimator proposed by haff  <cit> : 
+  <dig> Σ^=s+p−1ntrip, 
+
+
+where i
+p represents the identity matrix of order p. in a bayesian framework, it has been proven by haff that this estimator is the best estimator of the form ac), with 0<a<1/ and u=1/tr. here t is non-increasing and c an arbitrary positive definite matrix. it dominates estimators of the form as by a substantial amount. more precisely, it has been proven that under the l
+ <dig> loss, the uniform reduction in the risk function is at least 100p+1n+p%. in this study, we performed the shrinkage until the adjusted covariance matrix Σ^ is no longer singular, i.e. is a positive-definite matrix. the adjusted covariance matrix Σ^ was finally applied in the glasso algorithm to obtain the sparse precision matrix, that contains the degree of direct coupling between any pair of amino acids.
+
+apc correction
+the coevolution pair list is generated identically to the psicov final processing. for each msa column pair i and j we compute the l
+1-norm out of the corresponding 20× <dig> submatrix in Θ : 
+  <dig> cij=∑ab∣Θijab∣ 
+
+
+furthermore, we adjust the coupling score by the average product correction , previously applied for mi by dunn et al.  <cit>  to reduce entropic and phylogenetic bias: 
+  <dig> couscousij=cij−c¯c¯c¯ 
+
+
+with c¯ as the mean precision norm of column i and all other columns, c¯ as the corresponding for column j and c¯ as the mean precision norm of all coupling scores.
+
+random forest meta-classifier
+as previously indicated, new hybrid methods that combine coevolution detecting tools with other sources of information such as protein physiochemical features outperforms single methods like psicov. however, we are convinced that improvements of single residue-residue contact detecting methods can boost new emerging hybrid techniques. we designed a rf meta-classifier that includes several contact prediction methodologies along with a small number of sequence-derived physiochemical features.
+
+in particular, we built a rf classifier using the training set alignments from the metapsicov study  <cit> . in total, we used  <dig> protein alignments where psicov was able to successfully provide contact predictions. the rf was trained using the following features: 
+contact detecting methodologies mi, mip, bvn, psicov or couscous, freecontact and ccmpred
+
+secondary structure and solvent exposure probabilities derived from psipred  <cit> 
+
+shannon entropy using r  <cit>  package bio3d  <cit> 
+
+hydrophobicity using r package interpol  <cit> 
+
+amino acid physiochemical properties
+
+
+
+
+the rf meta-classifier was trained using  <dig> trees with ten features and a max-depth of eight. we performed five-fold cross-validation while training the classifier and optimised the area under the curve  metric for performance.
+
+evaluation metrics and distance descriptions
+the problem of predicting protein residue-residue contacts is well-known to be an extremely difficult one as on average only 3% of all possible residue pairs in known protein structures are identified to be real contacts. in the latest casp <dig> challenge  <cit> , this problem was tackled by dividing the contact prediction task into two categories. first, evaluation of predicted contacts using quality metrics like accuracy and x
+d  <cit>  on reduced lists . second, evaluation of predicted contacts using quality metrics like matthew’s correlation coefficient   <cit>  and area under the precision-recall  for full lists . the rl are usually defined by considering the top l/n predicted contacts where l is the length of the evaluation target or protein sequence and n is a small integer . rl metric accuracy is calculated as tptp+fp where tp defines a correctly predicted contact and fp an incorrectly predicted contact. the second rl metric x
+d represents the difference between the distance distributions of the predicted contacts and all pairs distance distributions in the 3d target structure. it is defined as xd=∑i=115pip−piadi∗ <dig>  with pia and pip are the percentages of pairs included in the i
+th bin for the whole target and predicted contacts respectively. additional details can be found in  <cit> . the fl metrics used in this study are a
+u
+c
+pr as it is a robust metric for unbalanced classes and the matthew’s correlation coefficient  <cit>  to evaluate all residue pairs for contact prediction.
+
+RESULTS
+we first illustrate as an example in fig.  <dig> the spatial proximity of the predicted contacts obtained by psicov  and couscous  for the immunoglobulin v-set domain  id: pf07686). the upper triangles of the presented contact maps  display the native contacts. a residue-residue pair is hereby considered to be in contact if the two amino acids are proximal in the 3d structure, in particular if their c
+β- c
+β  distance is less than  <dig> Å ngström . the lower triangles show the l/ <dig> contact predictions  obtained by using either psicov or couscous. correctly predicted contacts are coloured in green and incorrect ones in red. further, we mapped the top l/ <dig> predictions to the structure of the myelin oligodendrocyte glycoprotein  id: 1pko), solved at  <dig>  Å resolution . out of  <dig> possible contacts, couscous correctly predicted  <dig>  compared to  <dig>  by psicov resulting in higher accuracy of couscous. the figure shows  that the incorrect identified pairs are mainly located in loop regions at the top and the bottom. hence, the pairs may still have distances less than 8Å considering that the unordered regions are not static as illustrated by a crystal structure. in contrast, incorrect predicted pairs from psicov , are distributed over the entire protein.
+fig.  <dig> the top
+l/ <dig>  long, medium and short contact predictions for the immunoglobulin v-set domain family  obtained using psicov  and couscous  and mapped to the myelin oligodendrocyte glycoprotein 3d crystal structure  . correctly predicted contacts are shown in green and incorrect ones in red. upper triangles of the contact maps display all the native c
+β−c
+β contacts . the lower triangles show contacts predicted by psicov  and couscous 
+
+
+
+
+the performance of couscous was evaluated on the original psicov benchmark test set using standard assessment metrics applied in casp: accuracy, x
+d,m
+c
+c and a
+u
+c
+pr . we distinguished between three types of contacts: short , medium  and long range contacts .
+
+we list in table  <dig> the mean accuracies of couscous and psicov for the top- l/ <dig>  top- l/ <dig> and top-l for long, medium and short range predicted contacts on the original psicov benchmark set. for the top- l/ <dig> predictions couscous is  <dig>   <dig> and 13% more accurate than psicov for long, medium and short range contacts. similarly, for the top- l/ <dig> predictions we observed the similar gains in accuracy when using couscous. for the top-l predictions we observed different accuracies for the three types of contacts. the gain in accuracy of 11% when using couscous was similar for the long range contacts but the gain dropped to  <dig> and 5% for medium and short range contacts.
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+higher mean accuracies in bold
+
+
+
+
+the second evaluation metric applied in this study, the x
+d score, estimates the deviation of the distribution of distance in the rl sets  of contacts from the distribution of the distances in all residue pairs within the protein . table  <dig> summarises the average x
+d scores for couscous and psicov. for the top-l predictions couscous is more accurate than psicov on long, medium and short range contacts . for the top- l/ <dig> and top- l/ <dig> predictions we observed smaller improvements in x
+d score ranging from  <dig> to 11%. moreover, we compared the performance of couscous and psicov on fl; considering all possible residue pairs. in table  <dig> we summarise the mean a
+u
+c
+pr values of the precision recall  curves for couscous and psicov. couscous outperforms psicov with gains in accuracy of  <dig>   <dig> and 11% for long, medium and short range contacts, respectively.d values of couscous and psicov on psicov benchmark dataset
+
+x
+x
+x
+d top-l
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+higher mean values in bold
+
+
+ <dig> 
+ <dig> 
+ <dig> 
+higher mean values in bold
+
+
+
+
+we also performed an exhaustive analysis of couscous and psicov w.r.t. mcc for long, medium and short range contact predictions. in figure  <dig> we illustrate via box plot the distribution of the mcc values for the two prediction methods. it is apparent from the box plots that couscous is superior in predicting real residue contacts. to further test for significance we performed a t-test, after successfully testing for normal distribution and variance homogeneity, on the mcc distributions for different contact ranges. couscous outperforms psicov on all types of contacts significantly, with p-values of 6×10− <dig> .2×10− <dig> and 6×10− <dig> for long, medium and short range contacts, respectively.
+fig.  <dig> mcc distributions for psicov benchmark proteins in case of long, medium and short range contacts predicted by psicov and couscous. the stars represent statistical significance where ⋆ is used to represent p-value <  <dig>  and ⋆⋆⋆ is used to represent p-values <  <dig> 
+
+
+
+
+next, we analysed the dependence of the performance of psicov and couscous with regard to the size of the protein family. in this case, we used the number of effective sequences in a msa as comparison metric to account for the fact that highly similar homologous do not provide any additional contact information than a single one. similar to ma et al.  <cit>  we grouped the test set members into five categories by l
+n: [ <dig> ),[ <dig> ),[ <dig> ),[ <dig> ),[ <dig> ), and calculated the averaged l/ <dig> accuracies for each group. figure  <dig> shows clearly that couscous outperforms psicov regardless of the l
+n on long, medium and short range contacts. in addition, we tested the performance of couscous and psicov on an independent test set from the latest casp <dig> experiment. in table  <dig> we show the mean accuracies of couscous and psicov for the top- l/ <dig>  top- l/ <dig> and top-l for long, medium and short range predicted contacts. for the top- l/ <dig> predictions couscous is  <dig>   <dig> and 13% more accurate than psicov for long, medium and short range contacts, respectively. similarly, for the top- l/ <dig> predictions we observed gains in accuracy of  <dig>   <dig> and 9% when using couscous. for the top-l predictions we observed different accuracies for the three types of contacts. a gain in accuracy of 13% is observable when using couscous for the long range contacts but the gain dropped to  <dig> and 8% for medium and short range contacts.
+fig.  <dig> dependence of the performance of psicov and couscous on the effective number of sequences  in the msas. the performance is evaluated using accuracies for the top
+l/10long, medium and short contacts. the solid line represents the averaged accuracies of the test set binned into five different categories of neff : [ <dig>  5), [ <dig>  6), [ <dig>  7), [ <dig>  8), [ <dig>  10)). couscous outperforms psicov independent of the l
+n in the test set
+
+
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+higher mean accuracies in bold
+
+
+
+
+next, we designed two experiments using a rf meta-classifier where we combine contact detecting tools with protein sequence derived features. in the first case we used predictions of psicov as a feature in the meta-classifier and in the second case we replaced psicov predictions with couscous predictions. the classifier including couscous results as a feature outperforms the classifier including psicov results for the top- l/ <dig> and top- l/ <dig> predictions on all types of contacts except for the top-l predictions for long range contacts .
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+higher mean accuracies in bold
+
+
+
+
+in additional file  <dig> we illustrate the mean accuracies of different contact detecting techniques. our newly developed technique couscous  outperforms psicov  and is equally well as freecontact  on all contact types. the best single contact detecting tool is ccmpred . our simple rf meta-classifier that combines  <dig> single residue-residue contact detecting tools along with  <dig> sequence-derived features outperforms all single methods. however, metapsicov, a multi-stage neural network hybrid method that combines five coevolution techniques along with a broad range of sequence-derived features is still the best performing method.
+
+discussion
+in this work, we assessed the performance of our newly developed method couscous in predicting residue-residue contacts from msas. in particular, the performance was tested in comparison to psicov on the original psicov benchmark test set as well as on casp <dig> targets. on the rl sizes couscous outperformed psicov substantially, with on average 10% gain in prediction accuracy for all types of contacts. moreover, couscous proved to be superior over psicov on fl sizes with average a
+u
+c
+pr gains of 12%. with regard to mcc scores couscous is even significantly outperforming psicov, illustrated with the help of box plots and hypothesis tests . further, we reported that couscous’s gain in accuracy is independent of the number of effective sequences in a given msa.
+
+the main motivation of this work was to highlight that improvements of single residue-residue contact detecting tools, in this case psicov, might lead to improvements of new hybrid methods that combine contact detecting techniques with physiochemical and other sequence derived protein features. as proof of concept, we showed with the help of a simple rf meta-classifier that psicov should be replaced in hybrid classifiers by couscous.
+
+CONCLUSIONS
+jones et al.  <cit>  demonstrated in their initial work that glasso in principle performs excellently in identifying directly coupled columns within a msa. in the present study, we highlighted that the application of a different shrinkage approach than the one used in psicov, the empirical bayes covariance estimator, in combination with glasso substantially increased the contact precision. the theoretically shown superiority of the empirical bayes covariance estimator over simpler smoothed covariance estimators of the form as is also valid within this application of contact detection from msas.
+
+furthermore, it is worth mentioning that other research fields that apply the glasso procedure, such as gene network reconstruction, may also benefit from applying other shrinkage techniques. we are keen to investigate the effect of shrinkage in other graphical inference problems in future work.
+
+another important application that we are keen to investigate in future is the de novo structure prediction of proteins or protein complexes using couscous or a hybrid classifier, including couscous contact predictions as distance constraints, similarly to what have been applied in evfold  <cit>  and evcomplex  <cit> , or pconsfold  <cit> .
+
+additional files
+
+additional file  <dig> a complete list of all casp <dig> protein codes applied in this study. 
+
+
+
+
+
+additional file  <dig> mean accuracies of several contact detecting methods for the top- l/ <dig> l/ <dig> and l predictions for all contact types applying the psicov benchmark dataset. 
+
+
+
+
+
+additional file  <dig> scatterplot comparing the accuracies of the top l contacts of psicov to couscous, using sequence separation ≥ <dig>  
+
+
+
+
+abbreviations
+3dthree-dimensional
+
+ÅÅ ngström
+
+aucarea under the curve
+
+bvnbayesian network approach
+
+couscouscontact prediction using shrinked covariance
+
+casp11critical assessment of techniques for protein structure prediction 11
+
+dcadirect coupling analysis
+
+flfull lists
+
+glassographical lasso
+
+mccmatthew?s correlation coefficient
+
+mimutual information
+
+mipcorrected mutual information
+
+msamultiple sequence alignment
+
+pdbprotein data bank
+
+pfamprotein family database
+
+prprecision recall
+
+psicovprotein sparse inverse covariance
+
+rfrandom forest
+
+rlreduced lists
+

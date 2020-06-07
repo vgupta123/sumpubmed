@@ -1,0 +1,246 @@
+BACKGROUND
+chemical cross-linking combined with mass spectrometry  is becoming a powerful approach to studying protein-protein interactions. in the cx-ms protocol, proteins are linked before digestion. digested products include cross-linked peptides and conventional linear peptides. in this paper, we refer to conventional linear peptides as peptides if there is no ambiguity. cross-linked peptides are two peptides linked by a chemical compound. two such peptides are referred to as chains, and the chemical compound is referred to as cross-linker. in the database searching based identification framework, the number of all possible peptide-peptide combinations grows quadratically with respect to the number of proteins, which results in a large search space.
+
+many tools have been developed to identify cross-linked peptides. an incomplete list includes asap  <cit> , ms2assign  <cit> , ms-bridge  <cit> , clpm  <cit> , gpmaw  <cit> , virtual-mslab  <cit> , xdb  <cit> , x!link  <cit> , popitam  <cit> , ms3d  <cit> , crosssearch  <cit> , xcomb  <cit> , crux  <cit> , xlink-identifier  <cit> , plink  <cit> , hekate  <cit> , proteinprospector  <cit> , crossfinder  <cit> , and kojak  <cit> . the approach of most of these tools is to modify conventional peptide identification tools’ workflow and the corresponding score functions based on the property of cross-linked peptides. because the search space is large, most of them pre-select high possibility candidates before scoring psms . in order to reduce the search space, cleavable cross-linkers  have been developed to avoid generating peptide-peptide combinations during database searching. peptides linked by this kind of cross-linker can be broken into two peptides in dissociation. thus, the cross-linked peptides identification problem is converted to the conventional peptide identification problem.
+
+due to the good chemical and biological properties of noncleavable amine-reactive cross-linkers  and bs <dig>  suberate)), they have been widely used recently . tools including xquest  <cit> , plink  <cit> , proteinprospector  <cit> , and kojak  <cit>  were proposed to identify peptides linked by this kind of cross-linkers. they use preprocessing procedures to eliminate candidates with low possibilities before scoring. given a spectrum, they compare it with the theoretical spectra from peptides to determine their chances of resulting in high scores heuristically. peptides with low chances are eliminated. eliminating some of the peptides before psm scoring may result in false negatives. the most intuitive approach is searching all candidates exhaustively.
+
+in this paper, we propose a new tool, named ecl , that can exhaustively search a whole database within a reasonable period of time. experiments showed that more cross-linked peptides were identified thanks to exhaustive searching. for the purpose of visualization, we developed another tool, named eclannotator, that converts ecl results into webpages. these webpages show annotated tandem mass spectra and matched/unmatched theoretical ions clearly.
+
+implementation
+ecl is designed to identify peptides linked by noncleavable amine-reactive cross linkers like dss and bs <dig>  in the current version, ecl only supports cid . given a peptide-peptide combination, ecl in silico fragments it to b-ions and y-ions with different charges. these ions form a theoretical spectrum whose peaks’ intensities are the numbers of ions with the corresponding mass-to-charge ratios. the tandem mass spectra produced by a mass spectrometer are referred to as experimental spectra in this paper. ecl uses the normalized cross correlation coefficient to measure the similarity between a theoretical spectrum and an experimental spectrum: 
+  <dig> score=xty||x||||y||, 
+
+where x is the theoretical spectrum, y is the experimental spectrum, and t stands for vector transpose.
+
+because the search space is large, we developed an efficient and low memory requirement algorithm to score psms. concretely, eq.  can be rewritten as: 
+  <dig> score=ty||x||||y||=x1ty+x2ty||x||||y||=x1ty~+x2ty~||x||, 
+
+where x <dig> is the vector whose elements are contributed by the first chain, x <dig> is the vector whose elements are contributed by the second chain, x1+x2=x, and y~=y/||y||. ecl calculates y~ before scoring psms, which reduces the computational complexity largely. both x <dig> and x <dig> have linear ions containing one chain’s amino acids and cross-linking ions containing both chains’ amino acids . given an experimental spectrum and a chain, ecl can obtain this chain’s ion masses as 
+  <dig> xi=p−c+li,cross−linkingionli,linearion, fig.  <dig> an illustration of cross-linked peptides’ dissociation pattern. two chains’ lysines are linked. green markers indicate linear ions, and red markers indicate cross-linking ions. a chain’s linear ions only contain that chain’s amino acids. a chain’s cross-linking ions contain that chain’s amino acids, a cross-linker, and another whole chain
+
+
+
+where i is the ion index starting from  <dig>  xi is ith ion’s mass, p is the experimental spectrum’s precursor mass, c is the chain’s mass, and li is the corresponding linear ion’s mass. taking the first chain in fig.  <dig> for example, 4th b-ion is a cross-linking ion containing “eake” and “evrkelddlr” linked by a cross-linker. thus, its corresponding linear b-ion is “eake”. clearly, p−c is equal to the summation of the other chain’s mass and the cross-linker’s mass. we don’t consider the difference between the experimental spectrum’s precursor mass and the theoretical spectrum’s precursor mass because the precursor mass tolerance is smaller than or equal to the tandem mass tolerance for almost all mass spectrometers. given each ion’s mass, ecl calculates its corresponding mass-to-charge ratios with different charges. after getting all ions’ mass-to-charge ratios for one chain, ecl generates x <dig> or x <dig>  given an experimental spectrum, x1ty~ only needs to be calculated once for different x <dig>  which reduces the computational complexity largely.
+
+with the above optimization, ecl’s workflow is described as follows: 
+indexing chains based on their masses.
+
+calculating ions’ masses for each chain.
+
+indexing experimental spectra based on their precursor masses.
+
+peak de-noising. eliminating peaks whose intensities have the highest frequency.
+
+calculating y~=y/||y|| for each experimental spectrum.
+
+finding the largest precursor mass from all experimental spectra.
+
+looping over all chains whose masses are smaller than or equal to half of the largest precursor mass in ascending order: 
+ finding all spectra whose precursor masses are larger than or equal to 2×c+r−o, where r is the cross-linker’s mass and o is the precursor mass tolerance.
+
+ calculating ions’ masses using eq. , and using these masses to generate x <dig> 
+
+ calculating x1ty~ for each corresponding spectrum.
+
+ finding all chains whose masses are within the range [p−o−c−r, p+o−c−r).
+
+ looping over all found chains: 
+ <dig> . <dig> calculating ions’ masses using eq. , and using these masses to generate x <dig> 
+
+ <dig> . <dig> calculating x2ty~.
+
+ <dig> . <dig> calculating the final score using eq. .
+
+ <dig> . <dig> saving each spectrum’s top score result as a psm.
+
+
+
+
+
+estimating fdr  for each psm.
+
+converting fdr to q-value.
+
+
+
+ecl estimates fdr as what xprophet  <cit>  and plink  <cit>  do. three kinds of psms are used: 
+both chains are from the target database.
+
+both chains are from the decoy database.
+
+one chain is from the target database and the other chain is from the decoy database.
+
+
+
+fdr is estimated with 
+  <dig> fdr=f−dt, 
+
+where s is a score, t is the number of the first kind of psms whose scores are smaller than or equal to s, d is the number of the second kind of psms whose scores are smaller than or equal to s, and f is the number of the third kind of psms whose scores are smaller than or equal to s. finally, fdr is converted to q-value  <cit> : 
+  <dig> q=mins≤tfdr, 
+
+where t is a threshold.
+
+RESULTS
+computational complexity analysis
+ecl is closely related to the work of chen et al.  <cit>  and kojak  <cit> . chen et al.  <cit>  provided their algorithm’s computational complexity. hoopmann et al.  <cit>  provided kojak’s source code without computational complexity analysis, so we analyzed its computational complexity based on the source code. in this section, we will analyze ecl’s computational complexity in detail.
+
+computational complexity analysis
+defining the following variables: 
+k: number of proteins in a database.
+
+n: average number of peptides in a protein.
+
+m: average length of a chain.
+
+h: average number of peaks in an experimental spectrum.
+
+s: number of experimental spectra.
+
+l: number of precursor mass tolerance ranges. this approximately equals the precursor mass range divided by the precursor mass tolerance.
+
+
+
+the time complexity of the algorithm proposed by chen et al.  <cit>  is 
+  <dig> o+sk2n2log/l+sk2n2/l). 
+
+for the first and second terms, the authors only considered one experimental spectrum. we multiply the terms by s because there are s experimental spectra. we also use k2n2/l to replace p in the original paper. for the third term, the authors only considered one psm. we multiply the term by sk2n2/l because there are k2n2/l peptide-peptide combinations for each experimental spectrum and there are s experimental spectra. the time complexity of kojak is 
+  <dig> o+kns+st2). 
+
+please refer to the additional file  <dig> for details.
+
+for ecl, the computational complexity is dominated by step  <dig> in the workflow. the complexity of step  <dig>  is o). steps  <dig>  and  <dig> . <dig> have the same time complexity, o. ecl stores theoretical and experimental spectra in sparse matrixes. we developed an algorithm to match peaks between a theoretical spectrum and an experimental spectrum with o complexity . thus, both steps  <dig>  and  <dig> . <dig> have the time complexity, o. moreover, for an experimental spectrum and a pair of chains, steps  <dig>  and  <dig>  only need to be executed once because ecl checks each chain whose mass is smaller than or equal to half of the largest precursor mass in ascending order. steps  <dig>  and  <dig> . <dig> also only need to be executed once for the same reason. the time complexity of step  <dig>  is o). the time complexity of steps  <dig> . <dig> and  <dig> . <dig> is o. thus, the time complexity of step  <dig> is 
+  <dig> o+m+s+log+kns/l)). 
+
+
+
+there are seven variables in the time complexity equations. five of them can be fixed based on biological prior knowledge: 
+n≈ <dig> 
+
+m≈ <dig> 
+
+h≈ <dig> 
+
+s≈ <dig> 
+
+l≈ <dig> 
+
+
+
+we plotted curves of eqs. , , and  against different numbers of proteins . since kojak selects t peptides for each spectrum, we plotted three curves corresponding to three different t values. we can see that chen et al.  <cit>  has the highest time complexity. when the number of proteins is small, ecl has smaller time complexity compared to kojak . this is because ecl doesn’t need to select peptides beforehand. when the number of protein is large, ecl has higher complexity than kojak . this is because the number of peptide-peptide combinations searched by ecl grows quadratically as the increase of protein number ). this is an unavoidable cost of exhaustive searching. on the other hand, the number of peptide-peptide combinations searched by kojak is almost constant, and the total time complexity increases linearly ).
+fig.  <dig> computational complexity against different numbers of proteins. three t values were used to plot kojak’s computational complexity curves. chen et al.  <cit>  has the highest time complexity. when the number of proteins is small, ecl has smaller time complexity compared to kojak. when the number of proteins is large, ecl has higher complexity than kojak
+
+
+
+even though ecl’s time complexity is large, it can still handle a large database. given a data set containing thousands of tandem mass spectra, ecl only needs  <dig> h to search a database containing  <dig> proteins.
+
+space complexity
+the space complexity of chen et al.  <cit>  is 
+  <dig> o. 
+
+for the second term, we use k2n2/l to replace p in the original paper. for the third term, the authors only considered one peptide-peptide combination for each experimental spectrum. we multiply the term by kn considering that there are kn peptides for each experimental spectrum.
+
+there are two steps in kojak. the space complexity of the first step is o, and the space complexity of the second step is o. thus, the total space complexity is 
+  <dig> o. 
+
+the space complexity of ecl is 
+  <dig> o. 
+
+
+
+clearly, chen et al.  <cit>  has the highest space complexity, and kojak has the lowest space complexity. although ecl’s space complexity is higher than that of kojak, from our experience, a personal computer with 32g memory is sufficient in most cases.
+
+experiments
+in this paper, we will present two sets of experiments. the first one used a data set from the cross-linking of two synthetic peptides. the second one used four data sets from the 26s proteasome sample  <cit>  provided by xquest  <cit> . since our study did not involve any humans, animals or clinical data, we do not have ethics or consent issues.
+
+an experiment with synthetic peptides
+this experiment used two synthetic peptides produced by gl biochem  ltd. the sequences were “evrkelddlr” and “eakelieglpr”. n-terminals were protected by fmoc. we used  <dig> μl peptides and  <dig>  μl dss. their concentrations were  <dig> and  <dig>  mm, respectively. we dissolved the peptides and dss in dmso  to a final concentration of  <dig> mm. the reaction was carried out at room temperature, and the reaction time was  <dig> h. after quenching, we added  <dig>  μl piperidine to the above solution to remove the fmoc protection. the reaction lasted for another  <dig> h. finally, we freeze-dried the sample to obtain the cross-linked peptides.
+
+lc-ms  analysis was carried out on a thermo ltq orbitrap xl mass spectrometer  with a nanolc system. the sample was loaded onto a trapping column  using a flow rate of  <dig> μl/min of solvent a. the loading lasted for  <dig> min. cross-linked peptides were separated at a flow rate of  <dig> l/min on a  <dig> μm ×  <dig> cm c <dig> column . the following gradient was used: 0– <dig> min  <dig> % b, 8– <dig> min 2– <dig> % b, 12– <dig> min 10– <dig> % b, 180– <dig> min 50– <dig> % b, 200– <dig> min  <dig> % b, and 215– <dig> min  <dig> –  <dig> % b, where b was the ratio of acetonitrile to formic acid. b equaled 100: <dig>  in this experiment. the mass spectrometer selected up to five precursors to perform cid. the intensity threshold of triggering fragmentation was  <dig> counts. only those whose precursor charges were larger than or equal to  <dig> were considered. cid was performed for  <dig> ms using  <dig> % normalized collision energy and a  <dig>  activation value. dynamic exclusion was used with the following parameters:  <dig> repeat count,  <dig> s exclusion duration,  <dig> list size, and  <dig> ppm mass window. the ion target value was  <dig> , <dig>  for full scans, and  <dig> , <dig>  for a tandem mass scan. fragmented ions were detected in a linear ion trap.
+
+during the search, the precursor mass tolerance was 10ppm, and the tandem mass tolerance was  <dig> th. up to  <dig> missed cleavages were allowed. the database contained  <dig> randomly selected proteins and two synthetic peptides. the decoy database was generated by reversing peptides, with lysine and arginine fixed. because there was only one linkable site in each synthetic peptide, all cross-linked peptides formed by synthetic peptides were treated as inter-protein cross-linked peptides. the q-value cut-off threshold was  <dig> .
+
+the search was carried out on a personal computer with an intel core i5- <dig> cpu  and  <dig> gb memory. ecl needed about  <dig> s to finish the task. since we knew the ground truth, we could calculate the false discovery proportion.  <dig> out of  <dig> psms were incorrect. the corresponding false discovery proportion was  <dig> . this experiment indicated that ecl could provide trustable results. details can be found in the additional file  <dig> 
+
+experiments with 26s proteasome data
+four data sets from the 26s proteasome sample  <cit>  were used. we first searched four data sets against a database released along with the data sets. it contained  <dig> proteins. the latest versions of xquest, plink, proteinprospector, kojak, and ecl were used: xquest  <dig> . <dig>  plink  <dig> , proteinprospector  <dig> . <dig>  kojak  <dig> . <dig>  and ecl  <dig>  the precursor mass tolerance was  <dig> ppm, and the tandem mass tolerance was  <dig> da. other parameters were the same as those in the previous experiment. all the parameter files used by these tools were included in the additional file  <dig>  we used xprophet  <cit>  to estimate the q-value for xquest’s results by setting “qtransform” to  <dig> in the “xproph.def” file. because proteinprospector did not provide the q-value in its results, we estimated it as what trnka et al.  <cit>  did. we used percolator to estimate the q-value for kojak’s results as what kojak required. intra-protein cross-linked peptides and inter-protein cross-linked peptides were analyzed separately. for a fair comparison, these tools’ q-value thresholds were  <dig> .
+table  <dig> numbers of non-redundant cross-linked peptides identified by xquest, plink, proteinprospector, kojak, and ecl, respectively. the database contains  <dig> proteins
+
+values in the brackets are the numbers of overlapping cross-linked peptides identified by both ecl and the corresponding method
+
+
+
+in order to find out if the additionally identified cross-linked peptides were due to exhaustive search, we let kojak output top  <dig> pre-selected peptides for each cross-linked peptide’s highest score spectrum. . then, we compared the cross-linked peptides identified by ecl with those pre-selected peptides in the corresponding spectra. we consider one additionally identified cross-linked peptides pair is due to exhaustive search if all of the following criteria are satisfied : 
+the precursor masses in kojak and ecl are within the same tolerance range.
+
+if both of two peptide chains are in the pre-selection list and at least one is over  <dig>  kojak and ecl identify the same pair of peptide chains.
+
+at least one peptide chain isn’t in the pre-selection list.
+
+
+table  <dig> a table showing if kojak searched those missing identified peptides
+
+the second column contains the total numbers of peptides from the cross-linked peptides identified by ecl, but not by kojak. the third column contains the numbers of peptides that don’t belong to kojak’s pre-selected peptides. the forth column contains the ratios between the number in the third column and the number in the second column
+
+
+table  <dig> running time of xquest, plink, kojak, and ecl, respectively. the unit is second
+
+
+
+finally, we tested if ecl could search a large database within a reasonable period of time. we searched the same data sets against the whole proteome of schizosaccharomyces pombe species. there were  <dig> proteins. we set the allowed maximum missed cleavage to  <dig>  the rest of the parameters were the same as those in the last experiment. xquest ran for a few days, but it still couldn’t finish the searching. plink could not handle such a large database. proteinprospector spent  <dig>  h on average analyzing one data set on the authors’ web server. kojak spent  <dig>  h on average analyzing one data set. ecl spent  <dig> h on average analyzing one data set.
+
+there were 4× <dig> peptide-peptide combinations including decoy peptides. the precursor mass tolerance was  <dig> ppm. thus, there were about 4× <dig> peptide-peptide combinations for each spectrum. kojak selected top  <dig> peptides to generate peptide-peptide combinations for each spectrum, which covered about  <dig> % of the whole search space. proteinprospector used a similar pre-selection procedure to select top  <dig> peptides. thus, the number of peptide-peptide combinations searched by proteinprospector and kojak was almost constant with the increase of the database size. however, the number of peptide-peptide combinations searched by ecl increased quadratically. that’s why ecl was slower than proteinprospector and kojak.
+
+proteinprospector, kojak, and ecl identified fewer cross-linked peptides compared with the previous experiment . it is a known issue  <cit>  that larger databases lead to fewer results. the discussion of this issue is beyond the scope of this paper. ecl identified more non-redundant peptides than proteinprospector and kojak. please note that there is no intra-protein cross-linked peptides identified by kojak because percolator output errors in estimating q-value for kojak. the errors said: “the input data has too good separation between target and decoy psms”. it is a common error when there are only a few target or decoy psms. please refer to percolator’s document for more detail.
+values in the brackets are the numbers of overlapping cross-linked peptides identified by both ecl and the corresponding method. there is no result for intra-protein cross-linked peptides reported by kojak because percolator outputs errors in estimating q-value
+
+
+
+CONCLUSIONS
+high computational complexity is a major obstacle in exhaustively carrying out large-scale cross-linked peptides identification. to the best of our knowledge, ecl is the first tool that successfully addresses the computational complexity issue without any heuristic pre-selection procedure. given thousands of tandem mass spectra and a database containing thousands of proteins, it can finish the task in a few hours. the experiments showed that ecl could identify more peptides than xquest, plink, and proteinprospector. a further analysis on public data sets showed that exhaustive search helped identify more cross-linked peptides than existing methods.
+
+availability and requirements
+project name: eclproject home pase:http://bioinformatics.ust.hk/ecl.htmloperating systems: windows, linux, os xprogramming language: java, pythonother requirements: java  <dig>  or higher, python  <dig> license: apache license 2
+
+additional files
+additional file <dig> a supplementary document contains ecl user instruction, computational complexity analysis of kojak, spectra analysis of the 26s proteasome results, and venn diagrams of 26s proteasome results. 
+
+
+
+additional file  <dig> detailed results of synthetic peptides and 26s proteasome samples. 
+
+
+
+additional file  <dig> parameter files used by xquest, proteinprospector, kojak, and ecl, respectively. 
+
+
+
+additional file  <dig> distances of intra protein identified by ecl. 
+
+
+
+additional file  <dig> kojak’s pre-selection list of psms only identified by ecl. 
+
+
+
+abbreviations
+bs3bis suberate. cid: collision-induced dissociation
+
+cpucentral processing unit
+
+cx-mschemical cross-linking combined with mass spectrometry
+
+dmsodimethyl sulfoxide
+
+dssdisuccinimidyl suberate
+
+eclexhaustive cross-linked peptides identification tool
+
+etdelectron-transfer dissociation
+
+fdrfalse discovery rate
+
+pdbprotein data bank
+
+psmpeptide spectrum match
+

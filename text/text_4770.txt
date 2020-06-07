@@ -1,0 +1,181 @@
+BACKGROUND
+in recent years genetic data analysis has seen a rapid increase in the scale of data to be analyzed. schadt et al <cit>  offered that with data sets approaching the petabyte scale, data related challenges such as formatting, management, and transfer are increasingly important topics which need to be addressed.
+
+the majority of tools used in gwa data analysis typically assume that a data set will easily fit into the main memory of a desktop computer. most desktop computers have around 4– <dig> gb of main memory, which is more than enough to fit a data set of  <dig> million variants by tens of thousands of individuals. however, data set sizes continue to grow with advancements in analysis techniques and technologies. for example, techniques like genotype imputation
+ <cit>  attempt expand data sets by deriving missing genotype from reference panels. genotyping technologies such as illumina’s omni snp humanomni5-quad chips allow for genotyping of upwards of  <dig> million markers
+ <cit> . furthermore, genome sequencing technologies are advancing to the point where determining genotypes via whole genome sequencing may be a viable option. having an individual’s entire dna sequence opens the door for even more genetic markers to be analyzed. the  <dig> genomes project
+ <cit>  now includes roughly  <dig>  million variants in the human genome.
+
+the size of a data file used to represent the genotypes of  <dig> individuals would be roughly  <dig> gb . there are a several options to handling data sets of this size. first, the cost of upgrading a standard pc’s memory to handle this amount of data is not unreasonable. second, the algorithm can be extended to utilize memory mapping techniques
+ <cit> , which effectively pages chunks of the data file into main memory as they are needed. a third option is to modify the format for representing genotypes such that the genotypes are expressed in their most succinct form
+ <cit> . this manuscript explores the latter option more deeply. the interest is motivated in part by the desire to work in the general-purpose graphic processing units  space which has somewhat limited space especially when considered on a processor-by-processor basis.
+
+the compression of genotype encoding data is most effectively performed using succinct data structures
+ <cit> . succinct data structures allow compression rates close to the information-theoretic limits and yet preserve the ability to access individual data elements. in the genotype analysis tools that use succinct data types , a 3-bit genotype representation for biallelic markers has been adopted. while a 3-bit representation does provide a succinct data structure, it is not the most succinct. more precisely, from an information theoretic perspective, 3-bits is able to represent up to  <dig> unique values. however, there are only  <dig> commonly used unphased genotypes, namely {nn, aa, aa, aa} where nn is used to represent missing data. this means that a 2-bit representation is the information theoretic lower bound and its use would provide an even more compact representation.
+
+an important consideration when designing succinct data structures is data element orientation in memory. boost
+ <cit>  and biforce
+ <cit>  adopted a vectored orientation for representing data elements. the vectored orientation spreads each data element over multiple bit vectors. in other words, they utilize  <dig> bit vectors per marker to represent the set of genotypes. the advantages of this orientation are discussed later.
+
+this manuscript makes two important contributions in the use of succinct data structures for genomic encoding. in particular,  we implement a technique to reduce genotype encoding to a  <dig> bit vector form, and  we compare the performance of the new 2-bit encoding to the conventional  <dig> bit vector encoding. from these studies, we have observed that the 2-bit encoding encoding consumes less memory, and is slightly more efficient in some algorithms than the 3-bit encoding.
+
+implementation
+we analyzed a commonly used 3-bit binary representation of genotypes from performance and scalability perspectives. with this information we developed a c++ object library that we have named libgwaspp. the library provides data structures for managing genotype data tables in a 2- or 3-bit representation. finally, we benchmarked the two representations on randomly generated data sets of various scales.
+
+genome-wide association studies
+dna from individuals are collected, sequenced or genotyped, and the genotypes for genetic variants are used in genome-wide association studies . these studies aim to determine whether genetic variants are associated with certain traits, or phenotypes. the most common studies are case-control studies which group individuals together into two sets based on the presence  or absence  of a specific trait. these studies typically rely upon various statistical tests based upon the genotypic or allelic distribution of the variants in each set. an average data set aims to compare thousands of individuals by hundreds of thousands to millions of variants.
+
+gwa studies can be computationally intensive to perform. common algorithms consider either each variant individually, or variants in combination with one another. for example, measuring the odds ratio for each variant in a case-control study is one way of identifying variants which may be associated with the trait in question. an epistasis analysis algorithm, such as boost
+ <cit> , compares the genotype distribution of two variants in each step.
+
+in both of these algorithms, the basic task is counting the occurrences of each genotype in each of the case-control sets. in other words, the first step in determining the odds ratio is to build a frequency table  for both the case and control sets at a specific variant. similarly, the boost
+ <cit>  algorithm first builds a contingency table , or pairwise genotype count table, for a pair of variants.
+4 and5
+
+c
+a
+c
+b
+m
+
+
+b
+
+c
+
+
+a
+
+m
+a
+b
+note that the marginal sums of this table are the individual markers frequencies from table
+ <dig> 
+
+i
+
+1
+i
+
+2
+i
+
+3
+i
+
+4
+i
+
+5
+i1- <dig> represent individuals, and ma and mb are markers.
+
+i
+
+1
+i
+
+2
+i
+
+3
+i
+
+4
+i
+
+5
+i
+
+1
+i
+
+2
+i
+
+3
+i
+
+4
+i
+
+5
+binary genotype encoding schemes
+a common way to minimize the impact of the table building bottleneck is to fully utilize processor throughput by counting genotypes from multiple individuals in one step. the binary encoding of genotypes adopted by boost
+ <cit>  improves the computational efficiency of the epistasis algorithm. the algorithm used  <dig> bit vectors to encode for genotype data. in this scheme each genotype is its own bit-vector, or stream, of data. each bit corresponds to an indexed individual, and the indexing is assumed to be constant across all markers. a set bit indicates that the individual has the corresponding genotype for the specified marker. therefore, every variant requires  <dig> vectors to fully represent the genotypes.
+
+there are two key benefits of using this binary encoding scheme. the first is that the task of building a frequency table for a given marker is reduced to calculating the hamming distance of each of a bit-vectors and a bit-vector of all zeros. this distance is also referred to as a hamming weight. the technique used for calculating the hamming weight of a bit vector is to divide the bit-vector into manageable blocks, and sum the hamming weight of each block. the block size is typically linked to the processor word size, typically 32- or 64- bits . the algorithm for computing the hamming weight of an individual block is commonly referred to as population counting . we chose to follow the boost implementation of popcount which looks-up the hamming weight of 16-bit blocks in a pre-populated weight table. the second benefit is that it reduces genotype comparison logic to simple boolean logic operations. more specifically, the task of counting individuals which have a specific combination of genotypes for two markers is simplified to finding the hamming weight of the logical and of the genotype bit vectors. this is useful when building contingency tables.
+
+of interest to this paper is the fact that when using the 3-bit encoding scheme at least two thirds of the bits used will be unset. an information theoretic analysis of the genotype alphabet indicates that 2-bits are sufficient to uniquely represent each of the four unphased genotypes. the immediate benefit is a one third reduction in memory consumption . the caveat to this encoding scheme is that determining a genotype requires both bits.
+
+the algorithm in figure
+ <dig> is a pseudo-code representation of how to build a genotype count table from 2-bit encoded data. the hamming weight of each vector is the number of individuals with , and  genotypes, respectively. to disambiguate the values it is necessary to compute the hamming weight of the logical and of the bit-vectors. this value represents the number of  genotypes, and subtracting it from the previous two weights will result in the appropriate counts.
+
+the algorithm in figure
+ <dig> illustrates the construction of a pairwise genotype count table, or contingency table. a contingency table represents the number of individuals who possess a genotype combination for a pair of markers. when using the 3-bit encoding scheme, each cell of the table is simply the hamming weight of the logical and of the genotype bit-vectors for the two markers. the 2-bit encoding requires an inline transformation step to convert the 2-bit encoded data into 3-bit data. this step is necessary to be able to take advantage of the popcount bit counting method.
+
+both of the above algorithms can be further improved by incorporating additional information. for example, the algorithm for building a contingency table can be simplified if marginal information for both variants is available. the contingency table algorithm can make use of the variants’ frequency table and reduce having to compute  <dig> hamming weight values to only  <dig>  the remaining values can be easily computed by subtracting the row and column sums from their respective marginal information values. this reduction offers significant computational savings, especially when performing exhaustive epistasis analysis.
+
+benchmarking
+we compared the performance of the 2-bit encoded data to the 3-bit encoded data. in particular, we measured the runtime for building frequency tables and contingency tables using both encoding schemes. the runtime of these algorithms are dependent upon the number of columns, or individuals, in each row. therefore, we decided to hold the number of rows constant at  <dig>  variants. we varied the number of columns between  <dig> and  <dig> thousand individuals. we also tested a set with  <dig>  individuals as an extreme scale experiment. the genotypes were simulated following empirical allele frequency spectrum of affymetrix array  <dig>  snps of the ceu hapmap samples. similarly, individuals were randomly classified as either a case or control.
+
+three experiments were conducted. first, for each data set the runtime for building frequency tables for each of the variants were measured. second, for each data set the runtime for building all contingency tables for an exhaustive pairwise epistasis test was measured. third, each data set was run through our implementation of the boost
+ <cit>  algorithm and the total runtime was recorded. the runtime of boost
+ <cit>  algorithm does not include the time to load the compressed data set into main memory. in each of these tests, the average runtime is calculated and presented.
+
+all tests were conducted upon a desktop computer with an  <dig>  ghz intel core i7-3930k,  <dig> gb of  <dig> mhz ddr <dig> memory, with 64-bit fedora  <dig>  time was measured down to the nanosecond using the clock_gettime() glibc function. we used gnu g++ compiler  <dig> , and compiled using standard “-o3” compiler optimization flag. the tests were performed using 64-bit block size.
+
+RESULTS
+the first experiment measured the runtime for building frequency tables. initially, the 3-bit encoding scheme appeared to offer a consistent performance advantage over the 2-bit encoding. as the number of individuals increased, it took less time to construct the count table . the average time to build a genotype count table for less than  <dig>  individuals is less than  <dig> μs. for data sets greater than  <dig>  individuals, there is some performance overhead that results from decoding the 2-bit vectors. building frequency tables from the 3-bit encoded data proved to be 12–25% faster than when built from 2-bit encoded data. in the extreme scale data set there was a  <dig>  μs difference in favor of the 3-bit scheme. however, the second experiment offered different results.
+
+the second experiment measured the runtime for building contingency tables for all pairs of variants in the data sets. in this experiment, the 2-bit encoding scheme offered better performance. similar to the first experiment,  <dig>  individuals seemed to be the diverging point . at sizes greater than  <dig>  individuals, the 2-bit encoding scheme offered a 1% performance improvement over the 3-bit scheme. with  <dig>  individuals, this equates to about a  <dig>  μs difference in average performance. the third experiment further confirms this performance gain .
+
+speedup is measured relative to the 3-bit runtime.
+
+discussion
+this work focuses on ways to address frequency table building processes found in gwas for two primary reasons. first, upstream steps, like the loading of data, in a general gwas pipeline are performed relatively infrequently, and can be performed offline. for example, a data set can be transformed into an optimized format once, and in every repeat analysis the data set the loading becomes a constant time step within the pipeline. conversely, the building of these tables amounts to a frequently reoccurring step which is typically performed inline under varying conditions.
+
+secondly, we viewed the table building process as a bottleneck for downstream analytical steps. offering an approach which positively impacts the cost associated with this bottleneck is beneficial.
+
+the results suggest that the use of 2-bit encoding scheme for genotype data does offer several benefits over a 3-bit encoding scheme. the compact encoding scheme requires 33% less memory for representing the same data. aside from freeing up system memory for other tasks, the memory savings can be beneficial for other reasons. for example, epistasis algorithms like boost
+ <cit>  can be run on graphic processing units. gpus are separate devices on a computer which have their own physical memory, typically less than  <dig> gb, and require data to be copied to and from the device. the limited memory and data transfer issues both benefit from using a more compact data format.
+
+the 2-bit encoded genotypes have also been used by other software packages. plink
+ <cit> , for example, uses a 2-bit encoding in the bed file format. bed files use a contiguous pairing of bits to express the genotype of an individual. using bit pairs allows for more efficient individual genotype decoding as a result of the bits existing in the same bit-block. however, additional bit masking steps need to be applied to each block to effectively utilize popcount based methods for counting genotype occurrences within a block. as mentioned earlier, our implementation adopts a bit-vectored approach, whereby an individual’s genotype is divided over two separate vectors. this is primarily done to reduce the number of masking steps.
+
+in either case, some form of genotype disambiguation is necessary. there is an overhead associated with this decoding step, and it can be felt in certain algorithms. we measured approximately a 20% overhead when building frequency tables. while this is a significant overhead, the number of frequency tables are linear in the number of markers. therefore, it is conceivable to build these tables once, and reuse them in downstream analytical steps as needed. as a result, this overhead is generally acceptable. furthermore, the overhead is effectively hidden when building pairwise frequency tables.
+
+the improvement in performance present when constructing pairwise frequency tables from 2-bit encoded genotypes stems from the reduced number of memory access steps. as shown in algorithm
+ <dig> six genotypes blocks are used in each step of the iteration. when 3-bit encoding is used, each of these blocks must be read from memory. conversely, the 2-bit encoding only needs to read four blocks and computes the remaining two blocks.
+
+a further general performance increase may be possible through the use of hardware implementations of popcount algorithms. as part of the streaming simd extensions  of the x <dig> microarchitecture there is a popcnt
+ <cit>  instruction. recent processor lines from both intel and amd offer this instruction in some form or another.
+
+as we mentioned earlier, these succinct data structures are intended to impact the increasing scale of sample sets. the building of the frequency tables are linear algorithms which are dependent upon the sample sets. by fixing the number of variants and varying the number of samples in a data set we show the linear increase of the epistasis algorithm runtime, as is indicated by figure
+ <dig> 
+
+unfortunately, the runtime of brute force algorithms like boost
+ <cit>  are dominated more by the number of variants being analyzed than the number of individuals being studied. a data set of  <dig>  variants means that 5× <dig> unique contingency tables need to be built for a typical case-control study. expanding that size to a million variants increases the contingency table count to 5× <dig>  other works have demonstrated parallel implementations that effectively address the variant scaling
+ <cit> , <cit> , <cit> . this work demonstrates a general way to further improve the performance of these algorithms.
+
+CONCLUSIONS
+in this work, we were concerned with comparing the performance benefits and disadvantages of using more densely packed data representations in genome wide associations studies. we implemented a 2-bit encoding for genotype data, and compared it against a more commonly used 3-bit encoding scheme. we also developed a c++ library, libgwaspp, which offers these data structures, and implementations of several common gwas algorithms. in general, the 2-bit encoding consumes less memory, and is slightly more efficient in some algorithms than the 3-bit encoding.
+
+availability and requirements
+project name: libgwaspp
+
+project home page:https://github.com/putnampp/libgwaspp
+
+operating system: linux
+
+programming language: c++
+
+other requirements: cmake  <dig> . <dig>  gcc  <dig>  or higher, boost  <dig> . <dig>  zlib, gsl
+
+license: freebsd
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+ppp designed and implemented the software, conducted the experiments, and wrote the main manuscript. gz provided domain specific expertise in gwa studies, and the empirical data from which the simulated data was generated. pw contributed extensive knowledge of computational architectures and data structures. both also contributed greatly to the result analysis and editing of the manuscript. all authors read and approved the final manuscript.
+

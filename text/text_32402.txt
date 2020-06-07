@@ -1,0 +1,72 @@
+BACKGROUND
+the advent of next-generation sequencing has allowed for an unprecedented study of how genomic variants, particularly those in coding regions influence traits and disease. currently, whole-exome and whole-genome sequencing remain prohibitively costly for studying a few genetic loci in hundreds to thousands of individuals, which might be the design of a typical validation experiment for genome-wide association studies . a number of resequencing strategies exist for such validation experiments and several rely on multiplex pcr to capture many loci in a single pcr reaction.
+
+multiplex pcr is a technique that allows for simultaneous amplification of two or more loci using pcr primer pairs that are predicted to not interfere with each other within the reaction  <cit> . traditionally, multiplex pcr products were isolated by size, purified and sequenced independently; however, coupling multiplex pcr with barcoding of samples and next-generation sequencing is a powerful technique to rapidly isolate and sequence multiple regions simultaneously in many samples using the  <dig>  access array system . the main hurtle of coupling multiplex pcr with next-generation sequencing is efficient primer design. a robust solution is one that identifies primers that anneal to a single place in the genome and combines those primers into compatible groups. compatible primers are those with similar gc content, tm, amplicon size, and amplicons that do not target overlapping regions. existing tools are not well suited for this purpose because they focus on either a small portion of dna for the primer design, require post-processing of primers to create pools or are tailored for epigenetic analysis, or require post-processing to create compatible pools . here, we present mpd, a software package designed with the aforementioned requirements in mind, that automates the design of multiplex pcr primers for next-generation sequencing of genomic dna .table  <dig> comparison of multiplex primer design software to existing primer design software
+
+
+
+
+implementation
+multiplex pcr design  software consists of a c library and programs used to design and pool compatible primers and a perl package that provides convenience functions for sanitizing inputs, executing and processing the c programs, and summarizing results. to minimize human error, the package can write specifically formatted files to enable bulk oligonucleotide ordering via direct upload and addition of appropriate adapters to primers for compatibility with the  <dig>  access array system.
+
+the mpd c program designs primers using k-mers in a similar fashion to how blat finds compatible sequences  <cit> . it takes a specially prepared hashed version of the genome, flat dbsnp files, standard pcr parameters, and a bed file of target regions. all possible primers that cover a user-specified region are examined. primers are immediately excluded if any of the following is true: 1) they form hairpins, 2) dimerize to each other, 3) have tm outside the user specified range, 4) have gc content outside the user specified range, 5) occur within a repeat-masked region of the genome, 6) overlap a high frequency snp, or 7) if the last  <dig> bases of the primer anneal within the amplified product. tm and other primer characteristics were calculated using established algorithms  <cit> . primers not rejected for any of these criteria are given a “quality score” which is an estimate of the primers commonness within the genome. smaller scores represent primers with less common subsequences within them. a score of  <dig> would indicate that every k-mer of size  <dig> or smaller within the primer was absolutely unique, which is not actually possible, but scores near  <dig> indicate that most k-mers of size 14– <dig> are nearly unique. primers with non-unique 15mers at the 3’ end of the primer are given large penalties. after all primers have been identified compatible with the supplied specification, a matrix of compatibility is created, and primer pairs are determined to be compatible if all of the following are true: 1) no primer dimerizes with another, 2) all primers have tm’s within 2 °c, 3) primer pairs do not target overlapping regions, and 4) amplified regions are within 20% of the maximum allowable amplicons size of one another . the final criterion is important to avoid race conditions where smaller amplicons predominate the reaction. pooling begins by either selecting the primer compatible with the most or least primers and proceeds recursively until all compatible primers are pooled.
+
+the mpd perl package offers convenience functions to process bed files into unique regions, launch and process the mpd c program output, and check mpd primers against a local compiled version of ispcr . figure  <dig> and an included example script demonstrates the most common usage: a configuration file and target bed file are supplied, the bed file is sanitized to the unique regions, and primer pools are created that match the design specifications on the first iteration. primers above a set threshold are retained, and optional additional iterations are made to loosen pcr parameters up to a set threshold. optionally, ispcr may be used to provide an orthogonal validation for pcr primer uniqueness and genomic coordinates. after the final pcr pool design, all primers are written to  a plain text file,  a file suitable for use with ispcr, and  an excel file that is suitable for upload for batch synthesis of oligonucleotides in 96-well plate format. additionally, a coverage file is provided indicating which primer cover what target regions. to facilitate use with the  <dig>  access array system, required forward and reverse primer sequencing adapters may be optionally added.fig.  <dig> example pipeline for primer design. each successive iteration of the loop would loosen pcr design parameters by increasing the acceptable tm or amplicons size up to a set limit or maximum iterations
+
+
+
+
+web application
+the full multiplex primer design  program is accessible online . the web application allows users to submit primer design jobs by uploading a list of coordinates to amplify as a simple bed file. once the bed file is uploaded, the web server submits the data to a job queue, waiting until a worker hosted on amazon’s ec <dig> cloud computer platform is available to run the job. under typical conditions this happens within seconds. once a worker reserves a job, it sends real-time progress updates back to the browser, allowing the user to monitor the progress of the primer design submission from anywhere in the world. users may also opt-in to email notifications of major state changes, such as primer design success. once completed, output files may be downloaded, and the design summary may be viewed directly in the browser.
+
+genomic dna samples
+human dna samples used in this study were provided by the emory alzheimer’s disease research center , which recruits community volunteers for studies of aging and memory. genomic dna was extracted from human blood using the gentra puregene blood kit  following the manufacturer’s protocol.
+
+primer design and capture
+mpd was used to design primers for all exonic regions of the following genes: abca <dig>  apoe, bin <dig>  cd2ap, cd <dig>  clu, ms4a6a, and picalm using conditions recommended for the access array system and compatible for sequencing on an illumina miseq. for validation purposes, we restricted our analysis to the first  <dig> pools identified so only  <dig> access array system would be required per  <dig> samples. the primers were synthesized on  <dig> plates using standard desalting and normalized to 60 mm concentration with the appropriate forward and reverse adapters added to the respective primers. individual primers were pooled and amplification of  <dig> samples of genomic dna was performed using the access array as per manufacturer’s protocol. all samples were barcoded according to the manufacturer’s protocol and 250 bp paired-ended sequencing was performed on an illumina miseq. of note, the forward and reverse sequencing adapters add about 100 bp of sequence to the resultant amplicons.
+
+primer design validation
+all raw fastq files were mapped against hg <dig> build of the human genome using pe mapper  and trimmed by 27 bp, which is 1 bp larger than the longest primer, from the 5’ end of the read to avoid sequencing the primers directly. base calling and variant detection was performed using pe caller with default parameters , and annotation was performed using seqant  <cit> .
+
+quality control was performed in  <dig> phases. first, samples were examined within groups that underwent capture together. primer regions with > <dig> sd missing sites were dropped from all samples, and samples with > <dig> sd missing data were likewise excluded. second, samples from all batches were combined, and those with > <dig> sd missing data or excess heterozygosity were dropped. reported sites are those with >95% completeness, and variant sites that failed hardy-weinberg filtering at 10- <dig> were excluded; however, no site failed hardy-weinberg filtering.
+
+RESULTS
+for the  <dig> genes, we designed  <dig> primer pairs in  <dig> primer pools with an average of  <dig>  primers per pool . the primer pairs cover 90%  of the targeted bases and cover a total of  <dig>  bp total because regions flanking the target are covered. the mean in silico amplicon size was 277 bp  with a mean primer tm of  <dig> c  and length of  <dig>  bp . we selected  <dig> primer pools  for wet-lab testing because they could be amplified on a single access array chip.
+
+of the  <dig> samples,  <dig> samples were excluded due to low coverage and a median of  <dig> primer pairs were dropped per batch due to low coverage . of the failed primers,  <dig> failed in a single batch, which does not preclude usable data across the entire experiment whereas  <dig> failed in over half the batches which does. we note that the tm and gc content was higher among failed primer pairs with a mean tm of  <dig>  °c whereas working primers had a mean of tm  <dig>  °c, which was statistically significant . the gc content of the failed reactions also tended to be higher  <dig>  versus  <dig>  although this was not significantly different . the spearman rank correlation between the number of primers in a pool and the number of failed primers was - <dig>   indicating that failed primers tend to occur in smaller pools suggesting that increased pool size does not lead to higher primer failure.
+
+an average of  <dig>  bp were sequenced per individual at  <dig> % completeness with a mean depth of coverage of 300x . a total of  <dig>  bp were sequenced in the original targeted regions. among the region of interest, we identified  <dig> snps,  <dig> insertions and  <dig> deletions total with each sample averaging  <dig>  snps with  <dig>  replacement and  <dig>  silent sites. the overall average transition to transversion ratio was  <dig>  per individual and silent to replacement ratio was  <dig> . the mean minor allele frequency of  <dig>  ±  <dig>  for variant sites . we found dbsnp entries for  <dig> and 78% of the replacement and silent sites, respectively.
+
+discussion
+we demonstrate the mpd software is well suited to designing targeted resequencing experiments for use with the access array system . we resequenced a realistic collection of genes that were proposed as candidate regions by alzheimer’s disease gwas  <cit> . for these genes mpd was able to design primers over the majority of regions targeted, even particularly challenging regions with repetitive regions and high gc content . importantly, the design primer pairs performed well in wet-lab testing. it is hard to directly compare the number of variants observed in our experiment to those observed through whole-exome or whole-genome sequencing because of the relatively few expected number of variants we ought to observe per subject. most large-scale sequencing projects are interrogating millions of sites so their estimates of transition to transversion or silent to replacement ratios are more reliable than an experiment that targets only 25kb. despite this, the number and nature of variants we observe are consistent with high quality sequencing and compares favorably to whole-exome experiments when considering small regions in isolation. the weaknesses of multiplex pcr for next-generation sequencing are similar to those inherent in pcr-based capture methods, namely, the region must contain unique genomic sequence and not be enriched for high gc content.
+
+our approach for primer pooling differs from recommendations by fluidigm in two ways. the first recommendation is that primers within a pool should be within 20% of the average amplicon size of the pool. our software allows primers to be compatible if their amplicons are within 20% of the maximum amplicon length  which achieves nearly the same goal that one set of amplicons dominate the reaction. the second recommendation is that pairs within a pool must anneal to targets separated by at least 5 kb. our software checks for any annealing of amplicons within a pool to avoid interaction of amplicons within a pool, which we suppose is the intention behind the recommendation.
+
+CONCLUSIONS
+the mpd software is able to design multiplex pcr experiments suitable for next-generation targeted resequencing. the software allows an iterative design approach where initially stringent conditions and subsequently loosened to maximize the number of high-quality primers that are as close to the initial design criteria as biologically feasible. the mpd software coupled with the  <dig>  access array system are well-positioned for sequencing 10-100kb per sample on hundreds to thousands of samples and may be quickly retooled to enable shift in targeted genes as new genetic evidence emerges.
+
+availability and requirements
+
+project name: mpd
+
+project home page: https://wingolab-org.github.io/mpd-c/
+
+
+operating system: unix, linux, os x
+
+programming language: c, perl
+
+license: gpl 
+
+any restrictions to use by non-academics: none
+
+
+
+
+abbreviations
+gwasgenome-wide association study
+
+mpdmultiplex primer design
+
+pcrpolymerase chain reaction
+

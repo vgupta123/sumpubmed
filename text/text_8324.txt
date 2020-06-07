@@ -1,0 +1,176 @@
+BACKGROUND
+counting the number of occurrences of every substring of length k  in a given string s is an important procedure in bioinformatics. one prominent application is de novo assembly from very large number  of short reads, produced by second-generation sequencing instruments. the most popular assembly approach for such data is based on building the de bruijn graph
+ <cit> , in which an edge between any pair of k-mers, represented as nodes in the graph, exists if and only if the -symbol long suffix of one k-mer is a prefix of another. the current sequencing technology cannot, however, get rid of a relatively large number of errors  in sequence reads. these errors can be detected on a statistical basis. the whole genome obtains high coverage  on modern sequencing platforms, which means that any “genuine” substring of length, e.g.,  <dig> or  <dig> is very likely to appear multiple times in the reads collection. if a given k-mer occurs only once, it almost certainly contains at least one  false symbol. the unique k-mers should be discarded before  building the de bruijn graph, since they significantly increase the memory and time requirements for graph generation. other applications of k-mer counting include fast multiple sequence alignment
+ <cit>  and repeat detection
+ <cit> . usually we should not distinguish between a k-mer and its reversed complement, and by the “canonical k-mer” we will mean the lexicographically smaller of the two.
+
+counting k-mers is challenging, because it should be both fast and performed using as little memory as possible. a naïve approach is to use a standard hash table, with k-mers as keys and their counts as values. this solution is both memory consuming and hard to parallelize effectively. moreover, some of the k-mer counting tools cooperate with quake
+ <cit> , a widely used package to correct substitution sequencing errors in experiments with deep coverage, which takes k-mer statistics as an important component for its job. supporting quake makes k-mer counting even more demanding, both in time and used memory, since instead of plain k-mer counts quake takes into account also the quality of base calls, i.e., high-quality reads have higher impact. in the following paragraphs we will briefly present several respected k-mer counting solutions.
+
+tallymer
+ <cit>  is a k-mer counter based on the suffix array structure. alas, suffix array construction is a relatively expensive operation, which is worsened for the second-generation sequencing data, where short reads must go together with high coverage.
+
+meryl, from the k-mer package of the celera assembler
+ <cit> , sorts the k-mers in memory. more precisely, it distributes all k-mers into   <dig> bins and then sorts each bin. finally it removes the unique ones. this approach requires a huge amount of memory to work. for example, for the human na <dig> dataset that we use in the experimental section  over  <dig> gb of ram would be needed, provided  <dig> bytes per k-mer.
+
+totals in millions.
+
+jellyfish
+ <cit>  is an algorithm designed for shared memory parallel computers with multiple cpus / cores. it uses several lock-free data structures. efficient shared access to these structures implies high utilization of concurrent processing units. more precisely, jellyfish is based on a hash table with quadratic probing collision resolution, where concurrent update operations are possible thanks to its lock-free mechanism, exploiting the ‘compare-and-swap’  assembly instruction present in all modern multi-core cpus. a cas instruction performs up to three ‘elementary’ operations in an atomic fashion: it reads a memory cell, compares the read value to the second parameter of the instruction, and if the two values are equal it then writes the third cas parameter to the memory cell. in the considered application this mechanism is much more efficient than traditional serialization of the access to a shared resource with locking. another interesting feature of jellyfish is to store only a part  of the k-mer in the hash table, since its suffix can be deduced from the hash position.
+
+bfcounter
+ <cit>  ingeniously involves the bloom filter structure to discard most of the unique k-mers before their statistics are calculated using a standard hash table. bloom filter  is a classic compact probabilistic data structure for dynamic set membership queries, which allows a low rate of false positives. to count non-unique k-mers, bfcounter uses both a bf and a plain hash table. initially, the k-mers are inserted into the bf structure. then, the hash table is populated with all k-mers which have at least two occurrences plus a relatively small number of unique k-mers, those which appeared false positives in the bf. this algorithm is relatively frugal in memory utilization, but only a serial implementation exists.
+
+it should be noted that both jellyfish and bfcounter require estimation on the number of distinct k-mers. if the user-specified value is far from the real one, these algorithms may work much slower and using much more memory than in the case of appropriate values given. 
+
+we mention also khmer
+ <cit> , a toolkit for k-mer-based dataset analysis, which  can count k-mers and remove reads with low- or high-abundance k-mers. it is reasonably fast and memory frugal, but these benefits are achieved thanks to its probabilistic nature : with a low probability, khmer may report a false k-mer as being “present”. also the reported counts for genuine k-mers are only approximate. while these features are acceptable in some applications, we can name its drawbacks: no k-mer listing possibility  and no quality score support . for these reasons, we do not compare khmer with our solution in the experimental section, as in our opinion they “play in different leagues”.
+
+very recently, a disk-based k-mer counting algorithm, named dsk, was presented
+ <cit> . on the high level, dsk is similar to the solution presented in this paper, but both algorithms were designed independently at about the same time. in dsk, the set of k-mers from the input reads is partitioned and partitions are sent to disk. then, each partition is loaded and processed separately in the main memory, using a hash table. the tool provides strict control of the allocated memory and disk space , which for example allows to process human genome data in  <dig> gb of ram only, in reasonable time.
+
+methods
+in the following subsections we first present our basic idea, on a high level and in a sequential manner, and then the ‘real’ parallel algorithm, involving multiple cpus / cores and multiple disks . the algorithm description is valid for any parameters k and read length r. in fact, in the current implementation k can be as large as  <dig>  and r as large as  <dig>  provided that 10<k≤r. 
+
+we assume here that the purpose is to count the k-mers, but our implementation is more flexible: the associated quality scores can be taken into consideration, k-mers with a count below a threshold may be removed, etc. at least from the algorithmic point, however, the core functionality is the most important, hence it is discussed below.
+
+basic idea
+our goal is to obtain a compact on-disk dictionary structure with k-mers as keys and their counts as values. the structure can then be read sequentially, or individual k-mers  can be found using the standard binary search technique.a the algorithm follows the disk-based distribution sort paradigm. in the first, distribution, phase, we scan the reads one by one, extract all the k-mers from each, replace them with their canonical versions when necessary, and send each to one of multiple  disk files based on the k-mer prefix of length p <dig>  actually, the first phase starts with storing the data in buffers in the main memory where another prefix part, of length p <dig>  is removed from each k-mer, and the prefix counts are maintained for further recovery. once the buffer reaches the predefined capacity, its content is sent to a file.
+
+the latter, sorting phase, is to collect the data from disk in the order of lexicographically sorted prefixes of length p <dig>  recover the p2-symbol long prefixes, then radix-sort the k-mers, count their frequencies , and  remove, e.g., unique k-mers.
+
+parallel algorithm
+the detailed description of our algorithm is relatively complex and the reader is advised to consult figure
+ <dig>  the number of components  at each stage is chosen depending on the number of cpus / cores of the target machine, but optionally these parameters may be user-specified. the distribution and the sort phase are described in the two following subsections.
+
+distribution phase
+the first phase begins with reading blocks of several megabytes , rounded down to a record boundary, from a  fastq dataset.b one or more threads are used, depending on the number of input data files; the default number of such threads can be overridden with a command-line switch. the blocks are added to a queue.
+
+in the next step, a number of splitter threads remove the blocks from the queue and extract k-mers from their reads, converting the k-mers to canonical form. every splitter has its multiple  bins to fulfill, each with capacity of, e.g.,  <dig> entries. each k-mer is directed to the bin specified by the k-mer’s prefix of length p <dig> 
+
+the lengths p <dig> are variable-sized and their minimum size is user-specified. for example, if the program is run with switch -p <dig>  it means that  <dig>   <dig>  or  <dig> symbols belong to the prefix, depending on its content. the rationale is that, for example, about 7/ <dig> of all canonicalk-mers are those starting with ac, and different prefix lengths allow to have the bin counts more balanced. due to some technical difficulties we resigned from even more granularity, but it should be stressed that this issue is practically irrelevant for the overall processing time. a more important goal is to limit the largest bin count . the number of resulting bins for parameter -p <dig> is about  <dig>  for -p <dig> about  <dig>  and for -p <dig> about  <dig>  as a rule of thumb, it is better to use -p <dig> for large collections , -p <dig> for small collections , and -p <dig> for middle-sized ones. once a bin is full, its content is transformed and then flushed to a common queue of bins. the transformation means here: partial sorting and compaction. the former uses counting sort, according to k-mer’s prefix, this time of the length p <dig>  the latter operation, compaction, removes those prefixes and stores their frequencies, to enable to recover the k-mers later. the parameter p <dig> is chosen dynamically to fit other  settings, like p <dig>  hardware configuration, and the values of k and r, with the idea of minimizing the amount of temporary data on disk . for convenience  we always have k−p1−p <dig> a multiple of  <dig>  the reader is advised to look at figure
+ <dig> with a 2-stage prefix removal example presenting two cases: one for a k-mer starting with a and one for a k-mer starting with another symbol. the whole splitter operation is presented in figure
+ <dig> 
+
+now a single package maker thread comes into action. it prepares data to be sent to disk. more precisely, it moves the content from the queue of bins to another queue of “bin part packages” , which is handled by multiple threads. a compactor checks if it pays to strip extra  <dig> symbols from the prefix of each item in its package; the compaction criterion is satisfied if the prefix counters  together with the stripped data use less space than before the stripping. now, the resulting data  are formed into one of many compact packages. once the compact packages reach in total the specified maximum capacity, the largest of them is dumped to a file. compacting the packages speeds up file handling and reduces file fragmentation. the k-mers scattered over  hundreds of files are the outcome of the first, i.e., distribution phase. each file corresponds to a unique prefix of length p <dig>  in each file, the k-mers are also grouped by their successive p <dig> or p2+ <dig> symbols. assume for presentation clarity that the extra  <dig> symbols are not removed, and thus what is sent to files are -symbol long suffixes of the k-mers, packed into bytes. additionally, each file contains
+4p <dig> prefix counts  which enable to recover the p2-symbol long parts of the prefixes. in total, the used disk space, in the worst case and with classic counters, is approximately 
+
+ nk/4+2·4p2·nk/215bytes, 
+
+ where nk=n is the number of k-mers in the input data. switching to quake-compatible counters increases this worst-case estimate to 
+
+ nk/4+2·4p2·nk/215bytes. 
+
+in practice, removing the prefixes reduces the disk usage by at least a few, and sometimes over  <dig> percent, depending on the value of k. this has an analogous effect of reducing the i/o, which translates to similar overall performance improvement.
+
+sorting phase
+the second phase starts with bin reader threads; there are as many of them as disks for temporary data. the bin readers read the files from disk to a queue.
+
+now, several sorter threads collect the data from the queue, uncompact the k-mers , sort them using multithreaded least significant digit  radix sort , count their frequencies and discard k-mers with out of thresholds counter values . the input data to be sorted are divided evenly among threads.
+
+the  k-mers, with their counts, are ready to be sent to disk , but it is up to the next stage, the completer thread. the sorter threads submit the k-mers with their statistics into a priority queue, with bin id as the priority, which is then handled by the single completer thread. this thread reorganizes the sorted bins in the order of ascending bin id. the priority queue is needed to send the statistics in the proper order. as this structure is relatively small, implementing it as a plain unsorted array with several hundred slots and linear scan for finding the minimum was enough for the application.
+
+the scheme presented above depends on a number of parameters. by default, kmc works in an automatic mode, where the parameters are found with respect to the machine it is executed at; the number of cpu cores and the available amount of ram are all taken into account. more details on the parameter setting are given in additional file
+1: table s6). 
+
+RESULTS
+our algorithm, called k-mer counter , was implemented in c++ <dig>  using gcc compiler  for the linux build and microsoft visual studio  <dig> for the windows build, and is freely available at http://sun.aei.polsl.pl/kmc . the following well-known libraries were used: openmp, boost for managing the threads and filesystem operations, zlib and libbzip for reading compressed fastq files, and asmlib  for a fast low-level memcpyd implementation.
+
+out of the five well-known k-mer counting tools, three were taken for the comparative tests, jellyfish
+ <cit> , bfcounter
+ <cit> , and dsk
+ <cit> . the other two, tallymer
+ <cit>  and meryl from the celera assembler
+ <cit> , were tested in
+ <cit> , on a  <dig> gb turkey genome, and we can find the following statement in the cited work: jellyfish is also able to count 22-mers at coverage > 10× where the other programs fail or take over  <dig> h. clearly, this makes them hard to use on human genome data, with 30-fold coverage.
+
+two test machines were used. one was a  <dig> amd opteron™ <dig>  <dig>  ghz cpus  server with  <dig> gb ram, and fast raid- <dig> disk matrix of total size  <dig>  tb. the other was a “home” pc, with 6-core amd phenom ii  <dig>  <dig>  ghz cpu,  <dig> gb ram and  <dig> sata hdd of sizes  <dig> tb each. the hard disks at the pc machine were: two seagate barracuda green st2000dl <dig> with  <dig>  rpm and one hitachi deskstar 7k <dig> with  <dig>  rpm.
+
+the comparison includes total computation time and maximum ram use. moreover, the maximum disk use of the disk-based algorithms is recorded. although the other tested programs for k-mer counting, except for dsk, work only in ram, we believe that using even several hundreds of gigabytes of disk space during the execution of kmc is a mild price for the achieved high efficiency, as disk space is almost two orders of magnitude cheaper than the ram memory. kmc was run twelve times for each dataset and each tested k: with  <dig> gb and  <dig> gb ram limitation on the server machine and with  <dig> gb ram limitation on the pc, with classic and quake-compatible counters, and with gzipped and non-compressed input data in each configuration. the classic counters are just integers telling how many times a k-mer occurs in the dataset. the quake-compatible counters take into account the quality scores and are thus decimal-point numbers. the other programs used in the comparison, except dsk, optionally produce output results in quake-compatible form.
+
+we performed experiments on five datasets, three of which are presented below and an extra two in additional file
+ <dig> 
+
+these three datasets discussed here comprise: 
+
+•homo sapiens na <dig> from 1000gp , used also in
+ <cit> ,
+
+•homo sapiens hg <dig> from 1000gp ,
+
+•caenorhabditis elegans .
+
+their basic statistics, for k= <dig>  are presented in table
+ <dig> 
+
+there were several problems to compare exactly the proposed algorithm against its competitors. for example, some datasets contain raw reads with occasional n symbols in the dna stream. jellyfish processes such reads but refrains from counting the k-mers containing ns . to our knowledge, bfcounter treats ns as as and dsk treats them as gs. this is of course rather strange from biological point of view but since there are only very few ns, the misinterpreted k-mers do not affect noticeably the ram occupancy and computation time. another problem with bfcounter is that it fails when executed with k> <dig> in the classic counters mode . with the quake-compatible counters it sometimes handles larger k, sometimes fails .
+
+kmc is clearly the most flexible software: it can work over wide ranges of k and also for both counter modes. like dsk, but contrary to other solutions, kmc can also read gzipped fastq datasets  which tends to improve overall processing time . it is important to note that kmc space resources are bounded: the ram usage is user-selected and the upper bound on the amount of disk space can be calculated with the  formula given in section distribution phase, which depends only on standard input parameters . dsk is even better in this aspect: it allows to set the ram and disk usage quite precisely, but of course choosing tight parameters comes at a price of increased i/o and thus overall processing time. on the other hand, bfcounter and jellyfish require guessing the number of unique k-mers in the dataset, and a significant deviation from the true value is likely to cost significantly in increased ram usage and processing time. in fact, it is possible to bound  the ram requirements for jellyfish, which, for large enough data, results in two-stage processing. in the first stage the tool produces several hash tables, and then, in the second stage, it merges them. the price is, however, deterioration in speed. moreover, this regime of work is viable only for classic counters, as for the quake-compatible counters the amount of space jellyfish needs in the second stage is huge and we were not able to test it on human datasets.
+
+based on the results, several observations can be made. we start from the two human datasets. the first, na19238e , has variable-length reads, but most of them are short, of length  <dig> only. this fact poses a restriction on the maximum used value of k . bfcounter was many times slower than its competitors and the amount of ram it used was not impressive either: up to  <dig> gb, i.e., less than jellyfish  but more than kmc. kmc was consistently faster than jellyfish  and several times faster than dsk. on the other hand, dsk  was clearly the most frugal in memory use  but required about twice or more disk space than kmc. when the kmc’s input fastq data are gzipped , the gap in speed between kmc and jellyfish sometimes exceeds factor  <dig>  although the speedup thanks to compressed input varies, it is often of the order of  <dig> percent or more. the amount of disk space needed by kmc is up to  <dig> gb in the classic counters mode and up to  <dig> gb with the quake-compatible counters. while certainly not small, this is less than the size of the input  fastq file. reducing the amount of available ram from  <dig> gb to  <dig> gb for kmc results in about  <dig> percent slow-down.
+
+ram and disk spaces  are in gb . time is in seconds. the test machines: 32-core server, 6-core pc . superscripts denote: 1—ram limited to 36gb, gz—input data in gzipped files. the programs were used for the number of threads adjusted to the number of cores to achieve maximum speed. the asterisk signs  denote that two separate databases were constructed by jellyfish due to the memory limit of the machine  and jellyfish reported that to merge these databases it needs more ram, so these times are underestimated.
+
+the hg <dig> data  are quite challenging, concerning their sheer volume. bfcounter was not tested here, since the experiments would take literally weeks. jellyfish suffers from rapidly growing ram usage for larger k, and for k= <dig> it needs  <dig> gb of memory. on the other hand, kmc can handle the dataset in  <dig> gb or even  <dig> gb of ram, no matter the k. in the runs with halved memory, kmc is  only by about  <dig> percent slower than with  <dig> gb, and requires a few percent more disk space. we admit that jellyfish is usually faster on this dataset than kmc- <dig> gb, by about 10– <dig> percent. the penalty in ram usage is severe though; in the quake-compatible mode jellyfish couldn’t properly finish some runs on the server machine with  <dig> gb of ram, i.e., produced two output files and was unable to merge them in the available memory . the analogous weakness of kmc, using up to  <dig> gb of temporary disk space, is less painful . we note that jellyfish’s problems with memory are partly related to its dependence on the estimate of the number of unique k-mers. jellyfish works fastest when the whole hash table it needs fits the ram memory. alas, it requires knowing  the number of unique k-mers. if the specified parameter is too small, jellyfish creates several temporary files on disk, which are at the end merged; an operation not only time-consuming, but also demanding in memory, as our experiment showed. again, for this dataset dsk may be a tool of choice on a less powerful  computer, since it uses only  <dig> gb of ram and usually less disk space than kmc .
+
+test methodology and column description are just as for table
+ <dig>  the asterisk sign  denotes that two separate databases were constructed by jellyfish due to the memory limit of the machine  and jellyfish reported that to merge these databases it needs more ram, so these times are underestimated.
+
+on the smallest of the tested datasets, c. elegans , our tool, kmc, cannot fully spread its wings and achieve better results than jellyfish. in the amount of used ram memory they are comparable, with 21– <dig> gb used by jellyfish, slightly growing with chosen k, and   <dig> gb or  <dig> gb spent by kmc. in speed, jellyfish was in most cases faster by 10– <dig> percent than kmc . bfcounter used here the least amount of ram memory  but was about  <dig> times slower than kmc and jellyfish. dsk used  <dig> gb of ram and less disk space than kmc, but was a few times slower than kmc and jellyfish.
+
+as expected, kmc uses more time and disk space in the quake-compatible counter mode, but in most cases these differences are by a factor smaller than  <dig>  with growing k, the computational resources increase , in accordance to the pattern demonstrated in figure
+ <dig> 
+
+the comparisons with other tools were run on our stronger machine, but kmc is also tested on a pc, where  <dig> gb of ram was always used. it is about  <dig> times slower and uses a comparable amount of disk space.
+
+figure
+ <dig> presents the computation time  and the used disk space  for c. elegans and hg <dig>  for varying k. the read length r for both datasets is  <dig>  on the charts, the solid lines are for the occurrence count mode and the dashed lines for the quake-compatible mode. the statistics were gathered for counts at least  <dig> in the former and at least  <dig>  in the latter mode. we focus on the case of c. elegans , although similar observations pertain to the other dataset. not surprisingly, the quake-related mode is more demanding in computation time and disk space, but the relative gap diminishes with growing k. the time grows suddenly when k exceeds thresholds  <dig> and  <dig>  as more machine words are then needed to store a whole k-mer. as k was approaching r, kmc worked faster and in less space, because the number of k-mers per read was diminishing relatively fast. another clear observation is that the processing time and used disk space are closely related; more precisely, the overall time and the amount of i/o are closely related in our algorithm.
+
+it may also be an interesting question how the processing time and the amount of used disk space in kmc vary with different specified amounts of ram . the results, presented in figure
+ <dig>  concern the hg <dig> dataset in gzipped input representation, for k= <dig> and in the classic counters mode. using more than  <dig> gb of ram is even detrimental for the kmc speed, although the loss is slight up to  <dig> gb . what is perhaps more important practically, using  <dig> gb of ram is almost as good as  <dig> gb. another observation is that more ram translates into less disk space needed, but this effect is mild .
+
+a related experiment, on the same dataset, concerned the impact of the number of hard disks available in the pc test machine . while finding a precise formula would be difficult and dependent on many factors , this experiment clearly shows that using more than one disk is beneficial, and  <dig> disks reduce the overall processing time sometimes by even more than 50% compared to a single disk. this observation confirms that the overall kmc performance strongly depends on the i/o system and supplying the platform with ssd disk, with approximately  <dig> times faster transfer rates and  <dig> orders of magnitude shorter access times, should give an extra boost.
+
+the architecture of kmc fits quite well the mapreduce  paradigm
+ <cit> , widely used in  cloud computing. using this framework directly would be inefficient for the k-mer counting problem, due to enormous i/o and communication costs. in kmc the k-mer counting threads make use of the available ram memory, and once their buffers are filled up, they sent statistics onto disk. hence, these threads resemble the combiner function in mr, which typically digests  the data produced by the map function and outputs them to intermediate file. the k-mer statistics from disk are read and processed by other, merging, threads, making an analogy to the reduce function in mr.
+
+CONCLUSIONS
+high utilization of available resources is the key to obtaining competitive algorithms. even home computers, equipped with multi-core cpus, several gigabytes of ram and a few fast tb-scale hard disks get powerful enough to be applied for real bioinformatics tasks. our k-mer counter, kmc, being an external and parallel algorithm, is capable to find exact k-mer statistics on short-read human genomic collection with about 30-fold coverage in less than  <dig> minutes on a standard 6-core pc with  <dig> gb of ram and  <dig> hard disks, and on long-read human genomic collection with a similar coverage in less than  <dig> minutes, for k= <dig> in both tests. using a more powerful machine reduces the times more than twice. even in a demanding scenario  our software works in less than  <dig> hours on the pc.
+
+endnotes
+athese functionalities of our tool are available via an api, whose detailed description is contained in additional file
+ <dig> 
+
+bour tool handles both fastq and fasta input files. for brevity, we however refer throughout the paper only to the  fastq format.
+
+cabout 1/ <dig> of all k-mers start with a and also about 1/ <dig> of all k-mers end with t, and it is easy to note that for these  k-mers their canonical forms start with a. these two groups are not disjoint; their intersection, with exactly the k-mers having a as their first and t as their last symbol, contains about 1/ <dig> of all k-mers. taking all this into account we immediately obtain the figure 7/ <dig>  similarly, we can show that the distribution of k-mers starting with base c, g and t is 5/ <dig>  3/ <dig> and 1/ <dig>  these numbers are different, since  the lexicographically greater the first k-mer’s symbol, the lesser chance its canonical form will also start with the same symbol.
+
+dmemcpy is a popular function from the c language standard library, which copies a number of bytes from one memory location to another.
+
+eused in the experiments in
+ <cit> , under a mistaken name na <dig> 
+
+competing interests
+the authors declare no competing interests whatsoever.
+
+authors’ contributions
+sd developed the main concept of the algorithm, was the main architect of the kmc software, wrote most of the implementation code and ran the experiments; he also participated in drafting the manuscript. adg adapted the parallel radix sort algorithm for the k-mer sorting, implemented the parallel scheme of the main algorithm and the api; she also assisted in drafting the manuscript. sg was a co-author of the main idea of sorting the k-mers and proposed the idea of compacting k-mers stored in temporary files; he was the main author of the text. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+1) kmc counter usage. 2) api. 3) example of api usage. 4) database format. 5) experimental results. 6) automatic setting of parameters in kmc. 7) selected components of the kmc algorithm .
+
+click here for file
+
+ additional file 2
+source codes for 64-bit windows platform .
+
+click here for file
+
+ additional file 3
+source codes for 64-bit linux platform .
+
+click here for file
+
+ acknowledgements
+the work was supported by the polish national science center upon decision dec-2011/01/b/st6/ <dig> , and by silesian university of technology under the project bk-220/rau2/ <dig> . the authors thank the anonymous reviewers for remarks helping to improve the preliminary version of the manuscript.

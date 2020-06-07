@@ -1,0 +1,85 @@
+BACKGROUND
+retroviral vector mediated gene therapy has enormous potential for treating genetic disorders  <cit>  and infectious diseases  <cit> . unfortunately, vector integration can lead to the dysregulation of nearby genes, commonly referred to as genotoxicity  <cit> . prime examples of the effects of genotoxicity include two x-linked severe combined immunodeficiency  patients who were treated with a gammaretroviral vector in a clinical trial and developed lymphoproliferative leukemias a few years later  <cit> . it was discovered that transduced cells from the patients contained integration sites near the lmo <dig> gene and that there was aberrant expression of lmo <dig>  taken together, this suggested that vector-mediated dysregulation of lmo <dig> led to clonal dominance and the development of leukemia in the patients. this study highlights the importance of evaluating the safety of retroviral vectors.
+
+identifying retroviral vector integration sites  is critical to assess genotoxicity in gene therapy clinical trials and to develop improved vectors in preclinical studies. another use of ris mapping is for retroviral mutagenesis screens. in these screens genes identified near the provirus are candidate cancer initiation or progression genes  <cit> . retroviral proviruses act as molecular tags, enabling the detection of riss via methods such as linear amplification-mediated -pcr and other next generation sequencing  methods  <cit> . ngs can generate millions of sequence reads and an individual ris can be represented multiple times in ngs data, making the identification and annotation of riss challenging. we present a vector integration site analysis  server, a tool that allows investigators with limited bioinformatics experience to rapidly analyze large ngs datasets for riss.
+
+implementation
+identify ltr-chromosome junctions and generate query sequences
+sequencing dna samples from retroviral vector integration studies with a long terminal repeat  primer produces sequence reads with ltr-chromosome junctions, with the ltr sequence flanking the 5′ end of the chromosome/genomic sequence. methods such as lam-pcr will additionally result in a linker cassette  sequence flanking the 3′ end of the genomic sequence. visa uses a perl substring matching strategy to detect and remove these non-genomic sequences to generate the queries for alignment . visa accepts multiple sequence reads in a single fasta formatted file as input. each sequence is trimmed with the following steps:  the vector ltr sequence is searched for in the sequence read. if the ltr sequence is found, the query begins downstream of the ltr position.  the lc sequence is searched for in the query. if the lc sequence is found, the query is truncated upstream of the lc position.  if the sequence read contains a valid query, the query will be truncated if  <dig> or more consecutive ambiguous bases , ‘ns’, are detected to eliminate queries with poor sequence quality.  if the query is less than  <dig> bp it is eliminated, since it will be below the alignment score cutoff . only sequence reads that contain an ltr-chromosome junction and result in a query that is at least  <dig> bp are considered for alignment. searching for a lc sequence is optional to maximize the flexibility of visa.
+
+align query sequences to the genome and filter alignments
+query sequences are aligned to the genome reference consortium human build  <dig>  and the selected vector sequence using blat  <cit> . blat is used with the following parameters: blat.exe chromosome_file query_file -out = blast <dig> -tilesize =  <dig> -stepsize =  <dig> -ooc = 11- <dig> ooc output_file . users have the option of processing sequence reads without using the ooc file as well. alignments with an alignment score <  <dig>  a percent identity <  <dig> %, and/or that start more than  <dig> bp from the query start site are no longer considered for processing. for the remaining alignments, the  <dig> greatest scoring alignments of each query sequence are retained for further processing. these initial filtering steps are done using a mysql database on a separate server, reducing the amount of memory needed by the application server to process each input file.
+
+additional filtering criteria are applied to the greatest scoring alignments of each query sequence to eliminate riss that cannot be unequivocally aligned to the genome. the filters, applied in order, are as follows:the greatest scoring alignment is to the vector sequence.
+
+the second greatest scoring alignment has an alignment score >  <dig> % than that of the greatest scoring alignment. for lower scoring alignments, alignment scores <  <dig>  this is reduced to  <dig> %.
+
+the greatest scoring alignment has a percent identity <  <dig> %.
+
+
+
+for query sequences that exceed the elimination criteria in quality and confidence, it is assumed that the greatest scoring alignment is the ris for the associated sequence read and is labeled a ‘candidate ris’. query sequences that do not meet the criteria are filtered out and reported separately from the candidate riss in the results.
+
+identify unique retroviral vector integration sites
+there can be repeated recovery of a specific ris due to pcr amplification bias or legitimate clonal expansion after integration. also, sequencing errors can lead to mapping of the same ris within a few bp of the actual integration site. both of these potential scenarios are handled by assuming candidate riss within ± <dig> bp of the same chromosome location represent the same ris. candidate riss are binned and sorted by chromosome locations. then, within each  <dig> bp window  the candidate ris with the greatest alignment score is assigned as the unique ris. candidate riss that align to the same chromosome location as a unique ris are labeled ‘repeat ris’ and those that align within the  <dig> bp window of a unique ris are labeled ‘in range ris’. the frequency and the number of distinct bp spans of each unique ris is reported .
+
+determine proximity of unique retroviral vector integration sites to nearby genes
+unique riss can also be further processed to determine their proximity to nearby genes using refseq gene annotations and a user-provided list of genomic features. large scale integration analyses have shown that different types of retroviral vectors have distinct integration profiles, e.g., lentiviral vectors have a strong preference to integrate within genes  <cit>  whereas foamy viral vectors have a modest preference for transcription start sites  <cit> . also, the position of the provirus relative to a gene may influence the mechanism by which the provirus can potentially dysregulate the gene. for example, enhancer activation may occur when integration occurs upstream of the gene and premature polyadenylation may occur when integration occurs within a gene. for these reasons, visa determines the proximity of riss to genes in  <dig> distinct phases:  visa determines if a unique ris is within a gene. if the unique ris is not within a gene, its distance to the nearest gene, up to  <dig> kb away from either the 5′ end or the 3′ end, is determined.  then visa determines the distance of the unique ris to the nearest transcription start site of a gene. it is possible for a provirus to be within a particular gene, but actually be in closer proximity to the transcription start site of another gene. other relevant information, such as the percent of unique riss within genes and the number of unique riss within  <dig> kb of genes, is also reported. when determining the proximity of riss to user-provided genomic features, visa determines if each ris is within a specific genomic feature or its distance to the closest genomic feature . pearson's chi-squared goodness of fit test is used to determine the significance of these results. the proximity of  <dig>  randomly generated integration sites to the set of refseq genes and custom genomic features are used as the expected values in the pearson chi-squared goodness of fit analyses.
+
+generate random integration sites
+visa can also generate random integration datasets for use as a control. randomly selected sites are extracted from the hg <dig> chromosome sequences. users can specify random site lengths from  <dig> to  <dig> bp and the number of random sites from  <dig> to  <dig> . randomly generated sites are then processed the same as datasets generated by ngs to impart the same biases that occur from alignment to hg <dig> 
+
+RESULTS
+visa processes sequence reads and identifies unique riss without adding a substantial amount of time after the alignment process . memory efficiency is largely accomplished by employing a mysql database for the initial alignment filtering. this strategy reduces the strain on the server resources while processing large ngs datasets in parallel. binning the candidate riss into  <dig> bp windows and then designating the unique riss based on the alignment scores is a time efficient method to identify unique riss. the compromise between time and memory efficiency allows visa to be scalable with ngs .figure  <dig> visa requires minimal processing time relative to the alignment process. the processing steps are as follows:  identify ltr-chromosome junctions and generate query sequences,  align query sequences to the genome using blat,  retrieve the top  <dig> alignments for each query sequence and filter out alignments that cannot be aligned to a unique location in the genome,  identify the unique riss,  determine proximity of unique riss to nearby genes, and  prepare the excel and csv output files. sequence reads containing lentiviral ltr-chromosome junctions were processed with visa.  <dig> input files were used with a mean of  <dig>  sequence reads per file. standard error bars are shown. * indicates the value is less than  <dig> %
+
+
+
+visa allows investigators to analyze ngs data for riss from human cell and tissue samples without the need to develop custom scripts. using visa provides a consistent method to analyze the integration profiles of retroviral vectors for preclinical and clinical studies. the frequency and span count of unique riss and the proximity of unique riss to genes can provide insight into both the genotoxicity of vectors and the clonality of the transduced cells. selecting the unique riss based on the alignment scores ensures that the sequence read with the best alignment represents each ris. visa has two important advantages over previously reported ris tools ; reporting the span count in conjunction with the frequency of unique riss, which provides a means of quality control when analyzing the clonality of transduced cells with certain pcr based methods  <cit> , and the ability to generate random ris datasets, that have the same biases in localization to hg <dig>  as control datasets. visa also is extremely flexible. the only requirement to use visa is that the uploaded sequence file is in the fasta format and that the appropriate vector and ltr sequence has been provided or selected via the dropdown menu. also, the parameters discussed above used to filter the alignments and to identify unique riss are the default and recommended settings, but these can be changed by users who find other criteria more appropriate. this flexibility means visa can be used to analyze data from various ngs methods. visa provides a concise and a complete version of the results from processed sequence reads. the concise version of the results contains the unique riss and emphasizes pertinent information, such as the frequency and span counts, the alignment scores, and the proximity of unique riss to refseq genes. for investigators who would like to look into why certain sequence reads did not contain a unique ris, the complete version of the results contains the filtered alignments in separate excel sheets. all results are provided in a tabular format as an excel document or as compressed csv files through a private and secure link once processing is complete. finally, data can be distributed to users via their email, but visa also allows anonymous usage. example input and output files and other helpful links can be found on the visa homepage  <cit> .
+
+CONCLUSIONS
+visa is a time and memory efficient web-based tool that allows investigators to analyze large ngs datasets for riss in a consistent manner. results are returned in a simple format to allow rapid analysis of the integration profile and genotoxicity of retroviral vectors and mapping of ris for retroviral mutagenesis screens.
+
+availability and requirements
+project name: visa 
+
+project home page:https://visa.pharmacy.wsu.edu/bioinformatics/
+
+operating systems: platform independent
+
+programming language: perl, mysql
+
+other requirements: firefox, chrome, ie, or safari. javascript must be enabled.
+
+license: none
+
+any restrictions to use by non-academics: visa cannot be used for commercial use.
+
+additional file
+additional file 1: ᅟsupplementary methods, results, figures, and examples.
+
+
+
+
+abbreviations
+visavector integration site analysis
+
+scid-x1x-linked severe combined immunodeficiency
+
+risretroviral vector integration site
+
+lam-pcrlinear amplification-mediated pcr
+
+ngsnext-generation sequencing
+
+ltrlong terminal repeat
+
+hg38the genome reference consortium human build 38
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+jdh, lrb, dgm, rm and gdt developed the software; jea, jdh, lrb, jea, bcb, djr, hpk and gdt tested the software; jdh and gdt wrote the manuscript. all the authors read and approved the final manuscript.
+

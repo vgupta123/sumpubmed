@@ -1,0 +1,365 @@
+BACKGROUND
+high-throughput sequencing has made it fast and cost-effective to sequence dna from entire environments at once. the collection of all genomes in an environment is called the metagenome of the environment. a fundamental problem in metagenomics is to cluster the reads produced by a high-throughput experiment, according to which species  they originate from. this can be done in a supervised manner, by mapping the reads to a database of known genomes, or in an unsupervised way, by performing extensive comparisons of all reads against each other without relying on any reference database. unsupervised methods are attractive, and in most practical cases the only option available, since the genome of most organisms  that inhabit complex environments is unknown.
+
+having accurate clusters for reads that come from unknown taxonomic units allows one to estimate key measures of environmental biodiversity, and to assemble the corresponding genomes more accurately and using less memory . clusters have also natural applications to comparative genomics, as well as to the emerging field of comparative metagenomics that is becoming increasingly crucial for managing and understanding collections of hundreds of thousands of samples, like those already available in  <cit> . for example, a cluster corresponding to an unknown taxonomic unit could be positioned inside a taxonomy of known genomes by comparing their substring composition, and two metagenomic samples with annotated clusters could be compared in time proportional to the number of clusters, for example using the measures described in  <cit> , rather than in time proportional to the number of distinct substrings of a specific length, as done e.g. in  <cit> , or to the number of reads, as done in  <cit> .
+
+the problem of building a scalable, accurate and unsupervised metagenomic clustering pipeline is fairly recent and still open. most existing approaches exploit the same signal as alignment-free genome comparison tools, namely taxon-specific biases in the frequency of substrings of a specific length, and they use such signal in hidden markov models  <cit> , maximum likelihood monte carlo markov chains  <cit> , and expectation maximization algorithms  <cit> . other pipelines blend statistics with combinatorial criteria, merging e.g. reads that share long substrings first, and then further merging such groups by similarity of their k-mer composition vectors . a single metagenomic sample contains tens of gigabases, and to improve accuracy it is becoming more common to cluster the union of multiple samples that are believed to contain shared taxonomic units, as described e.g. in  <cit> . notwithstanding such issues of scale, no existing clustering pipeline is designed to be space-efficient, and can thus handle with commodity hardware the largest datasets available.
+
+read clustering
+read clustering tools share a number of core combinatorial primitives, which they blend with statistical considerations and with ad hoc heuristics to achieve accuracy. a pipeline that contains most such primitives is the one described in  <cit> , which we summarize in what follows, pointing the reader to the original paper and to its references for statistical considerations and for criteria used to set the parameters. the same primitives recur in a number of other pipelines  <cit> . as customary, we call k-mer any string of length k, and we call coverage the average number of reads that contain a position of the genome of a taxonomic unit. we also use the term taxon as a synonym for taxonomic unit.
+
+the first step of the pipeline consists in detecting and filtering out reads sampled from low-frequency taxa, since in practice the presence of such reads tends to degrade the quality of the clusters of high-frequency taxonomic units. reads from low-frequency taxa should also be clustered with dedicated settings of the parameters. such filtering has the additional advantage of removing reads with a large number of sequencing errors, and of reducing the size of the input to the following stages. specifically, given integers k and τ> <dig>  a read is filtered out iff all its distinct k-mers occur  less than τ times in the read set, where τ is set according to error rate, expected coverage, and read length.
+
+given a dna string r, let r~ denote its reverse complement. consider the graph where reads are vertices and two vertices are connected by an edge iff they are related in the following sense:
+
+definition 1
+ two dna strings r
+ <dig> and r
+ <dig> are related iff there is a string α of length k such that α occurs in r
+ <dig>  and α or α~ occurs in r
+ <dig> 
+
+the requirement of sharing a k-mer in either the forward or the reverse-complement orientation comes from the fact that we ignore whether a read was sampled from the forward or the reverse-complement strand of its genome. the second step of the pipeline consists in computing the connected components of the read graph defined by the k-rc-relation: we call such components the k-rc connected components. we omit k whenever its value is clear from the context. the value of k is typically set using statistics on the substrings of known genomes. the connected components of the k-rc-relation loosely correspond to unassembled contigs. moreover, assuming that the genomes of distinct taxonomic units have approximately the same length, different taxonomic units should get approximately the same number of connected components. connected components can be further merged if we have paired-end labels on the reads.
+
+in this paper we will also consider the following relation, whose connected components are a refinement of those induced by the previous one:
+
+definition 2
+ two strings r
+ <dig> and r
+ <dig> are related iff there is a string α of length k such that α occurs in r
+ <dig> and α occurs in r
+ <dig> 
+
+note that there is a one-to-one correspondence between the connected components of the k-relation and the connected components of the de bruijn graph of order k of the set of reads.
+
+the third step of the pipeline consists in computing composition vectors of h-mers, where h<k, for every connected component: a composition vector is an array of 4h elements, where each element corresponds to a distinct h-mer, and where the value of element α is the  frequency of string α in the connected component. since reads can be sampled from both strands of a double-stranded dna molecule, the frequency of an h-mer and of its reverse complement are summed, and a composition vector consists just of the distinct h-mers that are lexicographically smaller than their reverse complement.
+
+composition vectors are computed from connected components, rather than from single reads, since reads are typically too short for their h-mer composition to approximate the one of their corresponding genomes. due to multiple occurrences of the same string inside the same connected component, the h-mer composition is not estimated directly from the reads in the connected component, but rather from distinct long substrings that repeat inside the connected component, specifically from distinct substrings of length at least e>h which occur  at least τ
+′ times in the connected component.
+
+composition vectors are finally clustered using e.g. the k-means algorithm, since connected components with similar h-mer composition are likely to correspond to long fragments of the same genome.
+
+strings and string indexes
+let s be a string with alphabet Σ=. for simplicity, we assume in what follows that s <cit>  means s, and that the substring s means s. we denote by s¯ the reverse of s. given a bijective mapping f:Σ→Σ that defines a complement character for each character in Σ, we call reverse complement of s the string s~=f·f·⋯·f. unless otherwise noted, in this paper we assume f to be the natural complementarity of dna bases, i.e. f=t, f=a, f=g, f=c, although our algorithms do not exploit this specific mapping.
+
+we denote by ps the set of all starting positions of a string α∈Σ
++ in the circular version of s. we set Σsr={c∈Σ:|ps|>0} and Σsℓ={c∈Σ:|ps|>0}. a repeat
+α∈Σ
++ is a string that satisfies |ps|> <dig>  a repeat α is right-maximal  iff |Σsr|> <dig> |>1). a maximal repeat is a repeat that is both left- and right-maximal. it is well known that a maximal repeat corresponds to an equivalence class of the set of all right-maximal repeats. a supermaximal repeat is a maximal repeat that is not a substring of any other maximal repeat. we say that a left-maximal repeat α is strongly left-maximal iff there are at least two distinct characters a and b in Σ such that both a
+α and b
+α are right-maximal repeats of s. clearly only right-maximal repeats of s can be strongly left-maximal, thus the set of strongly left-maximal repeats of s is a subset of the maximal repeats of s. given a string α that occurs in s, we call λ the number of  suffixes of α that are strongly left-maximal repeats of s, and we call λ
+s= max{λ:1≤i≤n)}. clearly λ
+s∈o. strong right-maximality is defined symmetrically. a string α∈Σ
++ is a reverse-complement right-maximal repeat  of s if it is a right-maximal repeat of s$s~, where $
+Σ is a separator: in other words, there are two distinct characters c,d∈Σ such that α
+c or αc~ is a substring of s, and α
+d or αd~ is a substring of s. reverse-complement left-maximal repeats and reverse-complement maximal repeats are defined symmetrically.
+
+the suffix tree of a string s∈+ is the compacted trie built on the set of all suffixes of string s
+$, where $= <dig>  <cit> . there is a bijection between the set of leaves of the suffix tree and the set of suffixes of s
+$, and there is a bijection between the set of internal nodes of the suffix tree and the set of right-maximal repeats of s. we denote by ℓ the label of a node v in the tree, i.e. the concatenation of the labels of all edges in the path from the root to v. the locus of a nonempty substring α of s in the suffix tree of s is the node v such that α is a  prefix of ℓ and ℓ is a proper prefix of α, where u is the parent of v. a suffix link connects the node of the suffix tree that corresponds to a string α, to the node of the suffix tree that corresponds to the string α. inverting the direction of all suffix links gives the so-called explicit weiner links. the suffix link tree of s is the trie whose set of nodes consists of the set of all internal nodes of the suffix tree of s, and whose set of edges consists of all the explicit weiner links  of the suffix tree of s. an internal node of the suffix tree that corresponds to a right-maximal string α is the source of an implicit weiner link, labelled by character c, if string c
+α occurs in s, but is not right-maximal: the target of such implicit weiner link is the node that corresponds to the shortest string prefixed by c
+α that labels a node of the suffix tree. the number of implicit and explicit weiner links  in the suffix tree of a string s
+$ of length n is upper-bounded by 2n− <dig>  <cit> . the generalized suffix tree of a set of strings s
+ <dig> s
+ <dig> …,s
+m on alphabet  is the suffix tree of the concatenation s
+1·$
+1·s
+2·$
+2·⋯·s
+m·$
+m, where $
+ <dig> …,$
+m are distinct separators that are lexicographically smaller than every character in .
+
+the burrows-wheeler transform  is a standard tool in text indexing. for convenience, we define the burrows-wheeler transform only for strings terminated with a unique character $= <dig> that is lexicographically smaller than all characters in Σ. the suffix array sa
+s of s is an array such that sa
+s is the starting position of the suffix of s with lexicographic rank i among all suffixes of s. the burrows-wheeler transform bwt
+s of s is the string such that bwt
+s=s[sa
+s−1] if sa
+s≠ <dig>  and bwt
+s=s otherwise. given a collection of strings s
+ <dig> s
+ <dig> …,s
+m, where s
+i∈Σ
++ for all i∈, we call bwt of the collection the string bwt
+s, where s=s
+1·$
+1·s
+2·$
+2·⋯·s
+m·$
+m, and $
+ <dig> …,$
+m are distinct separators that are lexicographically smaller than every character in Σ. the bwt can be used as a full-text index, by encoding it to answer rank queries
+rank
+bwt, which return the number of times character c∈Σ occurs in the prefix bwt, and by augmenting it with array c, such that c is the number of characters in bwt whose lexicographical rank is strictly less than i. in this paper we assume that the bwt is encoded as a wavelet tree, thus rank operations on the bwt take o time  <cit> . rank operations on a bitvector of length n take constant time if such bitvector is augmented with suitable data structures of o bits; such data structures can be built in o time and o bits of working space  <cit> . rank queries and the c array enable a backward step operation on the bwt: given the lexicographic rank i
+′ of suffix s, a backward step gives the lexicographical rank of suffix s using the formula c[bwt
+s[i
+′]]+rank
+bwt. in what follows, we drop the subscript from sa, bwt and rank whenever it is clear from the context.
+
+we can associate to each substring α of s the interval sa
+s that contains the starting positions of all the suffixes of s prefixed by α, i.e. the starting positions of all occurrences of α in s. there is a bijection between the set of all such intervals of size at least two and the set of all internal nodes of the suffix tree of s. given any such interval associated with string α, and given a character c, we can compute the interval of string c
+α if it exists , using just two rank queries on bwt
+s
+ <dig>  if α is right-maximal, this operation corresponds to taking a weiner link labelled by c from the internal node of the suffix tree labelled by α. we can traverse the entire suffix-link tree by performing a linear number of such operations, and by using a suitably designed stack  <cit> : many algorithms based on the suffix tree can be simulated space-efficiently using such traversal  <cit> .
+
+the bidirectional burrows-wheeler index  consists of bwt
+s and of bwts¯, which we also denote by bwt¯s. bwt can be interpreted as the list of left extensions of all lexicographically sorted suffixes of s, and bwt¯ can be interpreted as the list of right extensions of all colexicographically sorted prefixes, where a string α is colexicographically smaller than a string β iff α¯ is lexicographically smaller than β¯. a substring α of s is associated with a contiguous lexicographic  interval, i.e. with the lexicographic  range of all suffixes  of s that are prefixed  by α. we denote the first and last position of the lexicographic interval of a substring α with iα→ and jα→, respectively, and the first and last positions of the colexicographic interval of the same substring with iα← and jα←, respectively. given a string α, indices iα→, jα→, iα←, jα← and a character c∈Σ, it is possible to compute a left-extension, i.e. the indices icα→, jcα→, icα←, jcα← and a right-extension, i.e. the indices iαc→, jαc→, iαc←, jαc← in time o: see algorithm  <dig>  within the same space budget, the time complexity can be further improved to o, by replacing the sum in line  <dig> of algorithm  <dig> with the count operation provided by wavelet trees  <cit> , and finally to o by using monotone minimal perfect hash functions  <cit> . in what follows, we use extendleft and extendright to denote these two primitives of a bidirectional bwt index. we also assume that a bidirectional bwt index provides operation enumerateleft , which, given a string α, iα→, jα→ , and a character c∈Σ, returns the set of all d distinct characters that occur in bwts , in lexicographic order. operations enumerateleft and enumerateright can be implemented in o) time using wavelet trees  <cit> .
+
+
+
+
+
+methods
+we show how to implement in small space the key primitives of the read clustering pipeline, using the bidirectional bwt index of the concatenation of all reads in the sample. specifically, we focus on the step that builds the connected components, since this is the space bottleneck of the entire pipeline in practice, and since the same techniques can be applied to the initial filtering of reads from low-frequency taxa. building composition vectors and clustering them requires negligible space compared to the other steps.
+
+we say that the rank of a read is the number of reads that come before it in the concatenation, plus one to make the ranks start from one. we first describe how to iterate over all the rc right-maximal substrings of s, a result that will be useful in what follows:
+
+lemma 1
+given the bidirectional bwt index of a string s ∈n−1
+$, where $= <dig>  we can iterate over all the rc right-maximal substrings of s in o time and o bits of space in addition to the input and the output.
+
+proof
+we use the recursive procedure in algorithm  <dig> to enumerate all the nodes of the generalized suffix tree of s and s~, as described in  <cit> . each frame in the iteration stack represents the four intervals that identify the lexicographic and colexicographic ranges of a string and its reverse complement. to decide whether substring c
+α is rc right-maximal, we just need intervals  and . recall that interval  in the reverse bwt lists all the right extensions of c
+α, and interval  in the forward bwt lists all the left extensions of cα~. let Σ1′={c:c∈bwt¯} be the set of distinct characters in bwt¯, and let Σ2′={c~:c∈bwt} be the set of distinct reverse complements of the characters in bwt. string c
+α is rc right-maximal iff Σ1′∪Σ2′>1: this can be checked by calling the enumerateleft and enumerateright operations provided by the bidirectional index, and by taking the union of their output.
+
+every element in the output of enumerateleft and enumerateright can be either charged to an implicit or explicit weiner link of the generalized suffix tree of s and s~, or to an edge of the same tree, thus the total number of such calls is o, and the total number of calls to extendleft and extendright is o as well. the claimed time bound comes from properties described in the “background” section. as used in algorithm  <dig>  the stack takes o bits, since in the worst case it consists of λ
+s levels, each of which contains up to σ quadruplets of intervals in bwt and bwt¯. we reduce the number of levels in the stack to o by pushing first, at every iteration, the left-extension with largest sum of interval lengths in, say, bwt, as described in  <cit> . □
+
+
+
+
+
+recall that in our case s is a collection of reads, thus, even without applying the logarithmic stack technique described in  <cit> , the space used by lemma  <dig> is o bits, where ℓ is the maximum length of a read.
+
+we compute k-rc connected components in two steps: first, we compute connected components of the k-relation on reads. then, we merge every two connected components c
+ <dig> and c
+ <dig> for which there is a k-mer α such that α is contained in some read in c
+ <dig>  and α~ is contained in some read in c
+ <dig>  as done in  <cit> , we use a union-find data structure on the set of reads to implement the merging operations . we assume that such data structure supports the following queries: find, which returns the handle of the connected component containing read r; union, which merges components c
+ <dig> and c
+ <dig> and returns the handle of the resulting component; and size, which returns the number of reads in component c. we initialize the data structure so that every read belongs to a distinct component.
+
+lemma 2
+let s=s
+1
+$
+s
+2
+$⋯s
+m
+$
+$ be a string of length n such that s
+i∈Σ
++ for all i∈, and $= <dig> is a separator. assume that we are given the bidirectional bwt index of s, a union-find data structure initialized with m sets and supporting find and union in time t, and an integer k. then we can encode, in the union-find data structure, all the connected components of the k-relation graph on set {s
+ <dig> s
+ <dig> …,s
+m}, in o) time and in n+o+o bits of space in addition to the input, where σ
+′=σ+ <dig>  ℓ= max{|s
+i|:i∈} and k is the number of distinct k-mers of s.
+
+proof
+we enumerate the nodes of the suffix tree of s in the order induced by the suffix-link tree of s, using a recursive procedure similar to algorithm  <dig>  specifically, we keep just  and  for every right-maximal substring α of s, and we use the fact that α is right-maximal iff bwt¯ contains at least two distinct characters . note that the bwt intervals of distinct k-mers are disjoint. thus, during the iteration, we mark in a bitvector b, of length equal to the size of bwt, the first position of the lexicographic interval of every k-mer. this can be done as follows . we initialize b to all ones and, whenever we enumerate a right-maximal substring α of length at least k, we use operations enumerateright and extendright provided by the bidirectional index to compute the interval  of every right-extension α
+c of α, in lexicographic order. then, we flip bit b for all c except the first in lexicographic order. at the end of this process we index b to answer rank queries in constant time, so that we can compute the id of the k-mer whose bwt interval contains a given position i in bwt by rank
+b.
+
+every k-mer interval is associated with the set of distinct reads that contain the starting points of the suffixes of s inside the interval. for each k-mer interval, we store the handle of one of such read. the handles are stored in an array h, of length equal to the number of k-mer intervals, such that the handle corresponding to the interval of the k-mer that contains position i in bwt is stored in h[rank
+b]. we initialize array h with null values. then, we backward-search string s in bwt
+s, maintaining the lexicographic rank i
+→ of the suffix that starts at the current position, and the rank r of the read that contains such suffix. at each step we compute p, the id of the k-mer whose interval contains i
+→: if h is null, we set h to find; otherwise, if h is different from find, we set h to the output of union). □
+
+note that in lemma  <dig> we do not use a distinct separator for every read, but instead we use the same separator for all reads. the result is unaffected by this change, and we will use this convention in the rest of the paper. we leave details to the reader.
+
+clearly it suffices to consider just k-mers that do not contain $ and that occur at least twice in s. more tightly, it suffices to consider just right-maximal k-mers that do not contain $: indeed, if a k-mer α is always followed in s by character c, then the set of reads that are merged by α is a subset of the set of reads that are merged by α·c. lemma  <dig> can be adapted to use just right-maximal k-mers:
+
+corollary 1
+lemma  <dig> can be implemented in n+o+o bits of space in addition to the input, where k
+′ is the number of distinct right-maximal k-mers of s.
+
+proof
+we follow the same approach as in lemma  <dig>  the intervals of all right-maximal k-mers are disjoint and of size at least two. we mark the first and the last position of every such interval in array b, by iterating over all right-maximal substrings of s and by setting b= <dig> and b= <dig> for every right-maximal α of length k. this marking technique was introduced independently by  and by  <cit> . as we backward-search s in bwt
+s, we decide whether the k-mer that prefixes the current suffix of s is right-maximal, by checking whether b= <dig> or rank
+b is odd, where i is the lexicographic rank of the current suffix. we proceed only in the positive case, using the handle that corresponds to the k-mer located at position ⌈rank
+b/2⌉ of h. □
+
+note that the running time of corollary  <dig> is o, where occ is the total number of occurrences of all right-maximal k-mers. in real datasets, for typical values of k , the number of distinct k-mers can be approximately  <dig> times bigger than the number of distinct right-maximal k-mers, and the length of the string can be approximately  <dig> times bigger than the number of occurrences of right-maximal k-mers.
+
+consider the set r of all distinct maximal repeats of s of length at least k: every substring s that equals a right-maximal k-mer of s is a suffix of a substring s[i
+′,j], with i
+′≤i, that equals a maximal repeat in r, and every substring s[i
+′,j] that equals a maximal repeat in r has a right-maximal k-mer as a suffix. thus, issuing union queries using the elements of r is equivalent to issuing union queries using all right-maximal k-mers. the size of r, however, is at least the number of right-maximal k-mers. specifically, the number of right-maximal k-mers equals the size of set r′⊆r, where r′ is the set of elements of r that do not have another element of r as a suffix. in other words, the elements of r′ are the reversed labels of the loci of the reversed right-maximal k-mers of s in the suffix tree of the reverse of s.
+
+more tightly, every substring α of a maximal repeat β∈r occurs in s whenever β occurs, and possibly at other positions, therefore the union operations induced by β are a subset of the union operations induced by α, and we can safely disregard β for clustering. we are thus interested in the following subset of the maximal repeats of s:
+
+definition 3
+let s∈Σ
+n be a string and let k be an integer. a repeat of s is called k-submaximal if it is a maximal repeat of s of length at least k, and if it does not contain any maximal repeat of length at least k as a substring.
+
+note that the set of k-submaximal repeats is a subset of r′. lemma  <dig> can be adapted to use just the k-submaximal repeats of s:
+
+corollary 2
+lemma  <dig> can be implemented in 2n+o+o bits of space in addition to the input, where k
+′′ is the number of distinct k-submaximal repeats of s.
+
+proof
+since the set of all k-submaximal repeats is a subset of r′, and since the elements of r′ are the reversed labels of the loci of the reversed right-maximal k-mers of s in the suffix tree of s¯, there is a one-to-one correspondence between the set of occurrences of k-submaximal repeats and the set of occurrences of their right-maximal suffixes of length k. we can thus issue union queries using just right-maximal k-mers that are the  suffix of a k-submaximal repeat, or equivalently using just right-maximal k-mers such that the label of the locus of their reverse in the suffix tree of s¯ is the reverse of a k-submaximal repeat.
+
+assume that we have bitvector b from corollary  <dig>  with the intervals of all right-maximal k-mers marked with ones, indexed to support rank queries. we mark in another bitvector b
+′  the subset of such intervals that correspond to k-mers that are the suffix of a k-submaximal repeat, as follows. we scan b sequentially, and for every pair  of ones such that the first has odd rank x and the second has even rank x+ <dig>  we check whether bwt
+s contains at least two distinct characters: if so, the right-maximal k-mer α that corresponds to interval  is also left-maximal, α is a k-submaximal repeat, and we set b
+′=b
+′= <dig> 
+
+otherwise, let v be the locus of α¯ in the suffix tree of s¯, let u be the parent of v, let the label of v be ℓ=ℓβ
+γ, let α¯=ℓβ, and let |γ|=g. we iteratively take backward steps from  until we find a bwt interval that contains at least two distinct characters. this is equivalent to reading the characters of γ sequentially. let such sequence of backward steps yield intervals [i
+ <dig> j
+1],[i
+ <dig> j
+2],…,[i
+g,j
+g] corresponding to right-maximal strings γ <cit> α,γ <cit> γ <cit> α,…,γ¯α. assume that, using rank queries on b, we detect that one such interval [i
+y,j
+y] is contained inside the interval of a right-maximal k-mer θ. let v
+′ be the locus of θ¯ in the suffix tree of s¯. then ℓ is a substring of ℓ and ℓ¯ is an element of r′, thus ℓ¯ is not k-submaximal, we leave b
+′ and b
+′ to zero, and we move to the next pair of ones in b. if none of the intervals [i
+ <dig> j
+1],…,[i
+g,j
+g] is contained inside the interval of a right-maximal k-mer, we set b
+′=b
+′= <dig> and we move to the next pair of ones in b.
+
+at the end of this process, we index b
+′ for rank queries, we replace the indexed b with the indexed b
+′, and we continue as in corollary  <dig>  the total number of backward steps performed by the algorithm is o, since every step visits a distinct right-maximal substring of s. □
+
+slightly more involved arguments allow one to shave n bits from the space complexity of corollary  <dig>  the running time of corollary  <dig> is o, where occ is the total number of occurrences of all k-submaximal repeats. in real datasets, for typical values of k , the number of right-maximal k-mers can be approximately  <dig>  times the number of k-submaximal repeats, and the total number of occurrences of right-maximal k-mers can be approximately  <dig>  times the number of occurrences of k-submaximal repeats. once again, we can discard k-submaximal repeats that contain $.
+
+before completing the construction of the k-rc connected components, we note that the technique described in lemma  <dig> allows one to detect reads whose k-mers occur all less than τ times in the dataset , in o time and in n+o bits of space in addition to the input and the output. once all reads from low-frequency species have been detected, it is also possible to derive the bwt of such reads, as well as the bwt of all reads from high-frequency species, directly from bwt
+s. we leave such details to the reader.
+
+to complete the pipeline, we just need to merge all pairs of components c
+ <dig> and c
+ <dig> that share a reverse complemented k-mer. once again, it suffices to consider just the rc right-maximal k-mers that occur in both s and s~:
+
+lemma 3
+let s=s
+1
+$
+s
+2
+$⋯s
+m
+$
+$ be a string of length n such that s
+i∈Σ
++ for all i∈, and $= <dig> is a separator. assume that we are given the bidirectional bwt index of s, a union-find data structure initialized with m sets and supporting find and union in time t, and an integer k. then we can encode, in the union-find data structure, all the connected components of the k-rc-relation on set {s
+ <dig> s
+ <dig> …,s
+m}, in o) time and in 2n+o+o bits of space in addition to the input, where σ
+′=σ+ <dig>  ℓ= max{|s
+i|:i∈} and k
+′′′ is the number of distinct rc right-maximal k-mers of s.
+
+proof
+let b
+ <dig> and b
+ <dig> be two bitvectors, of length equal to the length of bwt, initialized to all zeros. we iterate over every rc right-maximal k-mer α using algorithm 2: if none of the intervals  and  is empty, then the reads corresponding to interval  should be in the same connected component as the reads corresponding to interval . thus, if iα→≠jα→ we set b2= <dig> and b2= <dig>  otherwise we set b3= <dig>  similarly, if iα~→≠jα~→ we set b2= <dig> and b2= <dig>  otherwise we set b3= <dig>  at the end of this process we index b
+ <dig> and b
+ <dig> for rank queries, we allocate a vector h
+ <dig> of length equal to the number of distinct intervals marked in b
+ <dig>  and we store in h
+ <dig> the handle of any read that contains the k-mer that corresponds to the i-th marked interval, by backward-searching s in bwt
+s as described in corollary  <dig>  we similarly fill a vector h
+ <dig>  of length equal to the number of bits marked in b
+ <dig>  finally, we use again algorithm  <dig> to iterate over every rc right-maximal k-mer α: if none of the intervals  and  is empty, we issue union, where h1=h <dig> if iα→≠jα→, otherwise h1=h <dig>  similarly, h2=h <dig> if iα~→≠jα~→, otherwise h2=h <dig>  □
+
+note that, if the complementation function reverses the alphabet , we can avoid executing algorithm  <dig> twice. indeed, we could just run algorithm  <dig> and mark in a bitvector a the interval of α in bwt, and in a bitvector b the interval of α~ in bwt¯, for every rc right-maximal k-mer α that occurs both in s and in s~. then, we could allocate two vectors h
+a and h
+b, of length equal to the number of marked intervals in a and b, and we could store in h
+a  the handle of any read that contains the k-mer corresponding to the i-th marked interval in a . finally, we could issue union for all i∈[ <dig> k
+′′′].
+
+recall that the very last step of the pipeline consists in extracting repeated substrings of length at least e>h from each connected component. every such string is a substring of a maximal repeat of s·s~ of length at least e. if the user has set e>k, every such maximal repeat occurs in exactly one connected component: we could thus extract all the  repeats of s·s~ of length at least e, in a single traversal of the generalized suffix-link tree of s and s~ and within the same budget as the other algorithms .
+
+finally, the value of k in the k-rc-relation can be estimated from the dataset itself: specifically, given a range [k
+x,k
+y] of possible values, one might want to compute the value of k such that the majority of distinct k-mers of s and s~ occur at least twice in s·s~, i.e. most of such k-mers are not likely to contain sequencing errors. such k can be computed within the same time and space budget as the algorithms in this paper, using the algorithm described in  <cit> .
+
+in practice the memory used by the enumeration stack is negligible in all algorithms, the peak space usage of the entire pipeline is achieved by lemma  <dig> and, assuming that the bidirectional index takes 2n logσ
+′+o bits, such peak is approximately 2n logσ
+′+ logm+2n+o bits. the 2m logm bits of space come from the union-find data structure, which stores for each component a pointer to its parent in a tree structure, and the size of the subtree attached to it to maintain balancing. note that 2m logm∈o if all reads are distinct. rather than using the union-find data structure for clustering reads, we could use it for clustering distinct k-mers or repeats, and then we could propagate such clustering to reads . this could decrease peak memory when clustering the union of a large number of very similar samples.
+
+RESULTS
+the purpose of this section is just to show that our algorithms are practical. our implementation of the bidirectional bwt index is based on c++, on the sdsl library  <cit> , and on the ropebwt <dig> library  <cit> . for simplicity we implement corollary  <dig> rather than corollary  <dig>  we use the multithreading support of the c++  <dig> standard library to take advantage of multiple cores.
+
+specifically, since all our algorithms are traversals of a suffix-link tree, we run them on c parallel cores by dividing the bwt into c intervals of similar length and by assigning each interval to a distinct core. this work balancing technique is effective, since the length of the bwt interval of a node v of the suffix tree correlates well in practice with the number of nodes in the subtree of the suffix-link tree rooted at v. we parallelize the backward search of a sequence of reads in its own bwt by dividing the sequence into c blocks of approximately equal length, and by backward-searching each block in parallel.
+
+we observe that the parallel traversal of the suffix-link tree fails to use more than four cores efficiently, thus more advanced work-balancing strategies might be needed: engineering our implementation to exploit a large number of cores is outside the scope of this paper.
+
+the other purpose of this section is to show the potential of our framework, both in terms of clustering quality and in terms of computational resources, by comparing our implementation  to a sampler of recent, state-of-the-art tools. specifically, we compare bwtcluster to metacluster  <cit> , mbbc  <cit>  and bimeta  <cit> . such comparisons are inherently unfair, for a number of reasons. first, metacluster is a highly engineered, parallel version of the read clustering pipeline, extensively tuned over multiple years both in terms of quality and of speed . comparing bwtcluster to metacluster should thus penalize bwtcluster in terms of quality, and possibly of speed. second, bimeta and mbbc differ from the pipeline we described, bimeta is single-threaded, and mbbc uses less than two cores on average, thus they could be penalized in terms of speed. performing an extensive analysis of the clustering results of our framework, and augmenting it with advanced heuristics to make it as accurate as possible, are outside the scope of this paper.
+
+to the best of our knowledge there is no standard dataset for evaluating the performance of unsupervised metagenomic clustering algorithms yet, thus we experiment with the following samples of increasing complexity. first, we build three simple, error-free datasets, to measure how well an algorithm can separate two species that belong to distinct units at different levels in the taxonomy. such datasets contain exactly two species each, with tenfold coverage and paired-end reads of length  <dig> base pairs, with no errors <dig>  we call the datasets the species level, genus level and family level datasets, respectively. the reference genomes are taken from the ncbi database, and sampled at random locations of the genomes. second, we replicate the simulated, high-complexity datasets a, b and c described in  <cit> . such datasets have realistic error rates, contain up to a hundred species, and have different fractions of low-abundance species. the datasets are created by feeding the reference genomes from ncbi to the metasim software by  <cit> . third, we pick two real samples: a sample from the human gut catalogue described in  <cit>  containing  <dig>  billion base pairs, and a sample from a study on the mouse gut described in  <cit>  containing  <dig> million base pairs  <dig> 
+
+in simulated datasets, we assess the quality of both the k-rc connected components and of the clusters produced by k-means, using the measures described in  <cit> . specifically, suppose there are n species in the dataset, and that an algorithm outputs m clusters. let r
+ij be the number of reads in cluster i that are from species j. we call precision the ratio between ∑i=1mmaxjrij and the number of reads in all clusters, and we call sensitivity the ratio between ∑j=1nmaxirij and the total number of reads in dataset. for brevity we call preclusters the k-rc connected components in what follows. we combine the preclusters and the final clusters produced by both rounds of metacluster in order to compute precision and sensitivity. we do not measure clustering quality in real samples, since the truth is not known.
+
+we tried to make our tool as close as possible to metacluster by implementing many heuristics found in the metacluster papers and even by looking at the source code of metacluster, and implementing details not present in the metacluster papers. specifically, we do not merge a pair of connected components if either of the components has at least  <dig> reads, unless one of the components has size less than  <dig>  and before running k-means we filter all connected components containing less than  <dig> reads. we set the parameters as recommended in  <cit> , namely we set k= <dig> and τ= <dig> for filtering, we set k= <dig> for clustering, and we use k-mers of length  <dig> in the composition vectors clustered by k-means. other metacluster heuristics that are not yet implemented in our tool include issuing union queries in increasing order of k-mer frequency, merging two reads if they contain two k-mers at edit distance one from each other, and a few additional heuristics for growing the sizes of the k-rc connected components. unlike metacluster, our tool runs only a single clustering round, but since the number of filtered reads is small, the effect of this is negligible in final the precision and sensitivity.
+
+we ran the four tools for a maximum of  <dig> hours on each dataset. the results are shown in table  <dig>  the tools bwtcluster and bimeta cannot estimate the number of species in a sample, so we gave the true number of species as parameters to all tools, and we set the number of species to  <dig> for the real samples. mbbc takes in input an initial guess on the number of species. for the species, genus and family level datasets, when mbbc was given the true number of species as the initial guess, it failed and predicted just one species. with the initial guess of  <dig> the tool predicted the correct number of species for those datasets, and the numbers reported in table  <dig> for such datasets are with the initial guess of  <dig>  for the datasets a, b and c, we gave mbbc the true number of species.
+the size of each dataset is given in billion base pairs . algorithms that return an error are marked with symbol ×
+
+
+
+
+our tool was the only one which was able to process each dataset within  <dig> hours without returning an error. the peak memory of our tool was between  <dig>  to  <dig>  smaller then the competing tools. on the species, genus and family-level datasets, as well as on both real datasets, metacluster halted with an error, before even running k-means, saying that the number of clusters was too low, due to low coverage. the same error persisted when we tried to run just the second phase, which is designed to cluster low-frequency species. the peak memory usage of bwtcluster was less than  <dig> bytes per character  and it occurred during the construction of the index , thus it might be further reduced by replacing the bwt construction library. we could also be more careful in keeping in memory just the data structures that are strictly necessary to each step of the pipeline.
+fig.  <dig> running bwtcluster on dataset a: time  versus memory . bwt index constructions are highlighted in gray
+
+
+
+
+
+on datasets a, b and c, bwtcluster had approximately 94% of the precision of metacluster, both in the final clusters and in the preclusters, suggesting that our clusters are approximately as clean as metacluster’s. the precluster sensitivity of bwtcluster, however, was just approximately 20% of the precluster sensitivity of metacluster, suggesting that bwtcluster fragments species into more preclusters than metacluster: this could be caused e.g. by the absence of approximate matching and of other advanced merging heuristics implemented in metacluster. both mbbc and bimeta generally had smaller precision and sensitivity compared to bwtcluster.
+
+in conclusion, every competing tool we considered is either unstable, or it is significantly slower than our implementation, or it uses significantly more memory, and no competitor with a stable implementation achieves higher precision or sensitivity than bwtcluster on a substantial number of datasets. finally we note that the implementation of metacluster requires that all reads in a sample are of equal length, and have length at most  <dig> base pairs, whereas our tool has no such restriction.
+
+discussion and 
+CONCLUSIONS
+we described an algorithmic framework for unsupervised read clustering in small space, based on the bidirectional burrows-wheeler index of a metagenomic sample. specifically, we identified a set of core combinatorial primitives and we implemented them in o) time using 2n+o+o bits of space in addition to the index and to a union-find data structure on the set of reads, where n is the total number of characters in the sample, m is the number of reads, σ is the total size of the alphabet, t is the query time of the union-find data structure, and k is a measure of the redundancy of the sample, like the number of distinct right-maximal substrings of fixed length k, or the number of distinct submaximal repeats of length at least k. in practice both σ and t are constant, since t can be for example o, where x is the value such that the ackermann function a equals m  <cit> . our algorithms are practical, and they can exploit multiple cores by a parallel traversal of the suffix-link tree of the sample.
+
+since our algorithms use a string index as their substrate, one can build such index just once, and run the algorithms multiple times with different settings of the parameters. approximately half of the time taken by our implementation is spent in building the index , thus building the index just once is likely to speed up this frequent use case in explorative data analysis. since the index is based on the ubiquitous burrows-wheeler transform, such transform might have already been computed for supporting other queries, making such algorithms immediately applicable to existing datasets.
+
+compressed representations of the bwt could reduce peak space even further. specifically, the bwt of the union of similar metagenomic samples is likely to be very compressible, and since the space used by our algorithms in addition to the bwt is dominated by a measure of the redundancy of the input, such space is not likely to grow significantly when multiple similar samples are clustered at the same time.
+
+finally, one could experiment with dropping the k-rc-relation altogether, and with merging reads using just the k-relation: a connected component would then correspond to a substring of a genome in a specific orientation, and two connected components that originate from reading the same substring in different orientations would likely be merged during the final k-means step, since their composition vectors are similar. this would remove the need for storing bwt¯s in all steps after the initial filtering of reads from low-frequency taxa, since the corresponding algorithms can be implemented on top of the unidirectional traversal described in  <cit> .
+
+endnotes
+
+1more precisely if the interval of α is  then the interval of c
+α will be [i
+′,j
+′], where i
+′=c+rank
+bwt+ <dig> and j
+′=c+rank
+bwt.
+
+
+2the first dataset contains species vibrio cholerae and vibrio vulnificus, the second vibrio cholerae and photobacterium gaetbulicola, the third vibrio cholerae and escherichia coli
+
+
+
+3ebi identifier samea <dig>  mg-rast identifier  <dig> 
+
+
+4we run the species, genus, and family level datasets on a machine with a quad core intel core i7-6700k  <dig> ghz processor and 16gb of ddr <dig> ram clocked at  <dig> mhz. we run all other datasets on a machine with  <dig>  tb of ram and four intel xeon cpu e7- <dig> v <dig> processors .
+

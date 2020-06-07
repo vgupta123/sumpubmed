@@ -1,0 +1,160 @@
+BACKGROUND
+an important problem in genomics is the automatic inference of groups of homologous proteins when only sequence information is available. several approaches have been proposed for this task which are "local" in the sense that they assign a protein to a cluster based only on the distances between that protein and the other proteins in the set. in fact, the majority of these methods are based on thresholding a sequence similarity measure  and considering two protein sequences potentially homologous if their similarity is above the threshold  <cit> . however, by considering scop superfamilies as gold standard collections of homologous proteins and analysing the distribution of sequence distances within and between superfamilies, it was shown that there does not exist a single threshold on blast e-values that can be used to cluster homologues correctly  <cit> . as a consequence, while the existing methods yield adequate results for close homologues, they are likely to fail in identifying distant evolutionary relationships.
+
+a possible way to improve these results is to use "global" methods, which cluster a set of proteins taking into account all the distances between every pair of proteins in the set. paccanaro et al  <cit>  introduced a global method based on spectral clustering and showed that it has better performance than commonly used local methods  and tribemcl  <cit> . other authors have also used spectral clustering successfully in various biological contexts  <cit> . the development of scps  was motivated by the fact that currently available implementations of spectral clustering methods mostly consist of a few loosely coupled matlab scripts that assume a fair amount of familiarity with matlab programming and hence they are inaccessible for large parts of the research community. moreover, the mathematical formulation of the algorithm is rather involved and it is not trivial to implement all the details properly in an ex-novo implementation.
+
+scps provides an implementation of the spectral clustering algorithm  <cit>  via a simple, clean and user-friendly graphical user interface that requires no background knowledge in programming or in the details of spectral clustering algorithms. scps is also able to perform connected component analysis and hierarchical clustering, and it incorporates tribemcl, thus providing the user with an integrated environment where one can experiment with different clustering techniques. scps is extremely efficient and its speed scales well with the size of the dataset, allowing for the clustering of protein sets constituted by thousands of proteins in a few minutes. moreover, scps is able to calculate different cluster quality scores, it interfaces with external tools such as blast  <cit>  and cytoscape  <cit> , and it can produce publication-quality graphical representations of the clusters obtained, thus constituting a comprehensive tool for practical research. for more advanced use-cases , we also included a sophisticated command line interface.
+
+scps was written in c++ and is distributed as an open-source package. precompiled executables are available for the three major operating systems  at http://www.paccanarolab.org/software/scps.
+
+in the rest of this paper, we outline the general framework of our spectral clustering algorithm and then demonstrate its practical usage and usefulness via a number of benchmarks ranging from a few superfamilies to the entire scop database and the genome of the yeast saccharomyces cerevisiae.
+
+implementation
+spectral clustering in scps
+the goal of scps is to infer homology relations between protein sequences based on pairwise sequence information only. the input dataset thus consists of either a set of protein sequences or a list of pairwise similarity scores between some protein domains. the output is a partition of the sequences such that each sequence is assigned to one and only one of the partitions in a way that the partitions represent groups of homologs.
+
+a typical scps workflow starts with either a fasta file containing sequences for the protein domains of interest, or a list of blast e-values for all pairs of proteins where significant sequence similarity was reported by blast. besides spectral clustering  <cit> , scps currently supports connected component analysis, hierarchical clustering and tribemcl  <cit> , and more algorithms will be added in the near future. the spectral clustering approach reformulates the problem of protein homology detection into that of finding an optimal partition of a weighted undirected graph g. each vertex of the graph corresponds to a protein sequence. vertices are connected by undirected, weighted edges, each edge denoting a similarity relation between the two proteins it connects. the weight  of the edge is related to the probability of evolutionary relatedness. edges with large weight are more likely to appear between domains of the same superfamily, hence the problem of partitioning the graph into subsets of vertices with mostly heavy-weight edges is an equivalent formulation of the original protein sequence classification problem. spectral clustering solves the problem of finding the optimal partition by examining random walks on the similarity graph  <cit> .
+
+our approach is based on the spectral clustering algorithm of  <cit> . the general workflow is depicted on figure  <dig>  the basic steps of the algorithm are as follows:
+
+ <dig>  if the input file is a fasta sequence file, we conduct an all-against-all matching using blast and store the e-values.
+
+ <dig>  given the pairwise blast e-values obtained either from the previous step or directly from the input file, we build an affinity matrix based on a non-linear transformation from e-values to similarity scores. the matrix element in row i and column j contains the e-value corresponding to protein j when protein i was used as a query sequence.
+
+ <dig>  since the blast e-value corresponding to a query protein i matching protein j in the database is not necessarily equal to the case when the query protein j matches protein i in the same database, the affinity matrix has to be symmetrized. to obtain a symmetric matrix, we take the higher similarity score  in case of ambiguity. let sij denote the symmetrized similarity score between protein i and protein j. the sij values together constitute the symmetrized affinity matrix s, whose main diagonal contains only ones.
+
+ <dig>  we conduct a preliminary connected component analysis on the graph represented by the affinity matrix s to identify small connected components containing less than five sequences. it is unlikely that these components should be subdivided further, therefore we remove the rows and columns corresponding to these sequences from s, obtaining a reduced matrix s'.
+
+ <dig>  we construct a symmetric matrix l = d-1/2s'd-1/ <dig>  where d is a diagonal matrix formed of the vertex degrees (), and find the eigenvectors corresponding to the k largest eigenvalues of l. let us denote these eigenvectors by u <dig>  u <dig>  ..., uk, respectively.
+
+ <dig>  we build a matrix u s.t. the kth column of u is uk and normalize the rows of the matrix such that each row in u has unit length.
+
+ <dig>  treating the rows of u as points in the k-dimensional euclidean space ℝk, we conduct a k-means clustering of these points into k clusters. the initial centroid positions are chosen from the data points themselves, placed as orthogonally to each other as possible.
+
+ <dig>  we assign node i in the original graph to cluster j if and only if row i of y was assigned to cluster k in the previous step. small connected components obtained in step  <dig> are also merged back into the dataset in this final stage.
+
+an important advantage of this method is that the number of clusters  can be selected automatically by evaluating the eigenvalues of s'. in our implementation, k is set to the smallest integer k such that λk/λk+ <dig> > ε. ε is adjustable and it is chosen to be  <dig>  by default. the main role of ε is to control the granularity of the clustering obtained: larger ε values tend to produce more fine-grained clusters, while a smaller ε yields only a few large clusters. we found that the default choice works well in a wide variety of biological problems . another way to control the granularity of the clustering is to override k manually either before the clustering process or after the eigenvalue calculation. both methods are facilitated by the scps user interface.
+
+the clustering results are presented in a separate window  where the user can examine and draw the clusters one by one, calculate various quality measures , visualize the heatmap of the rearranged similarity matrix or export the results in plain text or xgmml format. xgmml files can later be loaded into cytoscape to facilitate further visualisation and analysis. the heatmap of the rearranged similarity matrix can also be exported in publication quality to a png file. scps can also retrieve human-readable protein descriptions based on gi numbers from ncbi to aid the interpretation of the results. clusters are drawn using the fruchterman-reingold layout algorithm  <cit> , a force-directed iterative layout algorithm where nodes are considered as tiny particles that repel each other, while edges represent springs that pull the endpoints of the edge closer. the strength of the attraction force is proportional to the similarity score used in our analyses, hence the obtained layout will tend to place highly similar pairs of proteins close to each other. figure  <dig> shows an example of a cluster drawing produced by scps.
+
+finally, scps includes a command line interface which runs the clustering without user intervention and writes the results to the standard output or to a specific output file. this enables the integration of scps in batch processing pipelines.
+
+implementation details
+scps uses the arpack library  <cit>  for eigenvector calculations. the arpack library implements the implicitly restarted arnoldi method for eigenvector calculations, which is an iterative process that is able to calculate all the eigenvectors and eigenvalues or only the top k ones. when one can provide a reasonable upper estimate on the number of clusters, the arnoldi method is much more efficient than standard methods that solve the eigenvector equation directly. on the other hand, the convergence of iterative methods is affected negatively in the presence of eigenvalues with multiplicity greater than one. the multiplicity of the top eigenvalue of the affinity matrix s is equal to the number of connected components in the input graph. therefore, we first eliminate small connected components of size less than five sequences from the original graph  and then connect the remaining components by a small amount of random edges with weight less than  <dig> . this decreases the multiplicity of the top eigenvalue to one and thus improve the stability of the eigenvector calculation process without affecting the final result.
+
+the number of clusters can be selected using one of the following methods in our implementation:
+
+• automatic. this method uses the eigengaps to select the appropriate number of clusters. k is set to the smallest integer k such that λk/λk+ <dig> > ε. ε is adjustable and it is chosen to be  <dig>  by default.
+
+• bounded from above. this method is similar to the automatic selection, but it considers at most a given number of clusters. it takes advantage of the fact that the complete eigenspectrum is not needed in this case when using the spectral clustering, saving time and resources during the computation. if the maximum number of clusters is kmax, scps will compute only the top kmax eigenvalues and the corresponding eigenvectors.
+
+• exactly. the user can select the desired number of clusters either before the analysis or after the calculation of the eigenvalues and eigengaps.
+
+transforming blast e-values to similarities
+a crucial step in the application of spectral clustering methods in the context of protein sequences is the transformation from blast e-values to similarities. scps uses an approach based on the statistical analysis of e-values within and between scop superfamilies. a randomly selected set of  <dig>  e-values chosen from sequences within the same superfamily and  <dig>  e-values chosen from sequences in different superfamilies were used to train a logistic regression model that discriminates between intra-superfamily and inter-superfamily e-values. the posterior probability returned by the model on any e-value is then interpreted as the probability of evolutionary relatedness. in case of asymmetric e-values for a pair of proteins, the lower e-value  is used. the proteins used for training the logistic regression model were not used later in performance assessments of the algorithm.
+
+quality measures
+this section describes the various quality measures we implemented in scps. in the following subsections, we will use the following notations:
+
+• sij is the similarity value labelling the edge between vertex i and j in a graph g. sij = sji since we always symmetrize the initial similarity values.
+
+• δij is  <dig> if vertices i and j are within the same cluster, zero otherwise.
+
+we will also need the following definitions:
+
+definition  <dig>  the weight of vertex i is the sum of the weight  of all its adjacent edges:di = Σjsij.
+
+definition  <dig>  the weight of cluster i is the sum of the weight of all the edges that lie fully within cluster i .
+
+mass fraction
+the mass fraction  <cit>  is an internal quality measure of a clustering on a given graph g. intuitively, a clustering is good if the total weight of its clusters is comparable to the total weight of the whole network; in other words, most of the heavy-weight edges are within clusters. the mass fraction simply denotes the fraction of edge weights that is concentrated inside the clusters.
+
+definition  <dig>  the mass fraction of a clustering defined by dij is given as follows:   
+
+a disadvantage of this measure is that it attains its maximum when all the vertices are in the same cluster, hence the mass fraction alone cannot be used to decide whether a given clustering is better than another.
+
+modularity
+modularity  <cit>  is another internal quality measure of a clustering on a given graph g. the idea is that it is not enough for a clustering to be good when it contains much of the edge weights within the clusters; the clustering is good when it contains more weight within the clusters than what we would expect if we rearranged the edges of the graph randomly while keeping the vertex weights constant. therefore, the difference between the actual cluster weight and the expected cluster weight after such rearrangement is a good indicator of the general quality of the clustering. this measure also avoids the problem with trivial clusterings: a cluster containing all the vertices will contain exactly the same weight before and after rewiring as all the edges will stay within the same cluster, so the modularity score will be zero. similarly, a clustering where each vertex is in its own cluster will also yield zero modularity as there are no intra-cluster edges at all.
+
+formally, the modularity score of a clustering is the normalized difference between the actual weight of the clusters and the expected cluster weight after a random rewiring that preserves the vertex weights. it can be shown that the expected weight of the edge between vertex i and j after rewiring is , where m is the sum of all edge weights in the graph   <cit> . the modularity formula then follows easily:
+
+definition  <dig>  let δij be  <dig> if vertices i and j are in the same cluster and zero otherwise. the modularity of the partition defined by δ is then as follows:   
+
+positive modularity then means that there is more weight concentrated within the clusters than what we would expect from a completely random graph with the same vertex weight distribution.
+
+heatmap of the rearranged similarity matrix
+this quality measure is not a single numeric value, but it provides a visual cue to the goodness of a clustering result. the basic idea is that the initial similarity matrix can be plotted as a greyscale heatmap where each pixel corresponds to a single cell of the matrix and the intensity of the pixel is proportional to the weight that the corresponding cell in the matrix represents. the rows and columns of the similarity matrix can be arranged in arbitrary order, but by arranging them in a way that rows and columns corresponding to the same cluster are next to each other, one can uncover a block-diagonal structure in the matrix if the clustering is good.
+
+RESULTS
+in this section, we present the results of a comparison of scps with other popular clustering methods  on various datasets assembled from scop  <dig>   <cit> , astral- <dig>  <cit>  and string v <dig>   <cit> . first, we will describe the datasets we used, then we give an overview of the methods we compared scps with and the quality measures we used to evaluate the performance of each method. after that, the benchmark results will be presented in detail. we conclude the section with a short discussion on the scalability of scps.
+
+data
+datasets 1- <dig> and the scop≥  <dig> dataset in our benchmarks were taken from scop  <dig>   <cit> . sequence data for these datasets were gathered from astral- <dig>  <cit> . sequence data for the yeast genome benchmark were downloaded from string v <dig>   <cit>  and the corresponding gene ontology annotations were assembled from the saccharomyces genome database  <cit> .
+
+datasets 1- <dig> are similar to the ones used in  <cit> , but they were updated to reflect the changes in superfamily classification since the publication of the original paper. dataset  <dig> was created explicitly for this study. the list of scop superfamilies used in each of the four datasets are listed in table  <dig> 
+
+the size of the dataset denotes the number of sequences in astral- <dig> corresponding to domains of the superfamily.
+
+the scop≥  <dig> dataset was constructed from scop  <dig>  and astral- <dig> as follows: a database containing all sequences in astral- <dig> was used to conduct an all-against-all search using blast. for each sequence in astral- <dig>  the corresponding superfamily was looked up from scop and a gold standard clustering was created using all the superfamilies that contained at least five sequences. superfamilies containing less than five domains with associated sequence information were excluded from the benchmark, as we were interested in the performance of the methods in case of non-trivial superfamilies. the final dataset contained  <dig> superfamilies.
+
+datasets 1- <dig> are distributed with the downloadable scps package. the scop≥  <dig> and the yeast genome dataset was excluded as it would have disproportionately increased the size of the package, but it is available from the authors upon request.
+
+alternative clustering approaches
+hierarchical clustering
+hierarchical clustering is a family of clustering methods that start with individual data points  and then build a tree by iteratively merging the closest points until only one is left  <cit> . the final cluster assignment is then determined by cutting the branches of the tree at a specific level. the various hierarchical clustering methods usually differ only in the way they define the distance between two sets of data points and the way they choose the optimal level to cut the branches of the tree in the end. the best results in our datasets were obtained by using the average distance metric, in which the distance between two sets of data points is given by the average distance between all possible point pairs such that one point is chosen from one of the sets and the other one is from the other set. the tree was cut at the level where the average distance metric was above 10- <dig>  similarly to  <cit> . pairs of proteins where blast did not return an e-value were considered to have an e-value of  <dig>  which is the default blast e-value threshold.
+
+connected component analysis
+connected component analysis is a method that has been widely used in computer vision  <cit>  and was initially applied to sequence clustering in generage  <cit>  and proclust  <cit> . the method starts with a fully connected graph where the edges are labeled by the e-values or some other suitable distance metric. the algorithm proceeds by removing edges labelled by a distance larger than a given threshold, then collecting groups of vertices that still remained connected. these groups are then considered as the final result of the algorithm. the e-value threshold used in our benchmarks was 10- <dig>  similarly to generage  <cit> .
+
+tribemcl
+tribemcl  <cit> , a variant of the markov clustering algorithm , models the random walk of a particle on a similarity graph, similarly to spectral clustering. a detailed comparison is given in  <cit> , here we only note that the fundamental difference between mcl and spectral clustering is the way the random walk is propagated along the edges of the network. while our spectral clustering algorithm models the random walk exactly and analyses perturbations to the stationary distribution of the random walk, mcl modifies the random walk to promote the emergence of clusters. this approximation allows mcl to converge faster, but it can potentially lead to many small clusters. another, less significant difference is the way tribemcl symmetrizes the input matrix of e-values: while scps takes the smaller e-value in face of ambiguity and then transforms it to a similarity value, tribemcl transforms both e-values to similarities first by taking the negative base  <dig> logarithm and then symmetrizes the pair by taking the average. a more detailed comparison of the two algorithms is to be found in  <cit> .
+
+for the tribemcl benchmarks on datasets 1- <dig>  we tuned the inflation parameter of the algorithm by trying all possible values with a step size of  <dig>  in the range , as suggested by the documentation of the algorithm. the final inflation parameter was chosen in a way that resulted in the highest f-score. for the scop≥  <dig> dataset, the inflation parameter was chosen as the average of the inflation parameters that were the best for datasets 1- <dig> 
+
+comparing clusterings with a gold standard
+we used the combined f-score to compare a clustering result with the gold standard scop superfamily classification. let n denote the total number of proteins in the dataset, ni* the number of proteins in the ith superfamily, n*j the number of proteins in the jth calculated cluster and nij the number of proteins that are in superfamily i and cluster j at the same time.
+
+definition  <dig>  the precision of cluster j with respect to superfamily i is the fraction of proteins in cluster j that are also in superfamily i: pij = nij /n*j
+
+definition  <dig>  the recall of cluster j with respect to superfamily i is the fraction of proteins in superfamily i that are also in cluster j: rij = nij/ni*
+
+now we can define the combined f-score, which combines precision and recall with equal weights.
+
+definition  <dig>  the combined f-score is defined as follows:   
+
+the combined f-score attains its maximum at  <dig> if the two clusterings are identical.
+
+benchmarks on scop
+the validity of the spectral clustering approach was tested on several datasets assembled from the scop database, version  <dig>   <cit> . sequences were extracted from astral- <dig>  <cit> , i.e. the sequence identity between any two sequences was at most 95%. datasets 1- <dig> contained sequences from 5- <dig> protein superfamilies that were hand-chosen to resemble the datasets originally used in  <cit>  . dataset  <dig> was conceived specifically for this study. finally, the scop≥  <dig> dataset contains all the scop superfamilies containing at least five sequences. the datasets were described in detail earlier in the data subsection.
+
+the results of the spectral clustering algorithm running in fully automatic mode with default parameters  were compared to the results obtained from hierarchical clustering  <cit> , connected component analysis  <cit>  and tribemcl  <cit> . the obtained partitions were compared with the gold standard scop superfamilies using the f-score which combines precision and recall with equal weight. the results are presented on table  <dig>  showing that spectral clustering clearly outperforms all the other methods at the superfamily level.
+
+the best f-score for each dataset is highlighted in bold.
+
+clustering the genome of the yeast saccharomyces cerevisiae
+to further test the scalability of our method and to assess its performance on the genome of a model organism with multi-domain proteins, we collected  <dig>  sequences of the yeast saccharomyces cerevisiae from string v <dig>   <cit>  and performed an all-against-all blast search on them with the default blast parameters. the blast hits were processed with spectral clustering, tribemcl, connected component analysis and hierarchical clustering and clusters of size less than three were excluded from further assessment. the parameters for the various algorithms were the same as in the scop≥  <dig> benchmark.
+
+owing to the lack of a hand-curated gold standard family classification for s. cerevisiae and the fact that proteins in a protein family tend to be functionally and structurally related, the quality of the clusters obtained were assessed by comparing them to gene ontology molecular function annotations  <cit> . electronic annotations  and annotations based on non-traceable author statements  were ignored. for the remaining annotations and for each detected cluster of each method, multiple hypergeometric tests were performed to assess the statistical significance of the occurrence of go molecular function terms within the cluster at a significance level of  <dig> . correction for multiple hypothesis testing was performed by controlling the false discovery rate  using the benjamini-hochberg method  <cit> . we treated a cluster as significant if at least one of the go terms were overrepresented within the cluster and then calculated the total number of significant clusters divided by the total number of clusters containing at least three proteins, as well as the total size of significant clusters divided by the total size of clusters containing at least three proteins. these ratios along with the exact numbers are reported in table  <dig>  although hierarchical clustering and connected component analysis achieve the highest significant cluster ratio  when taking into account the cluster counts only, they both generate a high number of singletons and clusters of size two, therefore the significant clusters cover only a small fraction of the whole similarity graph . the difference becomes clear when the same ratios are calculated using the cluster sizes instead of the cluster counts: spectral clustering dominates with  <dig>  sequences in  <dig> significant clusters covering  <dig> % of the  <dig>  sequences that are in clusters of at least size three, while tribemcl comes second with  <dig>  sequences in  <dig> clusters covering  <dig> % of the  <dig>  sequences in clusters of size ≥  <dig>  one may argue that this difference can be attributed to the fact that spectral clustering tends to produce fewer and thus larger clusters than mcl, but the same difference between spectral clustering and tribemcl can also be seen in the unweighted  case . similar results were obtained when we used the mips funcat annotations  <cit>  instead of the gene ontology . these results illustrate that spectral clustering is a viable alternative to other popular methods even on a genome-wide scale.
+
+scalability considerations
+the spectral clustering method has two potential bottlenecks. one of them is the k-means clustering step where no exact result is known about the number of steps the algorithm takes in the worst case. however, it was shown recently that the k-means clustering procedure terminates in a polynomial number of steps with high probability in high-dimensional spaces when the data points are drawn from independent multivariate normal distributions  <cit> . it was also proven that given a clustered structure in the original input dataset, data points of the same cluster will be aligned roughly along orthogonal directions in our k-means step. the normalisation step then ensures that these points will be situated close to each other  <cit> , thus they can be approximated well with multivariate normal distributions. therefore, the data points we are likely to encounter in the k-means step satisfy the conditions of polynomial time complexity. the other potential bottleneck of the algorithm is the calculation of the eigenvectors. typically, the number of steps required to calculate the top k eigenvectors scales linearly with the number of non-zero elements in the input matrix when using the implicitly restarted arnoldi method  <cit> . since scps uses this method when a maximum cluster count is specified, the algorithm is expected to terminate in polynomial time for real sequence similarity datasets, enabling us to analyse large datasets comprising of thousands of protein sequences. in our experiments, the scop≥  <dig> dataset was processed in  <dig> minutes using a single core of a quad-core intel xeon x <dig> desktop machine running at  <dig>  ghz, using the top  <dig> eigenvalues and eigenvectors of the similarity matrix. this does not include the cpu time required to run the all-against-all blast query on scop, which took nearly four hours.
+
+CONCLUSIONS
+in this paper, we presented scps, an efficient, user-friendly, scalable and platform-independent improved implementation of a spectral clustering method  <cit> , which can identify protein superfamilies in datasets containing thousands of proteins within a few minutes. the software along with its source code is available to non-commercial users free of charge. we would like to encourage users and developers to provide feedback, suggest new features or contribute code. future work will focus on the improvement of the similarity measure used by the algorithm and a parallelized implementation of the method to exploit the power of multiple cpu cores.
+
+availability and requirements
+project name: scps
+
+project home page: http://www.paccanarolab.org/software/scps
+
+operating systems: windows, mac os x, linux
+
+programming language: c++
+
+license: gnu general public license  v3
+
+restrictions to use by non-academics: none
+
+authors' contributions
+tn designed and implemented the scps graphical and command line interfaces, contributed robustness, stability and scalability improvements to the original algorithm and performed benchmarks. rs provided important biological insights and ideas to the algorithm and the datasets and extensively tested the software. ap conceived and implemented the first version of the algorithm, contributed valuable ideas to the present implementation and tested the algorithm. tn, rs and ap contributed to the writing of the paper. all the authors have read and approved the final manuscript.
+

@@ -1,0 +1,230 @@
+BACKGROUND
+the advancements of next-generation sequencing technologies have enabled inexpensive and rapid generation of vast amounts of sequencing data  <cit> . at the same time, high-throughput sequencing technologies present us with the challenge of processing and analyzing large data sets that they provide. a fundamental computational challenge encountered in next-generation sequencing systems is the one of determining the order of nucleotides from the acquired measurements, the task typically referred to as base calling. the accuracy of base calling is of essential importance for various downstream applications including sequence assembly, snp calling, and genotype calling  <cit> . moreover, improving base calling accuracy may enable achieving desired performance of downstream applications with smaller sequencing coverage, which translates to a reduction in the sequencing cost.
+
+a widely used sequencing-by-synthesis platform, commercialized by illumina, relies on reversible terminator chemistry. illumina’s sequencing platforms are supported by a commercial base-calling algorithm called bustard. while bustard is computationally very efficient, its base-calling error rates can be significantly improved by various computationally more demanding schemes  <cit> . such schemes include work presented in  <cit> . among the proposed methods, the bayescall algorithm  <cit>  has been shown to significantly outperform bustard in terms of the achievable base calling error rates. by relying on a full parametric model of the acquired signal, bayescall builds a bayesian inference framework capable of providing valuable probabilistic information that can be used in downstream applications. however, its performance gains come at high computational costs. a modified version of the basecall algorithm named naivebayescall  <cit>  performs base calling in a much more efficient way, but its accuracy deteriorates . both bayescall and naivebayescall rely on expectation-maximization  framework that employs a markov chain monte carlo  sampling strategy to estimate the parameters of the statistical model describing the signal acquisition process. this parameter estimation step turns out to be very time-consuming, limiting practical feasibility of the proposed schemes. highly accurate and practically feasible parameter estimation and base-calling remain a challenge that needs to be addressed.
+
+in this paper, we propose a hidden markov model  representation of the signal acquired by illumina’s sequencing-by-synthesis platforms and develop a particle filtering  base-calling scheme that we refer to as particlecall. when relying on the bayescall’s markov chain monte carlo implementation of the em algorithm  to estimate system parameters, particlecall achieves the same error rate performance as bayescall while reducing the time needed for base calling by a factor of  <dig>  to improve the speed of parameter estimation, we develop a particle filter implementation of the em algorithm . pfem significantly reduces parameter estimation time while leading to a very minor deterioration of the accuracy of base calling. finally, we demonstrate that particlecall has the best discrimination ability among all of the considered base calling schemes.
+
+methods
+in this section, we first review the data acquisition process and the basic mathematical model of the illumina’s sequencing-by-synthesis platform. then we introduce a hidden markov model  representation of the acquired signals. relying on the hmm model and particle filtering  techniques, we develop a novel base calling and parameter estimation scheme and discuss some important practical aspects of the proposed method.
+
+illumina sequencing platform
+a sequencing task on the illumina’s platform is preceded by the preparation of a library of single-stranded short templates created by performing random fragmentation of the target dna sample. each single-stranded fragment in the library is placed on a glass surface  and subjected to bridge amplification in order to create a cluster of identical copies of dna templates  <cit> . the flow cell contains eight lanes where each lane is divided into a hundred of nonoverlapping tiles. the order of nucleotides in a dna template is identified by synthesizing its complementary strand while relying on reversible terminator chemistry  <cit> . ideally, in every sequencing cycle, a single fluorescently labeled nucleotide is incorporated into the complementary strand on each copy of the template in a cluster. the incorporated nucleotide is a watson-crick complement of the first unpaired base of the template. in reversible terminator chemistry, four distinct fluorescent tags are used to label the four bases, and are detected by ccd imaging technology. the acquired images are processed in order to obtain intensity signals indicating the type of nucleotide incorporated in each cycle. these raw signal intensities are then analyzed by a base-calling algorithm to infer the order of nucleotides in each of the templates.
+
+quality of the acquired raw signals is adversely affected by the imperfections in the underlying sequencing-by-synthesis and signal acquisition processes. the imperfections are manifested as various sources of uncertainties. for instance, a small fraction of the strands being synthesized may fail to incorporate a base, or they may incorporate multiple bases in a single test cycle. these effects are referred to as phasing and pre-phasing, respectively, and they result in an incoherent addition of the signals generated by the synthesis of the complementary strands on the copies of the template. other sources of uncertainty are due to cross-talk and delay effects in the optical detection process, the residual effects that are readily observed between subsequent test cycles, signal decay, and measurement noise.
+
+overview of the mathematical model
+to describe the signal acquired by the illumina’s sequencing-by-synthesis platform, a parametric model was proposed in  <cit> . basic components of the model are overviewed below.
+
+a length-l dna template sequence is represented by a 4×l matrix s, where the ithcolumn of s, si, is considered to be a randomly generated unit vector with a single non-zero entry indicating the type of the ithbase in the sequence. we follow the convention where the first component of the vector sicorresponds to the base a, the second to c, the third to g, and the fourth to t and denote them as ea,ec,eg,et. the goal of base-calling is to infer unknown s from the signals obtained by optically detecting nucleotides incorporated during the sequencing-by-synthesis process.
+
+let p denote the average fraction of strands that fail to extend in a test cycle. phasing is modeled as a bernoulli random variable with probability p. let q denote the average fraction of strands which extend by more than one base in a single test cycle. pre-phasing is modeled as a bernoulli random variable with probability q. length of the synthesized strand changes from i to j with probability 
+
+  pij=p,ifj=i,1−p−q,ifj=i+ <dig> q,ifj=i+ <dig> ,otherwise. 
+
+let p denote an × transition matrix with entries pijdefined above, 1≤i,j≤l +  <dig>  the signal generated over l cycles of the synthesis process is affected by phasing and pre-phasing and can be expressed as x=sh, where h= is an l×l matrix with entries hi,j= <dig>  the probability that a synthesized strand is of length i after j cycles. here pj denotes the jth power of matrix p. the decay in signal intensities over cycles  is modeled by the per-cluster density random parameter λt, 
+
+  λt=λt−1+λt−1𝜖t, 
+
+where 𝜖t∼𝒩 is a one-dimensional gaussian random variable and dt is the per-cluster density decay parameter within  <cit> . we represent the tthcolumn of h as htand the tth column of x as xt. incorporating the decay into the model, the signal generated in cycle t is expressed as 
+
+  xt=λtsht, 
+
+where xt=xtaxtcxtgxtt″ is the vector of signals generated in each of the optical channels. assuming gaussian observation noise, the measured intensities at cycle t are given by 
+
+  yt=ktxt+∑b∈{a,c,g,t}xtbηtb, 
+
+where ktdenotes the 4× <dig> crosstalk matrix describing overlap of the emission spectra of the four fluorescent tags, and ηta,ηtc,ηtg,ηtt are independent, identically distributed  4× <dig> gaussian random vectors with zero mean and a common 4× <dig> covariance matrix Σt.
+
+note that, due to typically small values of p and q, the components of the vector ht around its tth entry are significantly greater than the remaining ones. this observation can be used to simplify the expressions  and . in particular, let htw denote the vector obtained by windowing ht around its tth entry, i.e., by setting small components of ht to  <dig>  in general, we consider l + r +  <dig> dominant components of htcentered at position t, ht−l,t,ht−l +  <dig> t,…,ht,t,…ht + r− <dig> t,ht + r,t, and then expression  becomes 
+
+  xt≈xtw=λtshtw=λt∑i=−lrst+iht+i,t. 
+
+finally, note that the signal measured in cycle t is empirically observed to contain residual effect from the previous cycle. the residual effect is modeled by adding αtyt−1to yt, where the unknown parameter αt∈. therefore, the model can be summarized as 
+
+  λt|λt−1∼𝒩λt− <dig> λt−12σt <dig> yt|yt− <dig> s,λt∼𝒩ktxtw+αtyt− <dig> ∥xtw∥22Σt,st∼unifea,ec,eg,et,xtw=λtshtwt= <dig> ,…,l 
+
+ where ∥·∥ <dig> denotes the l2-norm of its argument, and where y0= <dig>  λ0= <dig> 
+
+hidden markov model of dna base-calling
+in this section, we reformulate the statistical description of the signal acquired by the illumina’s sequencing-by-synthesis platform as a hidden markov model   <cit> . hmms comprise a family of probabilistic graphical models which describe a series of observations by a “hidden” stochastic process and are generally suitable for representing time series data. sequencing data obtained from the illumina’s platform is a set of time-series intensities y1:l, motivating the hmm representation. hmms provide a convenient framework for state and parameter estimation, which we exploit to develop a particle filter base-calling scheme in the next section.
+
+for the sake of convenience, we remove the dependency between subsequent observations yt− <dig> and yt by defining yt″=yt−αtyt− <dig> t= <dig> ,…,l. therefore, we can write 
+
+  yt″|s,λt∼𝒩ktxtw,∥xtw∥22Σt. 
+
+components of y1:l″ are the observations of our hmm, and depend on the underlying signals x1:l. moreover, let stw denote the 4× windowed submatrix of s, i.e., 
+
+  stw=. 
+
+since xtw=λtshtw=λt∑i=t−lt+rsihi,t, it is clear that yt″ depends on λtand stw. therefore, we define the state of the hmm to be the combination of λt and stw – the per-cluster density at cycle t and the collection of  bases around  the base in position t, respectively.
+
+the proposed hmm representation is illustrated in figure  <dig>  the observation dynamics that characterize the relationship between yt″ and the hidden states  are given by the distribution g. it is straightforward to show from  that 
+
+  gyt″|stw,λt∼𝒩ktxtw,∥xtw∥22Σt. 
+
+on the other hand, the state transition dynamics is described by the transition probability between subsequent states,  and . since stw and λt are independent, the transition probability is 
+
+  f=f1f <dig>  
+
+the second term on the right-hand side of , f <dig>  is known from the density decay model , 
+
+  f2∼𝒩λt− <dig> λt−12σt2). 
+
+for notational convenience, we use st,1w,…,st,l+r+1w to denote the set of l + r +  <dig> column vectors of stw. note that for k= <dig> ,…,l + r +  <dig>  the column vectors st− <dig> kw in st−1w and the column vectors st,k−1w in stw actually represent the same base. therefore, the transition model between them can be represent by a δ function as 
+
+  p=δ{st,k−1w=st− <dig> kw}= <dig> ifst,k−1w=st− <dig> kw, <dig> ifst,k−1w≠st− <dig> kw. 
+
+let u denote a uniform distribution on the support set of unit vectors . we assume no correlation between consecutive bases of the template sequence, i.e., st,l+r+1w is generated from u. therefore, f <dig> can be written as 
+
+  f1=∏k=2l+r+1δ{st− <dig> kw=st,k−1w}ust,l+r+1w, 
+
+ where u∼u. hereby, all the components of the hmm are specified.
+
+particlecall base-calling algorithm
+the goal of base calling is to determine the order of nucleotides in a template from the acquired signal y1:t. this can be rephrased as the problem of inferring the most likely sequence of states  of the hmm in - from the observed sequence y1:t″. we assume that the parameters Λ={p,q,d1:l,α1:l,σ1:l,k1:l,Σ1:l} are common for all clusters within a tile, and that they are provided by a parameter estimation step discussed in the following section. in this section, we introduce a novel base calling algorithm particlecall which relies on particle filtering techniques to sequentially infer  and, therefore, recover the matrix s.
+
+in general, particle filtering  methods generate a set of particles with associated weights to estimate the posteriori distribution of unknown variables given the acquired measurements  <cit> . in the proposed hmm framework, we sequentially calculate the posteriori distribution of the columns of sp,t= <dig> ,…,l, and find the maximum a posteriori  estimates of st by solving 
+
+  s^t=argmaxst∈{ea,ec,eg,et}{p}. 
+
+our algorithm relies on a sequential importance sampling/resampling  particle filter scheme  <cit>  to calculate p. different choices and approximation methods of proposal densities are considered in  <cit> . we directly use the transition  as the proposal density. this sequential importance sampling suffers from degeneracy and the variance of the importance weights will increase over time. to address the degeneracy problem, a resampling step is introduced in order to eliminate samples which have small normalized importance weights. common resampling methods include multinomial resampling  <cit> , residual resampling  <cit>  and systematic resampling  <cit> . we measure degeneracy of the algorithm using the effective sample size keff and, for the sake of simplicity, employ multinomial resampling strategy. if we denote the number of particles by np and associated weights by w, then keff=)2)− <dig> and resampling step is used when keff is below a fixed threshold nthreshold. nthreshold of size o is typically sufficient  <cit> . in our implementation, we set nthreshold=np/ <dig> 
+
+we omit further details for brevity and formalize the particlecall algorithm below.
+
+
+algorithm 1
+particlecall base-calling algorithm 
+
+ <dig>  initialization:
+
+ <dig>  initialize particles:fori=1→npdo
+
+ sample each column of the submatrix s1w, from u; sample λ <dig> from a gaussian distribution with mean  <dig>  and the variance calculated using bustard’s estimates of λin the first  <dig> test cycles.end for
+
+ <dig>  compute and normalize weights for each particle according to w1∝g,λ1) as in .
+
+ <dig>  run iteration t:
+
+ <dig>  sampling:fori=1→npdo
+
+ sample stw,,λt∼f,λt−1) according to .end for
+
+ <dig>  update the importance weight 
+
+  wt∝wt−1gyt″|stw,,λt. 
+
+ <dig>  normalize the weights. calculate the posteriori probability of st and obtain the estimate s^t.
+
+ <dig>  resampling:ifkeff=∑k=1np)2−1≤nthresholdthen
+
+ draw npsamples {s¯tw,,λ¯t,j= <dig> …,np} from {stw,,λt,i= <dig> …,np} with probabilities proportional to {wt,i= <dig> …,np}. assign equal weight to each particle, w¯t=1/np.end if
+
+since stw in the hmm states are discrete with a finite alphabet, and the transitions of stw and λt are independent according to , it is possible to rao-blackwellize the particlecall algorithm. rao-blackwellization is used to marginalize part of the states in the particle filter, hence reducing the number of needed particles np <cit> . we marginalize the discrete states stw and reduce the hidden process to λt, while relying on the particle filter to calculate p.
+
+the original posterior distribution of the states can be expressed as 
+
+  pλ1:t,s1:tw|y1:t″=ps1:tw|y1:t″,λ1:tpλ1:t|y1:t″. 
+
+since p∝pp), where λt− <dig> is a sample from p, we can state the rao-blackwellized particlecall algorithm as below.
+
+algorithm 2
+rao-blackwellized particlecall algorithm 
+
+ <dig>  initialization:
+
+ <dig>  initialize particles:fori=1→npdo
+
+ sample λ <dig> from a gaussian distribution with mean  <dig>  and the variance calculated using bustard’s estimates of λin the first  <dig> test cycles.end for
+
+ <dig>  compute and normalize weights for each particle according to w1∝g)∝∑s1wg).
+
+ <dig>  calculate the discrete distribution p) for each i.
+
+ <dig>  run iteration t:
+
+ <dig>  sampling:fori=1→npdo
+
+ sample λt∼f).end for
+
+ <dig>  update the importance weight wt∝wt−1g). and normalize the weights.
+
+ <dig>  resample if keff≤nthreshold
+
+ <dig>  update p)fori=1→npdo
+
+ update p) using p) and λt.end for
+
+in step  <dig>  of algorithm  <dig>  the quantity g) can be obtained by marginalizing over discrete states stw and st−1w, 
+
+  gyt″|y1:t−1″,λ1:t=∑stwpyt″|y1:t−1″,stw,λ1:tpstw|y1:t−1″,λ1:t=∑stwpyt″|stw,λt∑st−1wpstw|st−1w,y1:t−1″,λ1:t×pst−1w|y1:t−1″,λ1:t, 
+
+where p) is the observation density, p)=p) due to the independence of the state transitions, and p)=p due to the markov property and the independence of the state transitions.
+
+in step  <dig>  of algorithm  <dig>  the update equation is obtained as 
+
+  pstw|y1:t″,λ1:t∝pstw,yt″,λt|y1:t−1″,λ1:t−1=∑st−1wpyt″,stw,λt|y1:t−1″,st−1w,λ1:t−1×pst−1w|y1:t−1″,λ1:t−1=∑st−1wpyt″|stw,λt,y1:t−1″,st−1w,λ1:t−1×pstw,λt|y1:t−1″,st−1w,λ1:t−1×pst−1w|y1:t−1″,λ1:t−1=pyt″|stw,λtpλt|λt−1×∑st−1wpstw|st−1wpst−1w|y1:t−1″,λ1:t− <dig> 
+
+parameter estimation
+to determine the set of parameters Λneeded to run the proposed particlecall base calling algorithm, one could rely on the mcmc implementation of the em algorithm  proposed in  <cit> . in section results and discussion, we demonstrate the performance of the particlecall algorithm that relies on the mcem parameter estimation scheme. note, however, that the mcmc sampling strategy employed by mcem requires a lengthy burn-in period and a very large sample size to perform the expectation step. therefore, the mcem parameter estimation scheme is computationally rather intensive and requires significant computational resources if it is to be used for processing large sequencing data sets. as an alternative, we develop an em parameter estimation scheme which relies on the proposed hmm and uses samples generated by a particle filter to evaluate the expectation of the likelihood function. we refer to this algorithm as the particle filter em . the speed and accuracy of the proposed scheme is practically sound for use in next generation sequencing platforms.
+
+assumptions on parameters
+recall that the set of parameters needed to run particlecall is Λ={pqd1:lα1:lσ1:lk1:lΣ1:l}. the phasing and prephasing parameters p and q are assumed to be the same for each sequencing lane and are estimated using the same procedure as bustard . the remaining parameters are assumed to be cycle-dependent and need to be estimated for each tile. the cycle-dependency assumption on the parameters can lead to a substantial improvement in the base-calling accuracy  <cit> . in order to avoid over-fitting, we assume that parameters remain constant within a short window of cycles and then change to a different set of values. to track the changes in the parameters, we first divide the total read length l into several non-overlapping windows and then perform our parameter estimation window-by-window. to further reduce the number of parameters and improve the estimation efficiency, we assume that the parameters d1:l and σ1:l are uniformly distributed over an interval and incorporate them into the hidden states of the hmm model. therefore, only the mean and variance of these parameters, i.e., dmean, dvar, σmean, and σvarneed to be estimated. computational results demonstrate that these two assumptions does not affect the accuracy of base-calling.
+
+particle filter em algorithm
+in the early sequencing cycles, effects of phasing and prephasing are relatively small. therefore, we may ignore phasing and prephasing to facilitate straight-forward computation of the initial estimates of the remaining parameters. in particular, the signal generated in the early cycles t is approximated as 
+
+  xt=λtst. 
+
+replacing  by  leads to a simplified model that allows for straightforward base calling and inference of the parameters by means of linear regression. we use these values to obtain the estimates of dmean, dvar, σmean, and σvar, and to initialize the remaining parameters α, k, Σ, in the particle filter em parameter estimation procedure.
+
+the parameter estimation is performed window-by-window and is conducted using n reads randomly chosen from a tile . assume the window length is w, and denote the window index by m. the particle filter em  algorithm finds parameters for one window and then uses these values to initialize the search for parameters in the next window. we illustrate the procedure for the first window here . let Λ1i={αi,ki,Σi} denote the set of parameters for window  <dig> in the ith iteration of the em scheme. the estimate of Λ1i is given by 
+
+  Λ1i=argmaxΛ1l1Λ1i− <dig>  
+
+where l1=∑j=1nl <dig> j is the sum of the log-likelihood functions over the reads in the training set. the log-likelihood function for each read, l <dig> j, is obtained as 
+
+  l <dig> j=logp=elogp, 
+
+where the expectation is taken with respect to p. we rely on an sisr particle filtering scheme to generate equally weighted sample trajectories from p. based on  and , we calculate logp for these samples and compute their average to approximate the expectation in . the maximization  is performed by solving equations obtained after taking gradients of l <dig> over the parameters and setting them to  <dig>  in our experiment, the pfem parameter estimation scheme performs  <dig> em iterations and uses  <dig> samples from the particle filter for each window.
+
+RESULTS
+the proposed method is evaluated on a data set obtained by sequencing phix <dig> bacteriophage using illumina genome analyzer ii with the cycle length  <dig>  this is a short genome with a known sequence which enables reliable performance comparison of different base-calling techniques. we tested particlecall and several other algorithms on a tile containing  <dig> reads, and present the results here. all the codes are written in c and the tests are run on a desktop with an intel core i <dig> 4-core 3ghz processor.
+
+performance of particlecall
+the base calling error rates are computed by aligning the reads to the reference genome and evaluating frequency of mismatches. reads that could not be aligned to the reference with at least 70% matches are discarded. note that the error rates and speed of the proposed particlecall algorithm and the parameter estimation scheme are affected by the parameters l, r, particle number np, and parameter estimation window length w. we ran particlecall with l=r∈{ <dig> ,4}. increasing l and r beyond l=r= <dig> did not affect the performance while it significantly slowed down the algorithm. this is due to small values of the phasing and prephasing probabilities, which are estimated to be p= <dig> ×10− <dig> and q= <dig> . therefore, in the remainder of the paper, we set l=r= <dig>  the accuracy of base-calling for different npis shown in table  <dig>  as seen there, for the original particlecall algorithm, np= <dig> leads to high performance with reasonable speed. rao-blackwellized particlecall can achieve the same accuracy with fewer particles ; however, its effective running time is  <dig> times that of the original particlecall with the same performance. this is because the rao-blackwellization steps in  and  require evaluating a sum over all possible stw , resulting in a fairly large number of basic operations needed to calculate exact distribution of the discrete variables. therefore, for further performance comparisons, we rely on the original particlecall algorithm . table  <dig> shows the particlecall base calling error rate and parameter estimation times for different window lengths w. in the remainder of the paper, we set w= <dig> as it leads to desirable performance/speed characteristics of the algorithm.
+
+particlecall is run using parameters obtained via the mcem parameter estimation scheme as well as via the pfem parameter estimation algorithm proposed in this paper. rao-blackwellized particlecall is run using parameters via the mcem parameter estimation scheme.
+
+particlecall base-calling error rate and the parameter estimation time of the proposed pfem parameter estimation algorithm.
+
+performance comparison of different algorithms
+the error rates and speed of the proposed particlecall algorithm are compared with those of bayescall, naivebayescall, rolexa, and bustard. we run particlecall both with parameters provided by the computationally intensive mcem algorithm as well as with those inferred by the pfem parameter estimation scheme proposed in this paper. the results are reported in table  <dig>  note that rolexa generally outputs the so-called iupac codes, unlike all the other considered algorithms which provide sequences of nucleotides a, c, g, and t. to allow a comparison, we enforce rolexa to output sequences of nucleotides as well. the comparison of per-cycle error rates is shown in figure  <dig>  it can be seen from table  <dig> and figure  <dig> that particlecall, bayescall and naivebayescall all have improved base-calling accuracy compared to bustard. bayescall is highly accurate but relatively slow – it requires approximately  <dig> hours to complete base-calling for one tile of the data. naivebayescall significantly improves base-calling speed over bayescall but it does so at the expense of incurring higher error rate. our particlecall base-calling algorithm has the same accuracy as bayescall, while being roughly  <dig> times faster. figure  <dig> shows that both particlecall and bayescall are more accurate than naivebayescall in the early cycles and improve over bustard in all cycles. note that bustard outperforms rolexa, which is consistent with the results in  <cit> . moreover, we see from table  <dig> that performing parameter estimation via the mcem algorithm proposed in  <cit>  requires  <dig> hours, while the particle filter implementation of the em estimation scheme proposed in this paper takes only  <dig> minutes. as evident from table  <dig>  running particlecall with parameters obtained by the pfem scheme leads to only a minor performance degradation compared to running it with parameters obtained by the mcem algorithm. running particlecall base calling along with the pfem parameter estimation scheme takes about  <dig> hours per tile, which is  <dig> times faster than the total time required by the less accurate naivebayescall.
+
+the base-calling error rate and the running times of different algorithms. particlecall is run using parameters obtained via the mcem parameter estimation scheme as well as via the pfem parameter estimation algorithm proposed in this paper. for bustard and rolexa, only the total running times are reported.
+
+quality scores
+quality scores are used to characterize confidence in the outcome of the base-calling procedures. they are computed as part of the analysis of the acquired raw data and may be used to filter out reads of suspect quality, or to shorten the reads if the quality scores of individual bases fall below certain thresholds. they can also provide confidence information for downstream analysis including sequence assembly and snp and genotype calling. frequently used are the so-called phred quality scores, which were originally developed to assess the quality of the conventional sanger sequencing and automate large-scale sequencing projects. phred scores are also often provided by the algorithms used for base-calling in next generation sequencing platforms. formally, the phred score for a called base in the cycle t, s^t, is defined as 
+
+  qphred=−10log10p. 
+
+essentially, qphred is the scaled logarithm of the error probability. higher quality scores imply smaller probability of the base-calling error. for the proposed particlecall algorithm, probability of correctly calling a base can be obtained from the posteriori probability as 
+
+  p=1−pst|y1:t″. 
+
+quality scores can be used to compare the discrimination ability of different algorithms. the discrimination score d at error tolerance ε is defined as the ratio of the correctly called bases having p<𝜖 ) to all called bases. figure  <dig> compares the discrimination ability of particlecall, bayescall, naivebayescall and bustard. it shows that for a reasonable error tolerance ε, particlecall with parameters obtained through mcem has better discrimination ability than bayescall, naivebayescall and bustard, while particlecall with parameters obtained through pfem has discrimination ability close to naivebayescall and better than other algorithms. in other words, when a small cutoff error tolerance ε is set and all the bases with quality scores below εare considered invalid, particlecall provides the most accurate results among the considered base-calling schemes.
+
+effects of improved base-calling accuracy on de novo sequence assembly
+in shotgun sequencing, a long target sequence is oversampled by a library of randomly fragmented copies of the target, and the overlaps between short reads obtained by a high-throughput platform are used to assemble the target. in de novo assembly, the target is reconstructed without consulting any reference  <cit> . performance of assembly algorithms highly depends on the accuracy of base calling. to demonstrate the effects of base-calling accuracy on assembly, we apply the velvet assembly algorithm  <cit>  on reads provided by bustard, rolexa, naivebayescall, bayescall, and particlecall. in particular, we randomly subsample the set of reads provided by each of the base calling algorithms to emulate 5x, 10x, 15x, and 20x coverage. then we run velvet on each of the subsets, and evaluate commonly used metrics that quantify the quality of the assembly procedure. specifically, we evaluate the maximum contig length and the n <dig> contig length. the described procedure is repeated  <dig> times to obtain average values of these two quality metrics. the results are shown in table  <dig>  as can be seen there, particlecall provides the largest n <dig> and maximum contig length among all of the considered base calling schemes, for all of the considered coverages.
+
+the maximum contig length and n <dig> length of de novo assembly using velvet. the average values over  <dig> experiments are shown in the table.
+
+CONCLUSIONS
+in this paper we presented particlecall, a particle filtering algorithm for base calling in the illumina’s sequencing-by-synthesis platform. the algorithm is developed by relying on an hmm representation of the sequencing process. experimental results demonstrate that the particlecall base calling algorithm is more accurate than bustard, rolexa, and naivebayescall. it is as accurate as bayescall while being significantly faster. quality score analysis of the reads indicates that particlecall has better discrimination ability than bayescall, naivebayescall and bustard. moreover, a novel particle filter em  parameter estimation scheme, much faster than the existing monte carlo implementation of the em algorithm, was proposed. when relying on the pfem scheme, particlecall has near-optimal performance while needing much shorter total parameter estimation and base calling time.
+
+author’s contributions
+algorithms and experiments were designed by xiaohu shen  and haris vikalo . algorithm code was implemented and tested by xs. the manuscript was written by xs and hv. both authors read and approved the final manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+

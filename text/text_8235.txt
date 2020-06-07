@@ -1,0 +1,246 @@
+BACKGROUND
+next generation sequencing  platforms can generate large amounts of sequencing data, but often with high sequence error rates. for low to medium depth data fast and efficient implementation are needed to handle the data. arguably, downstream analyses should be performed in a probabilistic context by working with the raw data in form of genotype likelihoods   <cit> . angsd is a novel and efficient program that allows for multiple error models used within the gl calculation. the remainder of this section describe the typical work flow used for analyzing data. the implementation section lists and describes existing  methods and new methods that are available in our tool. the majority of methods in angsd are not implemented in other software and in the results section we have therefore limited the comparisons with existing tools to basic analyses of snp-discovery and genotype calling.
+
+the first step in a bioinformatic pipeline for analyzing ngs data is usually to align the reads to a reference genome using a fast short read aligner  <cit> . state-of-the-art alignment programs will, in addition to inferring the genomic start position of the reads, provide additional information such as the mapping quality scores , and possibly also indicate which parts of an alignment may be affected by indels. information regarding sequencing quality is included in quality scores , typically provided by the sequencing technology, and often modified using downstream re-calibration  <cit> . based on the aligned reads, and associated mapping and sequencing quality scores, a genotype likelihood  is then calculated. the gl is  the marginal probability of the sequencing data given a genotype in a particular individual, in a particular site. most data analyses then proceed by calling snps and genotypes from the gls, typically combining information from multiple individuals, often also combining the gl with prior information, such as the inferred distribution of allele frequencies. for many applications based on high-quality deeply sequenced data, this is a near-optimal strategy for analyzing the data. however, for low or medium coverage data, there is often a distinct statistical advantage in working on the raw data, or gls, rather than called genotypes in downstream analyses  <cit> . working directly on gls facilitates the incorporation of statistical uncertainty regarding genotypes. the uncertainty regarding genotypes in low coverage data arises from several sources, including mapping and sequencing errors, and the random sampling of  reads from a diploid genotype.
+
+the de facto standard format to store and distribute ngs data in, is the bam format which allows for random access within the sequencing data. when analyzing many individuals simultaneously, due to memory constraints, it is often convenient to analyze regions or single sites independently instead of reading all the data into memory. this is achieved by reading parts of each bam file, aligning and then passing the aligned sites for analysis. here we present an open source mutithreaded c/c++ program called angsd with this capability. angsd provides easy user access to methods for population genetic analyses and association mapping utilizing the full information of the data and taking uncertainty regarding snp calling and genotype calling into account, by working directly on user-provided, or de novo estimated, gls.
+
+examples of existing general multisample ngs analysis programs are the singlethreaded samtools  <cit>   and the multithreaded gatk  <cit>  . there are many differences between the three programs, but the key advantage with angsd is that it 1) allows for multiple input data types relating directly to raw sequencing data , 2) allows the user to choose between multiple methods for intermediate analysis such as different ways to calculate gl and 3) includes implementations of a large set of downstream analyses not implemented in any other software.
+
+implementation
+input formats
+angsd can currently parse a variety of different input formats including binary bam files and mpileup text files. genotype likelihoods input are supported for simple genotype likelihood formats and it also supports genotype  probabilities in the beagle  <cit>  format. angsd can perform various analyses, but some of these can be limited by the chosen input format e.g., sequencing depth calculation can only be performed on the basis of raw sequencing files and not gls. the dependency between the different analysis and input formats is depicted in figure  <dig>  indexed bam files facilitate random access and this feature is implemented in angsd. random access is not supported for other file formats.data formats and call graph.
+a) dependency of different data formats and analyses that can be performed in angsd. b) simplified call graph. red nodes indicate areas that are not threaded. with the exception of file readers, all analyses, printing and cleaning is done by objects derived from the abstract base class called general.
+
+
+
+methods
+some analyses can be performed on a single-site basis such as simple allele frequency estimation  and site-wise association testing. for analyses on genome wide data, the work-flow is divided into two steps: 1) angsd generates specific input data for the analysis. 2) a secondary associated program is used to perform the downstream analysis based on the angsd output  <cit> . for simple tests such as abba-baba/d-statistic  <cit>  the secondary program can be a simple rscript, but for computational intensive methods it can be a multithreaded c/c++ program. a description of the main methods are found in table  <dig>  angsd allows a number of different types of input data, but not all analyses can be performed if the input data is not sequencing data. for example, only a few methods are applicable if the input data is genotype probabilities, e.g., likelihood ratio test for snp calling can only be performed on gls and not genotype probabilities  .overview of analyses implemented in angsd
+
+
+
+analysis
+basis
+reference
+
+
+
+
+
+
+
+
+population differentiation statistics f
+st
+population structure via principle components analysis 
+
+detection of ancient admixture abba-baba/d-statistics
+estimation of sfs 
+estimation of sfs 
+
+
+
+table of the supported analyses in angsd. aindicates methods that require a secondary program in angsd package. bindicates methods for which angsd is the de facto implementation and care user supplied extensions for angsd. the basis for each analysis is either the sequencing data , base counts , genotype likelihood , sample allele frequencies  or genotype probabilities .
+
+
+
+genotype likelihoods
+for low and medium coverage ngs data, the recommended practice is to avoid basing downstream analysis on the raw counts of sequenced bases or called genotypes  <cit> , but instead use a probabilistic approach by using gls. many of the methods within angsd are based on gls . angsd supports four different models for calculating gls: 1) the recalibrating soapsnp model  <cit> . 2) the original gatk model  <cit>  3) samtools  <dig> + modified maq model  <cit> . 4) the type specific error model  <cit> . the sequencing error rates in these gl models are either fixed, obtained from qscores, or estimated from the data. the four implemented gl models assume diploid samples.
+
+allele frequency estimators
+the sample allele frequency in a site is the frequency of the allele among the individuals included in a specific sample. the population allele frequency is the  frequency of the allele in the entire population. without genotype uncertainty, the sample allele frequency is known and the population allele frequency can be estimated from the sample allele frequency. however, in the presence of genotype uncertainty, the sample allele frequency is unknown, but can be estimated from the raw data or from the genotype likelihoods  <cit> . we have implemented several estimators of population  and sample allele frequencies , that can be estimated based on gl’s, base counts or genotype posteriors. by using the population allele frequency we have implemented a likelihood ratio test  of the site being variable which can be used as a snp discovery criterion, and a bayesian approach for calling genotypes.
+
+population genetic analysis based on sample allele frequencies
+several analyses are based on sample allele frequency likelihoods instead of single individual genotype likelihoods. a sample allele frequency likelihood is  the probability of all read data for multiple individuals at a site, given the sample allele frequency. the methods in  <cit>  use the sample allele frequency likelihood in several applications, including estimation of the site frequency spectrum , and estimation of tajima’s d and various other neutrality tests can be estimated taking genotype uncertainty into account  <cit> . these methods are included in the angsd package as separate programs that utilize angsd output. various bayesian estimation procedures are also implemented, including maximum a posteriori probability  estimates of the sample allele frequency  <cit> . the implementation in angsd allows for the use of externally estimated posterior probabilities  for the calculation of posterior sample allele frequencies and other downstream analyses. importantly, angsd also allows for the joint estimation of sample allele frequencies from two populations :
+
+assuming two populations with n <dig> and n <dig> diploid individuals sampled from population  <dig> and  <dig>  respectively. then the 2d-sfs is the matrix γ :× of frequencies of derived sample allele counts in the two populations, i.e. γij is the probability of observing i and j derived alleles population  <dig> and  <dig>  respectively, in a randomly chosen site.
+
+let pxsd∣dd=i denote the likelihood for the sequencing data, in population d for site s, given a total of i derived alleles in population d. this likelihood is calculated using the algorithm described in ref.  <cit> . we can then write the likelihood for a single site s for the 2d-sfs as: 
+  lx|γ=∏s=0nlxs∣γ=∏s=0n∑i=02n1∑j=02n2γijpxs1∣d1=i×pxs2∣d2=j 
+
+in order to find the maximum likelihood we use an em-algorithm. assuming γold is our current parameters, a next iteration in the em-algorithm is given by: 
+ γijnew=∑s=0npxs1∣d1=ipxs2∣d2=j/lxs∣γold. 
+
+the algorithm then iterates updates of all ij simultaneously until the difference in successive likelihood values is below some tolerance.
+
+population structure
+genomes for admixed individuals represent a mixture of alleles from different ancestral populations. inferring individual admixture proportions along with a frequency estimate for the different ancestral populations is possible based on genotype likelihoods  <cit>  based on output from angsd. similarly the sample allele frequency likelihoods generated in angsd can be used to calculate statistics relevant to population structure analyses including inbreeding coefficients  <cit> , fst and principal component analyses   <cit> .
+
+another approach for detecting admixture including ancient admixture is the abba-baba test also called the d-statistic  <cit> . for sequencing data the strategy for this test is based on sampling a single base at each position of the genome  <cit> . this strategy removes bias caused by depth differences which is a fundamental problem of ngs data. given an outgroup angsd gives d-statistics for all possible combinations of the chosen individuals.
+
+association
+finding disease causing mutation is often done using association studies based on called genotypes. angsd provides two approaches for performing association studies that are appropriate for ngs data. both are based directly on genotype likelihoods which takes all the uncertainty of the ngs data into account. the first method can be used in a simple case/control setting  <cit>  where differences in allele frequencies between cases and controls are compared. the other approach is a more flexible generalized linear regression framework  <cit>  which allows for quantitative traits and inclusion of covariates. this approach is also implemented for genotype probabilities such as the ones estimated from haplotype imputation.
+
+base error estimation
+several error estimates of type specific base error rates are implemented. the simplest is based on the mismatch rate that also forms the basis of soapsnp  <cit> . another approach that tries to estimate the real error rate and not the mismatch rate is based on an outgroup  <cit>  and a high quality individual. the third approach estimates error rates, genotype likelihoods and allele frequencies simultaneously in order to determine the base error rate of polymorphic sites  <cit> .
+
+limitations & roadmap
+most statistical methods in angsd assume a diploid organism and does not support pooled data. indels are represented internally in angsd, but no method currently utilizes this information. we also acknowledge that bcf/vcf files are heavily used and have begun including basic vcf input/output in the development version. no analysis in angsd uses pedigree information such as gatk’s phasebytransmission. the cram format has been suggested as a successor to the bam format, but angsd does not support this in the current version and depending on the general acceptance of this new format we might include it in future versions. finally samtools and gatk include many different filters at the site level whereas these have not been included in angsd yet.
+
+RESULTS
+angsd is the de facto implementation of many published methods , and we will in this section show examples of how to use angsd including a novel method of estimating the joint site frequency spectra for two populations and an implementation of the abba-baba d-statistic  <cit>  for ngs data. we will also show that having the ability to decide which method to use for some of the intermediate analyses, such as calculation of gl, is important and can have a large effect on the downstream analyses.
+
+the genotype likelihood model affects downstream analysis
+as an example of the effect of genotype likelihood model on the analysis, we estimated the sfs for  <dig> european  and  <dig> african  unrelated samples from the  <dig> genomes project  <cit>  sequenced using the illumina platform. we used the method described in  <cit>  implemented in angsd to estimate the site-frequency spectrum. this is a two step procedure that first involves calculating the sample allele frequency likelihoods followed by a numerical optimization for finding the maximum likelihood estimate of the sfs. ancestral sites were obtained from the pantro <dig> genome from the multiz46way dataset sync://hgdownload.cse.ucsc.edu/goldenpath/hg19/multiz46way/maf , and the analysis was based on a  <dig> mb region from chromosome  <dig> by limiting our analysis to the sites with high mappability and discarding telomeres and centromeres. the angsd command used was
+
+
+
+we use the bam files for the european samples listed in the file “ceu.list”, limit our analysis to the non-centromeric/telomeric regions defined in the file “regions.txt”, estimate the sample allele frequencies likelihoods , define the output files  with prefix ceu.gl <dig>  and use the genotype likelihood model from samtools . in order to estimate the joint allele frequency with yri at a later stage we restrict the printed output to sites that are also present in the african sample and specified in the filters.txt file.
+
+we also repeat the above analysis using the yri population, and repeat the analyses for both populations using the gatk genotype likelihood model  <cit>  .
+
+from the sample allele frequency likelihoods for each site we then estimate the sfs using the expectation maximization  algorithm:
+
+
+
+here realsfs is the secondary program written in c++, and finds the optima of equation  in  <cit> . we supply the realsfs with the file containing the sample allele frequency likelihoods  and tell the program that the file contains  <dig> chromosomes  and it should try to use  <dig> computer cores. the resulting four frequency spectra  are shown in figure  <dig>  from the figure it is evident that the analysis is highly sensitive to the chosen gl model. we emphasize that there is a clear need for more research on comparing methods for estimating gls, and possible for developing new and more appropriate methods for estimating gls. however, such research is beyond the scope of this paper. we here emphasize that the angsd approach for estimating the sfs has been shown by others  <cit>  to be superior to the genotype calling approaches used by samtools and gatk.1d sfs for different gl models. sfs estimation based on a  <dig> megabase region from chromosome  <dig> using  <dig> ceu samples a) and  <dig> yri samples b)” from the  <dig> genomes project. the analysis was performed for both the gatk gl model  and samtools gl . notice the difference in estimated variability  for the two gl models, with gatk gl based analyses inferring more variable sites and an associated larger proportion of low-frequency alleles. the two categories of invariable sites have been removed and the distributions have been normalized so that the frequencies of all categories sum to one for each method.
+
+
+
+joint site frequency spectrum
+we have generalized the approach for estimating the one dimensional sfs  <cit>  to allow for two populations . to obtain the maximum likelihood estimate of the joint frequency spectrum we use an em algorithm  by evoking the following command:
+
+
+
+the result is shown on figure  <dig>  unlike joint sfs based on snp chip data , where most snps are polymorphic in both african and europeans, this plot shows that most derived alleles are private to one of the populations. this is also observed between chinese and africans  <cit>  and the difference between the snp chip data and the sequencing data is caused by ascertainment biases in the chip data where snps are often chosen because they are common in populations such as european  <cit> . we have also performed a proper simulation study by simulating genotypes for two populations that follows a demographic pattern similar to european and african populations, assuming realistic recombination and mutation rates for humans. we simulated genotypes corresponding to a  <dig> mb region using msms  <cit> , and based on the genotypes we calculated genotype likelihoods using the method described in  <cit> . this was done by assuming a mean sequencing depth of 2x and an error rate of  <dig> %. the true spectrum is visualized as a heat map in additional file 1: figure s <dig>  and our estimated spectrum in additional file 2: figure s <dig> and additional file 3: figure s <dig> joint sfs . two dimensional sfs estimation based on a  <dig> megabase region from chromosome  <dig> using  <dig> ceu samples and  <dig> yri samples from the  <dig> genomes project.
+
+
+
+abba-baba
+to illustrate the use of the abba-baba analyses  <cit>  we demonstrate two analyses:  an analysis of modern human samples, and  a comparison of modern human sequences and ancient dna from the denisovan hominin. for the modern individuals we tested a european , a native american , a papuan , a han chinese and an african   <cit> . the angsd command used in the first analysis was
+
+
+
+the abba-baba test is based on a sample of counts of bases , an outgroup , which in this case is the chimpanzee,  <dig> mb block size , and a strict filtering of bases based on quality scores  and mapping quality . a small rscript is used to perform a blocked  jack knife procedure to obtain standard deviations and resulting the z-scores. the results are shown in table  <dig>  the results are consistent with the current understanding of human migration out of africa and even shows the recently proven link between europeans and native americans through a shared ancestral central asian population  <cit> .d-stat results for modern samples
+
+
+h1
+h2
+h3
+nabba
+nbaba
+dstat
+jackest
+se
+z
+results of the abbababa analysis for modern individuals from the human genetic diversity panel.
+
+
+
+in the second analysis we used the following commands:
+
+
+
+in the command line above, we removed transitions  which are known to have extremely high error rates for ancient genomes. a more elaborate scheme for filtering bases using base quality scores can also be used to specify a different threshold for each individual and each of the four bases, and has also been implemented  <cit> . the results for the tests are shown in table  <dig>  this test for introgression between papuan ancestors and denisovans rejects the tree ,denisova), chimpanzee), with a z score of  <dig> , in accordance with the current understanding in the field  <cit> .d-stat for ancient sample
+
+
+h1
+h2
+h3
+nabba
+nbaba
+dstat
+jackest
+se
+z
+results of the abbababa analysis for  <dig> modern individuals and one ancient sample.
+
+
+
+snp discovery and genotype calling
+population genetic analyses are traditionally based on called genotypes, but this poses a significant problem for ngs data due to the nature of the technology. genotypes are not directly observable, but must be inferred from the data. for low or medium coverage data there can be considerable uncertainty in genotype inferences, potentially leading to errors or biases in downstream analyses. arguably, the optimal solution to this problem is to avoid genotype calling altogether, and instead base inferences on methods that incorporate genotype uncertainty with the gls  <cit> . however, we recognize that many analyses have not been generalized to be based on gls instead of called genotypes, and we have therefore included basic snp discovery and genotype calling into angsd, using methods that efficiently can take advantage of estimated priors derived from gl based analyses. in angsd snps are inferred based on allele frequency estimation using a likelihood ratio test that can reject that the allele frequency is  <dig>  <cit> . we compare snp calling using gatk , samtools  and angsd based on  <dig> ceu samples from the  <dig> genomes project  <cit> . angsd, samtools and gatk take into account the quality of the called bases  by modeling the uncertainty of possible genotypes, but differ in gl model, snp calling criterion, filtering, etc . in the commands below we perform snp calling for all combinations of 1) p-value of site being variable 10− <dig> .01-snp_pval 2) using local qscore recalibration with the baq model  <cit>  -baq 3) samtools or gatk gl model -gl.
+
+
+
+venn diagrams of the overlap of sites are shown in figure  <dig> , additional file 4: figure s <dig> , additional file 5: figure s <dig> , and additional file 6: figure s <dig> . notice the difference in variable sites for the different gl models, and the decrease of variable sites when applying baq. when choosing a lenient p-value threshold  angsd infers more snp sites than the other two methods when choosing a strict p-value threshold  fewer sites are called. in these analyses we removed sites that were called as homozygous for alternative alleles for samtools and gatk.overlap between inferred snps with a critical p-value threshold of
+10
+−6
+ and not using baq. venn diagram of the overlap between the snp discovery for angsd, gatk and samtools for  <dig> ceu samples for chromosome  <dig>  we used default parameters with gatk for samtools we discarded reads with a mapping quality below  <dig>  for angsd we choose an p-value threshold of 10− <dig> and didn’t enable baq. in a, we used the samtools genotype likelihood model in angsd, in b we used the gatk model in angsd.
+
+
+
+assuming a segregating site is diallelic, there are  <dig> possible genotypes. in angsd we allow for  <dig> different methods for calculating genotype posteriors , and we can define simple genotype calling criteria using these posteriors. we can either choose the genotype with the maximum posterior probability, or more sensibly, we can define a cutoff such that a genotype will be set to missing if it is below a certain threshold. our  <dig> models for calculating gp are 1) assuming uniform prior   2) using an estimate of the population frequency as prior   <cit>  3) using the sfs as prior by calculating the genotype probabilities for an individual conditional on the information for all individuals  <cit>  . we compared the three different angsd approaches with two existing tools for genotype calling  by using  <dig> ceu individuals that are part of the 1000genomes project and the hapmap project  <cit> . the exact commands used for this analysis in additional file  <dig> 
+
+we include reference genome information for all methods even though angsd does not need the information. additionally, we force all methods to call genotypes for all sites. each genotype call is assigned a probability or quality score. a threshold can then be applied to remove low quality calls. for sites where the different method did not provide a genotype call we set the genotype as homozygous for the reference allele and give the call the worst possible quality score. the results for the  <dig> , <dig> hapmap sites for all  <dig> methods are shown in figure  <dig>  the jaggedness of the samtools/gatk curves are due to the discretization of the phred scaled genotype qualities. we observe no big difference between the different methods for high call rates. for lower call rates we see that the ml method in angsd is somewhere between the gatk and samtools methods. for very low call rates we see that samtools outperforms the other methods.error rate vs call rate for called genotypes. error rate and call rates for genotype calls based on different methods. the error rate is defined as the discordance rate between hapmap genotype calls compared to the same individuals sequenced in the  <dig> genomes. genotype where called for all sites for all individuals for all methods. each genotype call has a score which was used to determine the call rate. due to the discrete nature of some of the genotype scores we obtain a jagged curve.
+
+
+
+computational speed
+to compare the running time of angsd with existing tools we performed simple snp discovery and allele frequency estimation for angsd, gatk and samtools. this we did with  <dig> samples,  <dig> samples and  <dig> samples . for angsd and gatk we redid the analysis, but this time allowing for  <dig> and  <dig> cores . the result is shown in table  <dig>  a fair comparison between tools is impossible for several reasons: 1) the tools perform slightly different analyses. 2) the storage subsystem might behave very different on different systems. 3) samtools is in its current version non thread-able in downstream analyses. 4) difference in workload at runtime. in practice most analyses can be run in parallel over different chromosomes or even smaller regions, which makes the lack of threading in samtools more of a nuisance than a real problem. we would expect the runtime to be linear in the region size for all programs, and observed similar memory usage for all three tools. from the table we observe that angsd is faster in all scenarios, but we emphasize that can not conclude that angsd is generally faster, but we do not expect that it is significantly slower than samtools and gatk on any given system. we also note that the bottleneck for simple analyses is the file reading, and allocating an unlimited number of cores will not decrease the running time, but might actually increase it. this is what we observe for both angsd and gatk for this simple analysis. in a more complex analysis setting such as saf estimation we would expect a better utilization of the threads. see additional file  <dig> for commands used.computational speed of gatk,samtools and angsd
+
+
+samtools
+gatk
+angsd
+gatk 
+angsd 
+gatk 
+angsd 
+wallclock time  measured in seconds for different samples sizes and different number of allocated cores. commands used are found in additional file  <dig>  we did the analysis twice  and picked the lowest value. notice that the runtime for gatk and angsd does not decrease with  <dig> and  <dig> threads. this could be an indication that the file reading is the bottleneck.
+
+
+
+CONCLUSIONS
+we have developed a fast program for analyses of ngs data that enable researchers to perform various analyses, particularly population genetic analyses that are not implemented in any other existing programs. for many of the analyses we use the full information of the data by avoiding genotype and snp calling and instead basing analyses on gls, calculated using different methods, typically using quality scores. this is especially useful for low-coverage data and for non-human organisms where imputation can not be performed reliably due to the lack of a reference population.
+
+availability and requirements
+project name: angsd 
+
+project home page:http://www.popgen.dk/angsd, https://github.com/angsd.
+
+operating system: platform independent. but only tested on the linux distribution ubuntu.
+
+programming language: c/c++.
+
+other requirements: zlib. for some downstream analysis r is required.
+
+license: gpl version  <dig> 
+
+any restrictions to use by non-academics: none.
+
+
+
+additional files
+additional file  <dig> 
+figure s <dig>  true 2d site frequency spectrum. a heatmap of the two dimensional site frequency spectrum simulated on the basis of known genotypes using a demographic model to mimick  <dig> european individuals and  <dig> african samples. the estimated spectrum can be found in additional file 2: figure s <dig> 
+
+
+
+additional file  <dig> 
+figure s <dig>  estimated 2d site frequency spectrum. a heatmap of the two dimensional site frequency spectrum estimated on the basis of genotype likelihoods for simulated genotypes. data was simulated assuming a sequencing depth of 2x and an errorrate of  <dig> %. the true estimates are seen in additional file 1: figure s <dig>  and the difference between the true and the estimated can be found in additional file 3: figure s <dig> 
+
+
+
+additional file  <dig> 
+figure s <dig>  difference between true proportions vs the estimated proportions. plot of the estimated proportions and the true proportions. the estimated proportions are based on genotype likelihoods calculated assuming 2x sequencing depth and  <dig> % error rate. the genotypes are simulated using msms and should reflect the difference european individuals , and african individuals.
+
+
+
+additional file  <dig> 
+figure s <dig>  overlap between inferred snps, a critical p-value threshold of 10− <dig> and not using baq. venn diagram of the overlap between the snp discovery for angsd, gatk and samtools for  <dig> ceu samples for chromosome  <dig>  we used default parameters with gatk for samtools we discarded reads with a mapping quality below  <dig>  for angsd we choose an p-value threshold of  <dig>  and didn’t enable baq. in a, we used the samtools genotype likelihood model in angsd, in b we used the original gatk gl model in angsd.
+
+
+
+additional file  <dig> 
+figure s <dig>  overlap between inferred snps, a critical p-value threshold of 10− <dig> with baq. venn diagram of the overlap between the snp discovery for angsd, gatk and samtools for  <dig> ceu samples for chromosome  <dig>  we used default parameters with gatk for samtools we discarded reads with a mapping quality below  <dig>  for angsd we choose a p-value threshold of  <dig>  and enabled baq. in a, we used the samtools genotype likelihood model in angsd, in b we used the gatk model in angsd.
+
+
+
+additional file  <dig> 
+figure s <dig>  overlap between snp sites, a critical value of 10− <dig> with baq. venn diagram of the overlap between the snp discovery for angsd, gatk and samtools for  <dig> ceu samples for chromosome  <dig>  we used default parameters with gatk for samtools we discarded reads with a mapping quality below  <dig>  for angsd we choose a p-value threshold of 10− <dig> and enabled baq. in a, we used the samtools genotype likelihood model in angsd, in b we used the gatk model in angsd.
+
+
+
+additional file  <dig> 
+commands used for some of the analyses. text file containing the commands used in various analysis in the text. we used samtools version  <dig> .19-44428cd, and gatk version  <dig> -7-g5e89f <dig> 
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+tsk and aa wrote the code for angsd, with input from rn. tsk coded the core algorithms for data parsing and most data analysis algorithms. tsk and aa performed the data analyses in this paper. all authors contributed to the writing of the manuscript, with tsk writing the first draft. all authors read and approved the final manuscript.
+

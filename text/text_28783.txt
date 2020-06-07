@@ -1,0 +1,145 @@
+BACKGROUND
+distance methods are important for phylogenetic inference, and this is confirmed by the many available algorithms and software implementations
+ <cit> . the main ambition with several implementation efforts has been to improve the computational efficiency, which is essential for any method’s applicability. in particular, the cubic time complexity of neighbor joining 
+ <cit>  has been an obvious obstacle that several groups have challenged. one of these efforts is fast neighbour joining , a quadratic-time algorithm for tree reconstruction presented by elias and lagergren
+ <cit> . they showed in
+ <cit>  that fnj performs similar to the canonical nj method. fnj modifies the nj selection function for joining any pair of sequences together and introduced the concept of visibility set to avoid redundant computation, thus, giving a significant improvement in speed and similar accuracy as nj for computing the phylogenetic tree. this paper presents fnj, a fast and practical implementation of the fnj algorithm.
+
+a sometimes overlooked issue in distance-based method development is that the distance matrix, the input to tree reconstruction algorithms, is the real computational bottleneck. with n sequences of length l, you cannot do better than time o for estimating a distance matrix. since l is rarely smaller than n, the distance computations have cubic time complexity, and there is therefore little gain with efficient tree reconstruction.
+
+we address this efficiency problem by making speedup techniques by
+ <cit>  available in a space-efficient implementation through the fastdist program. with novel substitution-counting algorithms and register-based bit-fiddling in 128-bit registers, common distance estimators for dna sequence can reach a speedup of two orders of magnitude compared to e.g. phylip. in addition, the implementation makes optimal use of ambiguity symbols instead of dismissing them, as described in
+ <cit> . similarly, for fast computation of the distance matrices of protein sequences, we introduce fastprot and fastprot_mpi.
+
+we present fastphylo as a package containing phylogenetic tools of efficiency.
+
+implementation
+fastphylo consists of four modules: fastdist, fastprot, fastprot_mpi, and fnj. all these modules are implemented in c++  and have been verified to compile on popular platforms: scientific linux, ubuntu and mac os x. the programs follow classic unix principles to achieve modularity and composability. this means that the user can decide whether to read from the file or use i/o redirection. in particular, you can construct a unix pipeline such as  
+
+to compute a phylogenetic tree and save it to a file.
+
+by reading and writing the commonly used sequence formats, fasta and phylip, compatibility is maintained with existing phylogenetic tools such as phylip
+ <cit>  and raxml
+ <cit> . however, we have also implemented support for xml-based i/o to encourage validatable data handling. using xml simplifies format conversion, safe-guards against formatting mistakes, and enables validation of input and output. to support validation, the relaxng xml
+ <cit>  schemas for sequence data, distance matrices, and phylogenies are builtin to all the fastphylo modules and can be easily retrieved from the programs. unlike the phylip format, xml also enables users to work with long accessions.
+
+one of the main issues with phylogeny reconstruction is the storage of distance matrices. it requires a large amount of disk space to store a distance matrix for very large gene families. we, therefore, introduce a binary format that overcomes this problem .
+
+features of fastdist
+the fastdist program estimates distance matrices from dna alignments. it implements fast computation of four distance estimators: hamming , jc
+ <cit> , k2p
+ <cit> , and tn93
+ <cit> . k2p is the default distance estimator for fastdist.
+
+the two distinguishing features of fastdist, however, are speed and the support for ambiguity symbols . fastdist computes the whole distance matrix using ambiguity symbols in a default mode, which requires quadratic memory space as the gene family size increases . to overcome this problem, we introduce a binary format that performs row-wise operations in computing the upper triangular distance matrix. furthermore, instead of keeping the whole distance matrix in plain text, we store the upper triangular matrix in a binary format that reduces the amount of disk space substantially. for instance, the distance matrix computed by fastdist using the binary format for  <dig>  sequences, with each sequence of length  <dig> bp, took ∼ <dig> gb of disk space while the distance matrix for the same set of sequences computed by rapidnj
+ <cit>  using phylip format consumed ∼ <dig> gb of disk space. using the memory-efficient option, fastdist allows the users to do row-wise operations while computing the distance matrix, i.e., keeping only a single row of the distance matrix in memory. when the binary format option is used, memory-efficient functionality is implicitly invoked. both memory-efficient and binary format, however, do not support ambiguity symbols information for computing distance matrix.
+
+features of fastprot and fastprot_mpi
+fastprot estimates the evolutionary distance between aligned protein sequences. it implements two methods for calculating the distance between protein sequences: the maximum likelihood , which for two aligned sequences a and b returns argmaxdpr, and the expected distance, which returns e . the ml estimator uses newton-raphson method to find the optimum. it is, however, slower than the expectation estimator.
+
+fastprot provides more distance functions when compared to other neighbour joining tools considered in this study. clearcut 
+ <cit> , ninja 
+ <cit> , and rapidnj  provide jc
+ <cit>  and jck
+ <cit> , quicktree 
+ <cit>  provides jck, while fastprot implements seven distance functions including jc, jck, wag
+ <cit> , jtt
+ <cit> , day
+ <cit> , mvr
+ <cit> , and lg
+ <cit> . it is more than  <dig> times faster than protdist, a phylip program for estimating distance matrices for protein alignments . fastprot also allows longer accessions compared to protdist which has the limitation of ten characters for an accession number.
+
+in addition to fastprot, we introduce fastprot_mpi, an implementation of fastprot using mpi libraries. fastprot_mpi can scale linearly to the number of nodes available on a cluster  and can handle very large protein families.
+
+a protein family of  <dig> family members was considered for this analysis, and time  was recorded for each experiment using the unix command "time". all experiments were performed on node level at a cluster machine. there were  <dig> cores in single node of the cluster machine on which the experiments were performed.
+
+features of fnj
+the fnj program implements three tree reconstruction methods, and the default is fnj
+ <cit> . furthermore, neighbor-joining
+ <cit> , the mainstay of phylogenetics, as well as the more recent improvement bionj
+ <cit> , are available as command line options. the program supports the formats used by fastdist and fastprot .
+
+bootstrap feature
+bootstrap analysis is built into fastdist, fastprot, fastprot_mpi and does not require a separate program. users can generate multiple bootstraps of the same dataset and store it to a file. by default, we keep a distance matrix from the original dataset along with the distance matrices from multiple bootstrap datasets. however, if users are interested in keeping the distance matrices only from bootstrap datasets, they can use the option -k, which will ignore the distance matrix from the original dataset and compute the distance matrices only for bootstrap datasets. in fact, users can run parallel jobs for each bootstrap in a distributed environment. for instance, if you want to infer phylogenetic trees for each of the  <dig> bootstraps of original dataset , you can use the gnu parallel <cit>  command in the following manner:  
+
+we provide a random seed option -s for the reproducibility of results. if a random seed option is not specified, the program will use the current time stamp for bootstrap analysis.
+
+RESULTS
+in order to access the performance of fastphylo compared to other nj-based tools, we considered two performance metrics: speed and memory utilization. apart from this, we were also interested in measuring how large gene families fastphylo can handle. the basic motivation for such analysis comes from the limitation that most of the nj tools fail to compute phylogenetic trees for very large gene families.
+
+simulated data
+to evaluate the performance of fastphylo, we simulated two different datasets. the first dataset, which we called dataset- <dig>  consists of  <dig> gene families with family size ranging from  <dig>  to  <dig>  family members. the second dataset, dataset- <dig>  contains  <dig> gene families with gene sequences ranging from  <dig>  to  <dig> . each gene sequence is  <dig>  nucleotides long, while each protein sequence is  <dig> amino acids long.
+
+we used tools developed by our colleagues ali tofigh and bengt sennblad to generate trees and sequences. all the details on parameter settings for generating trees and sequences are mentioned in additional file
+ <dig> 
+
+environment and experimental set-up
+we used clearcut, quicktree, ninja, and rapidnj as references in our experiments. quicktree and clearcut are implemented in c, rapidnj and fastphylo are implemented in c++ while ninja is implemented in java. ninja, quicktree, and rapidnj reduce running time of the canonical nj method while fnj and clearcut modify the original nj criteria in order to gain computational speed. since we took aligned dna sequences as an input and newick formatted trees as an output, we used the command  
+
+for all our experiments. all experiments were performed on a cluster machine. each cluster node has  <dig> cores and each core has  <dig> gb of ram. we set up two experimental environments: one for dataset- <dig> and one for dataset- <dig>  separately. for dataset- <dig>  we ran each experiment on a single dedicated core with a time duration of  <dig> hours for each job. however, for dataset- <dig>  the time limit for each experiment was set to  <dig> hours, and each experiment was performed on a node instead of a core due to memory requirements.
+
+we used massif, a memory profiling tool available in the valgrind suite
+ <cit> , to profile memory consumption of the aforementioned nj tools. the standard time tool available in linux  was used for measuring running time of each experiment. only "user time" output from the time tool is considered in the time comparison analysis. we tried to use the best performance parameters for each tool in our analysis. all the details on the choice of parameters used, for different nj tools, are mentioned in additional file
+ <dig> 
+
+results on dataset-1
+results on dataset- <dig> is shown in figures
+ <dig> and
+ <dig>  figure
+ <dig> shows the time comparison analysis, while in figure
+ <dig> we show the memory utilization of different nj tools considered in our study. from the time comparison in figure
+ <dig>  it is clear that our fastdist-fnj pipe outperforms clearcut, quicktree and ninja, while it shows a slight delay when compared with rapidnj. to investigate this further, we ran the same experiment on dataset- <dig> .
+
+results on dataset-2
+in order to address the question of how large gene families fastphylo can handle and also to investigate the delay in figure
+ <dig>  we ran the fastdist-fnj pipe and other nj tools on dataset- <dig>  the results are formulated in figures
+ <dig> and
+ <dig>  both fastdist-fnj pipe and rapidnj computed phylogenetic trees for all the  <dig> gene families of size ranging from  <dig>  to  <dig> , while clearcut, ninja and quicktree only computed phylogenetic trees for gene families of size ranging from  <dig>  up to  <dig> ,  <dig>  and  <dig> , respectively, in the allocated time, i.e.  <dig> hours. the graph in figure
+ <dig> reveals that rapidnj is ∼ <dig> times faster than fastdist-fnj pipe. however, figure
+ <dig> shows that the fastdist-fnj pipe uses less memory  than rapidnj.
+ <dig>  for large phylogenies, rapidnj uses much more memory as compared to fastphylo . however, we cannot explain the source of sudden jumps in memory utilization of fastphylo.
+
+to further investigate the delay in fastdist-fnj pipe, we split the experiment into two phases: 1) compute the distance matrix separately; and 2) compute the phylogenetic tree using the distance matrix as an input to the neighbour joining tools considered in this study. the results of these investigations are formulated in figures
+ <dig> and
+ <dig>  respectively. figure
+ <dig> shows the time and memory comparison of nj tools for computing the distance matrices. it is evident that rapidnj outperforms all the other tools. it is ∼ <dig> times faster than fastdist . however, rapidnj’s memory consumption increases quadratically with the number of sequences, while fastdist’s memory utilization increases linearly with the number of sequences . in figure
+7c, we report the results of rapidnj upto  <dig>  taxa. this is due to the memory limitation for computing the distance matrices for this experiment, i.e.  <dig> gb ram. rapidnj computed distance matrices for  <dig> gene families of size ranging from  <dig>  to  <dig>  sequences, while fastdist computed distance matrices for all the  <dig> gene families of size ranging from  <dig>  to  <dig>  sequences within the allocated memory. we can attribute the delay in the fastdist-fnj pipe, when compared to rapidnj, in figures
+ <dig> and
+ <dig> to the slow computation of distance matrices by fastdist program.
+7a and
+7b were performed on dataset- <dig>  while figure
+7c shows the memory utilization of rapidnj and fastdist  on dataset- <dig>  clearcut was not considered in this experiment since it outputs the distance matrix as an option, and at the same time it outputs the phylogenetic tree.
+
+figure
+ <dig> shows the time and memory comparison of fnj and rapidnj. the input to both programs is distance matrices. we used output from fastdist in a binary format as an input to fnj, and distance matrices in phylip format to rapidnj. it is interesting to note that fnj and rapidnj performed similar on both the time and memory comparison analysis, but rapidnj has an advantage on memory usage.
+
+CONCLUSIONS
+fastphylo is a software package containing software that is easy to use and has well-defined interfaces. it is an efficient software that enables very large problem sizes. in addition, fastphylo can be a good tool of choice in many studies: for instance, in mcmc and maximum likelihood  methods for phylogeny reconstruction, it can be used to generate a good starting tree. further more, fastphylo’s modular architecture offers maximum flexibility in phylogenetic computations.
+
+availability and requirements
+project name: fastphylo
+
+project home page:http://fastphylo.sourceforge.net
+
+operating system: linux, mac os x 
+
+programming language: c++
+
+licence: mit license
+
+any restrictions to use by non-academics: none
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+mak, ie, es, kn, rvg, rs and ps developed the software; mak and la designed and performed the analysis; mak and la wrote the manuscript. all the authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplementary material for fastphylo: fast tools for phylogenetics.
+
+click here for file
+
+ acknowledgements
+this work was supported by the royal institute of technology , sweden, and university of engineering and technology , pakistan. the computations were performed using the resources provided by snic through uppsala multidisciplinary center for advanced computational science  under project b2012160: fastphylo. we thank henric zazzi at pdc, kth royal institute of technology, for coding assistance.

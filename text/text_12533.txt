@@ -1,0 +1,169 @@
+BACKGROUND
+traditionally, wet-lab experiments were focused on describing the function of individual genes or proteins. with the advent of high-throughput technologies, system-level approaches have become common which make it possible to identify the interactions between the individual elements of the cell. here, mathematical models are crucial in understanding these biological systems. in particular the dynamic simulation of these models can illustrate and predict quantitative aspects of the system such as gene expression in regulatory networks or signal amplification in signal transduction networks  <cit> .
+
+the most common approach to modeling dynamics is via ordinary differential equations  which describe deterministically how the system evolves with time . since the simulation of odes is deterministic, successive simulations starting from the same initial conditions lead to the same results. biological systems, however, are not deterministic which can lead to quite different outcomes for the same initial conditions.
+
+the stochastic nature of biological systems can be simulated using numerical simulation algorithms such as the stochastic simulation algorithm  of gillespie  <cit> . the gillespie algorithm simulates the system reaction by reaction. a reaction step in this case consists of two parts . first, the time interval τ until the next reaction is drawn from the exponential distribution p = a exp using the inversion method. here, a is the sum over all reaction propensities aμ. second, the reaction μ which is to occur in this time interval is drawn with propability p = aμ/a. at the end of each step, molecule numbers and reaction propensities are updated. both simulations via odes and ssas assume a well-mixed system with a homogeneous distribution of molecules.
+
+the original gillespie algorithm  has been modified in several ways to improve runtime. here, the most commonly used modification is the next-reaction method by gibson and bruck  <cit> . this algorithm improves on a less efficient variant of the direct method which generates τk for each reaction rk and then fires the reaction with the minimum τk. the minimum τk and the corresponding reaction are obtained from a priority queue and time intervals are updated without drawing new random numbers only for those reactions whose propensity was changed by the firing of the reaction. reactions with changed propensities are identified with a dependency graph which contains an edge from reaction ri to reaction rj if ri changes the molecule number of at least one reactant of rj. it has been been suggested that the next-reaction method is actually less efficient than improved versions of the direct method  <cit> . indeed, we could show in our implementation that a variant of the direct method which uses the dependency graph technique to update propensities is significantly faster than the gibson and bruck algorithm.
+
+the direct and next-reaction methods are exact methods. this means reaction propensities are updated after each reaction. recently, gillespie  <cit>  proposed an approximative method, tau-leaping, which performs all reactions in a certain interval τ before updating the propensity functions. the interval size τ is chosen such that the propensity functions remain almost constant in this interval and reactions may fire multiple times. this, however, can sometimes lead to negative populations and as a consequence, this method has been improved later by cao et al.  <cit>  to avoid this problem. the modified tau-leaping algorithm automatically switches to the exact ssa for a few steps if the choice of τ becomes too small.
+
+both exact and tau-leaping models cannot be used to efficiently simulate models with multiple scales in molecule concentrations or reaction rates. exact methods are too inefficient to simulate many fast reactions and high molecule concentrations. on the other hand, the presence of low molecule concentrations and slow reactions in the systems will effectively lead to small τ values for the tau-leaping methods and thus make them behave as the exact methods. to circumvent these problems, hybrid methods have been developed which partition the system into fast and slow reactions  <cit> . the slow reactions are then generally simulated using the exact ssa. the fast reactions are solved either deterministically or with the langevin equation  <cit>  or simulated with tau-leaping methods  <cit> . alternatively, the model is simplified such that the effect of the fast reactions is incorporated in the simulation of the slow reactions, e.g. using quasi-steady-state assumptions, without actually firing the fast reactions  <cit> .
+
+several implementations of stochastic simulation algorithms are already available, e.g. copasi  <cit> , dizzy  <cit>  using the ssa implementations of the isbjava library, gillespie <dig>  <cit> , stocks  <cit> , stochkit  <cit> , and bionets  <cit> . in general, these programs were designed as stand-alone programs and as a consequence the user is limited to the functionalities of the user interface. this makes it difficult to use the implementations of the ssas within other programs. furthermore, most of these programs provide only one implementation of an exact ssa which is not always fast enough for practical systems biology applications. however, faster ssas such as e.g. the approximative tau-leaping procedure or new hybrid algorithms cannot be added to the programs easily by the users.
+
+the stochkit software and isbjava library provide these faster tau-leaping algorithms and the latter was also designed to be used within other systems biology programs. the output of the corresponding ssa implementations, however, is limited to the molecule concentrations. more flexible implementations are necessary to simulate complex high-level models and integrate stochastic simulation algorithms in new and innovative analysis and modeling tools. two examples which illustrate the need for more flexible tools  are the visualization of the simulation progress directly in a network and the simulation of cell growth and division. with current simulation tools, it is not possible to implement both examples without having to change the code of the actual simulation algorithms considerably.
+
+in this article, we present fern, a java framework for modeling and simulating biological systems which provides accurate and state-of-the-art simulation algorithms  and has been designed to be easily extendable to new ones . with the help of observers, the simulation progress can be monitored on every level and modifications to the systems can be introduced during simulations in an intuitive way. even with these additional functionalities, the implemented algorithms are faster than the isbjava implementations. results can be visualized easily and networks can be loaded from different sources. contrary to isbjava, fern supports the most current version of sbml and allows arbitrary rate law definitions. fern can be used as an integral part of other java applications or as a standalone program in the form of a command-line tool and plugins to cytoscape and celldesigner.
+
+implementation
+fern is an object oriented library implemented in java . although it consists of more than  <dig> classes and interfaces, most classes are just implementations of one of three major interfaces and abstract classes :
+
+ <dig>  the interface network provides the network structure of the model.
+
+ <dig>  the abstract class simulator performs simulations on a network. it additionally calls the registered observers during the simulation run.
+
+ <dig>  the abstract class observer traces the simulation progress and creates the simulation output.
+
+a simple simulation can be performed in only five lines of code, one line for each of: loading a network file, creating a simulator, creating and registering an observer, running the simulations and printing the results . more complex examples for using fern can be found in the fern distribution. in the following the three layers of fern are described in more detail.
+
+networks
+the interface network describes the network's structure, i.e. the reactions and species in the networks. for this purpose, each reaction and each species is described by an integer value. furthermore, the network stores basic information like species names and their initial molecule numbers. for the simulation more information is necessary which is stored in three additional classes :
+
+• the amountmanager controls the amount of each molecular species during the course of a simulation.
+
+• the annotationmanager can store additional annotations for the network, its species and reactions.
+
+• the propensitycalculator calculates the propensities for the reactions by the specified kinetic laws.
+
+there are three types of implementations of the network interface:
+
+• readers which can read network data from files 
+
+• wrappers which redirect method calls to existing network classes 
+
+• evolution algorithms which create networks from scratch by certain rules 
+
+for each network, stochastic simulations can be performed with all implemented simulation algorithms.
+
+import and export of networks
+fern supports two formats for loading and exporting networks: the sbml format  <cit>  as well as the simpler but also xml based fernml format. for reading and writing the sbml format, fern uses the java bindings of the c library  available at . thus, it can be easily adapted to new developments of the sbml format. currently, sbml version  <dig> levels 1– <dig> are supported.
+
+from the model loaded by libsbml from the sbml file, a fern sbmlnetwork is created using the list of compartments, species, reactions, parameters and events in the model. events have to be registered with a simulator by the sbmlnetwork if they are to be triggered during the simulation . triggering of events is handled by specific observers.
+
+currently, the sbmlnetwork class uses only the features of sbml necessary for the simulation of the network. it supports mathml to define complex reaction mechanisms but not rules, constraints or function definitions. if these features are required they can be incorporated easily by extending the sbmlnetwork class and loading these features from the sbml model created by libsbml. since many systems biology applications support sbml , the sbml format can be used as an interchange format between fern and these other applications.
+
+sbml is a powerful format which can provide lots of information about a model. in contrast, fernml stores only the topology of the reaction network, optional annotations and the simulation parameters . this results in a much more simplified input format. more complex aspects, such as volume change due to cell growth and division, can then be modeled in java using the fern library in a straightforward way . as a consequence, arbitrarily complex models can be designed.
+
+since fernml supports only the reaction rate equations used by gillespie  <cit> , the propensities can be recalculated at each step efficiently by a few arithmetic operations. sbml uses mathml to store the kinetics of a reaction. this allows for more complex reaction mechanisms and is particularly useful if the model cannot be formulated exclusively with first or higher order rate equations. to evaluate mathml expressions, fern creates expression trees from them which have to be evaluated every time a propensity is calculated. since this is one of the essential steps of ssas, the simulation of an sbml network in fern can be significantly slower than the simulation of the same network as a fernml network . thus, if only simple reaction rate equations are used, an sbml network should be converted to a fernml network using the provided conversion methods before performing the simulation.
+
+fern is not restricted to the input formats currently available. any new input format can be easily included by implementing the network interface or extending the abstractnetworkimpl class.
+
+simulation algorithms
+fern provides implementations for three exact stochastic simulation algorithms, three state-of-the-art tau leaping procedures  and a hybrid method combining ssa and tau-leaping  <cit> . the exact ssas implemented include the original direct method of gillespie  <cit> , the next reaction method of gibson and bruck  <cit>  and an enhanced version of the direct method. this enhanced method uses the dependency graph technique of the next reaction method to only update the propensity functions which are affected by the firing of a reaction. apart from this improvement, it is identical to the direct method.
+
+the tau-leaping algorithms are all based on the modified tau-leaping procedure proposed by cao et al.  <cit>  which avoids the problem of negative populations observed for the original tau-leaping procedure. this method switches to an exact ssa  for a few steps if the selected τ becomes too small. the three implementations differ only in the way the error is bounded . the error is bounded either by the sum of all propensity functions , the relative changes in the individual propensity functions  or the relative changes in the molecular populations .
+
+furthermore, fern implements the hybrid method by puchalka and kierzek  <cit>  which partitions the system during the simulation into slow reactions which involve only small molecule numbers and fast reactions which involve large molecule numbers. the slow reactions are then simulated using an exact ssa while the fast reactions are simulated with tau-leaping. this algorithm was chosen over other hybrid methods for two reasons. first it uses only stochastic simulation algorithms, i.e. exact ssa and tau-leaping, and no further assumptions such as quasi-steady state. second, the partitioning of the system is performed dynamically according to the state of the system and updated after each reaction step. our implementation of the hybrid method uses our more efficient enhanced gillespie algorithm  instead of the gibson and bruck algorithm used by puchalka and kierzek. on the model of lacz and lacy gene expression by kierzek  <cit> , the hybrid method speeds up the runtime by a factor of  <dig> compared to the enhanced gillespie algorithm.
+
+each simulation algorithm is implemented by extending the abstract class simulator or one of its subclasses. a simulation consists of the following steps . first, the data structures are initialized and the simulation is started by passing a simulation controller implementing the simulationcontroller interface. the simulation controller decides after each step if the simulation can continue. the most basic one is the defaultcontroller which lets the simulation run until a given simulated time is reached.
+
+in each step, the behavior of the simulator depends on the simulation algorithm implemented . the direct and enhanced gillespie algorithms draw the time interval τ till the next reaction from an exponential distribution. the reaction to be fired is then drawn with a probability proportional to its reaction propensity. for this purpose, a random variable r <dig> is first drawn from the uniform distribution between  <dig> and  <dig>  the corresponding reaction μ is then identified via a linear search such that ∑iμ−1ai<r2∑iai≤∑iμai. the gibson-bruck algorithm generates τk for each reaction rk and at each step fires the reaction with the minimum τk obtained from a priority queue. tau-leaping methods also choose a time interval τ but in this case several reactions can be fired during this interval .
+
+after each step, the molecule numbers for reactants and products and the propensity functions for the reactions are recalculated. here, reactants and products of a reaction can be identified efficiently from the adjacency list for this reaction stored in the network structure. propensities are updated efficiently for all simulation algorithms apart from the original gillespie algorithm using a dependency graph which stores for each reaction all reactions whose propensity is changed by the firing of this reaction.
+
+future developments of the algorithms can easily be included into fern by extending one of the ssa implementations or the original simulator class. in the same way ode solvers or simulators for spatial models which are not provided by fern can be integrated.
+
+observer system
+fern uses observers to trace the simulation progress and react to events. for this purpose, each observer has to implement functions which describe its response at specific time points of the simulations. such responses may occur either at the beginning or the end of a simulation, before each step, after a reaction is fired or when a certain time is reached. in order to be notified of these events, observers have to be registered with the simulator.
+
+observer implementations are provided for tracing the molecule numbers for some species in arbitrary intervals, recording the firings of reactions, computing distributions of molecule numbers at a certain time over many simulation runs as well as many others. several observers can be registered for a simulation at the same time and most of them can also handle repeated simulation runs, e.g. to create average curves or curves containing all trajectories for the individual simulation runs.
+
+visualization
+in general, the observers use gnuplot to present their results. once gnuplot is installed on a system and accessible e.g. via the path variable, the gnuplot class makes it possible to easily create plots and retrieve them as image objects, save them as files or present them online in a window. plots can be customized using appropriate gnuplot commands.
+
+furthermore, fern was used to implement cytoscape  <cit>  and celldesigner  <cit>  plugins for running and visualizing the simulations from within the cytoscape or celldesigner environments .
+
+stochastics
+an important feature of fern is that random number generation is handled by the singleton class stochastics. accordingly, only one instance of this class is instantiated during a fern run and all calls for random numbers are referred to this instance. this has several advantages. first, the underlying random number generator can be easily replaced if faster and better random number generators are developed. currently, the mersenne twister implementation of the colt project is used . second, by setting the seed value for the random number generator explicitly, the simulation can be made deterministic and e.g. interesting trajectories can be reproduced. third, it is possible to count the number of random number generations necessary for different implementations of ssas.
+
+RESULTS
+cytoscape plugin for stochastic simulation
+cytoscape  <cit>  is a software platform for visualizing and integrating networks with an emphasis on biological data. it provides a flexible plugin architecture which can be used to enrich the platform with additional methods. we used this functionality to create a plugin which uses fern to simulate networks loaded into cytoscape . this plugin makes it possible to track the simulation progress directly on the network. furthermore, it shows how fern can be easily integrated into other applications and how the observer system can be used to visualize more than just the changes in molecule numbers. each network readable by cytoscape can be used for simulation by the plugin if it consists of two distinct types of nodes, namely reactions and molecular species. furthermore, the initial amount of each molecular species and the reaction rate coefficient for each reaction have to be given. these parameters and the node type  can be read from arbitrary node attributes specified in cytoscape. additionally, the plugin provides access to fernml files in both directions. thus every cytoscape network can be saved as fernml, and every fernml file can be loaded into cytoscape.
+
+simulations can be performed with every stochastic simulation algorithm provided by fern and the simulation progress can be visualized directly on the network. reaction nodes flash up whenever the corresponding reaction is fired and the species nodes are colored according to their molecule numbers. furthermore, simulations can be run in real-time, which causes the algorithms to pause between two reaction events according to the simulated time. trend curves of molecular species can also be created using gnuplot.
+
+the implementation of the cytoscape plugin is straightforward. a central plugin class integrates fern into the cytoscape platform by creating a menu item to start the plugin and to load the user interface. apart from the classes defining the user interface, only a few additional classes are necessary. the most important ones are a wrapper class implementing the network interface to map the cytoscape network structure to fern and an observer class to make the visualization possible. additionally, fern provides its own visual style  to guarantee a proper display of the network and to handle the flashing and recoloring of reaction and species nodes, respectively. the cytoscape plugin was also adapted as a plugin to celldesigner  <cit>  which now offers a plugin functionality with the recent version  <dig>  beta.
+
+simulation of cell growth and division using observers
+the cytoscape plugin is one example how observers can be used to track the simulation progress on various levels. another example which illustrates the potential of the observer system is the simulation of the lacz model described by kierzek et al.  <cit>  and based on experimental results by kennell and riezman  <cit> . this model requires the simulation of cell division. after each cell division, the stochastic simulation is continued with one promotor molecule and all other molecule numbers divided by  <dig>  rna polymerase and ribosome molecules are assumed to remain approximately constant with natural variations. for this purpose, the number of these molecules has to be adjusted after each simulation step by drawing from normal distributions. furthermore, cell growth leads to a linear volume change.
+
+with existing stochastic simulation programs, this model can, in general, only be simulated by changing the code of the actual simulation algorithms. contrary to that, the model can be easily simulated with fern by simply defining a cell growth observer. before each simulation step, the observer checks if a generation has been completed. if this is the case, all molecule numbers are adjusted as described before. in any case, the volume size is adjusted to account for either cell division or cell growth, and the rna polymerase and ribosome molecule numbers are drawn randomly.
+
+this approximation was also used by kierzek et al. and assumes that cell volume does not change during a simulation step. to perform an exact simulation of volume change, propensity functions would have to be defined which handle the cell volume as a function of time. however, since the volume change during one reaction is extremely small, the differences between the approximate and exact results should be negligible. using the cell growth observer, we simulated the lacz model with the enhanced gillespie algorithm. our results for the concentration of the lacz protein  show clearly the periodic oscillation in the protein numbers due to cell growth and division. from these results, we can estimate the rate of lacz protein synthesis by a linear fit to the increasing lacz concentrations during the first generation. here, we obtained a rate of protein synthesis of 21s- <dig> which is close to the 22s- <dig> obtained by kierzek et al.  <cit>  and the 20s- <dig> reported by kennell and riezman  <cit> .
+
+the lacz model both in fernml and sbml format and the code for running the simulation is included with the fern distribution along with several other models such as the model of the egf signaling pathway by lee et al.  <cit> .
+
+accuracy of stochastic simulation algorithms
+to test the accuracy of the implemented stochastic simulation algorithms we used the discrete stochastic models test suite   <cit> . this test suite provides  <dig> stochastic models in the sbml format which have been solved either analytically or numerically. to test the implementation of a stochastic simulation algorithm, simulations have to be performed a large number of times  for each individual model. the test is failed for a model if the distribution of the results is statistically significantly different from the known underlying distribution.
+
+all three exact stochastic simulation algorithms in fern were tested with the dsmts test suite. of the  <dig> models only the test  <dig>  is failed. models  <dig>  and  <dig>  are rejected because hasonlysubstanceunits is not declared to be true. if the rejection is overridden, model  <dig>  is failed, too. according to the dsmts user guide, failure is expected for this model due to the inappropriate definition of the sbml model. in model  <dig> , molecule numbers are reset whenever one molecule exceeds a certain number. this may lead to larger variations than accounted for by the thresholds used in the tests.
+
+to asses our results we also evaluated gillespie <dig>  the stochastic simulation program by some of the authors of the test suite  <cit> . since the version of gillespie <dig> available online does not support level  <dig>  version  <dig> of sbml, only  <dig> of the  <dig> models could be evaluated. we found that tests for model  <dig>  and  <dig>  are also failed, as well as tests for models  <dig> ,  <dig> ,  <dig>  and  <dig> . two other models  could not be simulated as the rate law definition was not accepted by the program. furthermore, we compared the runtime of fern and gillespie <dig> on the dsmts models which could be run by both programs and found that the runtime of fern was significantly less than the runtime of gillespie <dig> .
+
+runtime performance
+runtime performance of the exact ssa implementations of fern was compared against the performance of the gillespie and gibson-bruck algorithms of isbjava and the gillespie algorithm of gillespie <dig>  for this purpose, simulations were performed for the egf signaling pathway by lee et al.  <cit>  which contains  <dig> molecular species and  <dig> reversible and  <dig> irreversible reactions. for each implementation,  <dig>  simulations were performed for a simulated time of  <dig> seconds and results were obtained for the activated enzymes of the signaling cascade .
+
+our results show that the implementations of the original gillespie and gibson-bruck algorithm of fern are always more efficient for the fernml network than the implementations provided by isbjava. for the sbml network, the performance is similar for the gibson-bruck simulator but significantly worse for the original gillespie algorithm. this is due to the evaluation of the mathml expressions required at each step of the simulation for each molecular species. however, this allows for more complex definitions of kinetic laws than possible in isbjava which supports sbml only up to level  <dig>  version  <dig> without mathml. if we compare fern's implementation of the gillespie algorithm to gillespie <dig> which also supports mathml, we observe that fern is more than three times faster than gillespie <dig> on the sbml network.
+
+furthermore, the enhanced implementation of the gillespie algorithm provided by fern is more efficient both for fernml and sbml than any of the exact methods provided by isbjava. this shows that the powerful observer system of fern does not come at the cost of a reduced runtime performance. accordingly, fern is a useful library for stochastic simulation even if the observer tools are not used.
+
+discussion
+in this article, we presented fern, a java framework for modeling and simulating biological reaction networks. fern is subdivided into three layers which are represented by either one interface or abstract class. the functionalities of the package are then provided by implementations of these classes. accordingly, fern can be easily extended. for instance, any network class can use the algorithms of fern by implementing the network interface. new simulation algorithms can be implemented easily by overriding only a few methods of the abstract simulator class and filling them with the new functionality. in this way, arbitrary fern-readable networks can be simulated in different ways and the presentation system can be exploited.
+
+it is possible to do reasonable simulations with fern in just five lines of java code. each of the five steps can be expanded to cover more complex scenarios and simulations can be controlled at different levels. for instance, to simulate cell growth, an observer can be modified to change the volume of the simulation space. alternatively, an interesting subnetwork can be selected on which simulations can then be run. fern can be easily integrated into other applications making its functionalities available within different environments. we have illustrated this by implementing fern plugins to cytoscape and celldesigner. with only few additional classes, the cytoscape plugin enables the users to follow the simulation progress directly on the network. this was made possible by the powerful observer system provided by fern which is one of its major advantages compared to other available simulation programs.
+
+the accuracy of our ssa implementations was analyzed by applying them to the discrete stochastic models test suite. all three of the exact simulation algorithms passed  <dig> % of the dsmts models which is significantly better than the performance of gillespie <dig> which passes only  <dig> % of the tests. this shows that the ssas provided by fern are highly accurate as well as fast. even though fern is implemented in java which is often claimed to be less efficient than c, fern's original gillespie algorithm is significantly faster than the c implementation of gillespie <dig> .
+
+compared with the isbjava library, fern has several advantages. first, fern is more flexible than isbjava and offers more functions for tracking and interacting with simulations. second, it implements both a hybrid algorithm as well as the most current tau-leaping methods which resolve the problem of negative concentrations. furthermore, its stochastic simulation algorithms are significantly faster than the isbjava implementations. finally, it supports the current version of sbml and allows arbitrary rate laws.
+
+CONCLUSIONS
+fern is an easy-to-use framework for modeling and simulating reaction networks and can be easily integrated into other systems biology applications implemented in java. it provides state-of-the-art stochastic simulation algorithms, efficient representations of networks with several input and output options and various ways of tracing and visualizing simulation data. although some available stochastic simulation programs offer a few specialized features not yet supported by fern such as e.g. time-delayed dynamics, none of them offer such a wide range of features and can be extended to new features as easily as fern. thus, fern is a useful tool for biochemical network analysis or the development of new analysis methods or applications.
+
+availability and requirements
+• project name: fern
+
+• project home page: 
+
+• operating system: platform independent
+
+• programming language: java
+
+• other requirements: java  <dig>  or higher; colt package ; jdom 
+
+• optional: libsbml  for sbml version  <dig> level 1– <dig> support; cytoscape  <dig> . <dig> or higher  to use the cytoscape plugin; celldesigner  <dig>  beta or higher  to use the celldesigner plugin; gnuplot .
+
+• license: fern is freely available under the gnu lesser general public license .
+
+authors' contributions
+ef designed and implemented the framework. ccf helped with the design and coordinated the project. ef and ccf drafted the manuscript. rz provided advice and guidance for the project and helped to revise the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+fern distribution, version  <dig> . this archive contains the fern source code and binaries as well as documentation and example models in fernml and sbml.
+
+click here for file
+
+ additional file 2
+fern user guide. the user guide provides instructions on installing and using fern, as well as a description of the software architecture and a specification of fernml and supported features of sbml.
+
+click here for file
+
+ additional file 3
+supplementary figures. this file contains supplementary figures on fernml, the simulation cycle, the cytoscape plugin and runtime comparisons between fern and gillespie <dig> 
+
+click here for file
+
+ acknowledgements
+we thank the anonymous reviewers for many helpful comments on the earlier versions of the manuscript and the fern software.

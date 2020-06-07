@@ -1,0 +1,199 @@
+BACKGROUND
+natural language processing  methods are increasingly used to accomplish information retrieval and information extraction in biomedical systems  <cit> . a critical component of nlp pipelines is the matching of terms in the text to concepts or entities in the controlled vocabulary or ontology. this task is best described as ‘concept recognition’ although the labels ‘entity mention extraction’ and ‘named entity recognition’ are sometimes also used, especially among clinical nlp researchers. ideally, such concept recognition systems produce annotations of mentions where the annotated term in the text may be a synonym, abbreviation, lexical variant, or partial match of the concept in the controlled vocabulary, or of the entity in the ontology. for example, given the concept “atrial fibrillation” in the terminology, we expect a concept recognition component to annotate mentions for all four of the following phrases in a text passage: ‘auricular fibrillation’ , ‘a-fib’ , ‘atrial fibrillations’ , and potentially ‘fibrillation’ . definitions of key terms used throughout this paper are provided in table  <dig> table  <dig> key terms and definitions
+
+
+
+two general approaches have been used for biomedical concept recognition  <cit> . term-to-concept matching algorithms  are general-purpose algorithms for matching parsed text to a terminology. they typically require expert selection of vocabularies, semantic types, stop word lists, and other gazetteers, but they do not require training data produced through human annotation.
+
+in contrast, machine learning nlp methods are used to produce annotators for specific well-defined purposes such as annotating drug mentions  <cit>  and gene mentions  <cit> . conditional random fields, for example, have produced excellent performance for specific biomedical ner tasks  <cit> , but these systems often require training data from human annotation specific to domain and document genre. more recently, incremental approaches have been advocated for certain tasks   <cit> . these methods may be most appropriate where specific classes of mentions are being annotated  <cit> .
+
+for large-scale processing of biomedical documents, human annotation can be impractical because of the wide range in domains and genre represented. as a result, many current biomedical nlp pipelines and frameworks utilize some form of a general-purpose concept recognition system in combination with more specific custom annotators developed using training corpora. commonly used general purpose concept recognition systems for biomedical tasks include metamap  and its java implementation mmtx  <cit> , mgrep  <cit> , indexfinder  <cit> , medlee  <cit> , doublet  <cit> , concept mapper  <cit> , and ‘ner components’ of ctakes  <cit> , including the ctakes lucene-based dictionary lookup annotator   <cit>  and the ctakes fast dictionary lookup annotator   <cit> . these systems are compared for approach, availability, interoperability, and terminology source and format in table  <dig>  a number of these systems have been compared in other publications .table  <dig> widely used concept recognition systems
+
+
+
+our laboratory has previously utilized several concept recognition systems in our nlp pipelines for processing clinical text for particular document genre  or for specific nlp tasks  coreference resolution  <cit> ). in our experience, currently available systems are limited in their ability to scale to document sets in the tens and hundreds of millions, and to adapt to new document genre, arbitrary terminologies specific to particular genre, and new nlp tasks. we developed noble to perform general-purpose biomedical concept recognition against an arbitrary vocabulary set with sufficient flexibility in matching strategy to support several types of nlp tasks. the system can be used for concept annotation of terms consisting of single words, multiple words, and abbreviations against a controlled vocabulary.
+
+in this manuscript, we present the algorithmic and implementation details of noble coder and describe its unique functionality when compared with these other systems. we benchmarked the accuracy, speed, and error profile of noble coder against mmtx, mgrep, concept mapper, ctakes dictionary lookup annotator , and ctakes fast dictionary lookup annotator , all of which are general-purpose term-to-concept matching systems that have been widely used for biomedical concept recognition.
+
+methods
+algorithm
+noble is a term-to-concept matching algorithm implemented using two hash tables: a word-to-terms  table and a term-to-concepts  table . in the terminology building process , noble takes a controlled vocabulary of synonymous terms, and splits each synonymous term for a given concept into component words. when the term is broken into words, each word is stemmed  to account for different inflections. this option can be disabled, which may provide slightly higher precision at the expense of recall. words are also normalized, excluding stop words. word normalization is performed using an approach that is similar to the method used by specialist nlp tools  <cit> . each normalized term is then mapped to its corresponding concept in the tc table. in parallel, each word from a given term is mapped to a set of normalized terms that contain it in the wt table.fig.  <dig> noble coder algorithmshowing a. terminology build process and b. concept recognition process
+
+
+
+to perform the subsequent match , input text is broken into a set of normalized words and stop words are excluded. the word set is then ranked by frequency of associated terms. each word is looked up in the wt table to find terms that are associated with the word and include all of the other words in the input text. this term is then added to a candidate list. once all of the words in the input text have been processed and a set of candidate terms has been generated, each candidate term is looked up in the tc table and its concept is added to the results queue.
+
+noble has been designed to support a variety of matching options, which can be used to modify the output of the system for specific purposes within an nlp pipeline. these parameters, which can be altered, include  subsumption,  overlap,  contiguity,  order, and  partial match. table  <dig> demonstrates the different concept matches  that noble coder produces based on parameter settings for a given input text and vocabulary set.table  <dig> noble matching options with examples
+
+
+
+matching options can be combined to create matching strategies suitable for particular nlp tasks . if multiple candidates are generated for the same input text chunk, an optional heuristic-based scoring algorithm is applied to the results queue to select the highest-ranking candidate. heuristics provide a method to optionally eliminate suboptimal matches that derive from specific characteristics of the terminology structure. for example, when two similar candidates are returned, noble  prefers candidates that map to the larger number of source vocabularies,  rejects candidates that resemble abbreviations, but lack a case-sensitive match, and  prefers candidates that are un-stemmed. using these heuristics, noble respectively compensates for  similar concepts that have not yet been merged,  concepts that have abbreviation synonyms identical to common words, and  concepts that are incorrectly matched due to word stemming. although this does not provide true word sense disambiguation, candidate heuristics minimize the frequency of spurious matches in our experience.table  <dig> examples of noble matching strategies produced by combinations of matching options
+
+for contiguity, the gap indicates the number of words  that can occur in-between words that make up a valid term
+
+
+
+noble coder is most reminiscent of the indexfinder  <cit>  algorithm and system . however, noble coder also differs from indexfinder in several important respects, with significant consequences for its performance, scalability, and extensibility.
+
+first, noble’s terminology representation is fundamentally different from indexfinder’s terminology representation. indexfinder uses in-memory lookup tables with integer identifiers to look up words and terms. constituent words are represented in a separate lookup table and string representation terms are not persisted. while this representation minimizes memory requirements, it loses information about composition of individual terms. consequently, all words associated with a term must be counted before selecting it as a candidate. in contrast, noble uses a wt table that includes the constituent words and terms . this supports two major algorithmic improvements:  it is possible to avoid looking up a list of terms associated with words that are already present in previously selected candidate terms; and  the algorithm can first consider more informative words with fewer associated terms, because the number of terms associated with each word in the wt table is known.
+
+to increase processing speed, noble coder creates a cache of the word-to-term table that contains  <dig>  % of the most frequently occurring words in a dictionary. this table contains a reduced set of terms that include only the cached words. noble determines if a word is cached before using the main wt table. the threshold was empirically chosen based on a series of experiments comparing a range of thresholds.
+
+second, noble coder uses hash tables to represent the wt table, and relies on the underlying jvm to handle references to string objects internally. noble coder also uses jdbm   <cit>  technology to optionally persist those hash tables to disk. this enables noble to input a terminology of any size, since it does not need to fit into memory. indexfinder leverages a sorted table of run-length identifiers, and therefore trades complexity at build time for a smaller memory footprint. in contrast, noble coder stores a list of term sizes, requiring more memory but eliminating the requirement to load the entire vocabulary each time the system is initialized.
+
+third, noble coder is arguably more extensible and customizable when compared with indexfinder. noble supports multiple matching strategies enabling the optional inclusion or exclusion of candidates based on  subsumption,  overlap,  contiguity,  order, and  partial match. noble has been implemented to support a variety of terminology import formats including rrf, owl, obo, and bioportal. the published implementation of indexfinder was specific to umls.
+
+finally, noble supports dynamic addition and subtraction of concepts to the terminology while processing. this feature can be used as part of a cycle of terminology enrichment by human reviewers or by automated methods.
+
+implementation
+noble coder is implemented in java and is part of a suite of java nlp tools developed at university of pittsburgh. in addition to the wt and tc tables described earlier, noble coder uses additional tables to store word statistics, terminology sources, and concept metadata such as hierarchy information, definitions, semantic types, and source vocabularies. noble coder uses jdbm  <dig>  library as a nosql solution to persist these tables to disk.
+
+noble coder supports several additional features and tools that enhance its utility and usability. these features include  matching regular expressions,  resolving acronyms to their expanded terms,  filtering concepts by source or semantic types,  skipping problem words, and  selecting a single candidate for a matched term. another feature that expands usability is the user interface  for running the concept recognition system and generating results as both tab-delimited files and interactive annotated documents in html format.
+
+noble coder has also been designed to minimize the amount of user effort required to input terminologies, including ontologies. for example, noble coder uses a bundled terminology importer ui so users can easily import custom terminologies in multiple formats . noble coder also allows users to select multiple branches from a set of terminologies, filter by semantic types, and export the results as an owl file. furthermore, users can visually and programmatically browse taxonomic relationships in a loaded terminology .fig.  <dig> noble coder user interface. a example of noble coder processing reports. b terminology importer loads the bioporter ontology, one of the many supported formats. c terminology exporter creates a custom terminology by merging branches from two different terminologies
+
+
+
+noble coder is open source and freely available for academic and non-profit use under the terms of the gnu lesser general public license v <dig>  source code, documentation, and executable, with uima and gate wrappers, are available at https://sourceforge.net/projects/nobletools/. for rapid evaluation, users may run noble coder in java webstart at http://noble-tools.dbmi.pitt.edu/noblecoder.
+
+we have used noble coder as part of a new nlp pipeline for ties v <dig>   <cit>  used to processed more than  <dig> million de-identified clinical documents. the ties system  <cit>  is used by clinical and translational researchers at our institution and other institutions across the country.
+
+benchmarking
+we compared noble coder to five widely used, general-purpose concept recognition systems: mgrep, mmtx, concept mapper, ctakes dictionary lookup annotator , and ctakes fast dictionary lookup annotator . because noble coder was originally written to replace mmtx in our ties system, we chose to evaluate mmtx rather than its prolog analog, metamap. as described by its nlm developers  <cit> , mmtx is a java implementation of metamap, which produces only minor differences in comparison. these discrepancies result in large part from mmtx’s tokenization and lexicalization routines. mmtx continues to be widely used throughout the biomedical informatics community, in part because of  its simpler installation using a single server and  its more flexible vocabulary building process.
+
+we used two human annotated corpora as a basis for performance comparisons. evaluation included measurements of run time speed  and standard performance metrics , as well as an analysis of false positive and false negative errors made by noble coder on both corpora. in order to minimize the differences among implementations, we performed all tests in a standard nlp framework, replacing only the ner processing resources between runs.fig.  <dig> benchmarking study
+
+
+
+system versions and configurations
+systems included in this benchmarking study differed considerably in the number and types of parameters, as well as the extent to which those parameters could be manipulated. in selecting parameter settings for each system, we sought to achieve uniform behavior that best captured the annotation guidelines associated with the reference standards  <cit> . in addition, we favored settings that, in our experience, have shown superior concept recognition for an overall information extraction strategy. previous studies of concept recognition systems using the colorado richly annotated full text  corpus have shown that adjusting parameters can produce significant variation in performance across corpora, terminology, and terminology subset  <cit> . rather than taking an exhaustive approach, our goal was to replicate the “best match” strategy, which is a common use case for concept recognition in information extraction tasks. consequently, we set parameters to achieve overlap, contiguity, and subsumption , which are equivalent to the noble coder ‘best match’ strategy. selected parameters for each concept recognition system are shown in table  <dig>  we relate each given parameter to the associated general behavior achieved, which are mirrored by named noble coder matching options. standard settings that were not adjusted are not shown.table  <dig> parameter settings used for concept recognition systems
+
+
+
+to minimize differences due to platform, all systems were run in the context of a ctakes uima pipeline that included standard front-end ctakes text annotators for tokenization and sentence detection. each coder was entirely wrapped as a uima annotator, with the exception of mgrep. mgrep was partially wrapped as a uima annotator as described below.
+
+corpora and vocabularies
+we used two publicly available, human-annotated corpora for comparison of the five systems. these corpora were selected because they represent very different tasks  and very different vocabularies , allowing us to better assess generalizability during the benchmarking process. for each corpus vocabulary, we built annotator-ready vocabulary footprints as described below.
+
+the colorado richly annotated full text  corpus
+the colorado richly annotated full text  corpus  <cit>  is a publicly available, human annotated corpus of full-text journal articles from a variety of disciplines. articles focus on mouse genomics. all articles are from the pubmed central open access subset. human concept annotations are provided as knowtator xml files with standoff markup. the evaluation set contained a total of  <dig> document,  <dig>  words, and  <dig>  human annotations.
+
+machine annotations by all five systems were generated using the terminologies and version provided with the craft corpus . based on published recommendations by the corpus developers  <cit> , we elected to exclude entrez gene from the human annotations. therefore, we did not utilize the entrez gene vocabulary, relying instead on the pr ontology for gene mentions.
+
+the shared annotated resources  corpus
+we obtained the shared annotated resources  corpus  <cit>  under a data use agreement with the massachusetts institute of technology . the share corpus consists of de-identified clinical free-text notes from the mimic ii database, version  <dig> , that was used for the semeval  <dig> challenge  <cit> . document genres include discharge summaries, ecg  reports, echocardiogram reports, and radiology reports. human annotations are provided as knowtator xml files with standoff markup. for the purposes of this study, we used the entire training set of documents. the evaluation set contained a total of  <dig> documents,  <dig>  words, and  <dig>  human annotations.
+
+machine annotations by all five systems were generated using the same terminology, version, and semantic types as designated by the share schema  <cit> . snomed ct was obtained from umls version 2011aa and filtered by semantic type to include only congenital abnormality, acquired abnormality, injury or poisoning, pathologic function, disease or syndrome, mental or behavioral dysfunction, cell or molecular dysfunction, experimental model of disease, anatomical abnormality, neoplastic process, and signs and symptoms.
+
+vocabulary build process
+for all concept recognition systems except noble coder, significant additional effort was required to import the vocabulary into a format that could be used by the system. additionally, some systems only worked when the concept code was in the form of a umls cui string , while others  expected integers. in order to standardize formats and to account for these different representations, we used umls rich release format  as the least common denominator for all vocabulary builds. we note that noble already ingests many different formats . for the sake of consistency, we utilized rrf as the input format for noble coder too.
+
+to construct coder-ready terminologies from craft, we developed java code to convert obo to rich release format . these transformational tools are also made publicly available at https://sourceforge.net/projects/nobletools/. we generated umls-like identifiers in a cui-to-code mapping table to enable subsequent comparison to the gold annotations.
+
+to construct coder-ready terminologies for share, we used unix command line tools  to extract snomed ct terminology, filter to the required semantic types  <cit> , and output rrf.
+
+noble coder ingests native rrf files as one of its input formats. no other transformations were performed. subsequent manipulations required for all other systems are described in table  <dig> table  <dig> vocabulary build steps required for each system
+
+mmtxa
+noble codera
+
+asystems that have vocabulary import and selection tooling
+
+
+
+document processing
+expert annotations for both corpora were published as knowtator xml files. we used the apache xmldigester package to read these files and transform their content to a set of comma separated value  files containing the annotation span, and concept unique identifier. natural language processing was performed with the ctakes uima processing pipeline . documents were initially pre-processed using ctakes off-the-shelf tokenizer and sentence splitter modules. they were then processed with each of the individual concept recognition components. each concept recognition system generated a set of concept annotations that were converted into a csv format matching the format of the gold annotation set.
+
+measurement of run times
+run time was defined as the time to process all documents in the corpus , as reported by the nlp framework tools. each concept recognition system was run ten times in the context of a simple uima pipeline. measurements were made on a single pc with intel i7 ×  <dig> processor and 32 gb of ram, running ubuntu  <dig> . no significant competing processes were running. a total of  <dig> runs were performed representing each of the six coders, across both corpora, over ten runs. runs were randomly sequenced to minimize order effect. resources were freed and garbage was collected before each new run was started. results are reported as median milliseconds with interquartile range .
+
+because mgrep runs as a command line program, we used a two-step process for mgrep in which we first produced a set of annotations cached in jdbm   <cit> , and then wrapped a series of hash map lookups with a uima annotator. run times for mgrep were calculated as the sum of these two steps. in this way, we avoided overly penalizing mgrep for start-up time, which would be incurred with each text chunk.
+
+nlp performance metrics
+standard nlp evaluation metrics were used, including tp, fp, fn, precision, recall, and f- <dig> measure. the quality of the software annotations was determined via comparison to the expert annotation set using gate’s annotdifftool  <cit> , which computes a standard precision, recall, and f- <dig> measure using true positive, false positive, and false negative distributions. we ran in average mode, which also considers partial positives . pps are defined as any inexact overlap between the software proposed annotation and the expert annotation. scoring with average mode allocates one-half the partial positive count into both the precision and recall calculations.
+
+error analysis
+to evaluate the overall error profile of noble coder against other systems, we examined the distribution of all errors  made by noble coder and determined when these specific noble coder errors were also made by one or more of the other systems. from this set of all noble coder errors, we then randomly sampled  <dig> errors made by noble coder on each corpus, including  <dig> false positives and  <dig> false negatives and yielding a total of  <dig> errors. each error in this sampled set was then manually classified by a human judge to determine the distribution of errors based on  <dig> categories of error types. categories included errors that could result in false positives , false negatives , or both false positives and false negatives . our categories built on previous error categories used in a study of mmtx  <cit> , which we further expanded. all  <dig> errors studied were classified as one of these error types. we then analyzed the frequency with which these specific noble coder errors were also made by the other systems. for error analyses, we considered only absolute matches and not partial positives, which would have significantly complicated the determination of overlap in errors among all six systems.
+
+RESULTS
+all systems performed better on the share corpus than they did on the craft corpus . there are likely various factors that contribute to the observed differences. the craft corpus contains a large number of gene and protein mentions, often with complex combinations of letters, words, numbers, and punctuation. such a terminology is more prone to ambiguity between entries or with common english terms. behavior was most disparate for mgrep, which was four times more accurate on the share corpus. because mgrep does not consider all word orders, it can be expected to perform better with vocabularies that include different orderings of multi-word terms as synonyms. mgrep’s vocabulary build process also includes umls lexical variant generation, which could be expected to improve performance on the share corpus more than on the craft corpus.table  <dig> performance metrics
+
+
+*mgrep runtime is a sum of the runtime of a harness and a stand-alone mgrep invocation on a corpus
+
+**all measurements were performed on a uima platform and a linux workstation, 32gb ram, intel® core™ i7- <dig> cpu @  <dig> ghz
+
+
+
+on craft, noble coder achieved an f <dig> value of  <dig> , ranking second behind the ctakes dictionary lookup annotator , and slightly better than mmtx , ctakes fast dictionary lookup annotator , and concept mapper . all five of these coders markedly outperformed mgrep .
+
+on share, noble coder achieved an f <dig> value of  <dig> , ranking third behind ctakes fast dictionary lookup annotator  and mgrep  which were tied. noble coder was slightly more accurate than mmtx , and performed better than ctakes dictionary lookup annotator , and concept mapper .
+
+with respect to speed, concept mapper was the fastest on both corpora, followed by ctakes fast dictionary lookup annotator and noble coder. all three of the fastest annotators completed the craft corpus with a median run speed of less than twenty seconds, and the share corpus with a median run speed of less than seven seconds. mgrep was only slightly slower than noble coder was and completed annotations of the craft and share corpora in  <dig>  and  <dig>  s, respectively. in contrast, mmtx completed the annotation of the craft corpus in 10 min and the share corpus in 1 min. ctakes dictionary lookup annotator was the slowest on both corpora, completing the annotation of the craft corpus in 68 min and the share corpus in  <dig>  min.
+
+we investigated the frequency of errors made by noble coder on both corpora and then determined the distribution of these errors across the other systems. as shown in fig.  <dig>  for both corpora, there is substantial overlap among fn errors, with the same missed entities being missed by multiple systems. of note, most of the errors made by noble coder were made by at least three other systems. as would be expected, fp errors have less overlap. however, once again, errors made by noble coder are frequently made by the other coders, with the majority of noble coder fp errors made by three or more systems.fig.  <dig> frequency of all errors made by noble coder and other systems shows the total number of errors made by noble coder and the number of other systems that made the same errors. a total number of fn and fp errors on craft corpus. b total number of fn and fp errors on share corpus
+
+
+
+the distribution of errors made by noble coder on a set of randomly sampled fn and fp errors is shown in table  <dig>  for both corpora, the most frequent type of error related to absence of background knowledge or context when compared to the human annotated gold corpus. for example, in the share corpus, the phrase “no w” appears in the review of systems within the documentation of the physical examination. “w” was annotated by the humans as a mention of the concept “wheezing” . the human annotators understood the context of the highly condensed list of clinical pertinent negatives used, and they also knew the discourse-specific abbreviations that were used in the review of systems for pertinent negatives in auscultation. “w” is not a synonym for “wheezing” in the vocabulary, and noble lacks the contextual understanding of such abbreviations. noble coder therefore missed this mention. noble coder also annotated entities that were not annotated by the expert human annotators, even though the mentions annotated appear to be reasonable concept annotations. for example, in the craft corpus the phrase “cells were lysed in laemli buffer” appears. noble coder annotated “buffer” with the concept “buffer” , but no matching human annotation appears in the gold corpus. such entities may not have been deemed sufficiently important to merit annotation, based on the annotation guidelines.table  <dig> analysis of sampled noble coder errors
+
+
+
+among the errors sampled from the craft corpus, other error types identified included  an alternative application of the terminology, concept hierarchy errors, abbreviation detection errors, wording mismatch, text span mismatch, word sense ambiguity, and missed exact matches. among the errors sampled from the share corpus, other error types identified included  text span mismatch, wording mismatch, concept hierarchy errors, an alternative application of the terminology, and boundary detection.
+
+finally, we looked at the overlap of error types among other systems for the  <dig> sampled noble coder errors . not surprisingly, noble coder fn errors that were judged to be related to context were commonly seen in all other systems. other errors were largely evenly distributed.fig.  <dig> frequency of error types made by noble coder and other systems shows the number of fp and fn errors made by noble coder on the craft and share corpora, and the number of other systems that made the same errors. a number of fn errors on craft corpus. b number of fn errors on share corpus. c number of fp errors on craft corpus. d number of fp errors on share corpus
+
+
+
+discussion
+in this manuscript, we introduce noble coder, a concept recognition system for biomedical nlp pipelines. the underlying algorithm of noble coder is based on a word lookup table, making it most similar to the indexfinder  <cit>  and concept mapper  <cit>  systems. however, noble coder is different from these systems in a number of respects, with consequences for its performance, scalability, and extensibility .
+
+our benchmarking tests showed that noble coder achieved comparable performance when compared to widely used concept recognition systems for both accuracy and speed. our error analysis suggests that the majority of the noble coder errors could be related to the complexity of the corpus, expert inferences made by the annotator, annotation guideline application of the human annotators, and missing  annotations created by noble coder that were not identified by the gold annotators. errors due to known weaknesses of concept recognition systems  occurred relatively infrequently in both corpora.
+
+overall, nlp performance metrics  were low for all systems, particularly on the craft corpus, which was not unexpected. results of our component benchmarking tests should not be directly compared to evaluations of entire systems, including those tested against these corpora with reported results in the high 70s f-score  <cit> . we specifically sought to separate out and test the concept recognition system alone without the use of noun phrasing, part of speech tagging, pre-processing of the vocabulary, or filtering results to specific semantic types. when concept recognition is used within the context of a pipeline that performs these other functions, performance can be expected to be higher.
+
+nevertheless, our results provide additional data to other comparative studies by evaluating recall, precision, and speed for all of these systems across two very different gold standards. no previous study has compared performance on more than one reference standard. our results demonstrate that some systems generalize more easily than others do. additionally, no previous study has directly compared the ctakes dictionary lookup annotator and fast dictionary lookup annotator with other alternatives. our results demonstrate the remarkable speed of the ctakes fast dictionary lookup annotator with increased accuracy on the share corpus.
+
+the results of our benchmarking tests are consistent with findings of other recent studies that demonstrate the greater precision and greater speed of mgrep over metamap . however, the low recall of mgrep, for example on the craft corpus, may limit its utility to tasks in which a umls-derived vocabulary is used with lexical variant generation. to evaluate speed fairly across systems, we ran all systems within the context of a ctakes uima pipeline. the command line version of mgrep can be expected to run at faster speeds.
+
+a recent study of concept recognition systems using the craft corpus showed that concept mapper achieved higher f <dig> measures when compared to both metamap and ncbo annotator  across seven of eight ontologies represented in the gold set annotations  <cit> . we did not specifically compare accuracy against specific ontology subsets, and therefore our results are not directly comparable.
+
+noble coder has some similarities to concept mapper including the use of a word-to-term lookup table and the ability to create different matching strategies. but there are also a large number of differences between the systems, including noble coder’s use of jdbm, native imports of vocabularies as nosql tables, and additional parameters for setting the mapping strategy  when compared with conceptmapper. a particularly important difference is that the noble algorithm is greedy, which is likely to improve performance with very large terminology sets and corpora.
+
+noble coder also has significant advantages over in-memory systems. use of heap memory is an advantage if the system will be run on 32-bit machines or in any way that is ram limited. disk-based concept recognition systems such as noble coder, mmtx, and disk-configured deployments of ctakes dla and fdla would likely run with smaller footprints than their in-memory counterparts. additionally, noble coder can enable the application programmer to directly manage heap growth, with its utilization of mapdb just-in-time caching technology. none of the other systems has this capability. memory management aspects of noble make it an excellent choice for nlp processing in cloud-based environments where higher ram requirements also increase cost.
+
+in addition to performance metrics and speed, usability within common nlp tasks and scenarios is an important criterion to consider when selecting processing resources for an nlp pipeline. we observed significant differences in the degree of effort required to achieve a specific behavior such as best match. systems that expose and explicitly document parameters that can be altered to achieve such behaviors may be preferred for some applications. the terminology build process remains one of the most complex and challenging aspects of working with any general concept recognition system. of the systems described in table  <dig> that support more than a single pre-determined vocabulary, only mmtx and noble provide both tooling and documentation to build the necessary terminology resources. most systems also have significant limitations in the formats and types of vocabularies that can be used. in large part, noble was developed to address this limitation. it currently supports a variety of terminology import formats including rrf, owl, obo, and bioportal. finally, of the systems tested, only noble supports dynamic addition and subtraction of concepts to the terminology while processing. this feature can be used as part of a cycle of terminology enrichment by human reviewers or by automated methods.
+
+results of our benchmarking tests may provide guidance to those seeking to use a general-purpose concept recognition system within the context of their biomedical nlp pipelines. given specific use cases, individual researchers must prioritize not only  precision,  recall, and  speed, but also  generalizability,  ability to accommodate specific terminologies and  terminology formats, and  ease of integration within existing frameworks. the reader should also be aware that any general-purpose annotator must ultimately be evaluated within the context of a larger pipeline system.
+
+CONCLUSIONS
+noble coder is an open source software component that can be used for biomedical concept recognition in nlp pipelines. we describe the system and show that it is comparable to the highest performing alternatives in this category. noble coder provides significant advantages over existing software including  ease of customization to user-defined vocabularies,  flexibility to support a variety of matching strategies and a range of nlp tasks, and  disk-based memory management, making the software particularly well suited to cloud hosted environments.
+
+availability and requirements
+project name: noble coder and noble tools
+
+project home page: http://noble-tools.dbmi.pitt.edu/
+
+operating system: linux, windows, macos
+
+programming language: java
+
+other requirements: none; can be used as standalone application, or within uima or gate
+
+license: gnu lgpl v3
+
+any restrictions : university of pittsburgh holds the copyright to the software. use by non-profits and academic groups is not restricted. licensing for use by a for-profit commercial entity may be negotiated through university of pittsburgh office of technology management.
+
+competing interests
+
+this research was supported by the national cancer institute .
+
+authors’ contributions
+
+et was the primary developer of the noble system, contributed to the analysis and interpretation of the data, and to the writing of the manuscript. km was the primary evaluator of the noble system against alternatives, contributed to the analysis and interpretation of the data, and to the writing of the manuscript. el contributed to the design of the benchmarking study, analysis and interpretation of the data, and writing of the manuscript. jc contributed to the analysis and interpretation of the data, and to the writing of the manuscript. gc contributed to the development of the system, the design of the benchmarking study, and to the writing of the manuscript. rj contributed to the development of the system, designed the benchmarking study, contributed to the analysis and interpretation of the data, and contributed to the writing of the manuscript. all authors read and approve the final manuscript.
+
+authors’ information
+
+none.
+
+we gratefully acknowledge support of our research by the national cancer institute . many thanks to fan meng and manhong dai  for the use of the mgrep software and for their assistance with the mgrep vocabulary builds. we also thank guergana savova, sean finan, and the ctakes team at boston children’s hospital for assistance in use of the ctakes pipeline and dictionary annotators. finally, we are indebted the creators of the share and craft corpora, whose significant efforts make these essential resources available for research use.

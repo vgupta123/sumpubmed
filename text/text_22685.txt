@@ -1,0 +1,109 @@
+BACKGROUND
+exome sequencing is one of the most cost-efficient sequencing approaches for conducting genome research on coding regions. the primary applications of exome sequencing include detection of single nucleotide polymorphisms, somatic mutations, small and large structural variations, and copy number variations. there are also some less obvious data mining opportunities through exome sequencing data such as extraction of mitochondrial  <cit>  and viral sequences  <cit> . another less explored genomic aberration that can be detected through exome sequencing is internal exon deletions . not to confuse with exon skipping, ieds are the result of the deletion of one or more consecutive exons in a gene where exon skipping are artificial method used to encourage the cellular machinery to skip over an exon  <cit> .
+
+functional ieds were first described in murine t-cell acute lymphoblastic leukemia , in which constitutive ligand-independent activation of notch <dig> occurs from a deletion of exons 3- <dig>  preserving the transcriptional binding domain in exons 28- <dig>  <cit> . a similar ied was recently reported in a breast cancer cell line, hcc <dig>  <cit> . the number of deleted exons range from a single exon to nearly the whole gene as in the example of the hcc <dig> cell line. these ieds are often too short to be considered copy number variation, thus only the very large ones have a chance to be picked up by sequencing-based cnv detectors. ieds have biological importance in cancer, such as in the removal of important regulatory mechanisms or protein-protein interaction domains. given the large amount of publically available exome sequencing data accumulated over the last few years, a method that can efficiently detect such deletions would benefit the medical research community greatly and provide means to rapidly identify new ied candidates. thus, we have designed exondel, a tool aimed at detecting ieds through exome sequencing data. exondel is written in a combination of perl and r. exondel detects exon deletion at gene level rather than at global level, and it adjusts for gc content.
+
+implementation
+an ied can be homozygous or heterozygous. while homozygous means that exon is deleted in both allele and heterozygous means that the exon is deleted in one of the two alleles. homozygous deletion is relatively easier and more accurately detectable than heterozygous exon deletion. exondel is currently designed to detect homozygous ieds only. exondel differs from other sequencing-based cnv tools by detecting exon deletion on a per gene level instead of searching for large lengths of depth variation across the whole genome. to achieve this, exondel first computes callable genes based on different exome capture methodologies. there are three major exome sequencing capture kits currently in broad use: illumina truseq, agilent sureselect, and nimblegen seqcap ez. the target regions for these three exome capture kits vary and range from  <dig>  to  <dig>  million base pairs. the capture kits available can enrich the exome, and additional content includes exons plus 3’ and 5’ utrs. the capture kits differ in their target regions, bait length, bait density, and molecule used for capture. to account for these differences, exondel computes the callable genes first. a callable gene has to satisfy the following two conditions: 1) all exons of this gene must be covered by the exome capture kit, and 2) each exon must have at least 90% of its base pairs covered by the exome capture kit. the first condition ensures that no false positive resulted from uncovered exons in the capture kit. the second condition ensures that no false positives resulted from partially covered exons in the capture kit. exondel will only attempt to detect exon deletions for the callable genes.
+
+the important inputs of exondel include a non-optional binary alignment map   <cit>  file, a non-optional browser extensible data  file of the capture kit, and an optional gene feature format  file. the bed file provides the exact capture regions down to a single base-pair resolution. the gtf file provides detailed information about the starts and ends of exons. both bed and gtf files are used to compute callable genes: if gtf is not provided, exondel will apply the latest gene annotation from refseq. other input parameters of exondel include a maximum window size and a list of genes of interest. the maximum window size parameter determines the max length ied that exondel will search for. for example, if the maximum window size is  <dig>  exondel will search for ieds with length less than  <dig> exons. for the user-input list of genes of interest, instead of searching though the entire exome, exondel will only search ieds in the genes of interest in order to save time.
+
+the depth coverage of illumina sequencing data can be influenced by gc content  <cit> . many sequencing-based tools have taken the gc content’s effect on depth into consideration. we also observed similar bias based on analysis of exon depth . to minimize the effect of gc-content bias on depth, we applied standardization of depth by gc content followed by median correction, a method described in  <cit> . the gc content was adjusted by the following formula,  where ri are the read counts of the ith exon, and mgc is the median read counts of all exons that have the same gc content as the ith exon. in yoon et al.’s original implementation, ri is the read counts of the ith  <dig> bp window because copy number was under consideration instead of exons.figure  <dig> 
+using data from all  <dig> samples, we show that depth drops for exons with low and high gc content.
+
+
+
+
+exondel detects exon deletions by comparing each exon’s depth against its parent gene’s median depth after performing the depth adjustment by gc content described previously. to ensure high specificity, reads with poor mapping quality  are removed. if non bwa aligned bams are used , exondel will compute the average base quality per read as  where l is the length of the read, and bqi is the base quality of ith nucleotide. all reads with average bqr <  <dig> are removed.
+
+ieds can have lengths  <dig> to l- <dig>  where l is the total number of exons in a gene. longer ieds are more reliable than shorter ieds because shorter ieds, especially for ieds with length  <dig> are more likely to be false positives caused by sequencing artifacts. potential ieds will be identified if the median depth of one or consecutive exons are smaller than a certain user-adjustable percentage of the median depth within the gene. first we define the median depth of the ith exon as dpei = median , where l is the length of the exon. the list of all median depths of all exons is denoted as dpall. an exon is considered deleted if and only if the following conditions are satisfied:dpei < c1 % × dp all, c% × dp all presents the percentile of all exon depth, and c is a constant. by default, c is  <dig>  the user can manually adjust c to change the sensitivity of exondel. increasing c will result more ieds detected.
+
+dpē > c2 % Î§ dpall, where ē denotes the exons that do not satisfy condition  <dig>  by default c is  <dig> 
+
+
+
+exondel performs the exon deletion detection at gene level. once it moves to the next gene, the condition is reset. the number of exon deletions detected is inversely proportional to this parameter . when multiple samples are loaded, exondel computes the summary statistics of all samples.table  <dig> 
+exon deletion candidates identified by window length, and comparison with other cnv tools using breast cancer cell lines
+
+
+exon deletions1
+verified in rnaseq2
+found by cnv tools3
+
+1based on  <dig> samples.
+
+
+2based on  <dig> samples,  <dig> of the  <dig> samples did not have rnaseq data.
+
+
+3based on  <dig> samples.
+
+
+
+to demonstrate the effectiveness of exondel, we used two independent datasets. the first dataset contains exome sequencing data from  <dig> breast cancer cell lines. the exomes were captured using illumina’s trueseq capture kit. seventy five nucleotide paired-end sequencing was performed using illumina’s hiseq  <dig> platform at vanderbilt genomic core. rnaseq data rt-pcr were used to validate the ieds identified by exondel. because exondel is also designed to work with tumors, which are heterogeneous  compared to cell line, we downloaded exome sequencing data of  <dig> breast cancer tumor samples  from the cancer genome atlas . the corresponding rnaseq data of the same  <dig> samples were also downloaded for validation purpose.
+
+RESULTS
+the  <dig> cell line datasets were processed in house using standard sequencing processing pipeline. the complete raw quality control results can be seen in additional file 1: table s <dig>  alignment was done using bwa  <cit>  against the hg <dig> human genome reference. statistics of alignments can be viewed in additional file 2: table s <dig>  using exondel to screen for ied on the  <dig> cell line samples, we identified both novel and known exon deletions were observed. we were able to validate the previously described deletion of exons  <dig> to  <dig> in notch <dig> in cell line hcc <dig> and identify a similar deletion in cell line mda-mb- <dig>  this previously unidentified ied of exons  <dig> to  <dig> is similar to the deletion in hcc <dig> and those described in murine t-all  <cit> . to verify these findings we performed rnaseq on these cell lines. figure  <dig> depicts the sequencing depth coverage using integrative genomics viewer for both dna exome and rnaseq data for each of the cell lines. for comparison, we included a cell line without the notch <dig> deletion  in figure  <dig>  exons 3- <dig> and 2- <dig> are clearly deleted in hcc <dig> and mda-mb- <dig> respectively but remain intact in hs578t cells. these deletions are further confirmed with rt-pcr .figure  <dig> 
+verification of notch <dig> deletions found by exondel. the mapping results of both exome sequencing and rnaseq data support the large deletion in notch <dig>  rnaseq data further proves that such deletions can be carried through transcription to rna.
+further validation of exon deletion on notch <dig> was obtained using rt-pcr.
+
+
+
+
+in addition to the multi-exon deletion in notch <dig>  many novel ied candidates were identified, some containing as few as a single exon . ieds with a single exon are more likely to result from sequencing artifacts. for comparative purposes, we screened our samples for cnv using  <dig> sequencing data-based cnv callers: exomecnv  <cit> , cnvnator  <cit> , conifer  <cit> , control-freec  <cit> , exomecopy  <cit>  and cn.mops  <cit> . even after combining results from all six cnv tools, exondel can still indentify many novel deletion candidates not identified by other cnv tools . figure 4a demonstrates the distribution of length of deletions detected by each tool. clearly, exondel can identify smaller deletions while other cnv tools identified deletions with long length. figure 4b shows the number of deletions detected by each tool. at window size  <dig>  a significantly more number of potential ieds were identified by exondel on all  <dig> samples, given researcher a greater chance at identifying the true biological relevant ides. the notch <dig> deletion we described was identified in  <dig> out of the  <dig> tested cnv tools. the detailed results of the exondel and cnv comparison can be viewed in additional file 3: table s <dig> figure  <dig> 
+comparison between exondel and other cnv calling tools.
+ the length distribution of the deletion detected by all tools;  the number of deletions detected using all tools at window size  <dig> 
+
+
+
+we repeated the exon deletion analyses on the tcga tumor datasets. because we do not have access to the actual tumor sample, we could not perform rt-pcr validation. rnaseq data was used for validation and comparisons with the six cnv tools were conducted. results of similar patterns were identified. more ieds can be detected with smaller window size, and exondel was able to find more ieds at all windows sizes compared to the other six cnv tools combined . this result shows that exondel is able to perform well on tumor samples.table  <dig> 
+exon deletion candidates identified by window length, and comparison with other cnv tools using the  <dig> tcga breast cancer tumor samples
+
+
+
+
+discussion
+ieds have functional implications in cancer genomics and we have developed a tool, exondel, to screen for novel ied candidates efficiently. using a combination of perl and r, we provide a single package including all source codes and instructions which is freely available for download. while providing several important new features, exondel also contains a few limitations. for example, as the name indicates, exondel can only detect exon deletion not amplification. the window size plays a significant role in detection of ied. large window size ensures more accurate detection at the cost of missing small ieds. small window size on the other hand, allows to detection high number of ieds at the cost of higher false positive rate. thus, we recommend running exondel at window size  <dig> to  <dig> in one setting, and scan for potential biological meaningful ied candidates from the results of larger window size to smaller window size.
+
+exondel distinguish itself from other sequencing-based cnv tools in two aspects. first, it performs deletion detection at gene level and uses exon as unit. other sequencing-based cnv tools usually consider cnvs as large deletion or duplication spanning large genomic regions. it is common to see that cnv contains many genes and the median length of cnv detected using sequencing-based cnv tool is around 105
+ <cit>  and the average exon less is less than  <dig> base pairs  <cit> . thus, exondel is very efficient, and one exome can be screened in about  <dig> minutes. exondel also allows the user to define the deletion window size and can be configured to run multiple bam files in parallel.
+
+in theory, exondel is designed to work with both tumor and cell line samples. tumor samples differ from cell lines samples because they are usually a mixture of tumor and normal tissues. thus, tumor sample contains noises which can mask the true variant signal. this is a challenge all variant callers have to face. if the tumor purity is low, a deleted exon might have reads aligned to it due to the presents of normal tissue. in such cases, exondel would not able to identify such ieds. as shown in our tcga tumor dataset results , exondel was able to identify many potential ieds, and a significant portion of them were verifiable by rnaseq and other cnv tools. this indicates that either the purities of these tumors were good, or many true ieds were not affected by tumor heterogeneity. a portion of ieds might still be affected by tumor heterogeneity, and these ieds were not detectable by exondel.
+
+CONCLUSIONS
+given the large volume of exome sequencing data publically available in repositories such as tcga, the  <dig> genomes project, nhlbi exome sequencing project, and the sequence reads archive, exondel provides researchers with a powerful tool to mine for internal deletions that may contain novel biological findings.
+
+availability and requirements
+project name: e.g. exondel project
+
+project home page: e.g. https://github.com/slzhao/exondel
+
+operating system: linux
+
+programming language: perl, r
+
+license: gpl v2
+
+any restrictions to use by non-academics: no
+
+electronic supplementary material
+additional file 1:
+raw data quality control matrix.
+
+
+ additional file 2:
+alignment quality control matrix.
+
+
+ additional file 3:
+comparison between exondel and six other cnv tools.
+
+
+ competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+yg wrote the manuscript and designed the study. sz was the primary programmer of exondel. bl and tms conducted cell culture and rt-pcr experiments. qs provided programming assistance. tps provided the rnaseq data used for validation in this study. jp and ys provided significant intellectual help in the areas of cancer biology and biostatistics. all authors read and approved the final manuscript.
+

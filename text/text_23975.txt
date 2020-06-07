@@ -1,0 +1,208 @@
+BACKGROUND
+the alignment of reads to genomes is an important problem in many biomedical applications that relied on next-generation sequencing technologies. this problem is motivated by the fact that genomes for many species have been sequenced. and since one expects genomes within the same species differ little, such "referenced" genomes can facilitate the assembly of new genomes of other individuals within the same species from short reads. to address this problem, researchers have proposed many approaches together with software packages. nevertheless, sequencing technologies have advanced rapidly, rendering many of these approaches ineffective or inefficient or both. one aspect that continually changes is the read length. advanced technologies generally produce longer reads . on the other hand, technologies that produce shorter reads can be less expensive and are therefore attractive in terms of cost. thus, it is desirable to have algorithms and tools that perform well across different read lengths ranging from  <dig> to several hundreds basepairs.
+
+nevertheless, many existing algorithms struggle to perform consistently across a wide range of read lengths. methods such as bowtie  <cit>  and burrows-wheeler alignment   <cit>  tend to perform better with shorter reads. bowtie uses the burrows-wheeler transform  and fm index to build a permanent index of the reference genome. it then applies backtracking algorithm to find alignments. bwa also utilizes the bwt, but unlike bowtie, can handle gaps and mismatches in the reads. more advanced versions of these methods include bowtie <dig>  <cit>  and bwasw  <cit>  which are designed to work with longer reads. bowtie <dig> can align reads with gaps and works better than bowtie at longer reads. bwa-sw exploits the bwt and several heuristics to speed up the local alignment of reads.
+
+many techniques utilize data structures and techniques such as the bwt, fm index, suffix arrays, suffix trees/tries, hash tables or q-grams  <cit> , aiming to speed up substring querrying. additional heuristics are also used to enhance efficiency. bowtie <dig>  <cit>  and cushaw <dig>  <cit> , for example, use seeds to quickly identify true candidates for alignment. gassst  <cit>  uses a filtering technique to reduce noisy seeds. implementations of some of these approaches, e.g. bowtie <dig>  cushaw <dig>  take advantages of parallelism or special-purpose architectures. the use of heuristics can improve performance several folds, but might lead to over-tuning parameters to a particular set of inputs, e.g. read lengths, species, or base error rates.
+
+we introduce randal, an aligner based on a novel algorithm that performs consistently well over a wide range of read lengths, from  <dig> to several hundreds base pairs. we employ two fm indices for efficient bidirectional  substring matching. to deal with inexact matching , first, we find common substrings between reads and the reference genome. then, these common substrings are extended to complete alignments based on a bounded threshold on the edit distance. we use a special pruning mechanism to shorten vastly the running time of computing edit distances in a vast majority of cases. the use of randomization in aligning reads to genomes increases the probability of finding seeds quickly and enables us determine methodologically important parameters to speed up the entire alignment process. preliminary results show that our algorithm performed consistently well on a wide range of read lengths across several bacterial and eukaryotic genomes. the alignment quality of our method was better or generally as good as that of all compared methods.
+
+methods
+given a reference genome  s and a set of reads r = {r <dig>  …, rn}, the main problem is to align each ri to  s. the reference genome  s and the reads are dna sequences, or strings over the alphabet of  <dig> characters, Σ = {a, g, c, t}. the alignment of a read r to  s is essentially finding a substring of  s that matches r the most. at the moment, we assume that these reads are not paired-end reads. the set of reads r are substrings of another genome  r that is different from, but belongs to the same species as  s. by aligning reads in r to  s, we implicitly reconstruct the genome  r.
+
+our strategy for read alignment is based on these ideas:
+
+ <dig> detection of identical substring matches between r and  s is based on common substrings of r and  s. as we know r and  s differ only slightly, we expect long common substrings exist.
+
+ <dig> a special data structure called the fm index is used to facilitate memory-efficient, time-optimal exact string matching. this data structure facilitates efficient detection of long common substrings between r and  s.
+
+ <dig> randomization is employed to find common substrings between r and  s efficiently and methodologically. randomization empowers us to methodologically determine important parameters that are used in critical steps of the algorithm. this translates into consistent performance in terms of time and accuracy across different species.
+
+ <dig> to account for insertion/deletion polymorphisms, we utilize the edit distance to provide an accurate measure for read alignment. additionally, we employ a pruning heuristic to shorten the computation of edit distance, without com promising quality of alignment.
+
+these ideas will be discussed in greater detail in the following sections.
+
+indexing the reference genome
+naive string matching takes quadratic time and therefore is too costly. researchers have used data structures such as suffix tree, suffix array, and fm index to speed up string matching significantly. the fm index  <cit>  in particular is desirable because it allows exact string matching to be done optimally in o time, where m is the length of the query , and is very space efficient. the fm index of the genome is a substring index that takes advantage of properties of the burrows-wheeler transform to search incrementally all suffices of a read in the reference genome. this allows linear time  searching for exact substring matches. by design, the search direction is in reverse  order with respect to the sequence.
+
+to facilitate bidirectional string matching , we employ two fm indices. a conventional fm index that traces substring matches backward is denoted as  Ɓ. to facilitate searching in the forward dimension, we created an fm index for the reverse of the reference genome,  s. searching using this index, denoted as  Ƒ, is equivalent to search in the forward direction in  s. the pair of indices  helps us identify long identical stretches of dna in the reference genome  s and each read ri.
+
+finding common substrings between reads and genomes
+given a read r and a specific position p in r, algorithm  <dig> outlines the steps in finding longest common substrings of r and the reference genome  s, with respect to p; figure  <dig> illustrates the conceptual goal of this algorithm. longest common substrings  are constructed by concatenating maximal matches between substrings of  s and those of r, which begin and end at p. searching for matches between substrings of  s and substrings of r is facilitated by the backward and forward fm indices  Ɓ and  Ƒ. to save time and reduce false positives, we only consider common substrings with lengths at least w.
+
+the choice of w is important. if w is too small, m is large, and we will consider many common substrings between the read and the genome to construct alignments between the read and the genome. the more common substrings we consider, the more likely we can find the correct position of the read in the genome to align; but we also more likely make mistakes of aligning the read to an incorrect position. in other words, with smaller w, we might get more true positives  and more false positives  at the same time. on the other hand, if w is too large, we might not be able to find any common substrings and consequently unable to align the read to the genome. therefore, inappropriate choices of w results in bad performance.
+
+algorithm  <dig> commonsubstrings
+1: let b be substrings of reference genome  s, which match exactly & maximally to ri...p- <dig> 
+
+2: let f be substrings of reference genome  s, which match exactly & maximally to rp...j.
+
+3: m := ∅
+
+4: for each b ∈ b do
+
+5:    for each f ∈ f do
+
+6:        let s := b ⊕ f be a concatenation of b and f.
+
+7:        if s is a contiguous block in  s and |s| ≥ w then
+
+8:            m := m ∪ s
+
+9: return m
+
+our strategy for determining good values of w is based on randomization. as we shall see soon, the value p given to algorithm  <dig> would be a random index of the read. to calculate w, first suppose that the correct substring of the reference genome  s to align to the read r is r'. let d be the edit distance between r and r'. these d mismatches divide r into d +  <dig> blocks. each block  includes the closest mismatch to it. let the sizes of the blocks be m <dig>  m <dig>  … … …, md+ <dig>  we have |r|=m= ∑i=1d+1mi.
+
+the random choice of p implies that the common substring found by algorithm  <dig> would be a random block, which is selected with probability pi=mim. this implies that the expected size of block i is e=mipi=mi2m. thus, the expected size of a random block, i.e. the expected length of the common substring, is e= ∑i=1d+1e= ∑i=1d+1mi2m.
+
+the cauche-schwarz inequality tells us that
+
+ ∑i=1d+11d+1mim2≤∑i=1d+12∑i=1d+ <dig> 
+
+after simplifying, these imply that e≥md+ <dig>  in other words, we have established that:
+
+lemma: the expected length of the common substring between a read and the reference genome found by algorithm  <dig> is at least md+ <dig> 
+
+although we do not know what d, the distance between r and its aligned substring r', is, it can be estimated by the rates of single nucleotide polymorphism  of the given genome and given rate of sequencing error. let b be the rate of each nucleotide being mutated or sequenced erroneously, which we may assume to be distributed by a binomial distribution with mean µ = mb and variance σ <dig> = mb, where m is the read length.
+
+although we do not know exactly what d is, its upper bound t might be estimated by µ + cσ, for some constant c. with  <dig>  reads, we found that c =  <dig> produces good performance with high true positives and low false positives.
+
+in summary, the two critical parameters of our method t and w are methodologically derived as follows:
+
+• the upper bound of the distance between a read and its aligned string, t=mb+4mb.
+
+• the lower bound of the expected length of common substrings, w~mt≤md+1≤e.
+
+w appears in algorithm  <dig>  and t appears in algorithm  <dig>  which is the next step after finding common substrings between reads and the reference genome.
+
+algorithm  <dig> alignread
+
+1: p := 1
+
+2: m := |r|
+
+3: for i from  <dig> to a do
+
+4:    c := ∅
+
+5:    m := commonsubstrings
+
+6:    for each s ∈ m , which is a substring of  sdo
+
+7:        let ri…j be the substring of r that matches s exactly.
+
+8:        let sl be the -substring of  s, preceding s
+
+9:        let sr be the -substring of  s, following s
+
+10:        d := edit-dist + edit-dist
+
+11:        if d ≤ t then
+
+12:            c := c ∪ 
+
+13:    if c has at least one sequences then
+
+14:        return "fail to align", if c has more than  <dig> sequences.
+
+15:        otherwise, align read r to each sequence of c. stop.
+
+16:    p := random
+
+17: return "fail to align"
+
+extending common substrings to align reads to referenced genomes
+using long exact common substrings as seeds to align reads to genomes is similar to  <cit> . our approach promises to be efficient because instead of exhaustively traversing indices of a read to find optimal common substrings, we find common substrings with respect to random index p of the read.
+
+in algorithm  <dig>  we iterate at most a times to find long common substrings between  s and each read r. in each iteration, given a random position p, we invoke algorithm  <dig> to find the longest common substrings  of  s that match to a substring of r with respect to p. as illustrated in figure  <dig>  each string s ∈ m corresponds exactly to a substring ri…j of r. this exact match between ri…j and s, naturally, pairs up r1…i− <dig>  to sl, the corresponding substring of  s preceding s, and rj+1…m  to sr, the corresponding substring of  s following s. if the total edit distances of these two pairs are less than the previously calculated upper-bound t, we align r to the corresponding substring of  s.
+
+note that in the first iteration, the position p is  <dig> and not a random index of r. the reason for this is that we would like the method of finding long common substrings  to be symmetrical in the sense that b and f could "wrap around" r. in other words, when p =  <dig>  b is a suffix of r and f is a prefix of r. in this case, the concatenation of b ⊕ f is not a contiguous substring, but rather two contiguous strings separated by a big gap. this conceptualization of "wrapping around" the read, or thinking of it as a circular instead of linear string, turns out to be quite effective in practice. in many cases, p =  <dig> leads to very long common substrings that lead to correct alignments of reads.
+
+if we cannot align r to any substring of  s after a attempts, then r is unaligned to  s, the reference genome. so, it is important to choose a appropriately. if a is too small, there will be many unaligned reads. if a is too large, the algorithm is slow. to select an appropriate value of a, let us again assume that the read and its correct alignment to the genome differ in d places , consequently diving the reads into d +  <dig> blocks. we want to select a value for a so that the longest block  can be sampled with high certainty. the probability that the longest block is selected  is m*m, where m∗ is the length of the longest block. on the other hand, the pigeonhole principle dictates that m*≥md+ <dig>  this means, d+1≥mm*, which is the expected number of iterations to sample p to select the longest block.
+
+thus, setting a = t +  <dig> ≥ d +  <dig>  the longest common substring between a read and the genome is sampled expectedly after a iterations. further, if a = c … , then the probability of landing in the longest block is exponentially increased as a function of c. trading for speed, c =  <dig> seems to work fine in practice, because even if algorithm  <dig> does not return the longest common substring, it is often possible to extend it to find the correct alignment for the read. but longest common substrings minimizes the chance of running into repeats in the genome; i.e. common substrings upon which extensions will lead to incorrect alignments.
+
+fast heuristic for computing edit distances
+computing edit distances consumes much time of the alignment algorithm . in steps 10- <dig> of algorithm  <dig>  we compute the edit distance between a read and a substring of the genome and discard it if the distance is greater than t. as each read often match with few substrings of the genome, we expect that such edit distances often exceed t. examining lines 10- <dig> of algorithm  <dig>  we see that actually we do not need to compute the exact value of d, the edit distance of x and y, as long as we can answer correctly the query d ≤ t.
+
+we claim that the edit distance of x and y, d ≤ t if and only if bound ≤ t, where bound is defined in algorithm  <dig>  to see this, observe that
+
+• if d ≤ t, then bound returns d.
+
+• if d > t, then bound returns either d or t +  <dig>  the only difference between bound and the conventional edit distance lies in line  <dig> of algorithm  <dig>  analyzing line  <dig>  we see that once di,j > t for  <dig> ≤ j ≤ m , then dm,m > t.
+
+if d > t, bound might not compute the edit distance correctly. nevertheless, d ≤ t if and only if bound ≤ t. for aligning reads to bacterial genomes, bound is much faster than the worst-case complexity Θ.
+
+algorithm  <dig> bound
+
+1: di, <dig> :=  <dig> for  <dig> ≤ i ≤ |x|
+
+2: d <dig> j :=  <dig> for  <dig> ≤ j ≤ |y|
+
+3: for i :=  <dig> to |x| do
+
+4:    for j :=  <dig> to |y| do
+
+5:        di,j := min, di− <dig> j+  <dig>  di,j−1+1)
+
+6:    return t +  <dig> if di,j > t for  <dig> ≤ j ≤ max{|x|, |y|}
+
+7: return d|x|,|y|
+
+RESULTS
+randal is implemented in c++; fm-index codes are adapted from an external library . we compared our method against several aligners including bowtie  <cit> , bwa  <cit> , bowtie <dig>  <cit> , bwa-sw  <cit> , and cushaw <dig>  <cit> . we chose these methods based on the fact that they are recently published, very popular and their software are available. comparison tests were conducted on a workstation with two intel xeon e5- <dig>  <dig> ghz cpu and  <dig> gb ram.
+
+each aligner is tested with  <dig>  simulated reads generated for each of  <dig> bacterial genomes and  <dig> chromosomes of eukaryotic genomes. sizes of these genomes range from  <dig>  and  <dig> millions bases; see table  <dig>  genomes were obtained from embl-ebi . since recent sequencing technologies produce read lengths ranging from  <dig> to 400bp at greater speed and lower cost than previous technologies   <cit> , we choose this range of read lengths to evaluate the methods. more specifically, the reads were generated at lengths  <dig>   <dig>   <dig>   <dig>   <dig>  and  <dig> as these lengths have been mentioned in the literatures. the wgsim c program, part of the samtool package  <cit> , was used to generate reads.
+
+extensive comparisons were performed using samtool's default settings, with base error rate at 2%; 15% of polymorphisms are indels with lengths drawn from a geometric distribution with density  <dig>  ∗  <dig> l− <dig>  additionally, we present summary results for 1% and 4% base error rates with similar trends and conclusions.
+
+aligned reads from aligners are evaluated using the wgsim_eval perl script, a part of the samtool package, using the default setting in which a read is mapped correctly if its mapping position is within a distance of  <dig> from the correct position. to compare alignment quality, we defined:
+
+ precision=# correctly aligned reads# aligned readsrecall=# correctly aligned reads# reads 
+
+alignment quality of  <dig> aligners
+at the outset, we found that bowtie and bwa were decent performers when read lengths were short, i.e. between 31- <dig> bases. when read length increased, however, these two aligners were not competitive. figure  <dig> shows the average performance  of  <dig> aligners on  <dig> bacterial genomes and  <dig> eukaryotic genomes, respectively. both bwa and bowtie suffered from a decrease of precision as read length increases. for bwa, recall peaked at around 94% even at longer reads. bowtie did better at recall for longer reads than bwa, but it was still not competitive to the other  <dig> aligners, including randal. its bad performance at longer reads is unacceptable because technological trends tend to produce longer reads. for this reason, we will drop them out of head-to-head comparisons at this point, and will only compare the  <dig> best aligners: bowtie <dig>  bwa-sw, cushaw <dig> and randal.
+
+a closer look at figure  <dig> reveals that bwa-sw was relatively competitive but come roughly in the last place. there is no consistent winner  among the top  <dig> performers, bowtie <dig>  cushaw <dig>  and randal. nevertheless, we can see that randal did noticeably better in terms of precision and was still competitive in terms of recall. importantly, we see that across the wide range of read lengths from  <dig> to  <dig> for both bacterial and eukaryotic genomes, the performance of randal was consistently high in terms of both precision and recall; average precision was never below  <dig>  and average recall was never below  <dig> . this consistency distinguishes randal from the other top aligners.
+
+an even closer look at individual bacterial and eukaryotic genomes  further reinforces the consistency in performance of randal. the lowest precision randal got in all  <dig> genomes was about  <dig> , and the lowest recall was about  <dig> . in comparison, for the other top performers, the lowest precision was about  <dig>  and lowest recall was about  <dig> .
+
+all top  <dig> aligners perform really well in both precision and recall as read length increases. their performance was quite similar at  <dig> read length. at shorter read lengths, however, randal outperformed the rest, often in both precision and recall.
+
+rates of misalignment of top  <dig> aligners
+misalignment means aligning a read at an incorrect position. misalignment increases the likelihood of running into problems later when we are interested in assembling reads into a complete genome and to identify where the constructed genome different from the reference genome .
+
+the misalignment rate is calculated by dividing the number of incorrect aligned reads by the total number of reads. figure  <dig> shows that averaging across all bacterial and eukaryotic genomes, randal got noticeably lower misalignments than the other aligners at all different read lengths. this result suggests that randal will likely work well with other tools and methods that require alignment of reads to reference genomes.
+
+alignment quality at different base error rates
+we have compared performance of  <dig> different methods using a base error rate of 2%; each nucleotide is mutated with the probability of 2%. due to the lack of space, we cannot present a comprehensive comparison at different base error rates, as we have at 2%. nevertheless, analyses at different base error rates show similar behaviors as we have observed at 2% error rates. we present a summary analysis at two other base error rates of 1% and 4% at read lengths of  <dig> bp,  <dig> bp, and  <dig> bp. table  <dig> summarizes the average precision and recall of the top  <dig> aligners. these numbers suggest the followings:
+
+ <dig> all methods performed well at 1% base error rate.
+
+ <dig> with 4% base error rates, the other methods suffered, particularly with shorter reads. the best of them  got ∼63% recall at  <dig> bp. low recall rate means few reads  were aligned correctly.
+
+ <dig> our method consistently achieved the highest performance  across different read lengths and base error rates. in precision, our method always got the highest, consistently above  <dig> %. in recall, even at worst case of 4% base error rate and  <dig> bp read length, we got ∼94%.
+
+raw running times of top  <dig> aligners
+theoretically, asymptotic complexity of our method in aligning a read of length m is proportional to m + m <dig>  the worst case complexity of m <dig> is due to edit distance computation. the heuristic for computing edit distance, however, reduces this worst-case complexity significantly in practice. our testing showed that the running times of other methods, like ours, did not depend much on genome sizes.
+
+bowtie <dig> was the fastest across the board, but as shown in the previous section, its alignment quality is not as good as our method or cushaw <dig>  compared to ours, cushaw <dig> was significantly slower. observing running times at different read lengths, we speculate that cushaw <dig> might be much be slower than ours with longer reads.
+
+difficulty of alignment in the presence of repeats
+although eukaryotic genomes are expected to be harder to align than bacterial genomes, an examination of performance of the top  <dig> aligners in figure  <dig> reveals that these aligners did not always perform better on bacterial genomes; eukaryotic genomes were not always harder to align. to quantify the degree of difficulty in aligning reads to genomes, we define repeat density as a measure of how many repeats a genome has. since repeats directly affect alignment quality, the notion of repeat density is meant as a quantifiable approximation of genome complexity. more precisely, given a genome  s and one of its length-k substrings, l, let f  be the number of times l occurs in s. we define the k-mer density of  s given k to be
+
+ d=∑l∈s,f≥2f|s|-k+ <dig> 
+
+dcan be interpreted as the probability that a random read of length k is a repeat. the larger d is, the more repeats  s has and the harder it is expected for aligners to align k-mer reads to  s. to investigate how much repeat density correlates with the difficulty of aligning short reads to genomes, first, we computed d for k at each read length  <dig>   <dig>   <dig>   <dig>   <dig>  and  <dig>  to get a glimpse of its distribution, we show the values of d of the bacterial and eukaryotic genomes, for k's equal to these read lengths, in table  <dig>  second, for each k, we computed the pearson correlation between d of all bacterial and eukaryotic genomes and the performance  of each aligner on aligning reads of length k to the genomes.
+
+CONCLUSIONS
+we introduced randal, a novel randomized approach to aligning reads to reference genomes. we showed that it performed among some of the top aligners that currently exist. unlike the other aligners, however, randal distinctly performs consistently well across a wide range of parameters  across all tested bacterial and eukaryotic genomes. as current sequencing technologies can produce reads in the tested range at low cost  <cit> , our approach promises to work well with these technologies.
+
+using repeat density as a measure of genome complexity, we showed that this measure correlated highly negatively with alignment quality . this implies that for larger and more complex genomes with many more repeats, these aligners will similarly suffer, as expected.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+vp conceived and designed the algorithm and experiments. nsv, qt, and nn implemented the algorithm. nsv and qt collected data, implemented experiments, carried out evaluation and data analysis. all authors read and approved the manuscript.
+

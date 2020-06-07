@@ -1,0 +1,279 @@
+BACKGROUND
+rna secondary structure prediction is an important ongoing problem in bioinformatics. rna provides a mechanism to copy the genetic information of dna and can catalyze various biological reactions. rna folding is the process by which a linear ribonucleic acid molecule acquires secondary structure through intra-molecular interactions.
+
+algorithms to make predictions of the structure of single rna molecules use empirical models to estimate the free energies of folded structures. this paper focuses on the base pair maximization algorithm developed by nussinov  <cit> , which predicts rna secondary structure in a computationally efficient way. given an rna sequence x
+ <dig> x
+ <dig> …,x
+n, where x
+i is a nucleotide from the alphabet {g , a , u , c }, nussinov’s algorithm solves the problem of rna non-crossing secondary structure prediction by means of computing the maximum number of base pairs for subsequences x
+i,…,x
+j, starting with subsequences of length  <dig> and building upwards, storing the result of each subsequence in a dynamic programming array.
+
+the following nussinov recursion s is defined over the region 1≤ i<j≤n as 
+  <dig> s=max+δ,maxi≤k<j+s)), 
+
+
+and zero elsewhere, where s is the n×n nussinov matrix, and δ is the function which returns  <dig> if  is an au, gc or gu pair and i<j, or  <dig> otherwise.
+
+nussinov’s algorithm is within nonserial polyadic dynamic programming . the term nonserial polyadic stands for another family of dynamic programming  with nonuniform data dependences, which is more difficult to be optimized  <cit> .
+
+on modern computer architectures, the cost of moving data from main memory is orders of magnitude higher than the cost of computation. improving data locality and extracting loop nest parallelism of npdp are still challenging tasks, although a number of authors have developed theoretical approaches to accelerating npdp codes for rna folding .
+
+fortunately, the nussinov recursion involves mathematical operations over affine control loops whose iteration space can be represented by the polyhedral model  <cit> . in this paper, we consider a formulation that is suitable for automatically producing parallel and tiled program loop nests from the dependence structure of the program .
+
+loop tiling, or blocking, is a key transformation used for both coarsening the granularity of parallelism and improving code locality. smaller blocks of loop nest statement instances in a loop nest iteration space  can improve cache line utilization and avoid false sharing. on the basis of a valid schedule of tiles, parallel coarse-grained code can be generated.
+
+to our best knowledge, well-known loop nest tiling techniques are based on linear or affine transformations . however, only the two outer loops from the three ones of the nussinov code can be tiled by means of standard tiling algorithms implemented in polyhedral tools  <cit> . for example, the state-of-the-art compiler, pluto  <cit> , extracting and applying affine transformations, is able to tile and parallelize the two outer loops of the considered nussinov code and is not able to tile the innermost loop. the iterations of this loop can be executed only in serial order that prevents enhancing code locality and parallelism degree.
+
+moreover, classical affine transformations have commonly known limitations  <cit> , which complicate extraction of available parallelism and locality improvement in npdp codes. mullapudi and bondhugula presented dynamic tiling for zuker’s optimal rna folding <dig> in paper  <cit> . they have explored techniques for tiling codes that lie outside the domain of standard tiling techniques. 3d iterative tiling for dynamic scheduling is calculated by means of reduction chains. operations along each chain find maximum and can be reordered to eliminate cycles. their approach involves dynamic scheduling of tiles, rather than the generation of a static schedule. at this time, a precise characterization of the relative domains of this technique is not available.
+
+wonnacott et al. introduced 3d tiling of “mostly-tileable” loop nests of the nusinov algorithm in the paper  <cit> . the “mostly-tileable” term means the iteration space is dominated by non-problematic iterations . this approach tiles non-problematic iterations with classic tiling strategies while problematic iterations of loop  are peeled off and executed later. generated code is serial and the authors do not present any parallelization of this code.
+
+rizk et al.  <cit>  provide an approach to produce efficient gpu code for rna folding, but they do not consider any loop nest tiling. tang et al.  <cit>  presented the pochoir compiler for automatic parallelization and cache performance optimization of stencil computations. pochoir computes the optimal cost of aligning a pair of dna or rna sequences by means of gotoh’s algorithm. it transforms computation to obtain diamond-shaped grid that can be evaluated as a stencil, but it can tile only two of the three loops of original code. stivala et al.  <cit>  describe a lock-free algorithm for parallel dynamic programming. however, code locality improvement is not considered.
+
+paper  <cit>  introduces a new technique to generate parallel code applying the power k of a relation representing a dependence graph, but that paper does not consider generation of tiled code and does not concern any rna folding. paper  <cit>  considers runtime scheduling of rna folding for untiled program loops with known bounds.
+
+motivated by the deficiency of the mentioned techniques, we developed and present in this paper a novel approach for tiling and parallelization of the nussinov loop nest. to generate valid tiles in all three dimensions, we apply the exact transitive closure of loop nest dependence graphs. it allows for generating target tiles such that there is no cycle in a corresponding inter-tile dependence graph. it is well-known that for such a case, a valid schedule of target tiles exists, i.e., a valid serial or parallel tiled code can be generated  <cit> . such a tiling can be applied to bands of original loops not being fully permutable. to parallelize generated serial tiled code, we use the loop skewing transformation and prove its application validity.
+
+methods
+brief introduction
+an introduced approach uses the dependence analysis proposed by pugh and wonnacott  <cit>  where dependences are represented by relations with constraints defined by means of the presburger arithmetic using logical and existential operators. a dependence relation is a tuple relation of the form  →: formula, where input list and output list are the lists of variables and/or expressions used to describe input and output tuples and formula describes the constraints imposed upon input list and output list. such a relation is a mathematical representation of a data dependence graph whose vertices correspond to loop statement instances while edges connect dependent instances. the input and output tuples of a relation represent dependence sources and destinations, respectively; the relation constraints specify instances which are dependent.
+
+standard operations on relations and sets are used, such as intersection , union , difference , domain , range , relation application : e
+′∈s
+′ iff exists e s.t. e →e
+′∈r, e ∈s). in detail, the description of these operations is presented in papers  <cit> .
+
+the positive transitive closure for a given lexicographically forward relation r, r
++, is defined as follows  <cit> : 
+ r+={e→e′:e→e′∈r∨∃e′′s.t.e→e′′∈r∧e′′→e′∈r+}. 
+
+
+it describes which vertices e
+′ in a dependence graph  are connected directly or transitively with vertex e.
+
+transitive closure, r*, is defined as below: 
+ r∗=r+∪i, 
+
+
+where i is the identity relation. it describes the same connections in a dependence graph  that r
++ does plus connections of each vertex with itself. figure  <dig> presents r
++ and r
+∗ in a graphical way.
+fig.  <dig> transitive closure. an example of dependence relation r, positive transitive closure r
++, and transitive closure r
+∗
+
+
+
+
+
+in the sequential loop nest, the iteration i executes before j if i is lexicographically less than j, denoted as 
+  <dig> i≺j,i.e.,i1<j1∨∃k≥1:ik<jk∧it=jt,fort<k. 
+
+
+a schedule is a function σ:ld→ℤ which assigns a discrete time of execution to each loop nest statement instance or tile. a schedule is valid if for each pair of dependent statement instances, s
+ <dig> and s
+ <dig>  satisfying the condition s
+1≺s
+ <dig>  the condition σ)<σ) holds true, i.e. the dependences are preserved when statement instances are executed in an increasing order of schedule times.
+
+
+
+
+
+the nussinov loop nest
+the nussinov recurrence is challenging to accelerate because of its non-local dependency structure shown in fig.  <dig>  cell s is depended to adjacent cells of the dynamic programming matrix as well as to non-local cells. these non-local dependences are affine, that is, s depends on other cells s such that the differences i–r or j–s are not constant but rather depend on i and j. therefore, the nussinov data dependences result in a nonuniform structure  <cit> . equation  <dig> leads directly to the form of the o nussinov loop nest presented in listing  <dig>  the loop nest is imperfectly-nested and is comprised of two statements, s <dig> and s <dig> 
+fig.  <dig> cell dependences. nussinov’s loop nest dependences for one iteration ; iteration  depends on three adjacent iterations and five non-local ones
+
+
+
+
+the following sub-section discusses how to generate serial tile code by means of the transitive closure of dependence graphs.
+
+loop nest tiling based on the transitive closure of dependence graphs
+to generate valid tiled code, we apply the approach presented in paper  <cit>  based on the transitive closure of dependence graphs. we briefly present the steps of that technique for tiling the nussinov loop nest. dependence relations for this loop nest, including non-uniform ones, can be extracted with petit   <cit>  and they are presented below. 
+ r=s0→s0:{→:j<j′<n∧0≤k∧i+k<j∧0≤i}∪{→:0≤i′<i∧j<n∧0≤k∧i+k<j}∪{→:0≤k<k′∧j<n∧0≤i∧i+k′<j}s0→s1:{→:j≤n−2∧0≤k∧i+k<j∧1≤i}∪{→:j<n∧0≤k∧i+k<j∧0≤i}s1→s0:{→:0≤i<j<j′<n}∪{→:0≤i′<i<j<n}s1→s1:{→:1≤i<j≤n−2}. 
+
+
+next, we calculate the exact transitive closure of the union of all dependence relations, r
++, applying the modified floyd-warshall algorithm  <cit> . for brevity, we skip the mathematical representation of r
++.
+
+let vector i=t represent indices of the nussinov loop nest, vector b=t define an original tile size, vectors ii=t and ii
+′=t specify tile identifiers. each tile identifier is represented with a non-negative integer, i.e., the constraints ii≥  <dig> and ii
+′≥  <dig> have to be satisfied.
+
+below, the mathematical representation of original rectangular tiles for the nussinov loop nest with the tile size defined with vector b is presented. 
+ tile=i:n−1−b1∗ii≥i≥max,n−1)∧ii≥0j:b2∗jj+i+1≤j≤min+ <dig> n−1)∧jj≥0k:s0:b3∗kk≤k≤min− <dig> j−i−1)∧kk≥0s1:k= <dig>   let us note that for index i, the constraints are defined inversely because the value of index i is decremented.
+
+for the tile identifiers, we define constraints, constr, which have to be satisfied for given values b <dig>  b <dig>  b <dig>  defining a tile size, and parameter n specifying the upper loop index bound. 
+  <dig> constr=ii,b1:n−1−b1∗ii>=0jj,b2:+b2∗jj<=n−1kk,b3:b3∗kk+0<=j−i− <dig>  
+
+
+in accordance with formula , we present below the lexicographical ordering ii≺ii
+′ on vectors ii, ii
+′ defining tile identifiers as follows. 
+ ii′≺ii=s0:s0:ii>iip∨∨)s1:ii>iip∨s1:s0:ii>iip∨∨)s1:ii>iip∨. 
+
+
+next, we build sets tile_lt and tile_gt that are the unions of all the tiles whose identifiers are lexicographically less and greater than that of tile, respectively:
+
+
+tile_lt={| ∃ ii
+′:ii
+′≺ii∧ii≥0∧
+
+
+constr ∧ii
+′≥ <dig> ∧constr ∧ i∈tile}.
+
+using the exact form of r
++, we calculate set, tile_itr, as follows. 
+ tile_itr=tile−r+. 
+
+
+this set does not include any invalid dependence target, i.e., it does not include any dependence target whose source is within set tile_gt.
+
+
+the following set 
+ tvld_lt=∩tile_lt)−r+  includes all the iterations that i) belong to the tiles whose identifiers are lexicographically less than that of set tile_itr, ii) are the targets of the dependences whose sources are contained in set tile_itr, and iii) are not any target of a dependence whose source belong to set tile_gt.
+
+target valid tiles are defined by the following set 
+ tile_vld=tile_itr∪tvld_lt. 
+
+
+to generate serial tiled code, we first form set tile_vld_ext by means of inserting i) into the first positions of the tuple of set tile_vld elements of vector ii : ii,jj,kk; ii) into the constraints of set tile_vld the constraints defining tile identifiers ii≥  <dig> and constr.
+
+the following step is to use the original schedule of the original nussinov loop nest statement instances, sched_orig, to form a target set allowing for re-generation of serial valid code. the original schedule can be extracted by means of the clan tool  <cit>  and is as shown below. 
+ sched_orig=s0: <dig> i, <dig> j, <dig> ks1: <dig> i, <dig> j, <dig> k. 
+
+
+next we enlarge that schedule with indices ii,jj,kk  repeating the same sequence of elements as that for indices i,j,k in the original schedule to get the following schedule. 
+ sched=s0: <dig> ii, <dig> jj, <dig> kk, <dig> i, <dig> j, <dig> ks1:s0: <dig> ii, <dig> jj, <dig> kk, <dig> i, <dig> j, <dig> ks1: <dig> ii, <dig> jj, <dig> kk, <dig> i, <dig> j, <dig> k. 
+
+
+let us note that tiles, formed for statement s <dig>  include only instances of statement s <dig>  while those generated for statement s <dig> comprise instances of both statement s <dig> and statement s <dig> 
+
+in the next step, we form relation, rmap
+s <dig>  for the sub-set of set tile_vld_ext representing tiles for statement s <dig>  as follows 
+ rmaps0=tile_s0→, 
+
+
+and relation, rmap
+s <dig>  for the sub-set of set tile_vld_ext representing tiles for statement s <dig>  as follows 
+ rmaps1=tile_s0→;tile_s1→,  and finally, form target set, tile_vld_ext
+′, as bellow 
+ tile_vld_ext′=rmap,  where rmap=rmap
+s0∪rmap
+s <dig> 
+
+sequential tiled code is generated by means of applying the isl ast code generator  <cit>  allowing for scanning elements of set tile_vld_ext
+′ in lexicographic order.
+
+tiled code parallelization
+to parallelize generated serial tiled code, we apply the well-known loop skewing transformation  <cit> . loop skewing is a transformation that has been used to remap an iteration space by creating a new loop whose index is a linear combination of two or more loop indices. this results in code whose outermost loop is serial while the other loops can be parallelized.
+
+we use the following skewing transformation: ii
+′=ii+jj, where ii
+′ is the new loop index, ii,jj are the indices of the first two loops in tiled code. figure  <dig> illustrates the loop skewing technique applying to the nussinov loop nest. iterations lying on each horizontal line can be executed in parallel while time partitions should be enumerated serially.
+fig.  <dig> loop skewing. scheduling for nussinov’s recurrence cells. cells lying on each horizontal line are independent and can be run in parallel; the vertical coordinate represents time partitions to be enumerated serially
+
+
+
+
+to apply the loop skewing transformation, we create the following relation 
+ r_sched={→ <dig> ii+jj, <dig> jj,…, <dig> −i, <dig> j,…:constraintsofsettile_vld_ext′},  and apply it to set tile_vld_ext
+′.
+
+applying the loop skewing transformation is not always valid. to prove the validity of this transformation applied to generated serial tiled code, we form the following relation, r_valid, which checks whether all original inter-tile dependences will be respected in parallel code. 
+ r_valid={→|∃i,j:i∈domainr∧j=r⏟∧i∈tile∧j∈tile⏟∧r_sched≽r_sched⏟}, 
+
+
+where:
+
+ means that j is the destination of the dependence whose source is i,
+
+ means that i,j belong to the tiles with identifiers ii and jj, respectively,
+
+ means that the schedule time of tile ii is greater or the same as that of tile jj, i.e., the schedule is invalid because the dependence i→j is not respected.
+
+this relation returns the empty set when all original inter-tile dependences are respected, otherwise it represents all the pairs of the tile identifiers for which original ones are not respected. figure  <dig> presents the case of an invalid schedule, where i and j are vectors representing the source and destination of a dependence, respectively, within the tiles with identifiers ii and jj. relation r_valid is empty for the generated serial tiled nussinov code, this proves the validity of applying the loop skewing transformation.
+fig.  <dig> illustration of an invalid schedule. vectors i and j represent the source and destination of a dependence, respectively. tile is scheduled to run after  tile
+
+
+
+
+
+
+
+
+
+target pseudo-code is generated by means of applying the isl ast code generator  <cit>  allowing for scanning elements of set r_sched in lexicographic order. then we postprocess this code replacing pseudo-statements for the original loop nest statements and insert the work-sharing openmp parallel for pragmas  <cit>  before the second loop in the generated code to make it parallel. listing  <dig> presents the target code for the nussinov loop nest  tiled with the tiles of the size 16x16x <dig>  the first loop in this code enumerates serially time partitions while the second one scans all the tiles to be executed in parallel for a given time defined with the first loop.
+
+RESULTS
+the presented approach has been implemented as a part of the polyhedral traco compiler <dig>  it takes on input an original loop nest in the c language, a tile size, and affine transformations for each loop nest statement to parallelize serial tiled code. then traco generates serial valid tiled code and checks whether the affine transformations are valid by means of calculating relation r_valid. if so, parallel tiled code is generated.
+
+all parallel nussinov tiled codes were generated by means of the intel c++ compiler  with the -o <dig> flag of optimization.
+
+this section presents speed-up of generated parallel tiled code. to carry out experiments, we used machines with two processors intel xeon e5- <dig> v <dig> , four coprocessors intel xeon phi 7120p , and  <dig> gb ram.
+
+problem sizes  <dig> and  <dig> were chosen because they are the average and the longest lengths of randomly generated rna strands  in human body to illustrate any additional advantages for medium and larger instances, respectively  <cit> . furthermore, we used several mrnas and lncrnas from the ncbi database <dig> for homo sapiens. analyzing the program code, we expected there should be no difference, performance wise, between actual sequences versus randomly generated sequences. to confirm this fact, we measured the summary time of calling bonding function δ. it takes less than  <dig>  percent of the whole tiled code running time regardless of the sequence type, for example,  <dig>  seconds for the problem size equal to  <dig>  on an intel xeon e5- <dig> v <dig> platform. it can be therefore concluded that the studied algorithm performance does not change based on the strings themselves, but it depends on the size of a string.
+
+for generated tiled code, we empirically recognized that the best tile size is 16x16x <dig> and the most efficient work-sharing is achieved by applying the openmp for directive  <cit>  with the dynamic scheduling of loop iterations and the chunk size equal to  <dig> 
+fig.  <dig> speed-up of parallel codes using two 32-core processors intel xeon e5- <dig> v <dig>  the horizontal coordinate represents number of threads and the vertical one shows the speedup of codes generated with the traco and pluto compilers for two problem sizes of rna folding
+
+
+fig.  <dig> speed-up of parallel codes using four 61-core coprocessors intel xeon phi 7120p. the horizontal coordinate represents number of threads and the vertical one shows the speedup of codes generated with the traco and pluto compilers for two problem sizes of rna folding
+
+
+
+
+
+those figures also present the speed-up of parallel 2d tiled code produced with the state-of-the-art pluto+  <cit>  optimizing compiler, which does not enable to tile the third loop in the nussinov loop nest <dig>  from figs.  <dig> and  <dig>  we may conclude that the tiled code generated with the proposed approach outperforms that generated with standard affine transformations extracted and applied with pluto+ for both intel multi-core processors and coprocessors.
+
+the parallel code presented in the paper is not synchronization free , after each parallel iteration multiple tasks must be synchronized. synchronization usually involves waiting by at least one task, and can therefore cause a parallel applications wall clock execution time to increase, i.e., it introduces parallel program overhead. any time one task spends waiting for another is considered synchronization overhead. synchronization overhead grows with increasing the number of synchronization events and the number of threads and tends to grow rapidly  as the number of tasks in a parallel job increases, it is the most important factor in obtaining good scaling behavior for the parallel program. synchronization overhead leads to non-linear character of speed-up when the numbers of threads grows . when the number of threads are less than  <dig>  the code presented in the paper and that generated with pluto, have comparable synchronization overhead and locality, but for the number of threads more than  <dig>  our code has less synchronization overhead and better locality that results in higher speed-up.
+
+it is worth noting that the generated tiled serial code has improved locality in comparison with that of the serial original code. this results in about  <dig>  and  <dig>  higher serial tiled code performance for the used intel muti-core processors and co-processors, respectively. below, we compare the speed-up achieved for the tiled code generated by the presented technique with that of related code.
+
+in paper  <cit> , the authors write: “we have developed gtfold, a parallel and multicore code for predicting rna secondary structures that achieves  <dig>  fold speedups over the current best sequential program”. this speed-up is achieved on  <dig> threads. the code, presented in our paper, outperforms this code . we also present speed-up for  <dig> threads for an intel xeon e5- <dig> v <dig> platform and from one to  <dig> threads for intel xeon phi 7120p coprocessors. the higher performance of our code is achieved due to applying loop nest tiling.
+
+rizk et al.  <cit>  provide an efficient gpu code for rna folding, but they do not consider any loop nest tiling. the authors give a table which shows that the maximal speedup, using a graphical card gtx <dig>  is  <dig> . applying intel xeon phi 7120p coprocessors for running our code, we reach the maximal speed-up  <dig>  for  <dig> threads . this demonstrates that tiling allows for considerable improving code locality that leads to significant increasing parallel code speed-up.
+
+pochoir  <cit>  computes the optimal cost of aligning a pair of dna or rna sequences by means of diamond-shaped grid that can be evaluated as a stencil, but it can tile only two of the three loops of original code, i.e., tiled code is of maximum 2-d dimension. this results in only  <dig>  speedup of the rna code generated with pochoir on  <dig> cores – the maximal number of cores that the authors examined.
+
+summing up, we conclude that the presented approach allows for generation of a parallel tiled nussinov loop nest which considerable reduces execution time in comparison with related codes. the code presented in our paper is dedicated to be run on high performance computer systems with the large number of cores. since the number of cores tends to grow, in our opinion, the presented code is very actual because it has improved scalability and can be run on computer systems with the large number of cores.
+
+CONCLUSIONS
+the paper presents automatic tiling and parallelization of the nussinov program loop nest. the transitive closure of dependence graphs is used to tile this code, whereas for extracting parallelism in the tiled loop nest, the loop skewing transformation is applied, which is within the affine transformation framework. to the best of our knowledge, the presented approach is the first attempt to generate static parallel 3d tiled code for nussinov’s prediction. an experimental study demonstrates significant parallel tiled code speed-up achieved on modern multi-core computer systems.
+
+the presented approach is an important starting point for future research aimed at effective tiling and parallelization of other npdp codes, in particular the detailed energy models used by zuker’s algorithm.
+
+we are going to examine how the presented approach based on both the transitive closure of dependence graph and affine transformations can be applied to tile and parallelize other important applications of bioinformatics.
+
+endnotes
+
+ <dig> zuker’s algorithm has the same dependence patterns as nussinov’s algorithm  <cit> .
+
+
+2
+http://traco.sourceforge.net
+
+
+
+3
+https://www.ncbi.nlm.nih.gov/
+
+
+
+ <dig> pluto  <dig> . <dig> beta and pluto+ generate the same tiled code for the nussinov loop nest.
+
+abbreviations
+astabstract syntax tree
+
+dpdynamic programming
+
+gpugraphics processing unit
+
+npdpnonserial polyadic dynamic programming
+

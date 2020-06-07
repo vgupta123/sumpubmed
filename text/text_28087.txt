@@ -1,0 +1,476 @@
+BACKGROUND
+in next generation sequencing experiments we may encounter divergent reads in various scenarios. these include structural variation studies, comparison of distantly related genomes, absence of same species reference genome, sequence error in long reads, genome variation within same species, ancient dna mapping, and mrna-seq experiments . programs  <cit>  based on hash tables and burrows-wheeler transform are very fast but have low accuracy on such reads that tend to contain many mismatches and gaps  <cit> . the smith-waterman algorithm  <cit>  can map divergent reads accurately but is considerably expensive. even high performance multi-core and graphics processing unit  implementations can take hours and days to align millions of reads even to bacteria genomes. as a solution we introduce a gpu program called maxssmap with the aim of achieving comparable accuracy to smith-waterman on divergent reads but with faster runtimes.
+
+we divide the genome into same size disjoint fragments and then map a read to all fragments in parallel on a gpu with the maximum scoring subsequence score  <cit> . a gpu can run several hundred threads at the same time and allows for massive parallelism in computer programs . the maximum scoring subsequence is roughly the same as smith-waterman except that it does not consider gaps.
+
+once we identify the first and second highest scoring fragments — we need the second to eliminate repeats — we perform needleman-wunsch alignment of the read to the identified region of genome. we present a gpu program called maxssmap that implements this idea along with several heuristics and shortcuts that lead to faster runtimes without sacrificing accuracy.
+
+on reads with fewer than 10% mismatches our program offers no advantage over hash-table approaches. programs like nextgenmap that use hash-tables in their first phase can map such reads very quickly with high accuracy compared to other leading programs  <cit> . thus we focus on reads with divergence between 10% and 30% as well as gaps of lengths up to  <dig> both in the read and genome.
+
+we compare maxssmap to two fast smith-waterman programs. the first is the recently published smith-waterman library for short read mapping and protein database search called ssw  <cit> . this uses a fast single-instruction-multiple-data smith-waterman algorithm to align a given read to the entire genome. the authors of the program demonstrate improved and comparable runtimes to state of the art fast smith-waterman programs for mapping dna sequences to a genome. in addition this produces output in sam format and has also been applied it to real data in the context of realigning unmapped reads  <cit> . the second is a fast gpu smith-waterman program for protein sequence database search called cuda-sw++  <cit> . we note that this is not designed for mapping dna sequence reads. however, we adapt it to short read mapping by considering fragments of the genome as database sequences and read as the query.
+
+exact smith-waterman methods take much longer than hash-table and burrows-wheeler based programs to align millions of reads to genome sequences. in this setting we study several meta-methods that first align reads with a fast program and then map rejected ones with a slower but more accurate one such as maxssmap and ssw.
+
+we study accuracy and runtime for mapping simulated illumina e.coli and human reads of various lengths to the e.coli and human chromosome one. our focus is on reads with 10% to 30% mismatches and gaps up to length  <dig>  we show that maxssmap attains comparable high accuracy and low error as cuda-sw++ and ssw but is several fold faster than the two programs respectively. we show that maxssmap can map reads rejected by nextgenmap  <cit>  with high accuracy and low error and much faster than if smith-waterman were used. we also study maxssmap on various read lengths and demonstrate applications on real data by mapping ancient horse dna reads to modern genomes and unpaired mapped reads in  <dig> genomes subject na <dig> 
+
+below we provide basic background and describe our program in detail. we then present our experimental results on simulated and real data.
+
+implementation
+we provide implementations of our program for cuda versions  <dig>  and  <dig>  and for opencl version  <dig> . we use a freely available open source library called simpleopencl . a simple linear time approach will find the maximum scoring subsequence  <cit> . to apply this to dna sequences consider two of the same length aligned to each other without gaps. each aligned character corresponds to a substitution whose cost can be obtained from a position specific scoring matrix that accounts for base call probabilities, or a substitution scoring matrix, or a trivial match or mismatch cost. the maximum scoring subsequence between the two dna sequences can now be obtained through this sequence of substitution scores  <cit> .
+
+graphics processing units 
+the gpu is designed for running in parallel hundreds of short functions called threads. threads are organized into blocks which in turn are organized into grids. we use one grid and automatically set the number of blocks to the total number of genome fragments divided by the number of threads to run in a block. the number of threads in a block can be specified by the user and otherwise we set it to  <dig> by default.
+
+the gpu memory is of several types each with different size and access times: global, local, constant, shared, and texture. global memory is the largest and can be as much as 6gb for tesla gpus. local memory is the same as global memory but limited to a thread. access times for global and local memory are much higher than the those for a cpu program to access ram. however, this time can be considerably reduced with coalescent memory access that we explain below. constant and texture are cached global memory and accessible by any thread in the program. shared is on-chip making it the fastest and is limited to threads in a block.
+
+more details about the gpu architecture can be found in the nvidia online documentation  <cit>  and recent books  <cit> .
+
+cuda and opencl
+cuda is a programming language that is developed by nvidia. it is mainly c with extensions for programming only on nvidia gpus. opencl  <cit>  is a framework for writing computer programs that execute on different platforms that include gpus and cpus.
+
+maxssmap algorithm
+overview
+our program, that we call maxssmap, follows the same two part approach of existing mappers: first identify a local region of the genome and then align the read with needleman-wunsch  to the identified region. the second part is the same as current methods but in the first part we use the maximum scoring subsequence as described below.
+
+maxssmap divides the genome into fragments of a fixed size given by the user. it uses one grid and automatically sets the number of blocks to the total number of genome fragments divided by the number of threads to run in a block. the number of threads in a block can be specified by the user and otherwise we set it to  <dig> by default.
+
+first phase of maxssmap
+in figure  <dig> we show an overview of the maxssmap program. each thread of the gpu computes the maximum scoring subsequence  <cit>  of the read and a unique fragment with a sliding window approach. in order to map across junctions between fragments each thread also considers neighboring fragments when mapping the read. when done it outputs the fragment number with the highest and second highest score and considers the read to be mapped if the ratio of the second best to best score is below. <dig> . this reduces false positives due to repeats. we later define a mapping quality score that is based on this ratio.figure  <dig> 
+overview of the maxssmap program. in this figure the genome is divided into six fragments which means six threads will run on the gpu. thread with id  <dig> maps the read to fragment  <dig>  slides it across fragment  <dig>  and stops when it has covered all of fragment  <dig>  we account for junctions between fragments and ensure that the read is fully mapped to the genome.
+
+
+
+second phase of maxssmap
+after the fragment number is identified we consider the region of the genome starting from the identified fragment and spanning fragments to the right until we have enough nucleotides as the read sequence. in the second part we align the read sequence with needleman-wunsch to the genome region from the first part. the default settings for match, mismatch, and gap costs that we also use in this study are set to  <dig>  - <dig>  and - <dig> 
+
+incorporating base qualities and position specific scoring matrix
+we also consider the base qualities of reads in both phases of the program. this can be done easily by creating a position specific scoring matrix for each read that also allows for fast access using table lookup  <cit> . for example let x be the probability that the base at position i is correctly sequenced. this can be calculated by the phred score  <cit>  that is provided with the reads. the score of a match against the nucleotide at position i is match×x and mismatch is .
+
+mapping qualities, read lengths, sam output, and source code
+maxssmap outputs in sam format that is widely used for mapping dna reads to genomes  <cit> . in the mapq field of sam  <cit>  we use the formula − <dig> log2p where p is the probability of alignment being incorrect. we define this to be the ratio of the scores of the second highest and top scoring fragments. for maxssmap we consider the read mapped only if mapping quality is above − <dig> log <dig> = <dig> . maxssmap can also map reads of various lengths present in one fastq file. there is no need to specify the read length. however, the maximum read length is limited to  <dig> base pairs  in the current implementation . the source code is freely available from http://www.cs.njit.edu/usman/maxssmap.
+
+we implement several novel heuristics and take advantage of the gpu architecture to speed up our program which we describe below.
+
+gpu specific heuristics
+coalescent global memory access
+coalesced memory access is a key performance consideration when programming on gpus . roughly speaking, each thread of a gpu has its own unique identifier that we call thread_id. in order to have coalescent memory access our program must have threads with consecutive identifiers access consecutive locations in memory . we achieve this by first considering the genome sequence as rows of fragments of a fixed size. we then transpose this matrix to yield a transposed genome sequence that allows coalescent memory access. the transposed genome is transferred just once in the beginning of the program from cpu ram to gpu global memory. it has negligible overhead time compared to the total one for mapping thousands of reads. see figure  <dig> for a toy genome accgtaggacca and fragment length of three. if the genome is not a multiple of the fragment length we pad the last fragment with n’s. our gpu program runs a total of numfragments threads. in the example shown in figure  <dig> there are four fragments. and so our program would run four threads simultaneously with identifiers zero through three. each thread would access the transposed genome sequence first at location thread_id, then at thread_id+numfragments, followed by location thread_id+2numfragments, and so on.figure  <dig> 
+genome sequence in transpose format to enable coalescent memory access. in maxssmap threads with ids  <dig> through  <dig> would at the same time read characters a, g, g, and c of the transposed genome to compare against the read. since the four characters are in consecutive memory locations and so are the thread ids, our program makes just one read from global memory instead of four separate ones.
+
+
+
+byte packing for faster global memory access
+in the gpu we store the genome sequence in a single array of int <dig> type instead of char. this leads to fewer global memory accesses and thus faster runtimes. to enable this we append ‘n’ characters onto the genome and query until both lengths are multiples of  <dig>  this also requires that the fragment length be a multiple of  <dig> 
+
+look ahead strategy to reduce global memory penalties
+as mentioned earlier maxssmap uses a sliding window approach from left to right to map a read to a given fragment on the genome. in its implementation we compute the score of the read in the current window and sixteen windows to the right at the same time. therefore instead of shifting the window by one nucleotide we shift it by sixteen. this leads to fewer global memory calls and also allows us to unroll loops. see file maxssmap_shared_int4_fast.cu in the source code for exact implementation.
+
+shared memory
+we store the query in shared memory to allow fast access. as mentioned earlier the gpu access time to shared memory is fastest. this, however, imposes a limitation on the read length because shared memory size is much smaller than global memory. the fermi tesla m <dig> gpus that we use in this study have a maximum of  <dig> bytes shared memory per block. the data structure stores the query in a profile format and so occupies a total of ×4× <dig> bytes. the  <dig> accounts for number of bytes in a float,  <dig> is for bases a, c, g, t, and n, and  <dig> is for additional space used by the look-ahead strategy and to eliminate if-statements in the code. thus the maximum allowable dna read length of the current implementation is  <dig> bp . the query length can be increased at the expense of running time by storing the query in constant memory, which is of size  <dig> byes, or in global memory.
+
+parallel multi-threaded cpu implementation of maxssmap
+we have also implemented a parallel multi-threaded cpu implementation of maxssmap with the openmp library  <cit>  . each thread maps the given read to a unique fragment of the genome. the number of threads is automatically set to the genome size divided by the specified fragment length. thus if the fragment length is  <dig> then for e.coli  it runs about  <dig> threads on the available cpu cores. this also uses the look ahead strategy as described above. however, the coalescent and shared memory techniques don’t apply to this version since they are specific to a gpu.
+
+programs compared and their versions and parameters
+the literature contains many short read alignment programs that have been benchmarked extensively  <cit> . instead of considering many different programs we select the widely used program bwa  <cit>  that uses the burrows-wheeler transform. we also select nextgenmap that uses hash-tables and is shown to be accurate on reads upto 10% mismatches compared to other leading programs  <cit> . we use the multi-threaded version of bwa and enable the gpu option in nextgenmap.
+
+other gpu programs for mapping short reads  are implementations of cpu counterparts designed for speedup and achieve the same accuracy. since they offer no improvement in accuracy they would perform poorly on divergent reads. furthermore, the cpu program runtimes are already in seconds vs. minutes and hours for exact methods  and so we exclude these programs from the paper.
+
+from the category of exact mapping programs we use ssw  <cit>  that uses a fast single-instruction-multiple-data  smith-waterman algorithm to align a given read to the entire genome and the fast gpu smith-waterman program cuda-sw++  <cit> . as noted earlier this is designed for protein sequence database search and not for aligning to large genome sequences. however, we adapt it to short read mapping by considering fragments of the genome as database sequences and read as the query.
+
+below we describe program parameters and how we optimized them where applicable. the exact command line of each program is given in the online additional file  <dig> at http://www.cs.njit.edu/usman/maxssmap.
+
+maxssmap
+for maxssmap we consider fragment lengths of  <dig> for e.coli genome,  <dig> for human chromosome one,  <dig> for horse and whole human genomes, and match and mismatch costs of  <dig> and - <dig> respectively. in the exact alignment phase where we perform needleman-wunsch we consider the same match and mismatch cost and a gap cost of - <dig>  we selected fragment lengths to optimize runtime. we considered sizes of  <dig>   <dig>   <dig>   <dig>  and  <dig> for the e.coli genome, lengths of  <dig>   <dig>   <dig>   <dig>  and  <dig> for human chromosome one, and lengths of  <dig>   <dig>   <dig>   <dig>  and  <dig> for the horse genome. for the whole human genome we used the same fragment size as for the horse genome. the match and mismatch costs are optimized for accuracy on the 251bp length e.coli reads. for other genomes we recommend the user to experiment with different fragment sizes starting with a small value. as explained earlier the maxssmap fragment length must be a multiple of  <dig> because of byte packing to allow storage of the genome in an array of int <dig> instead of char.
+
+maxssmap_fast
+in this faster version of maxssmap we consider every other nucleotides in the read sequence when mapping to the genome. this heuristic reduces runtime considerably than if we were to compare all nucleotides in the read sequence.
+
+see files maxssmap_shared_int4_fast.cu in the source code for exact implementation.
+
+ssw
+this is a recent smith-waterman library that uses single-instruction-multiple-data  to achieve parallelism. it has been shown to be faster than other simd based smith-waterman approaches  <cit> . it has also been applied to real data as a secondary program to align reads rejected by primary programs  <cit> .
+
+cuda-sw++
+cuda-sw++  <cit>  is originally designed for protein database search. it performs smith-waterman alignment of the query to each sequence in the database in parallel. we simulate short read mapping with it by dividing the genome into same size disjoint fragments and considering each fragment of the genome as one of the database sequences and the read as the query. we set cuda-sw++ to output the two top highest scoring fragments and their scores. if the ratio of the second best score to the best one is above. <dig> we do not consider the read mapped. we set the fragment length to  <dig> and  <dig> for the e.coli genome and horse genomes, the gap open and extension costs to - <dig> and - <dig>  and the match and mismatch costs to  <dig> and - <dig>  these values yielded highest accuracy for the simulated reads. we modified the code so that the blosum <dig> matrix uses + <dig> for match and - <dig> for mismatch. we choose  <dig> fragment length for e.coli because lower ones reduce the runtime marginally but the accuracy goes down considerably whereas higher fragment lengths don’t yield higher accuracy and increase runtime. the gap, match, and mismatch costs are optimized for accuracy on the 251bp e.coli reads. for the horse genome we couldn’t run cuda-sw++ with higher fragment lengths of  <dig> and so we selected  <dig> 
+
+bwa-mem
+we use bwa-mem version  <dig> .5a with multi-threaded enabled  and other options set to their default values.
+
+nextgenemap
+we use nextgenemap version  <dig> . <dig> with the options -g  <dig> that enables the gpu and everything else default.
+
+meta-methods
+we consider four meta-methods that first apply a nextgenmap and then a more accurate aligner for rejected reads.
+
+nextgenmap + maxssmap
+
+nextgenmap + maxssmap_fast
+
+nextgenmap + cudasw++
+
+nextgenmap + ssw
+
+
+
+we use the same options for each program in the meta-method as described above.
+
+experimental platform
+all programs were executed on intel xeon x <dig> machines with 12gb ram each equipped with three nvidia tesla m <dig> gpus with 3gb global memory and  <dig> byes of shared memory. we used cuda release  <dig>  to develop maxssmap and to compile and build the gpu programs. for our opencl implementation we use version  <dig> . in table  <dig> we list the architecture on which we run each program.table  <dig> 
+architecture for each program compared in our study
+
+
+
+
+data simulation
+we use the program stampy  <cit>   to simulate reads with realistic base qualities. we use the e.coli genome k <dig> mg <dig>  from which stampy simulates reads and illumina miseq 251bp reads in srr <dig> from the ncbi sequence read archive  from which stampy simulates base qualities. for the human reads we use the human chromosome one sequence from the genome reference consortium  version grch <dig> p <dig>  we use illumina miseq 250bp reads in err <dig> through err <dig> from the the ncbi sequence read archive from which stampy simulated base qualities.
+
+we simulate one million  <dig> bp e.coli reads and 250bp human chromosome one reads of divergences  <dig> ,  <dig> , and  <dig>  with and without gaps ranging upto length  <dig>  the gaps are randomly chosen to occur in the read or the genome. roughly speaking each divergence corresponds to fraction of mismatches in the reads after accounting for sequencing error. for example. <dig> divergence means on average 10% mismatches excluding sequencing errors. see table  <dig> for exact stampy command line parameters for simulating the data.table  <dig> 
+stampy  parameters to simulate reads
+
+
+
+
+
+measure of accuracy and error
+for stampy simulated reads the true alignment is given in a cigar string format  <cit> . except for cuda-sw++ we evaluate the accuracy of all programs with the same method used in  <cit> . we consider the read to be aligned correctly if at least one of the nucleotides in the read is aligned to the same one in the genome as given by the true alignment. it’s not unusual to allow a small window of error as done in previous studies .
+
+cuda-sw++ does not output in sam format. instead it gives the top scoring fragments and the score of the query against the fragment. to evaluate its accuracy we divide the true position by the fragment size which is  <dig> for e.coli and  <dig> for horse genome in our experiments. we then consider the read to be mapped correctly if the difference between the cuda-sw++ fragment and the true one is at most  <dig> 
+
+RESULTS
+we study the accuracy and runtime of all programs and the four meta-methods described earlier. in all experiments below we use the cuda  <dig>  executable of maxssmap when comparing it against other programs. we include a subsection that specifically compares the cuda  <dig> , cuda  <dig> , and opencl implementations of maxssmap. we measure their performance for mapping simulated illumina e.coli and human reads to the e.coli and human chromosome one respectively. we then compare them on reads of different lengths and demonstrate applications on real data.
+
+comparison of maxssmap and smith-waterman for mapping divergent reads to e.coligenome
+we begin by comparing maxssmap and maxssmap_fast to ssw and cuda-sw++. we map  <dig>  251bp simulated e.coli reads to the e.coli genome. we simulate these reads using the stampy  <cit>  program .
+
+as mentioned earlier, maxssmap offers no advantage over hash-table approaches on reads with fewer than 10% mismatches. programs like nextgenmap  <cit>  designed for mapping to polymorphic genomes can align such reads very quickly with high accuracy. thus we consider three levels of divergence in the reads:  <dig> ,  <dig> , and  <dig> . roughly speaking each divergence corresponds to the percentage of mismatches in the data.
+
+in table  <dig> we see that the maxssmap accuracy is comparable to ssw and cuda-sw++ except at divergence  <dig>  with gaps . table  <dig> shows that the maxssmap and maxssmap_fast runtimes are at least  <dig> and  <dig> times lower than ssw and  <dig>  and  <dig> times lower than cuda-sw++. this is where the real advantage of maxssmap lies: high accuracy and low error comparable to smith-waterman on reads up to 30% mismatches and gaps yet at a lower cost of runtime.table  <dig> 
+comparison of maxssmap and maxssmap_fast to a gpu and a simd high performance smith-waterman implementation
+
+
+ 
+
+div
+maxssmap_fast
+maxssmap
+cudasw++
+ssw
+
+reads without gaps
+
+reads with gaps
+ 
+ time in minutes to map  <dig>   <dig> bp reads to the
+e.coli
+genome
+
+div
+maxssmap_fast
+maxssmap
+cudasw++
+ssw
+
+reads without gaps
+
+reads with gaps
+these are simulated illumina reads and contain realistic base qualities generated from illumina short reads. each divergence represents the average percent of mismatches in the reads. so  <dig>  means 10% mismatches on the average. the gaps are randomly chosen to occur in the read or the genome and are of length at most  <dig> 
+
+
+
+at high divergence and with gaps we expect smith-waterman to fare better in accuracy and error than our maximum scoring subsequence heuristic. for example at divergence  <dig>  with gaps ssw is  <dig> % and 14% better than maxssmap and maxssmap_fast in accuracy.
+
+recall that maxssmap detects and rejects repeats which are likely to be errors. we use the same technique in the cuda-sw++ output. however, ssw does not appear to have such a strategy and so we see a higher error for it.
+
+comparison of meta-methods for mapping divergent e.colireads
+we now compare the accuracy and runtime of four meta-methods that use nextgenmap in the first phase of mapping and maxssmap, maxssmap_fast, cudasw++, and ssw to align rejected reads in the second phase. we study the mapping of one million  <dig> bp reads simulated e.coli reads to the e.coli genome.
+
+in table  <dig> we see that the accuracy of ngm+cudasw++ and ngm+ssw are comparable to ngm+maxssmap but runtimes are much higher. for example at divergence  <dig>  with gaps ngm+ssw takes over  <dig> hours to finish and ngm+cudasw++ takes  <dig> minutes, whereas ngm+maxssmap and ngm+maxssmap_fast finish in  <dig> and  <dig> minutes respectively. at divergence  <dig>  with gaps both ngm+maxssmap and ngm+maxssmap_fast finish within four hours whereas both ngm+cudasw++ and ngm+ssw take more than  <dig> hours. we choose the two fastest meta-methods for comparison to bwa and nextgenmap.table  <dig> 
+comparison of meta-methods
+
+
+ 
+
+div
+nextgenmap+
+nextgenmap+
+nextgenmap+
+nextgenmap+
+maxssmap_fast
+maxssmap
+cudasw++
+ssw
+reads without gaps
+reads with gaps
+
+ time in minutes to map one million  <dig> bp reads to the
+e.coli
+genome
+
+div
+nextgenmap+
+nextgenmap+
+nextgenmap+
+nextgenmap+
+maxssmap_fast
+maxssmap
+cudasw++
+ssw
+reads without gaps
+reads with gaps
+see table  <dig> caption for details about reads. na denotes time greater than  <dig> hours which is our cutoff time on this data.
+
+
+
+comparison of fastest meta-methods to nextgenmap and bwa for mapping divergent e.coliand human chromosome one reads
+in tables  <dig> and  <dig> we compare the accuracy and runtimes of nextgenmap and bwa to ngm+maxssmap and ngm+maxssmap_fast. both meta-methods achieve high accuracy and low error at all settings but at the cost of increased runtime compared to nextgenmap and bwa. on e.coli reads of divergence  <dig>  and  <dig>  with gaps nextgenmap+maxssmap_fast yields an improvement of 14% and 32% over nextgenmap while adding  <dig> and  <dig> minutes to the nextgenmap time of  <dig>  and  <dig> minutes respectively. on human chromosome  <dig> reads of the same settings nextgenmap+maxssmap_fast correctly aligns an additional 2% and 13% reads than nextgenmap alone at the cost of  <dig>  and  <dig> extra minutes. the maxssmap runtimes for human chromosome  <dig> are higher than for e.coli because there are many more fragments to consider in the former. the runtimes for both meta-methods also increases with higher divergence because there are many more reads rejected by nextgenmap at those divergences.table  <dig> 
+comparison of meta-methods to nextgenmap and bwa
+
+
+ 
+
+div
+bwa
+nextgenmap
+nextgenmap+
+nextgenmap+
+maxssmap_fast
+maxssmap
+reads without gaps
+reads with gaps
+ 
+ time in minutes to map one million  <dig> bp reads to the
+e.coli
+genome
+
+div
+bwa
+nextgenmap
+nextgenmap+
+nextgenmap+
+maxssmap_fast
+maxssmap
+reads without gaps
+reads with gaps
+see table  <dig> caption for details about reads.
+comparison of meta-methods to nextgenmap and bwa
+
+
+ 
+
+div
+bwa
+nextgenmap
+nextgenmap+maxssmap_fast
+
+reads without gaps
+
+reads with gaps
+ 
+ time in minutes to map one million  <dig> bp reads to the human chromosome one genome
+
+div
+bwa
+nextgenmap
+nextgenmap+maxssmap_fast
+
+reads without gaps
+
+reads with gaps
+see table  <dig> caption for details about reads.
+
+
+
+nextgenmap has higher accuracy than bwa as shown here in tables  <dig> and  <dig> and in previous studies  <cit>  while bwa is the fastest program amongst all compared. we ran bwa in a multi-threaded mode that utilizes all cpu cores and all other methods on the gpu. we found that running nextgenmap on the gpu was faster than its multi-threaded mode.
+
+comparison of methods on reads of various lengths
+the simulated sequences in our above results are based upon illumina miseq sequences of lengths  <dig> and  <dig> bp. here we study simulated reads of lengths  <dig>   <dig>   <dig>   <dig>  and  <dig> based on real e.coli sequences from the illumina genome analyzer ii , hiseq  <dig> , hiseq  <dig> , and miseq . we obtained the sequences from datasets err <dig> , srr <dig> , srr <dig> , err <dig> , and srr <dig> and srr <dig>  in the ncbi sequence read archive . we simulated  <dig> million reads of each length from the e.coli genome and of divergence  <dig>  with gaps  with stampy as described earlier. recall that stampy simulated base qualities based upon the real data in theinput.
+
+in table  <dig> we compare the accuracy and runtimes of bwa, nextgenmap, nextgenmap+maxssmap_fast, and nextgenmap+maxssmap. as the read length increases we see that nextgenmap and the meta-methods increase in accuracy and decrease in error. bwa is the most conservative and has lowest error at all lengths especially on the shortest read lengths.table  <dig> 
+percent of one million reads of lengths  <dig>   <dig>   <dig>   <dig>  and  <dig> and of divergence  <dig>  with gaps mapped correctly to the
+e.coli
+genome
+
+
+
+time in minutes to map reads
+shown in parenthesis are incorrectly mapped reads and remaining are rejected. we denote nextgenmap by ngm.
+
+
+
+at reads lengths of  <dig> and above nextgenmap+maxssmap has about 10% higher accuracy than nextgenmap and 1% more error.
+
+comparison to parallel multi-threaded cpu implementation of maxssmap
+we also study the runtimes of the parallel multi-threaded cpu implementation of maxssmap as described earlier. we examined three fragments lengths of  <dig>   <dig>  and  <dig>  each yields  <dig>   <dig>  and  <dig> threads to run on available cpu cores. we ran this program on intel xeon cpu which has a total of  <dig> cores.
+
+we tested this for mapping a  <dig>   <dig> bp e.coli reads and found fragment length of  <dig> to be the fastest. we then mapped  <dig>   <dig> bp e.coli reads which took  <dig> minutes. in comparison the gpu maxssmap takes  <dig> minutes. thus we find the multi-threaded version to be  <dig> times slower.
+
+applications on real data
+we consider two scenarios in real data where unmapped divergent reads may occur. the first is in the mapping of ancient fossil dna to modern genomes and second is the alignment of unmapped reads when comparing a human genome to the standard reference.
+
+ancient horse dna mapping to modern genomes
+for the first case we consider reads obtained from an ancient horse bone  <cit> . in a previous study the parameters of the bwa program were optimized to maximize mapped reads from this set to the horse and human genomes  <cit> . we consider one set of reads from the same study in dataset srr <dig> obtained from the nih sequence read archive . these reads are produced by the illumina genome analyzer ii sequencer and have an average length of  <dig>  and standard deviation of  <dig>  we obtained the human genome from the genome reference consortium  version grch <dig> p <dig> and the horse genome equus_caballus equcab <dig>  from ensemble .
+
+highly divergent sequences are likely to be present in this dataset and as we have seen in the previous section short read lengths of up to  <dig> are challenging even with 10% mismatches and gaps. thus we consider only reads of the maximum length of  <dig> in this dataset. we map the first  <dig> such reads with bwa, nextgenmap, nextgenmap+maxssmap_fast, nextgenmap+maxssmap, and nextgenmap+cudasw++ to the horse and human genomes. we consider the human genomes to identify ancient human dna fragments in the sample  <cit> .
+
+in table  <dig> we see that nextgenmap aligns 16% and 14% of the reads to the horse and human genomes whereas nextgenmap+maxssmap aligns a total of  <dig> % and 21% respectively. bwa in comparison aligns  <dig> % and  <dig> % with default parameters and has similar accuracy with optimized parameters given in a previous study  <cit> .table  <dig> 
+percent of  <dig>  ancient horse dna reads  of length  <dig> bp mapped to the horse genome equus_caballus equcab <dig>  and human reference genome
+
+
+
+bwa
+nextgenmap
+nextgenmap+
+nextgenmap+
+nextgenmap+
+maxssmap_fast
+maxssmap
+cudasw++
+time in minutes to map reads
+
+human genome
+
+bwa
+nextgenmap
+nextgenmap+
+nextgenmap+
+nextgenmap+
+maxssmap_fast
+maxssmap
+cudasw++
+time in minutes to map reads
+we ran nextgenmap+cuda-sw++ for a maximum of  <dig> hours and estimated the time to align all rejected reads. also shown is time in minutes.
+
+
+
+we evaluated nextgenmap+cuda-sw++ for mapping reads to the horse genome by running it for a maximum of  <dig> hours . in that time period cuda-sw++ considered  <dig> of the  <dig> nextgenmap rejected reads to be aligned  and mapped  <dig> % of them. based on this we estimate it would take  <dig> hours for cuda-sw++ to consider all of the nextgenmap rejected reads. and it would align a total of  <dig> % of  <dig> reads which equals  <dig>  this added to the nextgenmap mapped reads gives a total mapping rate of 26%.
+
+to better understand these numbers we simulated  <dig>  horse  <dig> bp reads of divergence 40% and gaps with stampy and with base qualities simulated from the same real dataset  used here. these settings were chosen to achieve a ballpark mapping rate with the real data. we find that nextgenmap aligns 18% of total reads with only  <dig> % correctly mapped while bwa maps no reads at all. these are similar to the mapping rates on the real data. this suggests these are difficult settings for nextgenmap and bwa. when we apply maxssmap to reads missed by nextgenmap it aligns an additional  <dig> %  with  <dig> % correct. to reduce the error to zero we raise the maxssmap mapping quality threshold from the default  <dig>  to  <dig>  raising it gives fewer but higher quality mapped reads. this gives  <dig> % mapped reads all of which are correct.
+
+with this in mind we return to the real data and apply nextgenmap+maxssmap with the higher mapping quality cutoff  in the hopes of obtaining all correct alignments. the higher threshold gives  <dig> additional reads. in the additional file  <dig> we give the sam output of these alignments. most have at least 30% mismatches and challenging for both bwa and nextgenmap.
+
+mapping unaligned reads from na <dig> to human reference
+for our second scenario we consider the popular human genome sequence na <dig> and study the mapping of one of its dataset srr <dig> to the same human reference used above. we map the first  <dig> paired reads in srr <dig>  with nextgenmap, nextgenmap+maxssmap_fast, and nextgenmap+maxssmap . in the latter two methods we re-align the pairs with maxssmap_fast and maxssmap where at least one read in the pair was unmapped by nextgenmap or the mapped pair positions were outside the mapping distance threshold of  <dig> base pairs.
+
+in table  <dig> we measure the number of paired reads whose mapped positions are within  <dig> base pairs. although the nominal insert size of this dataset is  <dig> with a standard deviation of  <dig>  we found many mapped pairs in the output that were within  <dig> base pairs and so we use this threshold. these mapped pairs are called concordant reads  <cit> . we see that nextgenmap aligns  <dig> % of the reads concordantly whereas nextgenmap+maxssmap_fast and nextgenmap+maxssmap align  <dig> % and  <dig> %. both methods mapped  <dig> % and  <dig> % pairs discordantly . nextgenmap mapped  <dig> % of the pairs discordantly but we don’t report this here because we re-align those reads with maxssmap.table  <dig> 
+percent of  <dig>  paired human reads from na <dig> in  <dig> genomes  of length  <dig> bp mapped concordantly to the human genome
+
+
+
+time in minutes to map paired reads
+concordant reads are pairs that are mapped within  <dig> base pairs. also shown in parenthesis are discordant reads  and the time in minutes. in nextgenmap+maxssmap we re-align pairs with maxssmap where at least one read in the pair was unmapped by nextgenmap or the pair is discordant. thus, nextgenmap shows zero discordant pairs because we re-align them with maxssmap.
+
+
+
+comparison of cuda and opencl executables of maxssmap
+we compare the cuda and opencl maxssmap exectuables for mapping reads to e.coli, horse, and human genomes. both implementations produce similar output and the same accuracies and error rates given earlier. in table  <dig> we see that the cuda  <dig>  runtimes are lowest followed by opencl and cuda  <dig> . the differences are small when mapping to e.coli but larger for the horse and human genomes.table  <dig> 
+running time comparison of cuda and opencl implementations of maxssmap 
+
+
+  
+
+div
+mss_fast
+mss
+mss_fast
+mss
+mss_fast
+mss
+
+cuda  <dig> 
+cuda  <dig> 
+opencl
+
+reads without gaps
+
+reads with gaps
+   
+ time in minutes to map paired human reads from na <dig> in  <dig> genomes  of length  <dig> bp to the human
+   
+genome. we denote nextgenmap by ngm and maxssmap by mss. see table
+8
+for more details about reads
+
+ngm+
+ngm+
+ngm+
+ngm+
+ngm+
+ngm+
+
+mss_fast
+mssmap
+mss_fast
+mss
+mss_fast
+mss
+
+cuda  <dig> 
+opencl
+   
+ time in minutes to map  <dig>  ancient horse dna reads  of length  <dig> bp to
+   
+the horse genome equus_caballus equcab <dig> . see table
+9
+for more details
+   
+about reads
+
+ngm+
+ngm+
+ngm+
+ngm+
+ngm+
+ngm+
+
+mss_fast
+mssmap
+mss_fast
+mss
+mss_fast
+mss
+
+cuda  <dig> 
+cuda  <dig> 
+opencl
+the output from the three methods give the same accuracies and errors as given earlier but the running times vary. we find the cuda  <dig>  implementation to have the lowest runtimes followed by opencl and cuda  <dig> .
+
+
+
+discussion
+in our experimental results we have demonstrated the advantage of maxssmap over smith-waterman for mapping reads to genomes. in scenarios where accurate re-alignment of rejected and low-scoring reads are required maxssmap and maxssmap_fast would be fast alternatives to smith-waterman. such conditions are likely to contain reads with many mismatches and gaps which would get rejected by programs based on hash-tables and burrows-wheeler.
+
+we demonstrate two such scenarios on real data. in both cases we see an increase in mapped reads by maxssmap. while this increase comes at the cost of considerable runtime it is still much faster than the smith-waterman alternative. furthermore, the output of nextgenmap+maxssmap reveals many high scoring alignments well above the mapping quality threshold that warrant further study.
+
+the maxssmap alignments of horse dna reads to the horse and human genomes contain  <dig> % and  <dig> % mismatches on the average. in the human genome paired read study we find the maxssmap concordant aligned pairs to contain  <dig> % mismatches on the average. in both cases these are challenging divergences for bwa and nextgenmap as we saw in the simulation studies.
+
+our real data applications in this paper are brief and deserve a wider study in a separate paper. for example when we aligned unmapped pairs in na <dig> to the human genome we obtained  <dig> % more pairs with maxssmap. we will search for variants in these alignments as part of future work. also in future work we plan to study maxssmap on metagenomic reads where divergence rates can be high as well.
+
+our results on both real and simulated data are an insight into missed reads that are rejected by bwa and nextgenmap. we see that the high mismatch rate and gaps are the main reasons why these reads are unmapped in the first place. without more exact approaches like maxssmap and smith-waterman it would be much harder to align such reads.
+
+the ratio of the nextgenmap+cudasw++ to the nextgenmap+maxssmap runtimes varies and can depend upon number of reads to align. in table  <dig> where reads lengths are fixed at  <dig> bp we see that this ratio is  <dig>  at divergence  <dig>  without gaps where both maxssmap and cuda-sw++ align approximately  <dig>  reads . as the divergence increase to  <dig>  with gaps both programs align about  <dig>  reads and there the ratio of their runtimes is  <dig> .
+
+our program is not without limitations. we find that at very short reads of lengths  <dig> and  <dig> the improvements given by maxssmap are small compared to higher lengths.
+
+however, read lengths of  <dig> and above are not uncommon especially since current illumina machines such as miseq, hiseq, and nextseq generate reads of at least this length 
+
+we find the runtimes are much higher for human and horse chromosomes than for e.coli just because there are many more genome fragments for the former. this could be lowered by spreading reads across multiple gpus. we also see that the accuracy of maxssmap is lower than smith-waterman as we cross into higher divergence of  <dig>  with gaps.
+
+CONCLUSIONS
+we introduce a gpu program called maxssmap for mapping reads to genomes. we use the maximum scoring subsequence to identify candidate genome fragments for final alignment instead of hash-tables and burrows-wheeler transform. we show that maxssmap has comparable high accuracy to smith-waterman based programs yet has lower runtimes and accurately maps reads rejected by a hash-table based mapper faster than if smith-waterman were used. we also study maxssmap on different read lengths and demonstrate applications on real data by mapping ancient horse dna reads to modern genomes and unmapped paired reads from na <dig> in  <dig> genomes.
+
+availability and requirements
+project name: maxssmapproject home page:http://www.cs.njit.edu/usman/maxssmapoperating system: linux programming language: cuda versions  <dig>  and  <dig>  and opencl version  <dig> other requirements: cuda toolkits version  <dig>  or  <dig> , gnu gcc c compiler  to compile opencl executablelicense: the mit license
+
+electronic supplementary material
+additional file 1:
+program command lines and high quality ancient horse dna aligned reads given by maxssmap.
+
+
+ competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+ur designed and implemented maxssmap. tt and ur conducted all experiments. both authors read and approved the final manuscript.
+

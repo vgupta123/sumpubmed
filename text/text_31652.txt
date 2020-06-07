@@ -1,0 +1,386 @@
+BACKGROUND
+genomic prediction of genetic merit, using snp markers, is now routinely used in animal and plant breeding to identify superior breeding individuals and so accelerate genetic gain . genomic prediction methodology is also increasingly used in human disease studies for the inference of genetic architecture, the identification of causal mutations , and prediction of disease risk .
+
+genomic predictions are often implemented using linear prediction models, especially best linear unbiased prediction  or genomic blup , which assume that all the snps contribute small effects to the trait and these effects are derived from a normal distribution  <cit> . while blup based genomic predictions have certainly been successful in increasing genetic gain in livestock and crops  <cit> , this approach does have some limitations. one limitation is that the prediction accuracy does not persist well across multiple generations, because the severe shrinkage in these models results in the effect of causative mutation being “smeared” across many markers encompassing long chromosome segments – in other words a linear combination of effects of a large number of markers is used to capture the effect of a qtl. after several generations, the association between markers and qtl might be broken down by recombination, thereby reducing prediction accuracy. the smearing of effect of causative mutations across many snp also results in imprecise qtl mapping with blup methods.
+
+to address these problems, bayesian mixture models   assume non-normal prior distributions of snp effects. one example of a flexible approach, bayesr  <cit>  defines a mixture model with snp effects following a mixture of four normal distributions with zero, very small, small and moderate variances. in practice, the prediction accuracy of bayesian mixture models  has been shown to be equal or superior to that of gblup for both human diseases and dairy cattle milk production traits .
+
+in addition to the prediction of breeding values and future phenotypes using genotype data, bayesian models  can be used to map the causal polymorphisms . for this purpose they have some advantages over traditional single snp regression, which is commonly used to analyse genome wide association studies  . single snp regression fits one snp at a time as a fixed effect and tests the significance of the association between the snp and the trait, while ignoring all other snps. to protect against performing multiple tests, stringent p-values  are used. this method of analysis has three limitations:1) the effect of those snps declared significant is usually over-estimated; 2) multiple snps in linkage disequilibrium with the same qtl may show an association with the trait leading to imprecision in mapping the qtl; 3) many qtl are not detected at all because no snp reaches the stringent p-value for association with the trait. by comparison, bayesian mixture models fit all snps simultaneously by treating the snp effects as random effects drawn from a prior distribution. for example, the bayesr model has been implemented for qtl detection in the dairy cattle genome and for human disease traits  <cit> . the results show that bayesr can increase the power of identifying the known genes in contrast with gblup and gwas.
+
+even though nonlinear models are attractive, one limitation is that nonlinear models typically require long computational times. due to the hierarchical estimation of posterior distributions of snp effects and their variances, nonlinear models have usually been implemented with markov chain monte carlo . this requires a large number of iterations with time per iteration scaled linearly with the number of markers  and the number of individuals . genomic data sets are now often very large and are rapidly becoming larger. for human,  <dig>  to  <dig> million snps arrays genotyped on up to 253 k individuals  <cit>  are available for association studies and disease/fitness prediction. in dairy cattle, whole genome sequence data including  <dig> million variants has been published by the  <dig> bull genomes project  <cit> . when confronted with such huge genomic data, bayesian methods can be so computationally expensive that it is not possible to use them.
+
+two approaches have been used to develop more computationally efficient algorithms for implementing bayesian mixture models. one is to modify mcmc with speed-up schemes. for example, moser et al.  <cit>  introduced a “500snps” scheme to pick  <dig> snps with non-zero effects to be updated instead of all the snps. such modification schemes could reduce the running time by 3 ~  <dig> fold. calus et al.  <cit>  proposed a right-hand-side updating algorithm to cluster multiple snps  to be updated as one during mcmc iterations. the results on 50 k snp panels demonstrated up to 90 % reduction in computational time without reducing prediction accuracy. the other approach is to introduce heuristic methods  as an alternative to mcmc. there are a wide range of fast versions of bayesian approaches to genomic prediction using these methods  , which are several orders faster than mcmc implementations. however, none of these algorithms gives consistently as high prediction accuracy as their mcmc counterparts. the em method of wang et al.  <cit> , embayesr, gave higher accuracy than ice based methods but still had a reduction in accuracy of 5 % ~ 7 % for traits with mutations of moderate to large effect. in other words, the heuristic approximations works best when there are no mutations of moderate to large effect, otherwise accuracy can be compromised. this is undesirable, especially when the largest advantage of the non-linear bayesian methods over blup is observed when there are mutations of moderate to large effect !
+
+motivated by the deficiency of both mcmc  and fast versions of nonlinear models , we hypothesise that a hybrid scheme, beginning with em iterations and finishing with mcmc sampling iterations, would give similar prediction accuracy to a full mcmc implementation, while having a significant speed advantage. here we propose a hybrid algorithm  of expectation-maximisation   and mcmc under the bayesr model. the algorithm also incorporates a speed-up scheme where only a proportion of snp continue to be sampled in mcmc iterations. in comparison with embayesr  <cit> , the main improvement is that hyb_br introduces a limited number of mcmc iterations after em to improve the solutions from embayesr.
+
+to evaluate the predictive ability and computational efficiency of hyb_br, prediction accuracy was compared with bayesr and gblup in two data sets. the first data set was 800 k snp genotypes in  <dig>  holstein and jersey bulls and cows. the prediction accuracy within these breeds and in a third breed  was evaluated. the results showed that hyb_br achieved very similar prediction accuracy to bayesr, while reducing the running time by up to  <dig> fold, and overcoming the limitations of slightly reduced accuracy of embayesr. as a result of running the algorithm, the posterior probability of each snp being in the model was derived, and this was used for qtl mapping. the resulting qtl regions were compared between the approaches and with previous literature reports. the results demonstrated that hyb_br has enough power to detect the major known genes affecting milk production traits in dairy cattle as well as some novel regions. hyb_br was also evaluated in a second data set - the welcome trust case control consortium  human disease data set  <cit> . the results demonstrated that hyb_br is a promising method for risk prediction and genetic architecture inference for human disease traits as well.
+
+methods
+the mixture data model
+the overall model at the level of the data for hyb_br  including all the relevant parameters and priors is described first. the model assumes that y, the phenotypic records of n individuals, is a linear model of fixed effects , snp effect , random polygenic effects  and environmental errors :  <dig> y=xβ+zg+wv+e, where,
+
+β = vector of p fixed effects, following uninformative priors.
+
+g = vector of m snp effects. for each snp, gi~bi1×n <dig> *σg2+bi2×n <dig> .0001*σg2+bi3×n <dig> .001*σg2+bi4×n <dig> .01*σg <dig> in which σg <dig> is the genetic variance of the trait and b is a scalar with two possible values { <dig>  1}, determining whether or not the effect of the ith snp is derived from the kth distribution.
+
+pr = vector of probabilities where prk = scalar with the value range between  <dig> and  <dig>  the parameter pr defines the proportion of all the snps following each of four normal distributions k. prk is assumed to follow a dirichlet distribution with the parameter α = t.
+
+v = vector of q polygenic effects , with v ~ n, a is the q × q pedigree-based relationship matrix, σa <dig> is the polygenic variance, q is the number of individuals in the pedigree.
+
+e = vector of n residual errors. for cattle data, e ~ n, where e is a n × n diagonal matrix so that the error variance associated with different records can vary. for example, for bulls, the phenotype would be daughter yield deviations, which would have a lower error variance than the trait deviations  of cows  <cit> . for human data where all phenotypes have the same magnitude of error, e matrix can be replaced by the identity matrix i.
+
+x = n × p design matrix, allocating phenotypes y to fixed effects β.
+
+z = a n × m genotype matrix with elements zij=sij−2pi/2pi1−pi <dig>  in which sij is the genotypes of the jth individual for the ith snp , and pi is the allele frequency of each snp i.
+
+w = n × q design matrix, aims at allocating the q ×  <dig> vector of polygenic effects to y.
+
+note that model  extends the model used by wang et al.  <cit>  to include fixed effects, polygenic effects and weights.
+
+the prior distribution of each snp effect gi conditional on b is pgi|bik=δgi,bi1=112πσi2kexp−gi22σi2k,bik=1k= <dig> , <dig>  
+
+where, δ denotes the dirac delta function with all probability mass at gi =  <dig> 
+
+the joint distribution p|prk)  can be written as:  <dig> pgi,bik|prk=∏k=14pgi|bik×pbik|prk=δgipr1bi1∏k=2412πσi2kexp−gi22σi2kprkbik 
+
+the implementation of hyb_br with the mixture model defined above consists of two components: 1) the expectation-maximization module. hyb_br first implements the em iterations under the mixture gaussian model  to give approximations for the parameter set including snp effects g, proportion of snp in each distribution pr, error variance σe <dig>  and polygenic variance σa <dig>  for the estimation of each snp effect, the pev  correction is introduced to account for the errors which are generated from the estimations of all other snp effects . 2) mcmc module. once the em steps are converged, the output values of the parameters are used in the modified mcmc iterations as the start values. for the final step, a mcmc scheme is implemented with a limited number of iterations.
+
+em module
+in the following em modules, the parameter set θ = {g, pr, β, v, σe2} will be estimated by their maximum a posteriori  value. similar to embayesr  <cit> , all the parameters θ were estimated according to the expectation-maximisation process with steps:i) define the log likelihood f of the data under the data model .
+
+ii) derive the log posterior function of the parameters using bayes’ theorem. following bayes’ theorem, the log posterior distribution of the parameter sets θ is based on the rule logp ∝ logf + logp, with p the prior for the parameter.
+
+iii) take the expectation on the posterior function over the missing data.
+
+iv) differentiate the expected posterior function and solve for this equal to zero to obtain map  of the parameter set θ.
+
+
+
+in the expectation-maximization implementation, the posterior distributions for each parameter p are obtained while “integrating out” the other parameters. for example, for the estimation of each snp effect gi , we maximize the posterior distribution of each snp effect p, prk, β, v, σe2) by integrating out the other snp effects gj ≠ i, the parameters b, β, v, but we fix the proportion parameter prk and the error variance σe <dig> at their maximum posterior estimates. in the following, we will detail the inference process for several key parameters including snp effects , the mixing parameters , fixed effects , polygenic effects  and the error variance  separately:estimation of snp effects g
+
+
+
+as in our em version of bayesr  <cit> , in hyb_br we will update the estimated effect of snps one at a time. therefore, we rewrite zg in eq.  as the sum of the effect of the current snp zigi and the combined effect of all other snp effects ui . we rewrite the model  as:  <dig> y=xβ+zigi+ui+wv+e where, gi is the ith element of the vector g, and ui = ∑j ≠ izjgj.
+
+we estimate of ĝi by the value of gi that maximises the posterior probability pgi|y,p^r,σe2^ where p^r and σe2^ are the map estimates of pr and σe <dig> conditional on y.
+
+to perform this, we first introduce “missing data” , β, v, ui), and then “integrate them out” via the expectation-maximisation steps. in detail, the marginal posterior distribution of each snp effect gi can be written as:
+
+pgi,bik|y,β,v,ui,σe2^,pr^k∝py|gi,bik,β,v,ui,σe2^,pr^kpgi,bik|pr^k.
+
+under the model , the first term py|gi,bik,β,v,ui,σe2^,pr^k is obtained according to the following normal distribution:
+
+y − xβ − zigi − wv − ui ~ n, 
+
+which can be transformed as: e*−zigi~n <dig> eσe <dig>  
+
+where, e* = y − xβ − wv − ui.
+
+therefore, the term py|gi,bik,β,v,ui,σe2^,pr^k can be written as: py|gi,ui,bik,β,v,σe2^,pr^k=12πσe2^n21eexp−12σe2^e*−zigi'e−1e*−zigi
+
+then the log likelihood function is:  <dig> logpy|gi,ui,bik,β,v,σe2^,pr^k=−n2logσe2^−loge−12σe2^e*−zigi'e−1e*−zigi 
+
+ignoring an additive constant, the second term pgi,bik|pr^k is defined in the eq. . then the log of pgi,bik|pr^k is:  <dig> logpgi,bik|pr^k=bi1logδgipr^1+∑k=24bik−12logσi2k−gi22σi2k+logpr^k 
+
+treating ) as missing data and omitting the terms without gi, the expectation of the log marginal posterior of each snp effect is: ee*,biklogpgi,bik|y,β,v,ui,σe2^,pr^k=ee*,biklogpy|gi,ui,bik,β,v,σe2^,pr^k+ee*,biklogpgi,bik|pr^k 
+
+according to eq , the expectation of the first term is:  <dig> ee*,biklogpy|gi,ui,bik,β,v,σe2^,pr^k∝−12σe2^e*−zigi'e−1e*−zigi+tre−1peve* 
+
+according to the eq. , the expectation of the second term is:  <dig> ee*,biklogpgi,bik|pr^k∝pi1logδgipr^1+∑k=24pik−12logσi2k−gi22σi2k+logpr^k 
+
+where, pik=ebik|y,pr^k. the term p can be derived as in the additional file  <dig> 
+
+hence, in the maximisation steps of em, we differentiate eqs.  and  with respect to ĝi, and then obtain an estimate for the snp effect as:  <dig> ∂ee*,biklogpgi,ui,bik|y,β^,v^,σe2^,pr^k∂gi=−∑k=24pikσi2k−zi'e−1ziσe2^gi+z'e−1e*σe2^=0g^i=zi'e−1zi+∑k=14pikσe2^σi2k−1z'e−1e* 2) estimation of parameter pr
+
+
+
+this follows a common method for an em algorithm to analyse a mixture of distributions. we introduce the ‘missing data’ b which is the indicator variable that indicates which of the k =  <dig> distributions snp effect i is drawn from. the posterior distribution of proportion parameter pr is: ppr,b|y∝py|bpb|prppr 
+
+where,
+
+the term p does not involve pr. so when we differentiate with respect to pr, this term will drop out and therefore can be ignored. pb|pr=∏i=1n∏k=14prkbikppr=∏k=14prk 
+
+therefore, the log posterior expression of pr can be written as: logppr,b|y∝logpb|pr+logppr=∑i=1n∑k=14biklogprk+∑k=14logprk. 
+
+treating b as the missing data and defining p = e|y, prk), the expectation of the posterior can be written as:  <dig> eb|ylogppr,b|y=∑i=1n∑k=14piklogprk+∑k=14logprk. 
+
+introducing lagrange multiplier λ to account for the constraint that ∑k = 14prk =  <dig> and differentiate with respect to prk, the parameter pr can be estimated by:  <dig> ∂eb|ylogppr,b|y+λ∑k=14prk−1∂prk=∑i=1mpikprk+1prk+λ=0prk=∑i=1mpik+1∑k=14∑i=1mpik+ <dig> 
+
+the computation of p is given in the additional file  <dig> ) estimation of fixed effects  and the error variance 
+
+
+
+since fixed effects  and the error variance has uninformative priors, their posterior distribution is: pσe <dig> β,g^|y=12πσe2n21eexp−12σe2y−zg^−xβ−wv^'e−1y−zg^−xβ−wv^ 
+
+as y−zg^−xβ−wv^=e, the full log likelihood based on this model is:  <dig> logpσe <dig> β,g^|y=−n2logσe2+12σe2e'e−1e 
+
+treating e as the missing data, the expectation of the eq.  can be expressed as ee|ylogpσe <dig> β,g^|y=ee|y−n2logσe2+12σe2e'e−1e=−n2logσe2+12σe2e'e−1e+tre−1peve 
+
+in theory, pev ≠ pev due to e = e* + zigi. however, since each snp effect is shrunk severely towards zero by gblup  <cit> , we approximate pev ≅ pev. the calculation of the term pev is detailed in the additional file  <dig> 
+
+therefore, differentiating the equation ee|ylogp with regard to σe <dig> and b, we achieve:  <dig> σe2^=1ny−zg^−xβ−wv^'e−1y−zg^−xβ−wv^+tre−1peve*   <dig> β^=x'e−1x−1x'e−1y−zg^−wv^ 4) estimation of polygenic effects 
+
+
+
+under the model , the conditional posterior density function of polygenic effects v is: pv|y=py|v,g^,β^,σe2^pv 
+
+where,  <dig> py|v,g^,β^,σe2^=12πσe2n21eexp−12σe2y−zg^−xg^−wv'e−1y−zg^−xβ^−wv   <dig> pv=12πσa2q21aexp−12σa2v'a−1v 
+
+therefore, the log posterior based on eqs.  and  is:  <dig> logpv|y=logfy|v,g^,β^,σe2^+logpv=−n2logσe2^−loge+12σe2^y−zg^−xβ^−wv'e−1y−zg^−xβ^−wv+−q2logσa2−loga+12σa2v'a−1v 
+
+according to the equation y−zg^−xβ−wv^=e, the eq.  can be written as:  <dig> logpv|y=logfy|v,g^,β^,σe2^+logpv=−n2logσe2^−loge+12σe2^e'e−1e+−q2logσa2−loga+12σa2v'a−1v 
+
+taking expectation over the missing data e, we get:  <dig> ee|ylogpv|y=−n2logσe2^−loge+12σe2^e'e−1e+tre−1peve+−q2logσa2−loga+12σa2v'a−1v 
+
+differentiating the eq.  with regards to v, we get:  <dig> v^=w'e−1wσa2+σe2a−1−1σa2w'e−1y−zg^−xβ^ 
+
+where, for simplicity, the variance σa <dig>  will be fixed as the specified value from gblup estimation.
+
+table  <dig> lists all the parameters and their equation derived from em steps.table  <dig> the list of all the estimated parameters including the possibility for each snp ), the proportion parameter , each snp effect , error variance , fixed effect , and polygenic effects v and the according equation derived from em steps
+
+
+ee*logpik
+
+
+g
+i
+σe2
+
+
+steps for em module
+the overall procedure of em is described by means of the pseudo code, steps ①~⑦. here we will detail these steps according to their sequence appearing in the pseudocode descriptions:step em_①: initialise the parameters g, pr, σi <dig> and construct x, a, g, e, w matrices. similar to embayesr  <cit> , the starting values of g and pr were set as g =  <dig>  and pr = { <dig> ,  <dig> ,  <dig> ,  <dig> }, while σi2 = { <dig>   <dig>  * σg <dig>   <dig>  * σg <dig>   <dig>  * σg2}. the genetic variance σg <dig> and polygenic variance σa <dig> are obtained from gblup. both variances won’t be updated during em iterations.
+
+the n ×  <dig> matrix x is a design matrix, allocating the phenotypes to fixed effects. in our case, the matrix x is set up with the first column being the mean, the second and third columns defining the breeds  and sex  of the cattle. for example, if the ith animal is a holstein bull, then xi,2 =  <dig> with xi,3 =  <dig> 
+
+the pedigree relationship matrix a is built using henderson’s rules  <cit> ; while the genomic relationship matrix g is constructed using the equation g = zz ' /n. diagonal error matrix e is calculated following garrick et al.  <cit> , and the index matrix w maps individuals in the pedigree to the phenotypes if they have ones.
+
+step em_②: calculate the pev matrix under model  <dig> . then using pev matrix, calculate tre−1zizi'e−1pevu1e which is used in the equation for ee*logpik . in theory, the calculation of this term should be updated each em iteration, which is time consuming. to avoid huge computational burden, the pev matrix is treated as constant value for the term tre−1zizi'e−1pevu1e in front of em loop.
+
+then for each snp i 
+
+step em_③: correct y for the effects of all other snps except current snp i with equation y†=y−∑j≠izjg^j−xb^−wv^.
+
+step em_④: estimate the probability that the effect of snp i is from one of four normal distributions ee*logpik with the equation . after this, p is calculated with the equation expee*logpik/∑k=14expee*logpik .
+
+step em_⑤: the snp effect ĝi is updated via eq. .
+
+after effects have been estimated for all snp,
+
+step em_⑥: estimate σe <dig> with eq. , fixed effects β with eq. , update prk with eq. , and update polygenic effects v with the eq. .
+
+step em_⑦: assess convergence criterion  ' / ≤ 10−  <dig> with l being the em iterations number. if not converged, then return to step ③ for the next em iteration; otherwise, exit the em iterations and return the estimates of parameters from the final iterations.
+
+
+
+modified mcmc module with speed-up scheme
+the outputs of the em including snp solutions, polygenic effects, error variance and genetic variance are used as starting values of parameters for the mcmc module, which allows mcmc to begin with no burn in.
+
+the mcmc module of hyb_br implements the same gibbs sampling processes as bayesr  <cit>  but modified with one speed-up scheme as follows. over the first  <dig> iterations, the average probability that the snp effect is zero ) is calculated. if p ≥ a, then the snp effect is set to zero and is not updated in future iterations.
+
+the test for selecting a reasonable value of the parameter a was conducted as follows. the impact of value of a from  <dig>  to  <dig>  on prediction accuracy was investigated for the milk production traits and fertility, fig.  <dig>  the results show that criterion p≥,  <dig>  is the lowest threshold which gives an accuracy very close to the maximum. the criterion means snp i has more than 90 % probability of having no effect.fig.  <dig> the trend of prediction accuracy according to a range of values of the threshold parameter a
+
+
+
+
+the modified mcmc steps can then be described as follows:step mcmc_①: sampling the error variance σ^e <dig> according to the distribution σ^e2~inv−χ2n− <dig> y*'e−1y*n− <dig>  with y*=y−zg−xβ^−wv^.
+
+step mcmc_②: sampling the fixed effects β from the distribution n, with βμ=x'e−1x−1x'e−1y−zg^−wv^.
+
+step mcmc_③: polygenic variance is sampled σ^a2~inv−χ2n− <dig> v^'a−1v^n− <dig> 
+
+step mcmc_④: the polygenic effects are sampled from normal distribution n, with the mean μ=v^ from eq.  and the variances=w'e−1w+a−1σe2/σa2− <dig> 
+
+then for each snp i ,
+
+step mcmc_⑤: implement the speed-up scheme : if  and  >  <dig> ), then stop updating this snp i.
+
+else,
+
+step mcmc_⑥: estimate the log likelihood that the effect of snp i is from one of four normal distributions l. following the derivation steps of kemper et al.  <cit> , the optimised equation of the log likelihood function is
+
+lgi|σi2k=−12logσi2kzi'zi+σe2+e*'e−1zi2σi2kσe−2/σi2kzi'e−1zi+σe2+logprk,
+
+with e* = y − xβ − u − wv.
+
+after this, p is calculated with the equation:exp, μ=zi'e−1zi+σe2^σi2k−1z'e−1e*, and s=zi'e−1zi+σe2^σi2k− <dig> 
+
+step mcmc_⑧: update pr ~ dirichlet,where β <dig>  β <dig>  …, β <dig> are the number of snps in one of four normal distributions.
+
+return to mcmc step  <dig> 
+
+hyb_br was written in the c++ programming language.
+
+
+
+data
+cattle
+one thousand seven hundred forty-five holstein and jersey cattle and  <dig> australian red bulls were genotyped with the 777 k illumina hd bovine snp chip.  <dig>  holstein and jersey bulls and cows,  <dig> australian red bulls and cows were genotyped with the 54 k illumina bovine snp array. after stringent quality control and snp filtering described in  <cit> , there were  <dig>  snps remaining for animals genotyped with the 777 k snp panel, and  <dig>  snps remaining for animals genotyped with the 54 k snp array. animals genotyped with the  <dig>  snps, were imputed to  <dig>  snp genotypes using beagle  <dig>   <cit> . therefore, the total data set was  <dig>  cattle of three breeds with real or imputed genotypes for  <dig>  snp.
+
+the phenotypes include milk yield, protein yield, fat percent, and cow fertility. the heritability of these traits varies from  <dig>  , to  <dig>  . the fertility  is usually measured according to calving interval , days from calving to first service , pregnancy diagnosis, lactation length , and survival to second lactation on australian holstein and jersey cows  <cit> . here, the fertility phenotype was calving interval . here, the fertility phenotype is mainly derived from ci. the phenotypes for all the traits were daughter trait deviations  for bulls , and trait deviations  for cows . for genomic prediction, the data was separated into a reference set, where snp effects were estimated, and validation sets, where the prediction accuracy was assessed, and the division of animals into reference and validation sets was by year of birth . the reference data includes bulls and cows from two breeds , and the predictions were evaluated in the other animals of the same breeds or in a breed  not included in the reference set. the exact number of individuals in these data sets for each trait is given in table  <dig> table  <dig> the number of individuals in the reference sets and validations sets related to three traits including milk yield , protein yield , fat percent  and fertility
+
+
+
+to compare the computational time required by the different genomic prediction methods, we also used three reference sets with increasing different numbers of animals; ref 1_ cattle had  <dig> holstein bulls; ref 2_cattle had  <dig>  holstein bulls and cows, while ref 3_cattle was the complete reference data set with  <dig>  animals.
+
+for the em module, estimates of three variance components  were required as the input. we ran asreml <dig>   <cit>   on these data sets to estimate these variance parameters and the results are listed in table  <dig> table  <dig> three input variance parameters related to the reference data sets
+
+the variances including error variance , genetic variance , and polygenic variance  are estimated by asreml 4
+
+
+
+the correlation between gebv and dtd in the validation sets was used as a proxy for prediction accuracy. the regression of dtd on gebv in the validation sets was used to investigate if any of the methods resulted in biased predictions.
+
+case/control human disease trait data
+for predicting human disease risk, seven disease traits of the welcome trust case control consortium  genomic data  <cit>  including bipolar disorder , coronary artery disease , crohn’s disease , hypertension , rheumatoid arthritis , type  <dig> diabetes , and type  <dig> diabetes  were used. following the steps of strict qc on snp data  <cit>  with plink  <cit> , we had seven combined case/control data sets  with different number of markers and records listed in table  <dig>  the input parameters of seven datasets for hyb_br including error variance and genetic variance were calculated by gcta  <cit> , given in table  <dig>  to assess prediction accuracy, for each disease, we randomly generated  <dig> splits of the data with 80 % of individuals for the reference set and 20 % for the validation set. to assess the prediction ability, the area under the roc curve   <cit>  was calculated.table  <dig> the size and genetic architecture of seven combined control/case data sets
+
+h
+2
+the error variance  and genetic variance  are estimated by gcta; the heritability  is estimated by the equation h2=σg2σe2+σg2
+
+
+
+
+RESULTS
+compute time comparison of hyb_br and bayesr
+to compare computational efficiency, hyb_br without the speed-up scheme , hyb_br with the speed-up scheme and pure mcmc bayesr were implemented on three data sets with  <dig>  markers but different numbers of records, varying from  <dig> in ref 1_cattle,  <dig>  in ref 2_cattle, to  <dig>  in ref 3_cattle. as used by kemper et al.  <cit> , pure mcmc bayesr required  <dig>  iterations of complexity o with parameters estimated from samples from the posterior distributions . the first  <dig>  iterations were removed as burn in. the mcmc module of hyb_br used only  <dig> iterations and burn-in was replaced by the em . 4000 cycles for the mcmc module were used after comparing results with increasing number of iterations. the results showed that  <dig> were necessary to achieve maximum prediction accuracy .fig.  <dig> prediction accuracy with an increasing number of mcmc iterations for bayesr
+
+
+
+the prediction accuracy was evaluated for milk yield with a reference set containing the holstein and jersey bulls&cows data.
+
+with the smallest data set , 5 h compute time was required for hyb_br compared with 96 h for bayesr mcmc ; 35 h required by hyb_br instead of 410 h of bayesr for ref 2_cattle; and in ref 3_cattle, 42 h for hyb_br_sp but 720 h for bayesr. these results suggest hyb_br is at least  <dig> times faster than bayesr mcmc, with the speed advantage increasing as data sets became larger . the hyb_br speed up scheme reduced compute time by approximately 50 %, compared to hyb_br_orig without the speed up scheme , with no reduction in the prediction accuracy .fig.  <dig> computational time in hours required for bayesr, hyb_br_orig, and hyb_br_sp on three reference sets 
+
+-polyb
+-polyb
+-polyb
+-polyb
+-polyb
+-polyb
+-polyb
+-polyb
+
+ameans polygenic effects are included in the predictions; while bmeans the predictions do not include polygenic effects into the model
+
+-polyb
+-polyb
+-polyb
+-polyb
+-polyb
+-polyb
+-polyb
+-polyb
+
+ameans polygenic effects are included in the predictions; while bmeans the predictions do not include polygenic effects into the model
+
+
+
+these timings were recorded on a server with intel e5- <dig>  <dig> ghz processors and 384gb of 1333 mhz ram.
+
+the accuracy and bias of within-breeds, multi-breeds and across-breeds prediction for four complex dairy traits
+genomic prediction with a single breed reference
+for the within-breed prediction  in table  <dig>  hyb_br performed as well as bayesr for all traits, including fat%. both bayesr and hyb_br had a 1 % ~ 6 % superiority of accuracy over gblup for milk yield, protein yield and fat%, but had no advantage for fertility. similarly, for the prediction of jersey validation with jersey reference, bayesr and hyb_br had a consistent advantage over gblup for milk production traits, but not for fertility. especially, for the trait fat%, bayesr and hyb_br gave very similar results, with a 17 % increase in accuracy  of genomic prediction over gblup, as well as a 5 % increase in accuracy over embayesr. hyb_br and bayesr also gave regression coefficients closer to one than gblup for most traits.
+
+genomic prediction with a multi-breed reference
+when predicting the holstein or jersey validation with the combined holstein and jersey reference, hyb_br had the same accuracy as bayesr, table  <dig>  compared with gblup, bayesr and hyb_br gave consistently higher accuracy increase for the milk production traits, though this was not observed for fertility. and for the prediction of jersey validation set, bayesr and hyb_br improved accuracy for the milk production traits by 11 % compared with gblup. the results show that there are small but consistent accuracy improvements as a result of using the multi-breed reference , consistent with the results of kemper et al.  <cit>  and hoze et al.  <cit> .
+
+also, including polygenic effects  in the model can improve the prediction accuracy by 1 ~ 2 %, at least for milk production traits, tables  <dig> and  <dig>  however, for fertility the introduction of polygenic effects for all the prediction methods did not impact the accuracy at all.
+
+compared with gblup and embayesr, bayesr and hyb_br gave less biased predictions for milk production traits. however for fertility the regression values far from one indicate bias, from all methods – the low accuracy of fertility phenotypes, including in the validation set, likely contributes to this.
+
+genomic prediction across breeds
+for predicting australian red validation bulls , bayesr and hyb_br gave higher accuracy than gblup for all traits .
+
+across all the prediction results shown in tables  <dig>   <dig> and  <dig>  embayesr had a 2 % ~ 5 % reduction in accuracy compared with bayesr and hyb_br for fat%, while bayesr and hyb_br gave almost identical accuracies in all cases.
+
+inferred genetic architecture and qtl mapping for dairy production and fertility traits
+bayes r described the genetic architecture of a trait by the posterior proportion of snps in each of the four different distributions. table  <dig> reported the estimated proportion in each of four distributions from bayesr, embayesr, and hyb_br. the number of snps falling into the distribution with the largest variance was similar for all three methods. compared with bayesr, hyb_br tended to estimate more snps  in the distribution with variance  <dig>  * σg <dig>  and  <dig>  * σg <dig>  in contrast to hyb_br, embayesr tended to estimate that a higher proportion of snps have no effect than does bayesr. this may explain the lower accuracy it achieves.table  <dig> the number of snps in each of four distributions
+
+g2
+b.  <dig>  * σ
+g2
+c.  <dig>  * σ
+g2
+g2
+b.  <dig>  * σ
+g2
+c.  <dig>  * σ
+g2
+g2
+b.  <dig>  * σ
+g2
+c.  <dig>  * σ
+g2
+b.  <dig>  * σ
+g2
+c.  <dig>  * σ
+g2
+
+
+qtl mapping for dairy production and fertility traits
+both bayesr and hyb_br estimate the posterior probability that every snp has a non-zero effect on the trait. this is useful for qtl mapping – snp with very high posterior probabilities of having a non-zero effect should be strongly associated with causal mutations . then, qtl mapping from bayesr and hyb_br can be conducted by plotting the posterior probability of each snps having a non-zero effect on the trait by genome position, and then comparing the genome location of the effects with a high posterior probability of being in the largest distribution for each method.
+
+the estimated posterior possibilities of all the snps  related to four different traits were plotted according to the positions  of snps on the whole genome  in figs.  <dig>   <dig>   <dig> and  <dig>  the top snps with high posterior possibilities were picked up according to the number of snps in the variance  <dig>  * σg <dig> . table  <dig> listed all the top snps in the variance related to the previously reported genes with a effect on milk production including csf2rb  <cit> , gc  <cit> , ghr/ccl <dig>  <cit> , paep  <cit> , mgst <dig>  <cit> , and dgat <dig>  <cit> . both bayesr and hyb_br identified all of these regions, which demonstrated that hyb_br can perform qtl mapping with similar precision to bayesr. for example, hyb_br could detect the dgat <dig> as well as bayesr shown in fig.  <dig> .fig.  <dig> mapping all the snps’ posterior possibilities estimated from bayesr and hyb_br across the whole chromosome related to milk yield. the posterior possibility is calculated based on the sum of the posterior possibilities p of each snp with non-zero variances written as ∑k = 24
+p. the blue circle is the snps  with location information mapped to known genes
+
+fig.  <dig> mapping all the snps’ posterior possibilities estimated from bayesr and hyb_br across the whole chromosome related to protein yield. the posterior possibility is calculated based on the sum of the posterior possibilities p of each snp with non-zero variances written as ∑k = 24
+p. the blue circle is the snps  with location information mapped to known genes
+
+fig.  <dig> mapping all the snps’ posterior possibilities estimated from bayesr and hyb_br across the whole chromosome related to fat percent . the posterior possibility is calculated based on the sum of the posterior possibilities p of each snp with non-zero variances written as ∑k = 24
+p. the blue circle is the snps  with location information mapped to known genes
+
+fig.  <dig> mapping all the snps’ posterior possibilities estimated from bayesr and hyb_br across the whole chromosome related to fertility. the posterior possibility is calculated based on the sum of the posterior possibilities p of each snp with non-zero variances written as ∑k = 24
+p. the blue circle is the snps  with location information mapped to known genes
+
+
+
+the application of hyb_br to predict the risk of human disease traits and infer genetic architecture for these traits
+in the human data, cross validation was used to estimate the accuracy of hyb_br. as there were  <dig> replicates of 20/ <dig> split , we evaluated the mean of the auc for each disease shown in table  <dig>  analysis methods compared were gblup implemented in gcta  <cit> , bayesr from moser et al.  <cit> , and hyb_br. the standard deviations of the accuracy  were also listed in the parenthesis of table  <dig>  hyb_br and bayesr performed equally well across all seven traits, with the same prediction accuracy for each trait. for the diseases of cd, ra, and t1d, bayesr and hyb_br had significantly higher accuracy than gblup. especially for t1d, bayesr and hyb_br could have up to 12 % accuracy increase compared with gblup. however, for other traits including bd, cad, ht, and t2d, bayesr and hyb_br did not show any superiority over gblup. the underlying architecture of these traits might explained this, as suggested by moser et al.  <cit> . in detail, for cd, ra and t1d, there are known mutations of moderate to large effect, and the mixture assumptions of bayesr and hyb_br can take advantage of this. however, for four other diseases including bd, cad, ht, and t2d, there are no known mutations of moderate to large effect, and this is reflected in the genetic architecture for these diseases inferred by hyb_br.table  <dig> the prediction performance evaluated by the area under curve  of gblup, bayesr and hyb_br on seven diseases
+
+h
+2
+h
+2
+h
+2
+the heritability  is estimated by the equation h2=σg2σe2+σg2; σe <dig> is derived separately by three methods; fixed genetic variance of σg <dig> for bayesr and hyb_br is obtained from gcta
+
+
+
+the genetic architecture of human disease traits
+the inferred genetic architecture was different for each of the seven diseases . for example, the genetic architecture of bd is controlled by many snps  with small effects , but just  <dig> snps with large effects . these numbers demonstrated the polygenic architecture of bd. on the contrary, for t1d, there was relatively smaller number of snps  with small effects but many more snps  with large effects. the proportion numbers from fig.  <dig> also demonstrated this . large proportion of snps with small effects  controlled the polygenic architecture of the diseases bd , cad , ht , and t2d . for these diseases, the mixture model of bayesr and hyb_br did not have much advantage. however, relatively larger proportions of snps with moderate effects  existed for the traits ra  and t1d. for these two traits controlled by major genes, bayesr and hyb_br gave substantially greater accuracy than gblup, which explained the results for prediction accuracy .table  <dig> the number of snps in each proportion of four distributions estimated by bayesr, and hyb_br on seven human diseases
+
+fig.  <dig> the inferred genetic architecture of seven human diseases from bayesr and hyb_br. the blue bar is the proportion of snps in pr  <cit>  , which is estimated by the number of snp in pr  <cit>  divided by the total number of snps with nonzero variance. the red bar is the proportion of snps with the variance  <dig>  * σ
+g <dig>  estimated by the number of snp in pr  <cit>  divided by the total number of snps with nonzero variance. the green bar is the proportion of snps with the variances  <dig>  * σ
+g <dig>  estimated by the number of snps in pr  <cit>  divided by the total number of snps with nonzero variance
+
+
+
+compared with bayesr, hyb_br detected the same number of snps with moderate variance  but appeared to systematically detect more snps in the proportion of small variance , similar to the results observed for the comparison of bayesr and hyb_br in in dairy cattle data .
+
+discussion
+we have presented a novel and computationally efficient algorithm termed hyb_br for simultaneous genomic prediction and qtl mapping. a pure em algorithm was less accurate for some traits, while pure mcmc requires very long computation times. therefore, hyb_br implements the em algorithm followed by a limited number of mcmc iterations. in this way, the algorithm takes advantage of the features of an em algorithm  and the higher accuracy from mcmc implementations in a hybrid scheme. our accuracies of genomic prediction for complex traits in human and cattle from hyb_br are almost identical to those from the full mcmc implementation of the bayesian mixture model, with a  <dig> fold or greater reduction in computing time required.
+
+for the pure mcmc algorithm, the burn-in stage can account for up to 50 % of the total running time. one of the key advantages of hyb_br is that the em module effectively replaces the burn-in cycles that are usually required for mcmc. based on the starting point from em , the running time of hyb_br can be much reduced.
+
+the pure em algorithm, embayesr  <cit>  has been demonstrated to be much faster than bayesr, but had lower accuracy for some traits, particularly those with mutations of moderate to large effect. for example, when implemented on the trait fat% in dairy cattle, embayesr had a decreased accuracy of 5 % ~ 7 % compared to bayesr. one possible explanation is that embayesr shrinks snp effects too much . this could be because the pev that is used to account for the error of the effects of all the other snps while estimating the effect of the current snp is only an approximation. the introduction of pev correction is based on one observation: previous fast algorithm studies  assumed the effects of the other snps were estimated perfectly while estimating the effect of the current snp, leading to poor performance  <cit> . therefore, embayesr and the em part of hyb_br allow for the errors in the effect of other snps and other location parameters by using the pev. the calculation of the pev from gblup is carried out before the iterations to estimate the effects of each snp. and since the normal priors from gblup model do not allow for snps of moderate to large effects, such pev calculation is an approximation and this may be one reason for loss of accuracy in the em. to deal with this, hyb_br further implements a small number of mcmc iterations to improve the outcome of pure em steps.
+
+hyb_br has three advantages. first, as the size of genomic data increases, the computational efficiency of hyb_br without burn-in stage  iterations), is greater than bayesr by full mcmc. and when implemented with the speed-up scheme described in the methods, computational time can be reduced even further, by sampling a reduced set of snps in the mcmc module, apparently with no loss of accuracy . second, the prediction accuracy of hyb_br is comparable to bayesr in all cases including dairy cattle and human disease prediction shown in tables  <dig>   <dig> and  <dig>  and table  <dig>  third, hyb_br, like bayesr, is flexible with respect to the genetic architecture of complex traits. as shown in tables  <dig>   <dig> and  <dig>  hyb_br performs well on four different complex traits, with architecture ranging from highly polygenic architecture to genetic architecture controlled by major genes. in addition to the prediction on the continuous quantitative traits of dairy cattle, the investigation on the risk prediction of seven case/control human diseases with binary 0/ <dig> phenotypes shows hyb_br and bayesr perform on this type of data, table  <dig>  finally, the posterior probabilities of snp having a nonzero effect from hyb_br can be used for qtl mapping, fig.  <dig> 
+
+implementing genomic prediction methods with whole genome sequence data may improve the prediction accuracy and accelerate the discovery of causal variants. however, for this to occur, more computationally efficient genomic prediction algorithms are required. compared with bayesr, the predicted time of hyb_br on different number of markers with the same reference phenotypesis listed in table  <dig>  the time is estimated linearly on the number of markers and individuals. when the number of markers reaches  <dig> million , the running time of bayesr is around  <dig>  h, which is impractical. on the contrary, on the same data with  <dig> million of variants, hyb_br is predicted to require 2010 h. it may be possible to reduce this further by optimising the code even more. therefore, as the size of genomic data increases, hyb_br will remain feasible well beyond the point where the use of bayesr is impractical.table  <dig> the predicted computational time  of hyb_br and bayesr on high density data with different number of variants and the same number of individuals 
+
+
+
+while hyb_br performs well with computational efficiency and robust prediction accuracy, there are at least still two strategies that could be used to further improve efficiency. there is one key part of em module that consumes running time and memory: the calculation of tr for each snp in front of em iterations. in detail, the calculation of tr requires the time complexity of o12mn <dig>  which accounts for almost 2/ <dig> of the computational time required for the em module even though the calculation is made in front of the em iterations. therefore, a future task is to implement a multi-threaded version to improve speed. the threshold of limiting the number of snps to be updated requires further study. currently we define the threshold as t: if >  <dig> ), which is applicable for the current data. however, it’s uncertain whether or not such a threshold is suitable for other types of data.
+
+hyb_br has some features in common with other mixture methods such as bslmm  <cit> , and bolt-lmm  <cit> . all of these methods declared the merit of computational efficiency with time complexity o but under different mixture models. in detail, bslmm assumed a large proportion of snps with small effects , while others had large effects . due to limited number of snps implemented for mcmc sampling , bslmm could be computationally efficient. however, compared with the mixture of four normal distributions by bayesr which provided great flexibility with respect genetic architecture, the flexibility of bslmm with respect to different genetic architectures required further investigation. another algorithm is bolt-lmm, which has been developed mainly for the association studies. bolt-lmm incorporated bayesian mixture models to improve the power of gwas with appealing outcomes. instead of mcmc sampling, bolt-lmm implemented iterative conditional expectation  algorithm on a mixture of two normal distributions to improve the computational speed with the approximated computational complexity o. there could be three limitations with this method: 1) ice algorithms did not account for the pevs from all other snp effects during the estimation of current snp effect. on practical data sets, ice could lead to the loss of prediction accuracy. bolt-lmm introduced ld score regression technique to calibrate the prediction errors. however, since the calibrating factor was constant across all the snps ), such calibration scheme seem not to be effective to solve the problem. 2) the leave-one-chromosome-out scheme implemented in bolt-lmm might perform well for gwas but not be suitable for simultaneous genomic prediction. 3) bolt-lmm treated each snp effect as a fixed effect for the association statistics. this combined with the stringent significance threshold for multiple testing, leaded to the over-estimation for snp effects. another efficient method for genomic prediction termed multiblup  <cit>  introduced snps clusters into blup models according to its adaptive algorithm. for each snp class, the linear combination models  similar to gblup were implemented. multiblup has been demonstrated to be computationally efficient with robust prediction accuracy in the human data sets. however, when moved to dairy cattle genomic data sets, there is long linkage disequilibrium  between markers, which might be easily broken up by multiblup models.
+
+CONCLUSIONS
+in summary, hyb_br is a computationally efficient method for simultaneous genomic prediction, qtl mapping and inference of genetic architecture. the hybrid scheme of mcmc and em decreases computational time by a factor of at least  <dig> fold with no reduction in prediction accuracy. the hyb_br algorithm makes simultaneous genomic prediction, qtl mapping and inference of genetic architecture feasible in extremely large genomic data sets including whole genome sequence data.
+
+additional files
+additional file 1: pev calculation from gblup. 
+
+additional file 2: calculation of p. 
+
+
+

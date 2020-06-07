@@ -1,0 +1,201 @@
+BACKGROUND
+metabolite profiling has become a powerful tool to address biological problems. it has been used in a wide range of applications, such as discovering the effects of herbicides in plants  <cit> , drugs in medical fields  <cit> , or molecular physiology and functional genomics  <cit> .
+
+gc-ms is by far the most widely applied analytical method as it provides an efficient way to quantify hundreds of metabolites in a single sample run  <cit> . in addition, robust extraction protocols exist and there is continued development of data evaluation methods. see  <cit>  for a introduction to metabolomics using gc-ms.
+
+the relatively low cost and high-throughput of gc-ms instruments has led to data pre-processing becoming a major bottleneck in metabolite profiling, particularly with recent increases in experiment size. the typical gc-ms pre-processing approach consists of peak detection and mass spectra deconvolution, retention time alignment across different samples and a normalisation step to remove systematic variation in the data. finally, the peak information is collected and transformed into a data matrix for statistical analysis. many software tools are available that can perform said steps, either using a non-targeted approach, i.e., all the extracted peaks are used as relevant information, or a metabolite-targeted approach, where detected peaks are searched in existing compound databases, matching their retention time and spectra. examples of gc-ms pre-processing software solutions include amdis  <cit> , leco chromatof  <cit> , metalign  <cit> , xcms  <cit>  and tagfinder  <cit> .
+
+although deconvolution is a well accepted method, biological complexity of samples, e.g., co-eluting compounds, causes errors in the deconvolution algorithm that result in partially deconvoluted or mixed mass spectra tags . a widely accepted alternative to avoid this inconvenience is the extraction of peak apex intensities for selected masses  <cit> . this method has the advantage of being both less computationally intensive and less error susceptible. in spite of that, existing tools have other limitations such as restrictions to maximum sample number, long run-time and complicated peak identification. the latter typically requires manual inspection and curation that may take weeks to complete for an average experiment.
+
+our aim was to develop a flexible and automated tool that can pre-process data, identify and quantify metabolite levels for even very large numbers of samples in a targeted manner, whilst keeping processing time to a minimum. our approach uses peak apex intensities to avoid deconvolution errors, a metabolite reference library based on selective masses and retention time indices  <cit> , conversion and correction from retention time  to retention time index , ri updating and metabolite identification using multiple correlated masses  <cit> .
+
+our software is implemented in the r language with computationally intensive functions programmed in c for speed and performance. the software is available as an r-package within the framework of the bioconductor project  <cit> .
+
+implementation
+this section describes our gc-ms pre-processing approach . in short, a sample definition file and a reference library are required to identify the files to process and to provide the metabolite information to be searched for. mass trace apices are extracted from every chromatogram and stored in text files. at the same time, rt is converted to ri. selective masses from the reference library are searched in a three-step ri updating procedure. every file, either chromatogram or peak list, is processed one at a time, allowing the analysis of a large number of samples. also, since the most time consuming algorithms are written in c, the overall processing time, from raw chromatograms to a metabolite data matrix, is very short.
+
+user input
+there are three types of input that the user must supply: chromatogram files, sample description and a reference library.
+
+gc-ms chromatograms must be first exported to the widely accepted and platform-independent netcdf file format. this is usually performed by using the platform-specific gc-ms software . baseline correction and smoothing could be performed before exporting the chromatograms, but as this is not always done, we implemented these steps so they can be performed by targetsearch.
+
+the "sample description" file contains a list of sample names, sample files and sample groups, which is used for the downstream analyses.
+
+finally, the "reference library" file contains the information on the msts that will be searched for in the chromatograms. required information is the metabolite name, expected ri, selective masses, most abundant masses, spectra and ri deviation. the file format can be tab-delimited text containing said columns or the commonly used nist ms search software text format  <cit> . we developed a novel iterative approach to ri assignment to take advantage of the fact that ri variation decreases in the following order: between experiment >> between samples >> between masses from the same metabolite. thus, we use selective masses to identify the experiment ri from the library ri, following that use this to find the sample ri and finally use this to identify co-eluting masses for quantification. targetsearch can be used with freely available public metabolite libraries, for example, in  <cit> , with commercial libraries, for example,  <cit>  or in-house developed or curated libraries.
+
+peak identification and ri correction
+initially, targetsearch performs baseline correction and identifies the local apex intensities from the mass traces in all chromatograms. the baseline correction algorithm is based on  <cit>  and should be performed if the exported chromatograms were not baseline corrected by the vendor software. this is controlled by the user. after that, targetsearch finds the retention time of the ri markers, internal standard compounds like alkanes or fatty acid methyl esters, and converts the retention time to ri using a linear interpolation  <cit> . the ri marker definition, time window and m/z values, have to be provided by the user in the same way as for other software  <cit> .
+
+in addition, a report is created to allow the rapid assessment of ri marker outliers. this is an essential step which can be cumbersome and time-consuming using other methods. the generated report contains a separate plot for each retention index marker in which sample number is plotted against the found retention time. outliers are highlighted on a per-day basis using a 3σ cut-off . here, measurement days are defined in the "sample description" file or can be detected automatically using hierarchical clustering. this report allows a fast assessment of outliers allowing the user to quickly decide whether the sample should be removed from the data set or not. it is also possible to manually edit the found retention time, but this is in our experience rarely necessary.
+
+finally, targetsearch creates a tab delimited file per chromatogram file which contains a peak list, retention times and converted ris. for efficiency, it is possible to start subsequent steps from these saved files by selecting "apex data" instead of "netcdf data".
+
+library search
+metabolites are identified in three steps. first, for every metabolite, selective masses are searched for in a given time window around the expected ri, returning the median ri of all selective masses. the expected ri of the respective metabolite is updated to that value. in the second step, targetsearch searches the selected masses using the updated ri and a given time deviation, usually smaller than the one used in the first step. the intensities of the selected masses are normalised to the median of the day, and then used to extract other masses with correlated apex profiles. the masses for which the pearson correlation coefficient is above a given threshold are taken as metabolite markers and their ris are averaged on a per sample basis. this average ri is taken to represent the exact position where the metabolite elutes in the respective sample. finally, using this exact ri and a much smaller ri window, targetsearch searches again for the top masses and the apex intensities are returned.
+
+metabolite profile
+the aim of targetsearch is to return a metabolite profile that is directly interpretable with little additional manual curation. this is achieved by using many correlated masses for accurate metabolite identification and quantification. targetsearch details the set of masses that were used for each metabolite. however, as metabolites with similar selective masses and ris can be present in metabolite libraries it is necessary to reduce redundancy. targetsearch does this by selecting peaks for which the ri gap is smaller than a defined cut-off and computing the pearson correlation between them. when two or more metabolites within such a time-group are tightly correlated only the one with more correlated masses is retained. the potential ambiguity is given in the metabolite identity information. this mostly occurs with large, comprehensive libraries which contain many metabolites that elute at the same time and are thus not distinguishable with any approach, or metabolites that are not in the samples, but whose ri and selective masses match one metabolite that indeed is there. such ambiguity is largely avoided in the case that a curated or more selective library is used.
+
+to aid objective metabolite identification a spectrum similarity score per metabolite is given in the information section. the score includes either all library masses or only the masses that correlate. the score is calculated according to  <cit> . let im and jm the intensities of mass trace m of sample spectrum and reference spectrum, respectively. then the score s is:   
+
+where n is the total number of masses. if one mass is missing, then the intensity of that mass is zero.
+
+output
+at the end, three matrices are given. one contains the so called metabolite information. this consists of metabolite names; number of correlating masses and the actual correlating mass values, the library ri, found ri and the deviation, spectra similarity score, and the number of samples in which a given metabolite was found. the other two matrices contain the normalised intensities and the ris, where columns are samples and rows metabolites.
+
+graphical user interface
+in order to facilitate the use of targetsearch for users unfamiliar with r, we provide a simple to use graphical user interface . a screenshot can be seen in figure  <dig>  many parameters that would be set by calling targetsearch functions can be set here before running the complete analysis. after the analysis is finished, the results are stored in a set of text files that contain the matrices described in the section above. to invoke the gui, use the r-command targetsearchgui().
+
+RESULTS
+in order to validate and demonstrate our method, we performed pre-processing analyses of both a standard mixture experiment and a biological example dataset. the standard mixture dataset allows the performance of targetsearch to be objectively assessed by comparing the results against the known concentration ranges, whilst the analysis of a biological dataset and the resulting comparison to manual data curation provides an example of the performance on an actual experiment. the standard mixture experiment is described in the example in order to demonstrate the analysis workflow, whilst only the interpretation and comparison of results is presented for the biological dataset.
+
+standard mixture experiment pre-processing
+the following section describes the analysis of the standard mixture experiment containing  <dig> samples using targetsearch. it is worth noting that these samples were measured in another laboratory , which shows that targetsearch can work for other data and not only for data generated by our gc-ms platform. each sample consisted of a mixture of  <dig> chemical standards at different proportions that were measured as described by kusano et al.  <cit> . all chemicals used for gc-tof/ms analysis were purchased from wako  or sigma-aldrich . see additional file  <dig> for a detailed list of the standard proportions. the chromatograms are available for download via drop met at http://prime.psc.riken.jp. we provide a detailed r-script  to perform the analysis of the  <dig> samples. see the targetsearch vignette or the user manual for further options not covered here.
+
+data pre-processing example
+the first step in gc-ms data pre-processing is to import the chromatogram netcdf files to targetsearch. in order to do that, the user must provide the sample  and retention index  markers definitions, as described in the user input subsection . the following r-code shows how both definition files are imported.
+
+> samples <- importsamples
+
+> rimlimits <- importfamesettings
+
+the parameters set the directories where the chromatograms are located and where the extracted peak list files will be saved. after that, the user needs to perform baseline correction and peak identification. obviously, baseline correction is needed here because these chromatograms have not already been corrected. otherwise this step is optional.
+
+the ricorrect function performs both algorithms and is the most time consuming step of the whole pre-processing analysis. in this stage it is possible to specify several parameters: massrange parameter limits the mass values  that will be included in the analysis, smoothing window parameter is the number of raw data points that will be averaged in order to remove noise, intthreshold defines the minimum apex intensity to be listed, baseline indicates that baseline correction will be performed, and baseline.opts is a list object that contains the parameters passed to the baseline algorithm.
+
+> rimatrix <- ricorrect, + window =  <dig>  intthreshold =  <dig>  baseline = true, baseline.opts = + list)
+
+the function returns a matrix  which contains the retention times of the ri markers  found in every sample  and creates a peak list tab delimited file per chromatogram as described in the peak identification section.
+
+this took around  <dig> minutes to run on an intel® core™ <dig> cpu,  <dig>  ghz, 2gb of ram computer. it should be mentioned that performing baseline correction doubles the running time in comparison to the running time of already corrected chromatograms, so is very useful to select baseline correction when exporting the chromatograms with the vendor software.
+
+as mentioned before, an essential step is to look for ri markers outliers. this can be easily done by the function fameoutliers which creates a separate plot for each marker and reports whether or not outliers have been found . in this example, we did not find any outliers, but we did observe a strong so-called "day effect" when comparing the measurement day number  <dig> against days  <dig> and  <dig> 
+
+outliers <- fameoutliers outliers report:
+
+===============
+
+no outliers were found.
+
+the next step is to import the library file , which is done by the function importlibrary. useful options are topmasses, which takes the top n most intense masses from the reference spectrum to be searched for, and ri_dev sets the ri deviations. the ri deviations can be equal for all metabolites , or individual ones  for fine tuning, i.e., it is possible to set specific ri deviations per metabolite.
+
+> lib <- importlibrary, topmasses = 20)
+
+the metabolite search is performed in three steps as explained in the library search subsection, where a smaller window is used in every following step. function medianrilib searches the average ri of the selective masses and returns an updated library object. function sampleri searches for the selective masses in the samples using the updated average ris and returns a matrix where each element  represents the average ri of metabolite i in sample j. finally, function peakfind searches again for the top masses and returns the apex intensities and ris. the three step search is performed by the following r-code.
+
+> lib <- medianrilib
+
+> corri <- sampleri
+
+> peakdata <- peakfind
+
+the object peakdata object has two slots containing all apex raw intensities and ris of all the masses that were searched for in matrix form. the apex matrix can in principle be used to perform further statistical analysis, by either using r or other statistical tools. in addition, we provide two functions, profile and profilecleanup, that create a metabolite profile out of the raw apex data.
+
+> metabprofile <- profile
+
+> finalprofile <- profilecleanup
+
+the first function makes the metabolite profile and the second one looks for possible ambiguities, which are controlled by the parameters timesplit and r_thresh. they define the ri gap cut-off that is used to look for metabolites whose ri distance is less than this gap and the correlation threshold, respectively. a conceptually similar approach so-called "time groups" is implemented in the tagfider software  <cit> . a summary of the obtained metabolite profile is shown in table  <dig> . we could identify  <dig> of the  <dig> standards. all metabolites have at least seven correlating masses, except maltose that has only four. the similarity score  was over  <dig> for every metabolite except histidine , fructose-6-phosphate  and maltose . only one ambiguous assignment was found: ribose and arabinose. this may have happened because both metabolites have very similar ris, the same selective masses and similar spectra. one way to resolve such ambiguity can be setting smaller ri deviations and/or using different selective masses.
+
+the summarised metabolite profile of the chemical standards . name: metabolite name; mass count: the number of correlating masses; ri: averaged ri; score: spectrum similarity according to ; ri dev; ri deviation from the expected ri; sample count: the number of samples in which the metabolite was found; corr coef: the correlation coefficient between metabolite input concentration and abundance estimation.
+
+since the chemical standards were measured using different proportions , we examined the correlation between the abundance estimation with the input concentration in order to further confirm the targetsearch results. there is a clear correlation for all the metabolites . most of the metabolites  had a correlation coefficient greater than  <dig>  and the lowest coefficient was  <dig> . here we showed that with little effort we can perform a metabolite analysis that can be used with little manual curation needed .
+
+visualisation
+after gc-ms pre-processing, the user can visually compare the averaged metabolite spectra with the reference spectra. our software include two functions to do so. plotspectra and plotallspectra. they plot a spectra contrast between averaged metabolite spectra, obtained by computing the median intensity of every mass across the samples, and reference spectra for a given metabolite . this allows the user to quickly validate the results by visually inspecting the contrasted spectra. in addition, the metabolite spectra can also be exported as a msp format file , which can be imported into nist for further comparisons against other metabolite libraries.
+
+we additionally provide a function to visualise chromatographic peaks in a given sample, which may also help to identify metabolites. see the targetsearch vignette for examples.
+
+biological dataset pre-processing
+the biological dataset consisted of wild-type col- <dig> arabidopsis thaliana seedling samples. three week old seedlings, grown on solid ms medium with 1% sucrose, were kept for 4h under either continuous light or darkness. metabolites were extracted from pools of seedlings in a total of four biological replicates. extraction and derivatisation of metabolites from leaves using gc-ms were performed as outlined by lisec et al.  <cit> . gc-ms data were obtained using an agilent  <dig> series autosampler , coupled to an agilent  <dig> gas chromatograph - leco pegasus  <dig> time-of-flight mass spectrometer . identical chromatogram acquisition parameters were used as those previously described by weckwerth et al.  <cit> .
+
+a similar pre-processing analysis as the one described for the standard mixture dataset was performed. we used a fatty acid methyl esters  as ri marker standards  and an in-house reference library composed of  <dig> metabolites . this library was manually curated and in addition to known metabolites includes several unknown metabolites that have been observed in previous experiments.
+
+after running targetsearch, we manually compared the final profile with the deconvoluted peak profiles obtained with leco . the profile list contained  <dig> entries in total, of which  <dig> metabolites were unambiguously assigned. the  <dig> ambiguous assignments corresponded to  <dig> metabolites . the remaining  <dig> metabolites  were neither present in the final profile nor in the chromatograms as confirmed by manual inspection. based on our previous experience, we routinely only consider metabolites to be present if at least  <dig> correlating masses at the correct ri are identified . taking this into account, we would consider  <dig> metabolites to be identified in this experiment. we thus checked these manually and found that  <dig> were correctly assigned ,  <dig> ambiguity was wrongly resolved, i.e., the correct metabolite was not the one suggested;  <dig> ambiguity could not be resolved manually, due to similar ris and reference spectra;  <dig> metabolite was not found in the chromatograms; and  <dig> metabolites were not found but  <dig> peaks  were found at their expected retention time. the later could be anticipated in the profile since the similarity score reported by targetsearch was below  <dig> 
+
+although we would not routinely work with the remaining  <dig> entries  that did not meet our correlating masses minimum, we additionally manually inspected these. their classification was as follows:  <dig> metabolites, including  <dig> ambiguity, were not found in the chromatograms;  <dig> metabolites were only found in a few of the chromatograms at low abundance and  <dig> metabolites were present but overloaded. in summary,  <dig> of  <dig> metabolites found by targetsearch were correctly assigned. similarly,  <dig> of  <dig> metabolites that we considered to have too few correlating masses to be present were manually confirmed not to be present in the chromatograms. just  <dig> metabolites were found by our software but could not be confirmed to sufficient confidence by manual curation, whilst  <dig> metabolites were not reported by targetsearch but were present in the chromatograms. this gives over 91% of assignment accuracy, counting the true positives and true negatives ratio. the results are illustrated in figure  <dig> 
+
+based on this example analysis and our experience with several other biological datasets, errors can be made by targetsearch in the following cases: metabolites with similar selective masses and spectra that elute at similar retention times; low abundant metabolites may cause spurious correlations, whilst overloaded peaks often elude the peak detection algorithm or disrupt correlation; finally, metabolites not present in the library that elute in the place where another metabolite is expected, as occurred in two cases in this analysis.
+
+many of these issues can be solved by changing the parameter definitions and in general the resulting dataset is more objectively linked to these parameters than the decisions involved in a typical manual curation. metabolite identification issues for example can be solved by increasing the intensity threshold during the peak detection stage, or by changing the correlation cut-off. we also note that most of these errors are inherent to metabolite profiling per se rather than being specific to our software and are thus also addressed by other technical aspects of the experiment .
+
+performance
+we developed this package with the intention to process as many chromatograms as possible in a single run and to be fast. to asses performance, we compared the processing speed of targetsearch with other gc-ms pre-processing software: xcms and tagfinder. first, we wanted to see what was the maximum number of chromatograms that can be processed by said tools. targetsearch could process our largest experiment -  <dig> baseline corrected chromatograms , taking around  <dig> hours to get a final data matrix . however, neither xcms nor tagfinder were able to process anywhere near that number of chromatograms with the same computer. we then reduced the number of chromatograms to  <dig> so we could compare the processing times. targetsearch proved to be much faster than xcms and tagfinder. results are summarised in table  <dig> 
+
+all parameters were set to default in order to obtain the maximum number of samples, but only  <dig> samples were available. times were compared using  <dig> samples. before running this analysis, tagfinder intensity threshold was set to  <dig> to allow the  <dig> samples to be imported. time is expressed in seconds. peak import is not necessary in xcms and targetsearch. ri correction is performed together with peak extraction in targetsearch.
+
+CONCLUSIONS
+here we presented the targetsearch software for the data pre-processing of gc-ms based metabolite profiling experiments. our method includes a novel strategy to iteratively correct and update retention times and uses efficient criteria for searching and identifying metabolites. this massively reduces the time from data acquisition to biological interpretation, particularly as good quality data can be directly obtained with limited need for manual curation. another advantage over other software, is the ability to analyse virtually any number of samples, at least over  <dig>  which otherwise is a major limitation of existing software, whilst maintaining a fast processing speed. we also provide a gui intended to assist users not familiar with r. using a dilution mixture dataset we found that targetsearch accurately identified the chemical components and reported abundance estimates which very well reproduced the input concentrations. using a real biological experiment, the accuracy in terms of automated profiling was over 90%. these results show that targetsearch greatly facilitates the analysis of metabolic profiling data and creates substantial time savings allowing scientists to focus more on the biology under investigation.
+
+availability and requirements
+project name: targetsearch
+
+project homepage: http://bioconductor.org/packages/ <dig> /bioc/html/targetsearch.html
+
+operating system: platform independent
+
+programming language: r, c
+
+other requirements: r > =  <dig> 
+
+license: gpl version  <dig> or newer
+
+abbreviations
+gc-ms: gas chromatography-mass spectrometry; mst: mass spectra tag; rt: retention time; ri: retention time index; gui: graphical user interface.
+
+authors' contributions
+mah initiated and supervised the project and developed an initial method with hr. aci improved and developed the majority of the method and the r package. cc tested and contributed to the method. jl contributed r scripts and developed the graphic user interface. mk performed gc-ms analysis. lw discussed and supervised the project. aci drafted the manuscript, with additions from all authors. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+standard compounds. the list of standard compounds. additional columns indicate the concentration in μg/μl that was used in every mixture.
+
+click here for file
+
+ additional file 2
+targetsearch example r-script. r-script used in this manuscript to process the standard mixture samples.
+
+click here for file
+
+ additional file 3
+sample file. the sample description file needed as input for targetsearch. it contains the list of netcdf files, the measurement day and the mixture used.
+
+click here for file
+
+ additional file 4
+retention index marker limits. the retention index marker file needed as input for targetsearch. columns represent the standard name, lower and upper limits, ri, and mass.
+
+click here for file
+
+ additional file 5
+reference metabolite library. the reference library which contains the information on the standards that were searched for in the chromatograms.
+
+click here for file
+
+ additional file 6
+metabolite profile. the metabolite profile information as given by targetsearch. it contains the metabolite names, number of correlating masses, the mass values, the library ri, the found ri, ri deviation and spectra score.
+
+click here for file
+
+ additional file 7
+metabolite concentration correlation. correlation between the input standard concentration and the obtained metabolite abundance. every boxplot corresponds to one metabolite as indicated in the plot title. boxes represent mixtures, mixture concentrations are shown above the box, the y-axis is the relative abundance, the expected abundances are indicated by horizontal dashed lines, and the correlation coefficient is displayed at the bottom of the graph.
+
+click here for file
+
+ additional file 8
+retention index marker limits . the retention index marker file needed as input for targetsearch . columns represent the standard name, lower and upper limits and ri.
+
+click here for file
+
+ additional file 9
+reference metabolite library . the reference library which contains the information on the standards that were searched for in the biological dataset chromatograms.
+
+click here for file
+
+ additional file 10
+biological dataset profile. the metabolite profile information as given by targetsearch. it contains the metabolite names, number of correlating masses, the mass values, the library ri, the found ri, ri deviation and spectra score. the first column contains the annotations after manual curation.
+
+click here for file
+
+ acknowledgements
+the authors acknowledge aenne eckhardt, gudrun wolter and anjte boltze for running samples. alexander erban, alexander luedemann and joachim kopka for useful discussion. thomas degenkolbe, szymon jozefczuck and gareth catchpole for commenting on the method. aci acknowledges mecesup. makoto kobayashi is thanked for gc-ms measurements. funding was provided by max planck society, max planck institute for molecular plant physiology. mah was supported by fp <dig> "agron-omics" .

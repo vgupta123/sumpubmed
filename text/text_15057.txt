@@ -1,0 +1,122 @@
+BACKGROUND
+electron microscopy  images can reveal the physical structure of cellular and subcellular processes in the nervous system at a fine level of resolution. accurately segmenting such images is a key component of many bioimage related tasks — including labeling, visualization, and classification — in structural biology and neuroscience
+ <cit> .
+
+however, fully automated methods to segment em images are computationally challenging to develop due to both natural and synthetic noise in the images and irregularity in cellular structures. noise can emerge due to variations in histological preparations or in the image acquisition process, or due to natural differences in the brain tissue or organisms of interest. this noise is extremely difficult to overcome experimentally and thus must be accounted for computationally. the physical shape of many structures  can also vary widely and do not conform to a standard template for detection
+ <cit> , and intensity and contrast differences may also be equally inconsistent across samples. high-quality em images can also be very large , which further constrains the complexity of image processing algorithms. while it may be possible to fine-tune an algorithm to handle nuances within a specific em preparation, few algorithms have been proposed that can reasonably handle images across a variety of different imaging conditions and preparations. supervised or semi-supervised techniques are often helpful
+ <cit> , but they require large sets of training data, which are often difficult to obtain in practice, especially across many conditions.
+
+an important initial step of image segmentation is grouping pixels into coherent local regions called superpixels. running algorithms on the decomposed set of superpixels  can aid existing supervised or semi-supervised approaches for em segmentation as well as other downstream computer vision tasks by simplifying learning and inference. indeed, in recent years, many unsupervised algorithms have been proposed to generate superpixels and range from graph-based
+ <cit> , to gradient-ascent-basad
+ <cit> , to clustering-based approaches
+ <cit>  . these algorithms have mostly been tailored for processing natural images and are often sensitive to variations in image quality and noise that are inherent to the em process. these algorithms also employ different constraints and parameters  designed according to their intended application.
+
+in this paper, we propose a novel, principled unsupervised segmentation algorithm designed specifically to be robust to the types of variation and noise expected in em images of brain tissue. we propose a two-step approach: first, we develop a novel watershed variant that produces a coarse over-segmentation while strongly preserving edges in the image. this is done by using canny
+ <cit>  and probabilistic boundary
+ <cit>  edges to find high-confidence boundaries, which are then incorporated as constraints into the watershed algorithm. second, we design a new region merging algorithm to reduce the number of superpixels by merging adjacent regions based on a measure of similarity derived from intensity and texture features. we formalize the merging problem as a graph-theoretic optimization function and use an efficient agglomerative greedy algorithm to find a final partition into the desired number of superpixels. we performed experiments to gather em images of the fruit fly and mouse nervous systems using two different histological preparations. using two standard measures of over- and under-segmentation error, we show that our approach offers a significant reduction in the number of superpixels while preserving more true boundaries than existing state-of-the-art algorithms . we also show qualitative results on several additional images. our results suggest that unsupervised techniques can be used as a general first-pass technique to reduce image complexity without significantly sacrificing accuracy.
+
+methods
+the salient watershed algorithm
+given an em image to segment, the first step is to produce accurate boundary-preserving superpixels. while many algorithms exist for this purpose, the classical watershed algorithm
+ <cit>  is a natural choice due to its ease of use, efficiency, and scalability. unfortunately, the standard watershed algorithm suffers from two significant problems: over-segmentation and leakage. over-segmentation can usually be corrected with post-processing steps ; however, to extract regions from em images that correspond to precise cellular structures, fixing leakage in the initial segmentation is critical. while dataset-dependent heuristics may help resolve leakage, this does not address the general problem of watershed leakage when segmenting images across different em preparations and imaging conditions.
+
+to tackle these issues, we propose a novel variant of the watershed algorithm called salient watershed. the steps of our algorithm are: 
+
+ <dig>  de-noise the image. we use non-local-means smoothing
+ <cit>  to both reduce the impact of local noise when detecting boundaries and to reduce unnecessary over-segmentation. in particular, we pre-process the original input image i with a 3 ×  <dig> pixel-wide non-local-means filter
+ <cit>  to obtain inl .
+
+ <dig>  detect high-confidence boundaries. first, we apply the canny edge detector
+ <cit>  on inl to obtain
+∇inlcanny. second, we compute the pb detector
+ <cit>  on inl for a coarse estimate of boundary probabilities
+inlpb, and then we compute an edge map
+∇inlpb by thresholding
+inlpb at a conservative threshold . third, we combine these edges into a hybrid salient edge map via pixel-wise multiplication:
+∇inlsalient=∇inlpb.∗∇inlcanny . it has been previously shown that the probabilistic pb edge detector
+ <cit>  by itself cannot adequately segment em images without re-training on specific type of images
+ <cit> . combining the canny and pb boundary detectors gives us the ability to find high-likelihood salient boundaries that retain precise edge localization without resorting to parameter tuning or re-training for different kinds of tissue samples.
+
+ <dig>  elevate watershed levels where canny and pb coincide. next, we compute the euclidean distance transform on
+∇inlsalient to obtain
+idistsalient and then compute an enhanced edge map
+ienhance=e-2∗idistsalient . this step elevates the watershed along the intersection of canny and pb lines and provides an exponential fall-off as the distance to these lines increases. it also helps bridge small gaps that may exist in the boundaries.
+
+ <dig>  run watershed on the enhanced image. finally, we apply the classical watershed algorithm on ienhance to obtain the final over-segmented image
+iwsenhance .
+
+by incorporating the notion of edge saliency into the watershed computation, we ensure that salient boundaries are preserved. this addresses the leakage problem consistently. while this procedure adds additional computational complexity to the original watershed procedure, salient watershed is a more robust algorithm that can be applied to many em datasets to produce a first-pass segmentation without tuning parameters.
+
+this algorithm produces an initial  set of superpixels , which are then further collapsed using an agglomerative merging algorithm, as described below.
+
+the region merging algorithm
+region merging is often performed after superpixels are generated to collapse neighboring regions. there are three aspects to region merging: the features used to represent each region, a measure of similarity between regions in feature-space, and an objective function for merging regions. we describe each of these aspects below.
+
+each region is defined by a normalized intensity histogram and a set of normalized texture histograms computed using pixel values in the region. texture is an important cue used by humans when manually segmenting and annotating em images
+ <cit> , and its use has become popular in many computer vision tasks today
+ <cit> . varma and zisserman
+ <cit>  proposed an effective set of  <dig> filters , but only recorded the maximum filter response across each orientation, leading to  <dig> total filter responses at each pixel. each region is thus represented by a b ×  <dig> feature matrix, where b =  <dig> is the number of bins in each histogram.
+
+most previous approaches compute the similarity between two regions in feature-space based on the euclidean or manhattan distances
+ <cit> , by comparing means and standard deviations of feature vectors
+ <cit> , or using information-theoretic measures
+ <cit> . the downside of these measures is that they treat each histogram bin independently and, as a result, two histograms that differ slightly in adjacent bins are treated as equally distant as two histograms that differ equally in far-apart bins. to avoid this problem, we use the earth mover’s distance 
+ <cit> , which computes the minimum cost to transform one histogram to exactly match the other using transformation costs that depend on the linear distance between bins. emd can be solved quickly using a constrained bipartite network flow routine
+ <cit> . overall, the similarity between two adjacent regions r and r′ is defined as:
+
+  s=exp)+exp-α∑i=18emd), 
+
+where the first term biases towards collapsing smaller regions; intr is the normalized intensity histogram of region r; textr,i is the ith normalized texture histogram of region r; and α is a parameter to weigh the contribution of the texture component . we use emd to compute the similarity between both normalized features , and thus born terms lie on roughly the same scale.
+
+the final aspect of the algorithm is the merging optimization function
+ <cit> . we define a predicate
+ that states that every region r should be "sufficiently" different compared to each of its neighbors. formally:
+
+  p=trueifs≤τ,∀r′∈nfalseotherwise, 
+
+algorithm 1 region-merging  
+
+where n are the regions adjacent to r. if this statement is true for region r, we call r an "island". we seek to find a segmentation such that
+ holds for every region. in graph-theoretic terms, we start with the region adjacency graph g = , defined by nodes v  and with edges e connecting adjacent regions. to merge two regions means to contract the edge between them; our goal is thus to find a set of edges whose contraction results in a graph satisfying
+ for every region. we find such a set using a greedy agglomerative algorithm: we start with the regions produced by the salient watershed algorithm, and iteratively merge the pair of neighboring regions that are most similar. this process can stop either when the similarity between any two adjacent regions is < τ  or when the desired number of superpixels is met . pseudocode of the region merging algorithm is shown in algorithm  <dig> 
+
+comparing segmentations versus ground-truth
+to evaluate performance, we performed experiments and collected three  <dig>  × 1000-pixel em images of the nervous system:  <dig> images were from the fruit fly ventral nerve cord fixed using a high pressure freezing  protocol, and  <dig> image was from the mouse cortex using a perfusion dab-based protocol . we manually segmented membranes, mitochondria, and other neuronal structures in these images  and extracted ground-truth boundary matrices for each. we also collected two additional images of the mouse cortex using hpf, which we analyzed qualitatively.
+
+to compare an algorithm’s segmentation p with the ground-truth q, we use two standard metrics: the asymmetric partition distance  and the symmetric partition distance 
+ <cit> . apd computes, over all regions r ∈ p, the maximum percentage of pixels in r that map onto a single ground-truth segment. spd finds the maximal matching between regions in p and q and computes the overall percentage of pixels that must be deleted from both images in order to make each pair of matched regions equivalent. apd penalizes "spill-over" of segments across ground-truth boundaries, but does not penalize over-segmentation. on the other hand, spd measures exact 1- <dig> correspondence between segmentations and does penalize over-segmentation. we report 1- spd as a percentage, so in both measures higher percentages are better.
+
+RESULTS
+we compared our algorithm against turbopixels
+ <cit>  and a matlab implementation of slic
+ <cit> . turbopixels uses geometric flows to find regions that are approximately uniform in size and shape while also preserving smooth boundary edges, and it is specifically designed to produce high-quality over-segmentations. slic is a clustering method based on k-means that was shown to be superior to several graph-based and gradient-ascent-based algorithms on segmenting mitochondria in em images
+ <cit> . it was also recently shown in a large-scale comparison to be amongst the best performing algorithms on the berkeley segmentation dataset
+ <cit> , and thus represents the current state-of-the-art. we ran each algorithm on our em images and varied the number of superpixels returned by adjusting parameters in the algorithm. for each segmentation, we computed the over- and under-segmentation error .
+
+our algorithm more strictly adheres to true boundaries compared to the other algorithms across nearly the entire range of superpixels . for example, at roughly  <dig> superpixels on the first fruit fly image, our algorithm has an apd of  <dig> % compared to  <dig> % for turbopixels and  <dig> % for slic. thus, we can achieve over three orders of magnitude reduction in the number of superpixels  while still preserving over 90% of the true boundaries. some predicted boundary contours may indeed be correct but do not align exactly with the ground-truth boundaries; thus, this value actually represents a lower-bound on performance. in practice, over-segmentation is often more permissive than under-segmentation because it is relatively easy for downstream analyses to specify additional merges  but more difficult and labor-intensive to reconstruct a lost boundary.
+
+our algorithm also outperforms the other methods in extracting true regions in their entirety . the spd penalizes over-segmentation and measures exact concordance between the ground-truth and algorithm partitions. at  <dig> superpixels, our algorithm has an average spd of almost 50% compared to 7%  and 30% . this means that half the pixels in our partition are exactly matched to ground-truth regions. our ground-truth was constructed to consider entire membranes as single regions , but there may be small substructures within membranes that persist due their markedly different features. these regions will naturally be left unmerged by each algorithm; a more fine-grained ground-truth segmentation would thus increase these percentages further. turbopixels especially suffers on the spd measure because it generates regular- and grid-like superpixels ; em images, however, contain many irregularly-shaped structures that do not fit this mold.
+
+our algorithm and slic perform similarly under both metrics when the number of desired superpixels is large , but diverge as fewer superpixels are requested. this suggests that both methods may be comparable at high numbers of superpixels, but that our region merging algorithm is more robust at preserving boundaries than the clustering-based approach used by slic.
+
+we also compared our salient watershed algorithm to the classical watershed algorithm
+ <cit> . on the first image, for example, the latter produced a segmentation with  <dig>  regions and an apd of  <dig> %. salient watershed produced a segmentation with  <dig>  regions and an apd of  <dig> %. apd can not increase with subsequent merges; the fact that our segmentation produces a higher apd with more than 3x fewer regions testifies to the strong edge-preserving property of our salient watersheds.
+
+next, to determine whether our superpixels may be used for classification, we took the  <dig> superpixels generated by our algorithm and clustered them in feature-space using k-means . co-clustered regions were assigned the same color . visual inspection shows that indeed many similar structures — in particular mitochondria  and membranes  — are similarly colored. this implies that the superpixels that comprise these regions represent homogeneous biologically structures and that they are well-separated by intervening boundaries in feature space. this clustering represent a first-pass unsupervised labeling of em images that can be further improved via supervised techniques
+ <cit> .
+
+finally, we demonstrate the performance of our algorithm versus slic and turbopixels qualitatively on two additional images of the mouse cortex prepared using high pressure freezing . the previous images of the mouse cortex were obtained using dab. without altering any parameters, we ran each algorithm using  <dig>  superpixels and visually compared the predicted boundaries. as with the previous images, our method preserves intricate membrane boundaries much better than the other techniques and produces more homogeneous regions. we also find superior performance when capturing irregularly-shaped regions, and we are better able to separate regions that are separated by a thin boundary . both of these types of heterogeneity are widespread in em images and not easily captured by methods that make assumptions about edge properties or the distribution of noise in em images
+ <cit> . this further suggests that our unsupervised approach is robust to some natural variations caused by different histological preparations in em neuroimages.
+
+CONCLUSIONS
+accurately segmenting electron microscopy images is an important problem for many neuroimage related tasks, but it also presents several computational challenges due to the noise and variation inherent in tissue samples and in the em chemistry and image acquisition processes. we presented an unsupervised algorithm to generate boundary-preserving superpixels by combining a salient watershed algorithm with robust region merging. on a benchmark dataset of noisy em images, our algorithm outperformed two state-of-the-art methods using two standard measures of over- and under-segmentation error. while our method has additional computational complexity, we place emphasis on accuracy and contend that downstream time spent in em image analysis will be reduced through more accurate segmentations.
+
+while aspects of this general pipeline for segmentation  have been used in previous works
+ <cit> , the specific sequence of steps as outlined in this paper is novel. this combination of components offers our unsupervised approach a level of generality and robustness that can handle many types of noise present in heterogeneous em data. our approach also uses few parameters and may be usable across different em histological preparations and for other large-scale bioimage segmentation problems .
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+the project was conceived by pa and ewm. pa and sn designed the algorithms and wrote the software. sn generated the ground-truth data and performed the quantitative evaluations. sn, pa and ewm wrote the paper. all authors read and approved the final manuscript.
+

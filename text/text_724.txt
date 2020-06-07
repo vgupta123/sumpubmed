@@ -1,0 +1,285 @@
+BACKGROUND
+the availability of large-scale genomic data sets provides an unprecedented wealth of information for phylogenetic analyses. however, genomic data sets also present a number of unique challenges for phylogenetics. beyond the exceptional computational challenges involved in analyses of thousands of genes from many taxa, complex patterns of gene evolution within the genome, including incomplete lineage sorting , gene duplications and losses, lateral gene transfer, and recombination, create tremendous heterogeneity in the topology of gene trees and obscure species relationships  <cit> . in fact, in some evolutionary scenarios, trees from the majority of genes in a genome can differ from the species phylogeny . thus, methods for incorporating genomic data into phylogenetic analyses must be both computationally tractable for extremely large data sets and must account for heterogeneous processes of gene family evolution. in this paper, we introduce novel algorithms that enable for the first time estimates of phylogenetic trees from large genomic data sets based on gene duplications and losses as well as incomplete lineage sorting.
+
+one approach for building phylogenetic trees from genomic data sets is gene tree parsimony . given a collection of gene trees, gtp seeks a species tree that implies the minimum reconciliation cost, or number of events that cause conflict among the gene trees. however, available gtp algorithms either lack sufficient speed to be useful for large data sets or the flexibility to deal with a wide range of evolutionary processes that affect gene tree topologies. in particular, the duplication-loss problem  <cit> , which is the gtp problem based on minimizing the number of gene duplications and losses, and the deep-coalescence problem  <cit> , which is the gtp problem based on minimizing the number of deep coalescences, lack efficient heuristics.
+
+both the duplication-loss problem and the deep-coalescence problem are np-hard  <cit> . therefore, in practice, these problems are typically approached using local search heuristics. these heuristics start with some initial candidate species tree and find a minimum reconciliation cost tree in its neighborhood. this constitutes one local search step. the best tree thus found then becomes the starting point for the next local search step, and so on, until a local minima is reached. thus, at each local search step, the heuristic solves a "local search problem". the time complexity of this local search problem depends on the tree edit operation used to define the neighborhood.
+
+rooted subtree pruning and regrafting   <cit>  and rooted tree bisection and reconnection   <cit>  are two of the most effective and most commonly used tree edit operations. for example, page  <cit>  and maddison and knowles  <cit>  implemented heuristics based on the spr local tree search to estimate the species tree that minimizes the number of deep coalescences. similarly, spr based local search heuristics were also developed for the duplication-loss problem  <cit> . however, these heuristics estimate the reconciliation cost from scratch for each tree topology that is evaluated, and therefore, they are only useful for small data sets. recently, than and nakhleh  <cit>  developed an integer linear programming formulation and a dynamic programming algorithm to provide exact solutions for the deep coalescence problem. although these exact algorithms can analyze data sets with hundreds of gene trees, they are limited to a very small number of taxa. furthermore, while there do exist fast heuristics based on spr  <cit>  and tbr  <cit>  local searches for gtp, these are based on minimizing the gene duplication cost only.
+
+several methods exist for inferring species trees from collections of conflicting genes in a probabilistic framework, but, these are similarly limited. liu and pearl  <cit>  and kubatko et al.  <cit>  discuss likelihood-based approaches to estimate a species tree from gene trees based on a coalescent process. these methods, along with ané et al.'s  <cit>  bayesian approach to estimating concordance among gene trees, require gene trees with a single gene per taxon, and they have only been tested on small data sets. in addition, probabilistic models of gene tree-species tree reconciliation that incorporate duplication and loss also exist  <cit> . however, these models are computationally complex, and they have not been incorporated in any tree search heuristics.
+
+our contributions
+a lack of efficient heuristics has limited the use of the gtp approach for phylogenetic analyses of large-scale genomic data sets, and there are no options for such gtp analyses based on the duplication-loss and deep-coalescence problems. in this paper, we address this issue by presenting efficient, novel algorithms for spr and tbr based local searches for both of these problems. let us assume, for convenience, that the size of the k given gene trees differs by a constant factor from the size of the resulting species tree. the currently best known  solutions for the spr and tbr local search problems, for the duplication-loss as well as the deep-coalescence problem, require Θ and Θ time respectively, where n is the size of the resulting species tree. our new algorithms solve these spr and tbr local search problems in o and o time respectively. consequently, our algorithms provide a speedup of a factor of n over the best known spr and tbr local search algorithms  for the duplication-loss and deep-coalescence problems. this enables, for the first time, gtp analyses with hundreds of taxa and thousands of genes based on gene duplications and losses or incomplete lineage sorting.
+
+we first develop our algorithms in the context of the duplication-loss problem, and then show how to apply them to the deep-coalescence problem. then, we demonstrate the improvement in runtime and scalability provided by our algorithms over the best current solutions by using an implementation of our algorithm for the spr local search.
+
+methods
+basic notation and preliminaries
+given a rooted tree t, we denote its node set, edge set, and leaf set by v , e, and le respectively. the root node of t is denoted by rt. given a node v ∈ v , we denote its parent by pat , its set of children by cht , and the subtree of t rooted at v by tv. if two nodes in t have the same parent, they are called siblings. the set of internal nodes of t, denoted i, is defined to be v \le. we define ≤ t to be the partial order on v  where x ≤t y if y is a node on the path between rt and x. the least common ancestor of a non-empty subset l ⊆ v  in tree t, denoted as lcat , is the unique smallest upper bound of l under ≤t.
+
+given x, y ∈ v , x →t y denotes the unique path from x to y in t. we denote by dt  the number of edges on the path x →t y. t is fully binary if every node has either zero or two children. throughout this paper, the term tree refers to a rooted fully binary tree. given t and a set l ⊆ le, let t' be the minimal rooted subtree of t with leaf set l. we define the leaf induced subtree t of t on leaf set l to be the tree obtained from t' by successively removing each non-root node of degree two and adjoining its two neighbors.
+
+the duplication-loss problem
+a species tree is a tree that depicts the evolutionary relationships of a set of species. given a gene family for a set of species, a gene tree is a tree that depicts the evolutionary relationships among the sequences encoding only that gene family in the given set of species. thus, the nodes in a gene tree represent genes. we assume that each leaf of the gene trees is labeled with the species from which that gene was sampled. in order to compare a gene tree g with a species tree s, we require a mapping from each gene g ∈ v  to the most recent species in s that could have contained g.
+
+definition  <dig> . the leaf-mapping ℒg, s : le → le maps a leaf node g ∈ le to that unique leaf node s ∈ le which has the same label as g. the extension ℳg, s : v  → v  of ℒg, s is the mapping defined by ℳg, s = lca)).
+
+for any node s ∈ v , we use  to denote the set of nodes in g that map to node s ∈ v  under the mapping ℳg, s.
+
+definition  <dig> . given trees g and s, we say that g is comparable to s if, for each g ∈ le, the leaf-mapping ℒg, s is well defined. a set of gene trees is comparable to s if each gene tree in is comparable to s.
+
+throughout this paper we use the following terminology:  is a set of gene trees that is comparable to a species tree s, and g ∈ .
+
+definition  <dig> . a node g ∈ i is a  duplication if ℳg, s ∈ ℳg, s) and we define dup = {g ∈ i: g is a duplication}.
+
+following  <cit> , we define the number of losses as follows.
+
+definition  <dig> . the number of losses loss at a node g ∈ i, is defined to be:
+
+•  <dig>  if ℳg, s'  = ℳg, s″  ∀ g' ∈ ch, and
+
+• ∑g'∈ch| ds' , ℳg, s' ) - 1|, otherwise;
+
+where s' = s. we define loss = Σg∈i loss to be the number of losses in g.
+
+under the duplication-loss model, the reconciliation cost of g with s is simply the duplication-loss cost; i.e., the number of duplications and losses.
+
+definition  <dig> . we define reconciliation costs for gene and species trees as follows:
+
+ <dig>  Δ = | dup| + loss is the reconciliation cost from g to s.
+
+ <dig>  Δ =Σg∈Δ is the reconciliation cost from to s.
+
+ <dig>  let be the set of species trees that are comparable with . we define to be the reconciliation cost of .
+
+problem  <dig> . given a set of gene trees, the duplication-loss problem is to find a species tree s* comparable with , such that Δ  = Δ().
+
+local search problems
+here we first provide the definition of an spr edit operation  <cit>  and then formulate the related local search problems. the definition and associated local search problems for the tbr edit operation are considered later.
+
+for technical reasons, before we can define the spr operation, we need the following definition.
+
+definition  <dig> . given a tree t, the planted tree Φ is the tree obtained by adding a root edge {p, rt}, where p ∉ v , to t.
+
+definition  <dig> . let t be a tree, e = {u, v} ∈ e, where u = pa, and x, y be the connected components that are obtained by removing edge e from t such that v ∈ x and u ∈ y. we define sprt  for y ∈ y to be the tree that is obtained from Φ by first removing edge e, and then adjoining a new edge f between v and y as follows:
+
+ <dig>  create a new node y' that subdivides the edge {pa, y}.
+
+ <dig>  add edge f between nodes v and y'.
+
+ <dig>  suppress the node u, and rename y' as u.
+
+ <dig>  contract the root edge.
+
+we say that the tree sprt  is obtained from t by a subtree prune and regraft  operation that prunes subtree tv and regrafts it above node y.
+
+notation. we define the following:
+
+ <dig>  sprt  =∪y∈y{sprt }
+
+ <dig>  sprt = ∪ ∈e sprt 
+
+throughout the remainder of this manuscript, s denotes a species tree such that , and v is a non-root node in v .
+
+we now define the relevant local search problems based on the spr operation.
+
+problem  <dig> ).
+
+given and s, find a tree t *∈ sprs such that Δ  =  Δ .
+
+our goal is to solve the spr-s problem efficiently. to that end, we first define a restricted version of the spr-s problem, called the spr-restricted scoring problem.
+
+problem  <dig> ).
+
+given , s, and v, find a tree t *∈ sprs such that Δ  =  Δ.
+
+let n = | le|, m = | le| + | le| and k = ||, and let us assume, for convenience, that all g ∈  have approximately the same size. in the following, we show how to solve the spr-rs problem in o time. since sprs = ∪ {pa, v} ∈ e sprs, it is easy to see that the spr-s problem can be solved by solving the spr-rs problem o times. this yields an o time algorithm for the spr-s problem. later, we show that the local search problem corresponding to the tbr operation reduces to solving o spr-rs problems; which yields an o time algorithm for the tbr local search problem. in the interest of brevity, all lemmas and theorems in this paper appear with proofs omitted; however, all proofs are available in  <cit> .
+
+solving the spr-rs problem
+throughout this section, we limit our attention to one gene tree g; in particular, we show how to solve the spr-rs problem for g in o time. our algorithm extends trivially to solve the spr-rs problem on the set of gene trees  in o time. for simplicity, we will assume that le = le. indeed, if le ≠ le then we can simply set the species tree to be s; this takes o time and, consequently, does not affect the time complexity of our algorithm.
+
+in order to solve the spr-rs problem for g, it is sufficient to compute the values | dup| and loss for each s' ∈ sprs. bansal et al.  <cit>  showed how to compute the value | dup| for each s' ∈ sprs, in o time. losses, however, behave in a very different and much more complex manner compared to gene duplications and it has remained unclear if their computation could be similarly optimized. in this paper we show that it is indeed possible to compute the value loss for each s' ∈ sprs in o time as well. altogether, this implies that the spr-rs problem for g can be solved in o time. next, we introduce some of the basic structural properties that are helpful in the current setting.
+
+basic structural properties
+consider the tree ns, v = sprs). observe that, since  = sprs, solving the spr-rs problem on instance ⟨{g}, s, v⟩ is equivalent to solving it on the instance ⟨{g}, ns, v, v⟩. thus, in the remainder of this section, we will work with tree ns, v instead of tree s; the reason for this choice becomes clear in light of lemmas  <dig> and  <dig> 
+
+since s and v are fixed in the current context, we will, in the interest of clarity, abbreviate ns, v simply to n. similarly, in the remainder of this section, we abbreviate ℳg, t to ℳt, for any species tree t.
+
+throughout the remainder of this work, let u denote the sibling of v in n. we color the nodes of n asfollows:  all nodes in the subtree nv are colored red,  the root node of n is colored blue, and  all the remaining nodes, i.e. all nodes in nu, are colored green. correspondingly, we color the nodes of g by assigning to each g ∈ v  the color of the node ℳn.
+
+definition  <dig> . we define Γ to be the tree obtained from g by removing all red nodes . observe that while Γ must be binary, it might not be fully binary.
+
+the significance of the tree Γ stems from the following two lemmas which, together, completely characterize the mappings from nodes in v  for each s' ∈ sprs. this characterization is the basis of lemmas  <dig> through  <dig> 
+
+lemma  <dig>  given g and n, if g ∈ v  is either red or green, then ℳs' = ℳn for all s' ∈ sprn .
+
+lemma  <dig>  given g and n, if g ∈ v  is a blue node, then ℳs'  = lcas' ) for any s' ∈ sprn.
+
+characterizing losses
+to solve the spr-rs problem efficiently we rely on the following six lemmas, which make it possible to efficiently infer the value of loss for any s' ∈ sprn  and any g ∈ v .
+
+consider any g ∈ i, and let g' and g" be its two children. let a = ℳn, b = ℳn  and c = ℳn . without loss of generality, node g must correspond to one of the following six categories: 1) g is red, 2) g is green, 3) g, g', and g" are all blue, 4) g and g' are blue, and g" is green, 5) g and g' are blue, and g" is red, or, 6) g is blue, g' is red, and g" is green.
+
+lemmas  <dig> through  <dig> characterize the behavior of the loss cost loss, for each s' ∈ sprn , for each of these six cases. at this point, it would help to observe that sprn  = {sprn : s ∈ v }.
+
+lemma  <dig>  if g is red then loss = loss for all s' ∈ sprn .
+
+lemma  <dig>  if g is green then loss = loss +  <dig> if s' = sprn  where b ≤n x <n a or c ≤n x <n a, and loss = loss otherwise.
+
+lemma  <dig>  let g, g' and g" all be blue nodes, x ∈ v , and let a' = ℳΓ, n , b' = ℳΓ, n  and c' = ℳΓ, n .
+
+ <dig>  if s' = sprn  where x ≮n a', then loss = loss.
+
+ <dig>  if s' = sprn  where x <n a', and s" = sprn ), then,
+
+ loss = loss +  <dig> if b' ≤n x <n a' or c' ≤n x <n a', and,
+
+ loss = loss otherwise.
+
+lemma  <dig>  let g and g' be blue nodes and g" be a green node, x ∈ v \{u}, and let a' = ℳΓ, n , b' = ℳΓ, n  and c' = ℳΓ, n .
+
+ <dig>  if s' = sprn  where x ≮n a', and s" = sprn ), then,
+
+ loss = loss -  <dig> if a' ≤n x <n u,
+
+ loss = loss -  <dig> if a' ≤ n pa <n u but x is not such that a' ≤n x <n u, and,
+
+ loss = loss otherwise.
+
+ <dig>  let s' = sprn  where x <n a' and s" = sprn ).
+
+ if a' ≠ b' and b" denotes the child of a' along the path a' → n b', then,
+
+i. loss, g) = loss, g) -  <dig> if a' ≠ c'. and,
+
+   loss, g) = loss, g) if a' = c',
+
+ii. loss = loss +  <dig> if b' ≤ n x <n b",
+
+iii. loss = loss if x is such that x ∈ v  but not such that b' ≤ n x <n a',
+
+iv. loss = loss, g) if c' ≤n x <n a', and,
+
+v. loss = loss, g) - <dig> otherwise.
+
+ if a' = b', then,
+
+i. loss = loss, g) if c' ≤ n x <n a', and,
+
+ii. loss = loss, g) - <dig> otherwise.
+
+lemma  <dig>  let g and g' be blue nodes and c be a red node, x ∈ v , and let a' = ℳΓ, n.
+
+ <dig>  if s' = sprn  where x <n a', and s" = sprn ), then loss = loss +  <dig> 
+
+ <dig>  if s' = sprn  where x ≮n a', then,
+
+ loss = loss if a' ≤n x ≤n u, and,
+
+ loss = loss +  <dig> for s" = sprn ) otherwise.
+
+lemma  <dig>  let g be blue, g' be red, and g'' be green. let x ∈ v \{u} and a' = ℳΓ, n .
+
+ <dig>  if s' = sprn  where x ≮n a', and s" = sprn ), then,
+
+ loss = loss -  <dig> if a' ≤ n x <n u,
+
+ loss = loss if a' ≤ n pa <n u but x is not such that a' ≤n x <n u, and,
+
+ loss = loss +  <dig> otherwise.
+
+ <dig>  if s' = sprn  where x <n a', and s" = sprn ), then,
+
+ loss = loss, g) +  <dig> if x ∈ chn , and,
+
+ loss = loss +  <dig> otherwise.
+
+the algorithm
+observe that sprn  = {sprn : s ∈ v }. therefore, the goal of our algorithm is to compute at each node s ∈ v  the value loss, where s' = sprn . to do this efficiently, we rely on the characterization of losses given in lemmas  <dig> through  <dig> 
+
+the first step of the algorithm is to compute the value loss. this "loss value" is assigned to the node u. to compute the loss value for the rest of the nodes our algorithm makes use of six different types of counters at each node in nu; we refer to these counters as counter-i, for i ∈ { <dig> ..., 6}. the reason for using these six counters is that the behavior of the loss values can be explained by using six types of patterns . these counters make it possible to efficiently compute the difference between the values loss and loss, where s' = sprn , for each s ∈ v . next, we describe each of these six counters; throughout our description, s represents some node in nu.
+
+counter- <dig> if the value of counter- <dig> is x at node s then this implies that the tree sprn  incurs x additional losses over the value loss.
+
+counter- <dig> if the value of counter- <dig> is x at node s, then this implies that for each t ≤n s the tree sprn  incurs an additional x losses over loss.
+
+counter- <dig> if the value of counter- <dig> is x at node s, then this implies that for each t≤ n s the tree sprn  loses x losses from loss.
+
+counter- <dig> if the value of counter- <dig> is x at node s, then this implies that for each t ≤ n s the tree sprn  incurs αt · x additional losses over loss, t).
+
+counter- <dig> if the value of counter- <dig> is x at node s, then it is equivalent to incrementing counter- <dig> at the sibling of each node on the path u → n s, except at u, by x.
+
+counter- <dig> if the value of counter- <dig> is x at node s, then it is equivalent to incrementing counter- <dig> at both children  of the sibling of each node along the path u → n s, except u, and incrementing counter- <dig> at each node along the path u → n s, except at u, by x.
+
+in the remainder of this section we first show how to compute the values of these counters, and then the final loss values, at each node in nu.
+
+computing the counters
+we now describe how the values of the six counters are computed. initially, each counter at each node in nu is set to  <dig>  consider any g ∈ i, and let g' and g" be its two children. recall that node g must fall under one of the following six categories: 1) g is red, 2) g is green, 3) g, g', and g" are all blue, 4) g and g ' are blue, and g" is green, 5) g and g' are blue, and g" is red, or, 6) g is blue, g' is red, and g" is green.
+
+let a = ℳn , b = ℳn  and c = ℳn . also, whenever properly defined, let a' = ℳΓ, n , b' = ℳΓ, n  and c' = ℳΓ, n . based on lemmas  <dig> through  <dig>  we now study how the six counters can be updated so as to capture the behavior of losses in each of these cases.
+
+case  <dig>  by lemma  <dig>  we do nothing in this case.
+
+case  <dig>  based on lemma  <dig>  the contribution of any node g that satisfies the condition of case  <dig> can be captured by incrementing the value of counter- <dig> by one at each node on paths a → n b and a → n b, except at node a.
+
+case  <dig>  from lemma  <dig> it follows that in this case the contribution of g to the loss value changes in a way that is captured by incrementing counter- <dig> by  <dig>  at each node, except a', on the paths a' → n b' and a'→ n c'.
+
+case  <dig>  according to lemma  <dig>  if nv is regrafted on an edge of nu that is not in na', then the contribution of g to the loss cost is captured by incrementing counter- <dig> by  <dig> at each node except u along the path u →n a', and at their siblings. if nv is regrafted on an edge of nu that is in na' then there are two possible cases:
+
+a' ≠ b': recall that b" represents the child of a' along the path a' → n b'. here, the contribution of g to the loss cost is captured by  incrementing counter- <dig> by two at node b",  incrementing counter- <dig> by one at each node except b" along the path b" →n b'',  incrementing counter- <dig> by one at the sibling of b", and  incrementing counter- <dig> by one at each node except a' on the path a' → n c'.
+
+a' = b': in this case, the contribution of g to the loss cost is captured by  incrementing counter- <dig> by one at both children of a', and  incrementing counter- <dig> by one at each node except a' on the path a' → n c'.
+
+case  <dig>  by lemma  <dig>  for this case, the change in the loss contribution of g is captured by incrementing counter- <dig> by  <dig> at node a', and by incrementing counter- <dig> by  <dig> at both children of a' in n.
+
+case  <dig>  by lemma  <dig>  for this case, the change in the loss contribution of g is captured by incrementing counter- <dig> by  <dig> at node a', and by incrementing counter- <dig> and counter- <dig> by  <dig> each at both children of a' in n.
+
+computing the final loss values
+our algorithm considers each internal node of gene tree g, one at a time, and updates the relevant counters at the relevant nodes in nu, as shown in the previous subsection. then, based on the counters, it computes, at each node s ∈ v  the value α  = loss - loss, where s' = sprn ; this can be achieved by performing a constant number of pre- and post-order traversals of nu. a final traversal of the tree now allows us to compute the value loss = a + loss at each s ∈ v . due to space limitations, a more complete description of the algorithm is omitted from this manuscript .
+
+for simplicity in stating the time complexity of our algorithm, we assume that all g ∈  have approximately the same size. recall that n = | le|, m = | le| + | le| and k = ||.
+
+lemma  <dig>  the spr-rs problem on the input instance ⟨{g}, s, v⟩ can be solved in o time.
+
+remark on lemma 9: observe that in cases  <dig>   <dig> and  <dig> , handling each g might require updating the counters at Θ nodes, yielding a total time complexity of o for these cases. however, it is still possible to obtain the o time bound.
+
+thus, we have the following theorem.
+
+theorem  <dig>  the spr-rs and spr-s problems can be solved in o and o time respectively.
+
+the time complexity of the best known  solution for the spr-s problem is Θ . our algorithm improves on this by a factor of n.
+
+speeding-up the tbr local search problem
+intuitively, a  tbr operation may be viewed as being like an spr operation except that the tbr operation allows the pruned subtree to be arbitrarily rerooted before being regrafted. the tbr-s problem is defined analogously to the spr-s problem.
+
+observe that there are Θ  different ways to select a subtree of s to be pruned. furthermore, there are o different ways to reroot the pruned subtree. the idea is to directly use the solution to the spr-rs problem to compute the duplication and loss costs for the o-cardinality subset of tbrs defined by any fixed pruned subtree and its fixed rooting. this yields the following theorem.
+
+theorem  <dig>  the tbr-s problem can be solved in o time.
+
+this improves on the best known solution for the tbr-s problem by a factor of n.
+
+the deep coalescence cost model
+our algorithms for efficient spr and tbr local searches for the duplication-loss model apply directly to the corresponding spr and tbr local search problems for the deep coalescence model. this can be achieved using any of the following two methods. the first method is to make use of the result of zhang  <cit>  who showed showed that if g is a uniquely leaf-labeled gene tree and s is a species tree such that le = le, then the deep coalescence cost of g and s is equal to loss - 2| dup|. thus, our algorithms imply that we can compute the deep coalescence cost of each tree in the spr  neighborhood of s in o ) time. the second method is to use the algorithm for computing losses, presented in this paper, and slightly modifying it to directly compute the deep coalescence cost. owing to the similarity in the definition of the loss cost and the deep coalescence cost, this can be done in a straightforward manner . overall our algorithms yield speed-ups of a factor of n over the fastest current approaches for spr and tbr local searches for the deep coalescence cost model.
+
+RESULTS
+to evaluate the performance of our novel local search algorithms, we implemented our algorithm for the spr-s problem as part of a standard search heuristic for the duplication-loss problem. we refer to our program as duploss. we first evaluated its performance on randomly generated gene trees. these data sets represent extreme examples of incongruence among gene trees, and thus, they provide a challenging way to test the run-time performance of a gene tree reconciliation method. the input gene trees for each run consisted of  <dig> trees, each with the same set of taxa and with random binary topologies and random assignment of leaf labels. we conducted runs with  <dig>   <dig>   <dig>   <dig>  and  <dig> taxa in each gene tree. all analyses were performed on a  <dig> ghz intel pentium  <dig> cpu based pc with windows xp operating system. we compared the performance of duploss with the program genetree  <cit> , which, like mesquite  <cit> , implements similar local search heuristics based on the best known  algorithm for the spr-s problem. our implementation shows a tremendous improvement in runtime and scalability compared to genetree . for example, on the  <dig> taxon data set, our implementation finished in less than five minutes, while genetree ran for almost six days . furthermore, we could not run genetree when the input trees had more than  <dig> taxa.
+
+we also tested the performance of duploss using several empirical data sets. first, we ran our implementation on the 8-taxon, 106-gene yeast data set of rokas et al.  <cit> , and the 8-taxon, 268-gene apicomplexan data set of kuo et al.  <cit> . for the yeast data set, we made the gene trees using maximum likelihood implemented in raxml  <cit> , and for the apicomplexan data set, we used the gene trees included as supplemental data  <cit> . tree searches for both data sets finished within one second, and the topologies were consistent with the unrooted species trees presented in each study. finally, we ran our implementation on a plant data set consisting of  <dig>   <dig> gene trees from  <dig> taxa, previously used in a gene tree reconciliation analysis based on duplications only  <cit> . although this is among the largest data sets used in a gene tree reconciliation analysis, our heuristic finished in approximately  <dig> hours, and the resulting species tree was consistent with the general consensus of plant relationships. duploss is freely available upon request.
+
+discussion
+the novel algorithms presented in this paper enable gtp analyses that incorporate gene duplications and losses as well as deep coalescence on a scale that is impossible with previous implementations. whereas most phylogenetic analyses only use data from putative orthologs, the duplication-loss model allows one to incorporate data from large gene families into phylogenetic analysis, and it does not depend on the accuracy of orthology estimates. incorporating deep coalescence events may be critical when there is a history of rapid speciation, and these evolutionary scenarios represent many of the most difficult, and interesting, phylogenetic problems.
+
+previous advances in gtp heuristics for the duplication cost problem  <cit> , that is, calculating the species tree based on the number of duplications only without considering losses, have enabled promising phylogenetic analyses of extremely large data sets . with partial sequence data, it is difficult, if not impossible, to distinguish losses from missing sequence data. thus, it has been argued that the duplication only reconciliation cost is more appropriate than the duplication-loss cost when analyzing incomplete data sets . however, with the rapid accumulation of complete genome sequences, the duplication-loss problem provides a more complete model of evolution than the duplication problem. similarly, there has been much recent interest in the deep coalescence problem , but it has not been applied to large data sets due to a lack of efficient heuristics.
+
+while gtp has been effective on small data sets , its performance in general is relatively uncharacterized, largely due to the lack of fast implementations. the parsimony approach minimizes the number of evolutionary events that are counted, and therefore, it may not be appropriate when genes exhibit high rates of duplication and loss or deep coalescence events. in such cases, inferring the species tree based on a likelihood model of gene evolution may be more appropriate. still, likelihood methods are often computationally burdensome, and the computational difficulties are compounded by the extremely large data sets that are an inherent part of genome-scale analysis. the algorithms in this paper provide a pragmatic solution to the problem of addressing complex processes of evolution on enormous data sets in a phylogenetic analysis.
+
+CONCLUSIONS
+the abundance of new genomic sequence data presents new challenges for phylogenetic inference. genome-scale phylogenetic analyses must account for complex evolutionary processes, such as gene duplication and loss, incomplete lineage sorting , or horizontal gene transfer, that can produce conflict among gene trees, and they must be computationally feasible for enormous data sets. our new algorithms for fast local tree search for inferring species trees under the duplication-loss and deep coalescence reconciliation costs expand both the size of the data sets and the range of evolutionary models that can be incorporated into genome-scale phylogenetic analyses.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+msb was responsible for algorithm design and program implementation, and wrote major parts of the paper. jgb performed the experimental evaluation and the analysis of the results, and contributed to the writing of the manuscript. oe supervised the project and contributed to the writing of the paper. all authors read and approved the final manuscript.
+

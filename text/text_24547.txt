@@ -1,0 +1,135 @@
+BACKGROUND
+the development, optimization and validation of protein modeling methods require efficient tools for structural comparison. frequently, a large number of models need to be compared with the target native structure. there are numerous measures of model similarity. the most popular is the crmsd – coordinate root mean-square deviation   <cit> . the other popular scores are: gdt_ts – global distance test total score  <cit> , maxsub – maximal substructure  <cit> , tm-score – template-modeling score  <cit> , or drmsd – distance root mean-square deviation  <cit> .
+
+one of the methodologies most widely used for protein modeling includes performing the clustering step after generating a protein conformation ensemble  <cit>  followed by the selection of a representative model  for refinement. to achieve this, we need a similarity matrix of the whole ensemble, which contains all-versus-all comparison / <dig> of score calculation). however, many available applications are not optimized for running time, because they were developed rather for simple pair comparison.
+
+the main reason for the development of clusco software was to create a high-throughput tool for all-versus-all comparison, because calculating similarity matrix is the one of the bottlenecks in the protein modeling pipeline.
+
+implementation
+the implementation of the similarity measures was performed using openmp api which supports multiprocessing programming. additionally, the crmsd algorithm was coded on the graphic processor unit  architecture using nvidia cuda, which gave an over ten fold speedup in comparison with one cpu.
+
+we used an open source parallel k-means  <cit>  clustering code, implemented with openmp and serial c clustering library  <cit>  for hierarchical agglomerative clustering .
+
+algorithms
+crmsd coordinates root mean-square deviation is defined as: 
+
+  crmsd=1n∑i=1n∥xia−xib∥ <dig> 
+
+after the optimal superimposition. in this equation n is the number of atoms, xia - i-th atom position vector of protein a. there is no need to superimpose structures  to obtain the crmsd. by the diagonalization of the 3× <dig> covariance matrix m, we obtain the crmsd value by  <cit> : 
+
+  crmsd=ra2+rb2− <dig> 
+
+where ra is the radius of gyration of protein a, s is the sign of the covariance matrix determinant, λ is the eigenvalue  of the square of the covariance matrix. these eigenvalues can be computed by finding roots of the cubic equation instead of computational demanding singular value decomposition of the covariance matrix.
+
+gdt_ts global distance test total score is defined as: 
+
+  gdt_ts=14maxc1Å+maxc2Å+maxc4Å+maxc8Å 
+
+where c1Å is the number of atom pairs below the 1Å distance. max denotes here the maximal value for a series of superimpositions.
+
+the global distance test algorithm is np-hard  <cit> , and all the gdt_ts computing algorithms use their own heuristics. our gdt_ts algorithm is as follows: 1) divide the chain into all possible continuous  <dig> n/ <dig> n/ <dig> n fragments, and 2) use them as initial superimposition fragments , 3) find atom pairs which are closer by cutoff , 4) select atoms which are closer than  <dig> Å and use them for another superimposition until the number of selected atoms does not change in four iterations.
+
+tm-score, maxsub   <cit>  – both scores are variations of levitt and gerstein  score.
+
+tm-score is defined as: 
+
+  tm−score=max1n∑in11+did <dig> 
+
+where d0= <dig> n−153− <dig> , and maxsub is defined as the tm-score with d0= <dig> Å. for the calculation of both scores we used the same searching algorithm as for gdt_ts, which means that the computational costs of gdt_ts, maxsub, and the tm-score will be the same.
+
+drmsd distance root mean-square deviation  <cit> . this score is the deviation of inter-molecular distance matrices: 
+
+  drmsd=2n∑i=1n−1∑j=i+1ndija−dijb <dig> 
+
+where dija is the distance between i and j atoms of protein model a. note that the representation of molecule as a distance matrix causes loss of information about chirality.
+
+cmo contact map overlap  <cit> . using a representation of the protein structure as a binary matrix c, defined as: 
+
+  ci,j=1if|xi−xj|<cut-off0otherwise 
+
+we use sørensen similarity index as a similarity score between the two proteins a, b: 
+
+  s=1002nn+n 
+
+where n is the number of contacts in protein a.
+
+RESULTS
+using the crmsd, drmsd, maxsub, gdt_ts, tm-score, cmo as a similarity measure, clusco can calculate all-versus-all  scores of proteins from a one-column list file or using multimodel pdb file. the calculated results may be used, for example, as a similarity matrix input for clustering algorithms or clustered by clusco itself.
+
+in this section we show the examples of usage and the performance of clusco with respect to other similar programs. all tests were performed on a box with intel e <dig> cpu , nvidia geforce gtx  <dig> gpu and 24gb of ram. the computation time elapsed was assessed by the standard *nix “time” program.
+
+selecting of pairs of models within a given crmsd threshold
+recently, fogolari and coworkers  <cit>  described an algorithm for reducing the computational cost of all-versus-all comparison of protein models using crmsd by inverse triangle inequality. as an example of that idea, the authors provided fsss software and 1ctf protein models from 4state_reduced decoy set   <cit>  as an input ensemble. the fsss software outputs pairs of models with crmsd below a given threshold .
+
+we compared fsss and clusco based on this dataset, recording the time spent by one cpu performing the task. note that clusco computes all-versus-all scores by default, and to get results similar to the ones obtained from fsss  we needed to filter the output by awk : clusco-l 4state_reduced_1ctf.list-s rmsd-o4state.tmp;awk‘{ifprint$line}'4state.tmp > output.rmsd.
+
+fsss software spent  <dig>  seconds on this task, and clusco+awk spent  <dig>   +  <dig>   seconds, which amounts to 261× speedup. note that it is possible to improve these results, using parallel execution of clusco .
+
+clustering of protein decoys from five independent molecular dynamics trajectories
+the decoy set vhp_mcmd  <cit>  from decoys ’r’ us database contains the results of five  molecular dynamics simulations of the thermostable subdomain from chicken villin headpiece , starting from different protein conformations. the set contains  <dig> of villin conformations in total, in the range of  <dig>  -  <dig>  Å crmsd to the experimental structure deposited in the protein databank.
+
+using crmsd and each of the clusco clustering schemes, it is possible to separate this decoy set roughly into former trajectories, as we show in additional file 1: table s <dig>  each of the hierarchical agglomerative methods divides decoys into rather separate clusters i.e. more than 85% of trajectory models create a separated cluster, while of “native” and “f1” models create one common cluster . other clustering scheme in k-means results in the grouping of “native” and “f1” models into four separated clusters.
+
+command to perform clustering described above: clusco -l vhp_mcmd.list -s rmsd < <dig> , <dig> > <dig> 
+
+the running time for this dataset varied from  <dig> seconds , to  <dig>  minutes  in terms of results and computation time. to do this, we used public available i-tasser  <cit>  decoys set, containing 12500- <dig> models for each of  <dig> modelled target protein.
+
+calibur uses preprocessing of decoy set in three ways: screening-out unlikely candidates by setting lower and upper crmsd bounds, using triangular inequality for assessing if particular model is within the threshold distance from a group of models , detecting and ignoring outlier decoys. durandal uses triangular inequality  for the approximation of crmsd value of randomly chosen decoy and fill-up distance matrix until it contains proper amount of information for the next, clustering step. spicker selects the decoy with the largest number of structurally similar decoys  and creates the first cluster. the process is repeated to get a sufficient number of clusters.
+
+clusco was run with crmsd as a similarity measure  and k-means as a clustering method. we set number of clusters to 20: clusco -l list -s rmsd  <dig>  <dig> 
+
+the clusco representative model was selected by min, where f denoted the fraction of elements in particular cluster and <r> – the average crmsd between cluster elements.
+
+for the comparison of software reliability, we calculated tm-score to the experimental structure  and z-score of the tm-score .
+
+according to the average tm-score, all of the programs gave similar results: all, except durandal, gave the average tm-score  <dig> , and durandal gave the score of  <dig> . according to z-score, the best algorithms were calibur and clusco , followed by spicker and durandal .
+
+we recorded the execution time of each algorithm: durandal was the fastest , then clusco on one cpu , spicker  and calibur . if we allow for the possibility of parallel execution on gpu/cpu – clusco finished calculations in  <dig> min on  <dig> cpu’s, in  <dig> min on  <dig> cpu’s and  <dig> gpu and in  <dig> min on  <dig> cpu’s. we summarized these results in table  <dig> 
+
+1thx_ –  <dig> decoys of  <dig> aa. protein, 2reb_ <dig> –  <dig> decoys of  <dig> aa. protein. need to note that spicker use maximum of  <dig> decoys.
+
+analyzing the above results, we can conclude that clusco gives results which are as good as the ones provided by the state-of-the-art calibur in half of the time, however, on the commonly used today multicore machines, our program gives results in the time about 18× shorter than calibur.
+
+comparison of structures with reference/experimental model
+to compute the score between multi-model pdb file  and the reference structure , one should run clusco in the following way:   
+
+this command will compute the tm-score for each of tra.pdb models, saving the results into output.txt. if omp_num_threads variable was not set, program will utilize all available cpu’s.
+
+we recorded the computation time of the tm-score to the reference  structure with clusco and the original tm-score software  <cit>  using the decoy set mentioned in the previous paragraph. tm-score performed the task in  <dig> minutes, clusco on  <dig> cpu – in  <dig> minutes , but when we ran clusco on  <dig> cpu’s, it completed the task in  <dig> minutes  .
+
+it must be noted that the computation time for gdt_ts and maxsub will be mostly identical, since all of these algorithms use the same method for selecting fragments of structure. optionally, it is possible to compute more exact gdt_ts score with clusco by using -s gdtext flag – in this particular case clusco will split structures into many more fragments.
+
+for the comparison of crmsd computation time, we used the qcprot algorithm  <cit>  claimed by the authors to be probably the fastest available today. recorded times were only for the crmsd routine . in this comparison test, we got slightly better results than the qcprot: the speedup of  <dig> − <dig> × for clusco on one cpu and the speedup of  <dig> − <dig> × on one gpu. see figure  <dig> for details.
+
+recently hung & samudrala  <cit>  published an algorithm for the computation of all-versus-all tm-score on amd gpu and cpu. we compared clusco with this algorithm using the exemplary data attached to the program package . clusco on one cpu completed the computation in  <dig>  minutes, hung & samudrala code – in  <dig>  minutes, but clusco can achieve pronounced speedup if executed in multi-cpu fashion , which was not implemented in the hung & samudrala algorithm . however, users with access to the amd gpu can complete this task significantly faster with hung & samudrala algorithm.
+
+CONCLUSIONS
+we presented here versatile software for comparison and clustering of protein structures, optimized for novel multicore computers. we showed cuda implementation of crmsd algorithm which may be usable for creating of proteins similarity matrices  as an input for more efficient clustering algorithms.
+
+however, up till now, not many computers are equipped with graphics cards capable of floating point computation, but most of them are equipped with multicore processors. our software accounts for this situation by containing a parallel code for all described here comparison methods. it results in great-to-moderate speedup over an existing serial execution algorithms, together with clustering results as good as obtained using the state-of-the-art method, calibur.
+
+clusco is able to cluster small-to-moderate protein decoys with scoring functions other than the crmsd, i.e. the tm-score, drmsd, gdt_ts, maxsub, contact map overlap, especially on many-core machines, which is unique.
+
+clusco may be useful for protein modeling community as an all-in-one, fast and easy in use software for daily lab work. it may be used as a standalone program for comparison or clustering of protein models or as a preprocessing tool for clustering algorithms, either as a compiled program or a fragment of clusco’s source code.
+
+availability and requirements
+project name: cluscoproject home page:http://biocomp.chem.uw.edu.pl/cluscooperating system:gnu/linuxprogramming language:c/c++, cudaother requirements: openmp library , optionally: cuda sdk and cuda compatible graphic cardlicense:gnu gpl , python license , custom license for k-means library 
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+mj wrote algorithms, manual and manuscript. ak corrected the manuscript. both authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+the supporting information. additional comparison results with other software.
+
+click here for file
+
+ acknowledgements
+we would like to thank dr sebastian kmiecik for reading the manuscript.
+
+mj acknowledge the support from a project operated within the foundation for polish science mpd programme, co-financed by the eu european regional development fund.
+
+ak acknowledge support from the foundation for polish science team project  co-financed by the european regional development fund operated within the innovative economy operational program.

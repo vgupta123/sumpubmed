@@ -1,0 +1,135 @@
+BACKGROUND
+snp selection
+a large part of the genetic variation in a species come in the form of single nucleotide polymorphisms   <cit> . technological advances in high-throughput sequencing have made it possible to detect variations on genome-wide scales, also for non-model species. with current developments in high resolution genotyping technologies like snp arrays and high-throughput mass spectrometry, snp analysis is quickly becoming an indispensable tool in many fields of biology.
+
+in spite of improvements to technology, snp analysis is still limited by genotyping cost and capacity. it therefore remains an important challenge to find a set of snp markers that is as effective and efficient as possible. to be precise, we want to identify the minimal set of snps that must be examined in order to draw conclusions with an acceptable certainty - viz., the snps that are most informative for the task at hand. for instance, when selecting snps that are diagnostic , we would like to pick a small set of sites that provide the most information about the individual's group affiliation. although one could achieve the same certainty  using a larger set of individually less informative snps, this would also increase the risk of overfitting the model to the data. careful selection of snps is therefore not just an issue of economy and expedience, but also of accuracy.
+
+diagnostic snp identification
+in practice, diagnostic snps are usually identified and ranked or selected using some variation of the following procedure:
+
+first, samples are collected from individuals from the populations of interest, and dna is extracted and sequenced to a depth deemed reasonable in terms of cost and benefit. sequencing each sample individually is advantageous for reliably detecting rare alleles and to ensure a more complete snp discovery  <cit> , and is less sensitive to variation in molarity in the samples  <cit> . in spite of these advantages, collecting multiple samples in pools before sequencing can still be more cost effective, in particular for novel snp discovery in less well-studied species and when sample material is abundant  <cit> . the sequence data is typically filtered for quality and contamination, mapped to a reference genome sequence using a short read alignment program, and putative snps are identified when reads differ from each other or from the reference.
+
+the set of putative snps are then evaluated using some diversity statistic , or statistical confidence in allele frequency difference . often several measures are used, and candidates are typically filtered on one criterion , and then ranked using the other . sites can also be excluded based on coverage and more specific error estimates using base quality or mapping quality.
+
+in practice, some additional care is often taken in the selection of candidate sites. for instance, one might require a certain minimum distance between sites in the genome in order to avoid unwanted correlations, or exclude sites in regions with low average mapping quality.
+
+challenges with this approach
+there are many statistics that could be used to identify diagnostic snps , but fst is perhaps most commonly used  <cit> , and is readily calculated from identified allele frequencies.
+
+unfortunately, fst is less than ideal for several reasons. it is a population genetics statistic, and must be calculated using some estimator. there exist several different options  which can give different results, and thus fst statistics may not be directly comparable between studies. fst is not robust to errors in the data, something that becomes a challenge with the relatively high number of errors and large number of candidate sites that typically arise from sequencing data. when coverage is low, a low number of sequencing errors can shift statistics substantially, and the highest fst scores tend to come from sites with low coverage. to counter this, coverage thresholds can be used, but this excludes a substantial fraction of candidate sites. and, although commonly used in this role, fst is controversial as a measure of differentiation. in particular, where heterozygosity within populations is high, fst will be lowered, regardless of the differences between populations  <cit> .
+
+an alternative  approach is to use p-values for allele difference, usually calculated using fisher's exact test, but other options are also possible  <cit> . one challenge here is that although we are usually interested in the magnitude of the allele differences, this is only taken indirectly into account by p-values. variation in sequencing coverage means that sites with high coverage will tend to have higher confidence, even if the actual allele difference is small  <cit> . even with no difference between population, sampling will introduce artificial differences, which will result in significant p-values if the coverage is sufficiently high. in addition, fisher's exact test does not generally take into account the possibility of errors - the observation of a single allele will exclude an underlying frequency of zero for the observed allele, even if that may well be the case if the observation is an error.
+
+outline
+in the following, we derive a method for calculating the expected information to be gained from genotyping a specific site, and argue that this is a more intuitive and useful measure for evaluating diagnostic snps than the commonly used alternatives. we will first describe how to calculate the expected informatino given a priori knowledge of allele frequency, we will then proceed to develop a method to make a conservative estimate for this statistic, taking into account sampling bias and uncertainty in the data. finally, we provide an implementation, and discuss the results from applying it to both simulated and real data sets.
+
+methods
+expected site information
+given the drawbacks to using fst discussed above, it is perhaps tempting to instead use some other measures, like nucleotide diversity or absolute difference in allele frequency. however, it is easy to see that nucleotide diversity per site  + q where p and q are the major allele frequencies in the two populations) fails to measure divergence when one of the populations has an allele frequency of  <dig>  - substituting p =  <dig>  in the formula above results in  <dig>  + q, and it is easy to see that nucleotide diversity will be  <dig>  regardless of q.
+
+absolute difference in allele frequencies  is perhaps better, but consider populations where one allele's frequencies in the two populations are  <dig>  and  <dig> , respectively. assigning an individual to a population based on observing this allele not inspire a lot of confidence in the result, they are roughly equally likely. although the difference between allele frequency is the same for a site with allele frequencies  <dig>  and  <dig> , observing this allele is here five times as likely in one population as in the other, intuitively making this a much more useful site to observe.
+
+for diagnostic snp, what we really would like to know is the amount of information observing each site contributes. using bayes theorem, observing an allele a in some individual n, gives us the following posterior probability for n belonging to some population a, where the allele frequency, p, is known:
+
+ p=ppp 
+
+here, p is our prior probability of n belonging to a, which after observing a is modified by a factor of
+
+ pp 
+
+in order to assign n to one of several populations , we are interested in the relative probabilities for the two hypotheses. in other words, we would like to know the odds for n belonging to one population or the other. given the probabilities of p and p, and initial odds p /p, we get
+
+ pp=pp/ppp/p 
+
+canceling out p, we find that the prior odds are modified by:
+
+ pp 
+
+that is, the ratio of this allele's frequencies in each of the populations. for practical reasons, we take the logarithm of the odds. this gives us scores that are additive and symmetric . specifically, base two logarithms will give us the score in bits.
+
+when observing a site, we may of course also encounter the alternative allele. by the same reasoning as above, we find that this allele modifies the prior odds by
+
+ 1-p1-p 
+
+lacking any specific information about priors, we can consider each population equally likely, and the likelihood of observing a particular allele is the average of the likelihood in each population. the information gain from each possible allele is then averaged, weighted by this average likelihood. for a biallelic site with major allele frequencies p and q  in the two populations, the expected added information from the site then becomes:
+
+ i=p+q2log2pq+log21-p1-q 
+
+note that we are here only interested in the amount of information gained, regardless of which hypothesis it favors, and thus we take the absolute values. for a site with multiple alleles enumerated by i and with frequency vectors p and q in the two populations, this generalizes to:
+
+ i= ∑ipi+qi2log2piqi 
+
+returning to the example at the start of the section, we now find that a site with allele frequencies of  <dig>  and  <dig>  contributes  <dig>  bits of expected information, while  <dig>  and  <dig>  contributes  <dig>  bits. unlike measures like fst, measures of i is additive , so the information gained from observing multiple sites is readily calculated, and observing with an esi of  <dig>  bits is equivalent to observing four sites with esi  <dig> .
+
+it may also be instructive to compare this procedure to sequence alignment and position specific score matrices . in sequence alignment, a sequence of nucleotides or amino acids are scored by comparing its match to a target sequence to its match to some base model using log odds scores. the base model to compare against is often implicit , but more elaborate models is also possible . similarly, position specific frequency matrices are often converted to position specific score matrices using log odds. calculating the information value from a set of observed alleles is then analogous to scoring an "alignment" of the set of observed alleles to two different sets of allele frequencies.
+
+allele frequency confidence intervals
+in order to apply the above method in practice, we need to measure the allele frequencies in the population. this is problematic for two reasons: first, we do not have precise knowledge of the allele frequencies, we can only estimate them from our sample, which introduces a sampling bias. second, the sequencing process introduces additional artifacts that add nose and bias to the data. for instance, sequencing errors often result in substitutions, which are observed as apparent alleles. in addition, sequences can be incorrectly mapped, contain contamination, the reference genome can contain collapsed repeats, and the chemistry of the sequencing process is usually also biased - for instance, coverage is often biased by gc content. these artifacts often give the false appearance of variant positions.
+
+one challenge with calculating site information from sequencing data , is that such errors in the data can vastly overestimate the information content. for instance, an allele that appears to be fixed in one population means that any other observed allele will assign the individual to the alternative population - regardless of any other alleles. it is easy to see that an allele frequency of zero results in the odds going either to zero or infinity, and thus the log odds will go to either positive or negative infinity.
+
+for diagnostic snp discovery, it is more important to ensure that identified snps are informative, than to precisely estimate the information content. thus, we take a conservative approach and use upper and lower limits for the allele frequencies by calculating confidence intervals using the method by agresti and coull  <cit> . in addition, the limits are also adjusted by a factor ∈, corresponding to sequencing error rate. in the following, we will refer to the resulting measure as conservative site information, or csi.
+
+RESULTS
+simulated data
+a set of simulated reads were generated using flowsim  <cit> , using a procedure adapted to populations genetics studies  <cit> . a section of  <dig> megabases, comprised of the four largest scaffolds, was extracted from the salmon louse  draft genome assembly. random substitutions were introduced at a rate of 1/ <dig> bases to generate three different haplotypes, which where then admixed in proportions 1:2: <dig> and 3:2: <dig> to generate two population, p <dig> and p <dig> with variant allele frequencies of  <dig> ,  <dig>  and  <dig> , as shown in table  <dig> 
+
+fst
+simulated reads were then generated with genome coverages of 10x, 20x, and 40x from each of the populations, using substitution rates of  <dig> ,  <dig>  and  <dig> . to simplify analysis, the indel rate was held constant at  <dig> .
+
+the reads were mapped to the reference genome using the bwa short read mapper  <cit> , and analyzed using samtools' mpileup command  <cit> . in addition to the methods described here, popoolation  <cit>  was used to calculate fst and p-values from fisher's exact test.
+
+csi scores for divergent and non-divergent sites
+in figure  <dig> we see that csi clearly separates the divergent and non-divergent sites. at low csi scores, the separation is approximately a factor of  <dig>  and it increases with increasing csi scores to a factor of about  <dig>  here, the number of divergent and non-divergent sites are approximately equal. the actual csi value for the divergent sites are  <dig> , we see that the program provides a conservative estimate, and only three sites score higher. the error rate does not seem to affect scores to a large degree.
+
+comparing csi and traditional statistics
+the relationship between csi and p-values is shown in figure  <dig>  although all sites are non-divergent, we obtain many higher p-values at higher coverage, indicating that fisher's exact test is upwardly biased as coverage increases.
+
+in figure  <dig>  the relationship between csi and fst is explored. especially, at low coverage, many sites show a very high fst value. as coverage increases, both the variation and expectation of fst is reduced, and also the correlation between csi and fst improves.
+
+it is also instructive to contrast fst values with p-values . since most polymorphic sites result in a non-zero p-values and fst, the diagram is noticeably denser than figures  <dig> or  <dig>  there is also a clear banding effect; as coverage increases, fst values tend to decrease, and p-values increase, and the bulk of the data is rotated in a clockwise direction.
+
+comparing csi and fst for divergent and non-divergent sites
+adding the divergent sites in figure  <dig>  we see that the distribution for the divergent sites extend the general distribution for the non-divergent sites.
+
+real data
+one important use for snps, is to assign individuals to their respective populations or subpopulations. for instance, the quantity of norwegian farmed salmon exceeds the wild river populations by a large factor. as salmon occasionally escape from sea farms, the ability to effectively identify escapees is important both to identify the farms responsible, as well as quantifying the ecological effects of introgression. here snps will play an important role by providing a low-cost, high resolution data  <cit> .
+
+below, we examine pooled salmon sequencing data from rivers flekkeelva and suldalselva, and investigate the resulting csi distributions. from each of the rivers, two pools were sequenced using illumina hiseq, resulting in datasets f <dig>  f <dig>  s <dig> and s <dig>  each containing between  <dig> and  <dig> million aligned reads, corresponding to coverages of  <dig> x to  <dig> x, assuming a genome size of  <dig> gigabases. the data sets were then merged by river , and by replicate .
+
+comparison
+it can be seen from figure  <dig> that, as expected, we identify a larger number of sites when comparing between rivers than between the mixed replicates, and although the separation is not as clear as for the simulated data, the slope is similar. the difference increases  with increasing scores, but there remain several high-scoring sites also in the replicates comparison.
+
+filtering by coverage
+a closer examination of the data reveals that many of the high scoring sites have a coverage substantially higher than the expected combined coverage of approximately 50x. this can be due to collapsed repeats in the genome assembly or other artifacts of the assembly, sequencing, or mapping processes. to investigate this, sites were filtered by coverage, retaining only sites with a total coverage of  <dig> ±  <dig> . the results are shown in figure  <dig>  for comparison the unfiltered results from figure  <dig> are retained with dashed lines.
+
+we see from figure  <dig> that filtering on coverage eliminates some of the noise, most noticeable for higher csi values. the effect of filtering also tends to reduce the scores between the replicate pools more than the river pools, this observation is also supported by the total number of identified snp, as summarized in table  <dig>  in all cases a large number of sites are removed, 30%  and 33%  of the identified sites.
+
+discussion
+statistics, coverage, and sequencing errors
+it is striking that p-values for the non-divergent sites increase with coverage. for instance, out of the  <dig> non-divergent sites, we expect approximately  <dig> sites by chance to have a p-value less than 10− <dig>  for 10x coverage, we find  <dig>  for 20x, we find  <dig>  and for 40x we find  <dig>  this indicates that p-values are biased upwards with increasing coverage, and must be consequently be interpreted with care  <cit> . the expectation and variance of fst similarly depends on coverage. in contrast, low coverage in combination with sequencing errors and incorrectly mapped reads here result in a large number of high-scoring non-divergent sites. using a combination of these measures may be effective, but also effectively narrows the data set, much like a stringent filtering for coverage.
+
+simulated data is by definition a simplification of reality. for instance, here the data assumes uniform probability of reads across the genome, and unbiased and context independent sequencing errors. also, divergent and non-divergent positions occur in similar numbers in the simulated data, in reality, there will be a continuous spectrum of allele frequencies, and it will depend globally on the degree of divergence between populations, and locally on selection and other non-random evolution pressures. results from simulated data must, as always, be interpreted as optimistic. in practice, coverage will vary substantially across a sequenced genome. in general, high variance regions tend to have lower mapping  <cit> , but other factors are bias caused by gc-content, misassembly and collapsed repeats, copy-number and other structural variations, incorrect mapping, sampling bias . real data sets must therefore be expected to contain a wide range of coverages, mapping reliability, and sequencing error rates.
+
+other information theoretic measures
+although not commonly applied, information theoretic measures have been used previously in analyzing genetic variation. expected site information is related to kullback-leibler divergence  <cit> , but differs in that it is symmetric and extended to multiple alleles. rosenberg  <cit>  gives a summary of several alternative statistics, and also develops an information theoretic measure that contrasts individual populations with an average of all population. this measure is then used to infer ancestry, and applied to microsatellite data. here, we develop an information theoretic measure in a bayesian context, and apply it to high-throughput sequencing data.
+
+dealing with sequencing errors and artifacts
+based on the assumption that most sequencing errors will be singletons, achaz  <cit>  developed variants of several estimators for Θ which avoids taking singletons into account. achaz' formulas were later adapted to high-throughput sequencing experiments, and given a more generalized  form that allowed an arbitrary lower bound on number of observed alleles  <cit> . however, much of the genetic diversity is in the form of low frequency alleles, and as singletons also have a high impact on many statistics  <cit> , these estimators have lower power  <cit> . it is also possible to attempt to quantify the errors more precisely by leveraging characteristics of the data  <cit> .
+
+future work
+here, we have focused on the expected information content. as this is an additive measure, it is straightforward to sum over multiple sites to get the expected information for a set of snps. since rare alleles yield more information than common ones, a natural extension might be to consider instead the minimum information content from a set of loci, ensuring that we can reach a conclusion even if we are unlucky with the actual alleles observed. yet another option is to calculate a confidence interval for the information.
+
+CONCLUSIONS
+when selecting diagnostic snps, we want to find sites that provide the most information regarding our current problem. although this is commonly measured using statistics like fst, these are indirect measurements, proxies for the actual information. in addition, we have seen that it and other commonly used statistics have intrinsic biases when applied to sequencing data, due to coverage variation, sequencing artifacts, and mapping errors.
+
+as an alternative, we have derived a direct calculation of the expected site information from allele frequencies, using a bayesian framework. in addition to being a direct measurement of the value of interest, it has a clear interpretation, and desirable properties, like additivity. we have further developed a conservative estimator for this statistic, and provide an implementation.
+
+availability
+the method as described above was implemented in a program, 'varan', which parses read alignments in the standard "mpileup" format as output by the samtools mpileup command. it can currently output several different statistics and estimators, including conservative expected site information . the software is distributed under the general public license, and the source code can be downloaded from http://malde.org/~ketil/biohaskell/varan. further information and documentation is available from http://biohaskell.org/applications/varan.
+
+simulation data, tables, and scripts used in this paper is available from http://malde.org/~ketil/papers/varan. the salmon louse genome used to generate the simulated reads is available from http://sealouse.imr.no/.
+
+competing interests
+the author declares that they have no competing interests.
+

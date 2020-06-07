@@ -1,0 +1,88 @@
+BACKGROUND
+the introduction of ngs  technologies has made possible the sequencing of genomic dna in a short time , producing billions of short dna samples . the typical read length produced by current ngs sequencers ranges from  <dig> to  <dig> nucleotides , though new sequencers yielding reads of several thousand nts are already in the market  <cit> . also, the upcoming generation of portable high-throughput sequencers is expected to produce huge datasets containing very long reads  <cit> .
+
+a particular topic of dna analysis is dna methylation. by aligning and comparing  bisulfite-treated reads to the genomic dna sequence, it is possible to determine the methylation of each pair-base. several methylation tools have been developed over recent years ), but all of these tools decrease their performance for reads whose length exceeds 100- <dig> nts. in order to tackle this problem, we developed hpg-methyl, a new tool for analyzing the methylation of bisulfite reads  <cit> . the strategy implemented in this tool was the use of a parallel pipeline that aligns the reads by using both the burrows-wheeler transform   <cit>  and the smith-waterman algorithm  . the combination of both algorithms in hpg-methyl provides the best performance for all the considered methylation analysis tools. nevertheless, for large datasets with long reads the execution times are still too long, preventing the analysis tasks from being carried out in an interactive way.
+
+in this paper, we propose a new strategy for methylation analysis that greatly reduces the required execution time of the mapping tools while yielding a better level of sensitivity, particularly for datasets composed of long reads. this strategy can be exported not only to other methylation analysis tools, but also to dna and rna analysis tools. it consists of two independent techniques: first, we use a bidirectional implementation of the bwt that tries to map each read onto the reference genome simultaneously starting from both read ends , instead of mapping each read from one end to the opposite one.unlike other implementations of bidirectional bwt  <cit> , it allows up to two eids when aligning a read, increasing the performance of the alignment tool. this technique does not add any computational cost to the bwt, and it helps to discard wrong alignments more efficiently. second, a different pipeline scheme  <cit>  is used for those reads which cannot be completely mapped by using the bwt. the new pipeline scheme merges several stages into a single but more flexible stage, based on the bwt. this new stage provides considerably fewer candidate regions of the genome where each considered read can be mapped, although these regions are much more likely to be correct. as a result, the use of the swa in the pipeline is greatly reduced, and it maps much shorter read segments. since the computational cost of the swa depends on the read length, and these techniques greatly reduce the number and length of the read segments mapped by using the swa, the proposed strategy greatly improves the performance of the methylation tools, allowing them to linearly scale with the length of the reads. we have implemented this strategy in hpg-methyl, developing a new version denoted as hpg-methyl <dig>  the performance evaluation results show that the new tool achieves execution times one order of magnitude shorter than the existing tool, while yielding slightly better sensitivity for short reads and significantly better sensitivity for long reads.
+
+implementation
+a new implementation of the burrows-wheeler transform
+the burrows-wheeler transform  is a compression procedure originally designed for data  compression  <cit> . later, it was used as a backward search method  to efficiently align short sequencing reads against a large reference sequence such as the human genome, allowing errors , insertions or deletions   <cit> . many software tools and bwt implementations have been proposed for sequence alignment  <cit> . although the computational cost of the bwt increases with the number of allowed eids due to the search tree exploration process, most of the existing implementations use pruning or greedy schemes to avoid an exponential cost  <cit> .
+
+nevertheless, the bwt is used to perform a unidirectional backward search in all cases. the bwt starts from one end of the read, trying to align as many nucleotides  of the read as possible to a sequence of the reference genome, until an eid is found. figure 1
+a) illustrates the mapping of a portion of the read, denoted as a segment. the mapping procedure is as follows: the last nucleotide of the read is searched in the reference genome. next, the sequence of the last two nts of the read is searched on the reference genome, then the sequence of the last three nts, and so on. in each search, a new nucleotide from the end of the read is added to the sequence to be found. this procedure is repeated, until an eid is reached. at that point, a segment of the read will be aligned to one or more locations of the reference genome. also, it is possible to use the bwt to perform the alignment in the opposite direction  <cit>  by constructing the ferragina and manzini index  <cit>  for the reversal of the read.
+fig.  <dig> alignment of a read sequence. using a unidirectional bwt b bidirectional bwt
+
+
+
+
+unlike other implementations of bidirectional bwt  <cit>  our bwt implementation allows up to two eids when aligning a read. to be precise, it can be configured to allow  <dig>   <dig>  or  <dig> eids. as illustrated in fig. 1
+b), the bidirectional alignment of the read simultaneously starts from both read ends, looking for the occurrences of the first  nts. this strategy allows the duplication of the supported eids without exponentially increasing the size of the search tree. as in unidirectional implementations, further nts are added to the initial sequences, until too many eids are found. the main differences is that when the procedure finishes, we have two mapped segments instead of one, and the distance between the segments can also be used to search the correct mapping of the read in the reference genome. the main difference with other bidirectional implementations is that the proposed one can be configured to allow two eids, and this fact can help to increase the performance of the alignment tool, as shown in the “results” section.
+
+implementation in a parallel pipeline
+the bwt implementation and use described in the previous section can be used in any alignment process. in order to prove its potential, we have integrated this version of the bwt in the parallel pipeline of a software tool designed for methylation analysis, termed hpg-methyl  <cit> .
+
+like most of current software tools  <cit> , hpg-methyl combines multi-seeding with dynamic programming methods such as the swa. it first uses bwt to align small segments of the reads  in the genome. depending on the location of the seeds, one or more candidate areas are considered for aligning the rest of the read segments using swa. in this way, the higher computational cost of the swa algorithm is required only for inter-seed spaces, instead of the entire read.
+fig.  <dig> parallel pipeline in hpg-methyl tool
+
+
+
+
+in order to take full advantage of the bwt implementation described in the previous section, we have changed the hpg-methyl pipeline, denoting this new pipeline as hpg-methyl <dig>  hpg-methyl <dig> merges several stages into a single but more flexible stage, based on the bwt. the new stage provides considerably fewer candidate regions of the genome where each considered read can be mapped, although these regions are much more effective. as a result, the use of the swa in the pipeline is greatly reduced, and it is used to map much shorter read segments.
+fig.  <dig> new parallel pipeline in hpg-methyl <dig> tool
+
+
+
+
+the next stage in the pipeline is the sw stage, where the swa is used to study the alignments of the read in the cals yielded by this stage, as in the hpg-methyl software  <cit> . however, it must be noted that there is a crucial difference between the hpg-methyl pipeline and the strategy described here : in the former case, only one iteration of the bwt was applied, and for those reads not mapped in that iteration the seeding stage generated new and short read seeds from scratch. as a result, the length of the unmapped segments between seeds to be studied using the swa could be any number between the length of the seed and the length of the read. in the latter case , the bwt is iteratively applied before generating the cals, in such a way that the correct cals will probably contain more than two seeds, and therefore the length of the unmapped segments to be studied using the swa will be much shorter. in this way, the computational cost of the pipeline remains closer to a linear cost than to quadratic cost with regard to the read length. also, the existence of more seeds within each cal helps to align more reads, while the probability of multiple alignments for each cal decreases. finally, the probability of generating cals which cannot be aligned is greatly reduced.
+
+RESULTS
+in this section, we present a comparative performance evaluation of the bwt implementation and deployment described in the previous section. we have denoted this implementation as hpg-methyl <dig>  for comparison purposes, we have also evaluated two additional tools: hpg-methyl and bismark. these tools were selected because they yielded the best performance at the time hpg-methyl was evaluated  <cit> . we have measured the sensitivity and execution time yielded by the considered software tools when using synthetic as well as real datasets. the former datasets have been extracted from the reference genome ), while the latter ones have been obtained from the european nucleotide archive . all the datasets contain fixed read lengths, and we have considered datasets of different reads lengths, from  <dig> to  <dig> nts. all the synthetic datasets contain four million reads. the performance evaluation has been carried out on the same computer platform used to evaluate the hpg-methyl tool  <cit> , a computer based on an intel i7-3930k processor  with  <dig> gbytes of ram. nevertheless, the average use of memory shown by all the considered tools did not exceed  <dig> gbytes of ram. we have used the default parameter settings in the execution of the bismark tool, other than the number of parallel execution threads. the hpg-methyl tools is the only tool where the optimum parameter settings are not automatically computed based on each read length, and therefore these parameters should be explicitely used in the command line according to the length of the reads in the dataset, as described in the readme.txt file . the hpg-methyl <dig> tool automatically computes the optimum parameter settings for each read length, so it only needs the number of parallel threads to be used in the execution. an example execution command for each of the considered tools can be found in the “additional file 1” .
+table  <dig> sensitivities yielded for a synthetic dataset with a mutation rate of 1%
+
+
+
+table  <dig> execution times  for processing the synthetic dataset 
+
+
+
+
+also, we have tested the considered tools with real datasets  containing  <dig>  million bisulfite reads coming from homo sapiens. the length of the reads in each file is  <dig> and  <dig> nts, respectively. table  <dig> shows the percentage of reads mapped. it shows how hpg-methyl <dig> again yields the greatest sensitivity for real datasets, although the performance differences are not very significant due to the short read length.
+
+
+
+finally, table  <dig> shows the execution times required to align the real datasets. it can be seen how both versions of the hpg-methyl software require similar execution times for the srr <dig> dataset, while bismark yields much longer execution times. the reason for this behavior is that the read length in this dataset is too short for hpg-methyl <dig> to significantly increase the performance. however, the performance differences among the considered software tools for the srr <dig> datasets are more significant, the execution time of hpg-methyl <dig> being half of that required by the hpg-methyl tool.
+
+
+
+CONCLUSIONS
+the performance evaluation results show that the new software tool achieves execution times one order of magnitude shorter for long reads, while yielding equal or better sensitivity. the strategy employed in this software can be exported not only to other methylation analysis tools, but also to dna and rna analysis tools. as a future work to be done, we plan to apply the same strategy of bwt deployment to other existing software tools with a similar parallel pipeline, such as the hpg aligner  <cit> .
+
+availability and requirements
+
+project name: hpg-methyl2project home page:
+https://github.com/grev-uv/hpg-methyl
+operating system: the software has been tested on ubuntu linuxprogramming language: clicense: gpl v2
+
+additional file
+
+additional file  <dig> text document containing an example of the command launched to execute each of the tools. 
+
+
+
+
+abbreviations
+bwtburrows-wheeler transform
+
+cscytosines
+
+eidserrors, insertions or deletions
+
+ngsnext generation sequencing
+
+ntsnucleotides
+
+pcrpolymerase chain reaction
+
+swasmith-waterman algorithm
+

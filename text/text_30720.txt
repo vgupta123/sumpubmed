@@ -1,0 +1,545 @@
+BACKGROUND
+conducting accurate mechanistic simulations of biochemical systems is a central task in computational systems biology. for systems where a detailed model is available, simulation results can be applied to a wide variety of tasks including sensitivity analysis, in silico experimentation, and efficient design of synthetic systems
+ <cit> . unfortunately, mechanistic models for many biochemical systems are not known; consequently, a prerequisite for the simulation of these systems is the determination of model structure and kinetic parameters from experimental data.
+
+despite recent advances in experimental methodology, the estimation of unknown kinetic parameters from data is a bottleneck for performing accurate simulations
+ <cit> . for deterministic models of biochemical systems, where dynamics are typically described by ordinary differential equations, reliable methods for parameter estimation are relatively abundant
+ <cit> . in contrast, parameter estimation for stochastic biochemical systems are less well developed
+ <cit> . in recent years it has become increasingly clear that stochasticity plays a crucial role in many biological processes, ranging from bistable genetic switches
+ <cit>  to robust oscillators
+ <cit> . unlike in the deterministic regime, the dynamics of a stochastic system are described by a probability distribution which cannot usually be obtained analytically . instead, sampling methods like the stochastic simulation algorithm 
+ <cit>  are used to generate ensembles of trajectories from the unknown distribution.
+
+given the probabilistic nature of stochastic biochemical models, a natural approach for parameter estimation is to choose values that maximize the probability of the observed data with respect to the unknown parameters . in the case of fully observed data, where the number of molecules of each system species is known at all time points, mles can be calculated analytically. however, since realistic biochemical systems are discretely and partially observed, computational mle methods are necessary. one of the earliest examples presented, simulated maximum likelihood , combines a non-parametric density function estimator with monte carlo simulation to approximate the likelihood function
+ <cit> . to maximize the likelihood, sml uses a genetic algorithm requiring absolute bounds on each of the unknown parameters. horváth and manini developed an expectation-maximization  approach  which artificially modifies a subset of reactions in simulated trajectories to approximate and maximize the likelihood
+ <cit> . however, this method can become increasingly inaccurate as species counts approach zero, and it is not clear how to properly choose the number of reactions to modify at each step. more recently, a histogram-based monte carlo simulation procedure was developed to estimate data likelihood
+ <cit> . like the sml method, this approach uses a genetic algorithm to maximize the likelihood, requiring prior parameter bounds. finally, wang et al. proposed a method combining stochastic gradient descent  with a reversible jump markov chain monte carlo sampler to maximize parameter likelihood
+ <cit> . the sgd method efficiently and heuristically generates trajectories consistent with observed data, iteratively modifying them via a metropolis-hastings step until they closely approximate trajectories from the unknown probability distribution.
+
+although not strictly an mle method, boys et al. developed a bayesian approach for inferring parameters that employs a poisson process approximation to efficiently generate trajectories consistent with observed data
+ <cit> . like sgd, this method also incorporates a metropolis-hastings sampling step to correct for the approximate nature of the generated trajectories.
+
+all of the above mle approaches essentially iterate between two steps:  approximating a parameter likelihood using monte carlo sampling and  maximizing that approximation with respect to the unknown parameters using an optimization algorithm. we note that the bayesian method of boys et al. also requires extensive monte carlo sampling in the manner of step . execution of  requires the generation of many system trajectories that are consistent with experimental data. when simulating trajectories of a model with unknown parameters, the generation of even a single trajectory consistent with data can be an extremely rare occurrence. the sml and histogram-based methods
+ <cit>  mitigate this computational challenge by requiring accurate bounds for each unknown parameter. in contrast, the em-based, sgd, and poisson approximation methods
+ <cit>  reduce simulation cost by generating system trajectories in a heuristic manner. although these strategies have been successful, parameter bounds are not always available, and it is not clear whether heuristically generated trajectories can be used to accurately and efficiently parameterize all systems. in addition, unlike bayesian methods, existing mle approaches only return parameter point estimates without quantifying estimation uncertainty.
+
+in this work, we develop monte carlo expectation-maximization with modified cross-entropy method , a novel, accelerated approach for computing mles along with uncertainty estimates. mcem <dig> combines advances in rare event simulation
+ <cit>  with an efficient version of the monte carlo em  algorithm
+ <cit> , and it does not require prior bounds on parameters. unlike the em-based, sgd, and poisson approximation methods above, mcem <dig> generates probabilistically coherent system trajectories using the ssa. the remainder of the paper is structured as follows: we first provide derivation and implementation details of mcem <dig> . next, we apply our method to five stochastic biochemical models of increasing complexity and realism: a pure-birth process, a birth-death process, a decay-dimerization, a prokaryotic auto-regulatory gene network, and a model of yeast-polarization . through these examples, we demonstrate the superior performance of mcem <dig> to an existing implementation of mcem and the sgd and poisson approximation methods. finally, we discuss the distinguishing features of our method and motivate several promising future areas of research .
+
+methods
+discrete-state stochastic chemical kinetic system
+we focus on stochastic biochemical models that assume a well-stirred chemical system with n species {s <dig> …,sn}, whose discrete-valued molecular population numbers evolve through the firing of m reactions {r <dig> …,rm}. we represent the state of the system at time t by the n-dimensional random process x≡,…,xn), where xi corresponds to the number of molecules of si at time t. associated with each reaction is its propensity function aj, whose product with an infinitesimal time increment dt gives the probability that reaction rj fires in the interval tt + dt) given x=x. the sum of all m propensity functions for a given system state x is denoted a <dig>  we restrict our attention to reactions that obey mass action kinetics—i.e. where aj≡θjhj with θj a positive real kinetic constant and hj a function that quantifies the number of possible ways reaction rj can occur given system state x. examples of hj include:  <dig>  x112x <dig>  and x1x <dig> for zeroth-order, unimolecular, homo-bimolecular, and hetero-bimolecular reactions, respectively. further details on mass action propensity functions can be found in
+ <cit> .
+
+the “direct method” implementation of gillespie’s stochastic simulation algorithm  provides a simple numerical procedure for generating exact system trajectories from their underlying  probability distribution
+ <cit> . the method works by sequentially simulating the time to the next reaction  as an exponential random variable with mean 1/a <dig> and the index of the next reaction  as a categorical random variable with probabilities aj/a <dig>  given a final time t and initial system state x=x <dig>  application of the direct method yields a reaction trajectory z≡, where r is the total number of reactions that happen to fire by time t. although z is only of length 2r, combining it with x <dig>  allows us to identify the complete system state at any time in the interval [ <dig> t regardless of how large n and m are. using the above notation, we can express the likelihood of the complete system trajectory  as the following function of the kinetic parameters θ≡ : 
+
+  fθ=∏i=1rθji′hji′×exp−∑i=1r+1τi∑j=1mθjhj, 
+
+where τr +  <dig>  is the time interval between the firing of the final reaction and t, and xi− <dig>  is the easily computable system state at the time immediately after the st firing event .
+
+maximum likelihood parameter estimation
+if the true values of the kinetic parameters θ∗  are unknown and we are given a complete system trajectory , a natural approach for generating parameter estimates
+θ^ is to choose values of θ that maximize the likelihood with respect to the trajectory ). these maximum likelihood parameter estimates  can be analytically computed for each reaction as follows : 
+
+  θ^j=rj∑i=1r+1hjτi. 
+
+where rj is the total number of times reaction rj fires in z. although simple, equation  is only useful in the presence of a complete system trajectory. experimentally observed data are typically much less informative, consisting of the initial system state plus numbers of molecules for a subset of the system species at d discrete time points. we represent these “observed data” with y≡, where xi′ contains the numbers of molecules of a subset of the n species at some time point ti. knowledge of any yof finite size is insufficient for reconstructing the complete system trajectory  and the corresponding likelihood ); thus, equation  is not a feasible approach for computing mles. instead, we require a method that can accommodate “unobserved data”—i.e., the states of all system species at all times not included in the observed data.
+
+in this work we use the expectation-maximization  algorithm
+ <cit>  to identify mles in the presence of unobserved data. this algorithm suggests the following iterative computation given some
+θ^ : 
+
+  θ^=argmaxθq)≡argmaxθ피logfθ|y,θ^=argmaxθ∑z∈θg)×logfθ, 
+
+where
+피·|y,θ^ is the expectation operator taken with respect to the conditional distribution of z given y and
+θ^θ is the set of all valid reaction trajectories that are consistent with y, and
+g) represents the unknown conditional density of z. the theory behind the em algorithm guarantees that equation  will converge to estimates that locally maximize the observed data likelihood, given n sufficiently large . unfortunately, we cannot work with equation  directly, as an explicit evaluation of the summation is intractable. instead, we use a monte carlo extension of em 
+ <cit>  that samples reaction trajectories using the direct method of the ssa to approximate
+θ^: 
+
+  θ^≈argmaxθ∑k=1kizk∈풵×logfθx <dig> zk=argmaxθ∑k′=1k′logfθx <dig> zk′, 
+
+where
+zk is the kth ssa trajectory simulated using the parameter vector
+θ^izk∈풵 is an indicator function taking a value of  <dig> if
+zk is consistent with y, and k is the total number of simulated trajectories. equation  presents a simplified expression in which k′ indexes only the k′ simulated trajectories that are consistent with the observed data. in practice, we set k to the value that leads to the desired number of consistent trajectories k′. we note that equations  and  describe a rejection sampling approach to generating reaction trajectories conditional to the observed data, in which only those simulated trajectories consistent with data are retained and all others are rejected. in practice, we simulate trajectories incrementally between two data points at a time, further propagating only those trajectories that pass through the second data point exactly. although this incremental approach is much more efficient than performing rejection sampling across full length trajectories, as we describe below it can still be computationally prohibitive.
+
+by simplifying equation  with the same procedure used to derive equation 
+ <cit> , we obtain an iterative, mcem version of the mle for each reaction: 
+
+  θ^j=∑k′=1k′rjk′∑k′=1k′∑i=1rk′+1hj)τik′. 
+
+equation  is analogous to equation , with trajectory features having an added subscript k′ and superscript .
+
+an open question in the use of mcem involves efficient selection of the numbers of consistent trajectories k′ and iterations n. we adopt the ascent-based mcem algorithm
+ <cit>  for this task, which suggests increasing k′ at each iteration according to an estimate of the current monte carlo error and terminating the algorithm when the estimated change in conditional log-likelihood
+피logfθ|y,θ^ passes below a constant threshold. specifically, we set the initial value of k′ to  <dig> and the sample size increment parameters αβ, and k to their respective default values of . <dig>  . <dig>  and  <dig>  we terminate the algorithm when an upper bound of the change in conditional log-likelihood  was less than . <dig> for three consecutive iterations .
+
+accelerating mle computation
+equation  requires the generation of k′ trajectories that are consistent with observed data. for datasets with closely spaced time points and reasonably accurate initial parameter estimates
+θ^, this task may be computationally feasible. for the more realistic case of a sparse dataset and inaccurate values of
+θ^, it quickly becomes intractable, as the simulation of even one consistent trajectory is an extremely rare event. in light of this fact, we adapt methods from rare event simulation to substantially accelerate the use of mcem. below we describe the incorporation of three techniques: the cross-entropy method, multilevel splitting, and parameter perturbation. specifically, we employ these three techniques together as a standalone algorithm to quickly compute plausible parameter estimates
+θ^ce . we then use these parameter estimates as input to an otherwise unmodified ascent-based mcem algorithm, which further refines the estimates until mles are obtained. the advantage of this two-step process is that we retain all of the desirable properties of mcem while dramatically accelerating the time to convergence .
+
+the cross-entropy method
+the cross-entropy  method was first developed by rubinstein
+ <cit>  to accelerate the simulation of stochastic rare events. since that time, the method has been used in many contexts, including combinatorial optimization
+ <cit>  and stochastic biochemical modeling
+ <cit> . briefly, the ce method begins by simulating k trajectories using an initial parameter vector
+θ^. next, a subset of ⌉ρk⌉ trajectories  that are closest to a given system state  is selected and used to compute a better parameter estimate
+θ^. this process is then repeated until all ⌉ρk⌉ subset trajectories reach the given state, upon which the algorithm computes a final parameter vector
+θ^ce and terminates. unless otherwise noted in the examples below, we set k= <dig> and ρ=. <dig>  which were shown empirically to confer good performance .
+
+when applied to the task of stochastic parameter estimation, the ce method proposes an iterative optimization very similar to equation : 
+
+  θ^=argmaxθ∑k=1ki,y)≤δ)×logfθ) 
+
+where
+d,y) is a user-defined function measuring the distance between a simulated trajectory and the observed data, and δ is the th  quantile of distances achieved by the k simulated trajectories. in this work, we choose d to be a normalized l <dig>  distance evaluated at each observed time point for each observed species . upon simplification of equation , we obtain the following expression for each ce reaction parameter: 
+
+  θ^j=∑k=1ki,y)≤δ)×rjk∑k=1ki,y)≤δ)×∑i=1rk+1hj)τik. 
+
+once δ= <dig>  equation  is used a final time to obtain
+θ^ce and the algorithm terminates. if we then set
+θ^≡θ^ce for mcem, we expect that on average only k′/ρ total trajectories must be simulated to provide k′ consistent trajectories. generally speaking, the algorithm is guaranteed to terminate provided ρ and k′ are sufficiently small and sufficiently large, respectively . as will be shown below, use of the ce method coupled with mcem provides enormous computational savings when compared to mcem initiated with arbitrary parameter values.
+
+multilevel splitting
+if the observed data consist of many time points, simulating a trajectory that passes through all of the data will be extremely unlikely, even when using the true parameter values. consequently, our ce method will require a very small ρ  in order to converge in a reasonable number of iterations. as a means of reducing this computational expense, we have added a “divide and conquer” approach with respect to the data inspired by multilevel splitting  methods for rare event simulation
+ <cit> . ms methods divide rare trajectories leading to a given system state into less rare sub-trajectories passing through intermediate states. sub-trajectories that reach the intermediate states in a given time are split into multiple copies, while the others are killed with some probability. in this way, an ensemble of simulated trajectories is gradually enriched for those that reach the state of interest.
+
+a natural definition of a sub-trajectory in the context of observed data is the portion of a trajectory from time  <dig> to a recorded time point ti≤td. starting from t= <dig> for a given iteration of our ce method, we simulate k trajectories only until the first observed time point, giving rise to the sub-trajectories
+,z <dig> ,…,z <dig> k), where the first subscript of
+zi,k denotes a sub-trajectory spanning the time interval . we then compute the distance
+d,y1) of each sub-trajectory with respect to the first observed data point y1≡. sub-trajectories falling in the th quantile of distances  are “split” by sampling from them with replacement to generate k new trajectories, while the remaining trajectories are killed. the new trajectories are simulated forward to the second observed time point to yield
+,z <dig> ,…,z <dig> k), and the distances
+d,y2) are computed ). as before, sub-trajectories are split according to their distances from the observed data, and the process is continued until trajectories reach the final time point. the resulting k trajectories, enriched for sub-trajectories passing close by observed data, are used as input to equation  to update the parameter estimates, after which the next ce iteration begins. figure
+ <dig> illustrates this overall process of splitting combined with the ce method. we note that setting ρ′= <dig> results in a nearly unmodified ce method as described above, and the amount of trajectory splitting can be easily tuned to the desired level by changing ρ′ accordingly.
+θ^, we first simulate an ensemble of k trajectories from the initial system state  until time t <dig>  . the ending states of the ⌉ρk⌉ trajectories closest to the first observed data point  are sampled with replacement to provide starting states for the next simulation interval. we then simulate a second ensemble of k trajectories starting at time t <dig>  until reaching t <dig>  here, we select the ⌉ρk⌉ trajectories spanning the interval  that are closest to the first and second data points  and use them to initiate the third simulation ensemble. we repeat this process until reaching t <dig>  at which time we compute the first set of parameter estimates
+θ^ using the ⌉ρk⌉ trajectories closest to all data points . using
+θ^, we begin the process again at t= <dig>  producing the green traces. finally, using
+θ^ to generate the blue traces, we obtain ⌉ρk⌉ trajectories coinciding exactly with all data points, which we use to compute
+θ^ce≡θ^.
+
+parameter perturbation
+both the ce method and its ms modification rely on the system’s intrinsic variability to refine parameter estimates. if a system exhibits a low level of variability, each selected subset of ⌉ρk⌉ trajectories will not lie much closer to the data than the other trajectories. this will result in a slowly progressing algorithm. to overcome this potential problem, we have introduced a parameter λ∈ <cit>  which we use to independently perturb the components of the current parameter estimate for each simulated trajectory over each of the observed time intervals. we generate
+θ~j,i,k  as follows: 
+
+  θ~j,i,k∼uθ^j,θ^j), 
+
+where u is a uniformly distributed random variable with minimum and maximum values a and b, respectively. we simulate each of the d observed time intervals for each of the k trajectories using independently perturbed parameters; thus, equation  is evaluated m×d×ktimes for each iteration m of our modified ce method. depending on the magnitude of λ, this procedure generates substantially more variability in each ensemble of sub-trajectories, leading to faster progression of the ce method. although parameter perturbation is not generally used in rare event simulation, we note that a similar approach is present in iterated filtering versions of sequential monte carlo algorithms
+ <cit>  where the perturbations allow the algorithm to escape from local minima of an objective function. in all examples presented below, we choose λ=. <dig> 
+
+computing mle uncertainty estimates
+an advantage of using mcem to identify mles is the simplicity with which uncertainty estimates can be computed. in general, mles exhibit asymptotic normality; consequently, their covariance matrix can also be estimated using monte carlo simulation
+ <cit> . in order to insure that parameter confidence bounds derived from the mle covariance matrix are positive, we introduce the transformed parameters
+ωj=logθj. due to the functional invariance property of maximum likelihood estimators,
+ω^j=logθ^j, and by modeling
+θ^ as a log-normally distributed random variable ,
+ω^ becomes multivariate normal with mean vector
+ and covariance matrix Σ. we can estimate this covariance matrix using the following expression : 
+
+  −Σ^−1=1k′∑k′=1k′∂2∂ω2logfω+1k′∑k′=1k′∂∂ωlogfω×∂∂ωlogfωt−1k′∑k′=1k′∂∂ωlogfω×1k′∑k′=1k′∂∂ωlogfωt, 
+
+where {·} delimits a matrix, at represents the transpose of vector a, fω is equivalent to equation  with
+exp substituted for θ,
+zk′ is a reaction trajectory simulated using
+θ^=exp, and k′ indexes only the k′ simulated trajectories that are consistent with the observed data. after some simplification, we arrive at: 
+
+  −Σ^−1=−1k′∑k′=1k′∑i=1rk′exphjτik′j+1k′∑k′=1k′rjk′−∑i=1rk′exphjτik′j×rjk′−∑i=1rk′exphjτik′jt−1k′∑k′=1k′rjk′−∑i=1rk′exphjτik′j×1k′∑k′=1k′rjk′−∑i=1rk′exphjτik′jt 
+
+where {·}j is a diagonal matrix with j ranging from  <dig> to m along the diagonal and j is a column vector with j ranging from  <dig> at the top-most element to m at the bottom. all trajectories in equation  are simulated using parameter values
+θ^=exp.
+
+upon solving equation  for
+Σ^, we can compute the coordinates of confidence intervals and ellipses  for ω using the properties of the multivariate normal distribution. we then transform these coordinates by exponentiation to yield  confidence bounds for θ. we note that all of the components of equation  were previously required for computing mles using mcem. in practice, after identifying
+θ^, we simulate one additional ensemble of trajectories to estimate parameter uncertainties. for all examples described below, we use k′= <dig>  in this final computation.
+
+to summarize, our proposed method for accelerating mle identification in stochastic biochemical systems works in three steps: first, it identifies an initial parameter estimate
+θ^ce using a modified cross-entropy method with multilevel splitting and parameter perturbation; second, it uses this initial estimate as input to ascent-based mcem, which is run until convergence to yield
+θ^; third, it uses this mle to compute parameter uncertainty estimates via equation . we provide pseudo-code for the complete method below , which we refer to as mcem2: monte carlo expectation-maximization with modified cross-entropy method.
+
+RESULTS
+we now illustrate the utility of mcem <dig> for estimating unknown parameters by applying it to data from five stochastic biochemical model systems: a pure-birth process, a birth-death process, a decay-dimerization, an auto-regulatory gene network, and a model of yeast-polarization. for each model, we first simulate a single system trajectory  using the ssa for a given final time t. next, we extract data from this trajectory for all species at d equally-spaced time points, where d=t/Δt for a time step Δt. finally, we run mcem <dig> on the dataset and a version of the model where all information about model parameters has been withheld. unless otherwise noted, we set the initial parameter vector for each system
+θ^ equal to a vector of all ones. we display point estimates and confidence bounds for each simulation.
+
+pure-birth process
+a system for which mles can be computed analytically from discretely observed data is the pure-birth process, also known as a homogeneous poisson process. the model is given by the single reaction 
+
+ ∅→θs 
+
+ with initial conditions x0= <dig>  the mle for a given dataset from this model can be easily computed by dividing the number of molecules of s present at the final time point by the corresponding time:
+θ^=xd′/t. by design, both mcem <dig> and standard ascent-based mcem will also return this mle , as any version of em applied to this model ultimately reduces to the exact computation xd′/t.
+
+thus, the only potential difference between mcem <dig> and mcem for this system is the required computing time. to quantify this difference, we generated data for  <dig> pure-birth models, with θ∗, the true value, ranging from . <dig> to  <dig>  for each model, we used t= <dig> and d= <dig>  giving
+Δt= <dig>  we then applied ascent-based mcem and mcem <dig>  both with
+θ^= <dig>  to each dataset and ran until convergence. figure
+ <dig> displays the computing time for both methods as a function of θ∗. we see that the time required for mcem increases dramatically as values of θ∗ depart from
+θ^. the rapidly accelerating computational cost for mcem is due to the rapidly decreasing likelihood of simulating a consistent trajectory as the discrepancy between
+θ^ and θ∗  increases. as shown in figure
+ <dig>  mcem is only feasible to use when
+θ^ is within a factor of two from θ∗. in contrast, the computing time for mcem <dig> stays approximately constant for values of θ∗ less than  <dig> and increases relatively slowly for values greater than  <dig>  this cost increase is due to the simulation cost of firing more birth reactions required for larger θ∗. mcem <dig> does not appear to suffer from a cost associated with the discrepancy between
+θ^ and θ∗.
+θ^= <dig> and varying θ∗  values. blue circles and curve fit depict identical quantities for ascent-based mcem. performance of mcem <dig> is robust to the discrepancy between initial and true parameter values, while ascent-based mcem quickly becomes computationally intractable as the discrepancy increases.
+
+we next investigated the accuracy of mcem <dig> uncertainty estimates. figure
+ <dig> shows the normalized mcem <dig> mles with 95% confidence intervals  for all models. out of  <dig> cis, only eight  do not overlap the true values. this figure matches well with the expected number of missed overlaps =5) and suggests that our asymptotic normality assumption for deriving mle confidence bounds is valid. we note that the relative magnitudes of the cis decrease with increasing θ∗; this is due to the diminishing effect of noise on the system as the average number of reaction firings per unit time increases.
+θ^= <dig> and varying θ∗. error bars denote 95% confidence intervals  for each model. out of  <dig> models tested, only eight  do not overlap the true parameter values  whereas the remaining  <dig>  enclose the truth. this agrees well with the expected 95/ <dig> 
+
+birth-death process
+the second model doubles the number of reactions of the pure-birth process by adding a degradation reaction. the birth-death process takes the form: 
+
+ ∅→θ1ss→θ2∅. 
+
+the presence of a single first order reaction  renders the analytical calculation of mles infeasible. furthermore, computational parameter identification for the birth-death process is significantly more challenging than for the pure-birth process. this challenge stems from the degeneracy present in a discretely observed dataset: the net increase of a single molecule of s can result from any combination of r + 1r <dig> and rr <dig> reaction firings . to evaluate mcem <dig> on this system, we first generated single trajectory data for a model with θ∗= and x0= <dig>  where the system starts in stochastic equilibrium. we used t= <dig> and d= <dig>  giving Δt= <dig>  figure
+ <dig> displays the progression of
+θ^ <dig> and
+θ^ <dig> as a function of mcem <dig> iteration. the modified cross-entropy phase of the algorithm required only three iterations , transforming
+θ^= to
+θ^=. from this point onward, the subset of trajectories given by ρ=. <dig> were consistent with the data, and the mcem phase of the algorithm further modified the parameters to their final values
+θ^=, which were reached upon satisfying the convergence criterion . figure
+ <dig> also includes the results from an additional  <dig> iterations of mcem to illustrate the diminishing returns from running the algorithm beyond the convergence criterion. throughout the mcem phase, we note that the ratio
+θ^2/θ^1≈. <dig>  indicating that multiple parameter values satisfying this ratio are sufficient to generate consistent trajectories. nevertheless, figure
+ <dig> demonstrates that substantial parameter refinement is achieved by running mcem to convergence.
+θ^ <dig> and
+θ^ <dig>  respectively, as a function of iteration number. true parameter values are marked by green and blue horizontal dotted lines. the cross-entropy phase completes in three iterations , followed by  <dig> iterations of mcem until convergence . an additional  <dig> iterations of mcem are included to illustrate the diminishing returns from running the algorithm beyond convergence. although the parameter estimates from the first mcem iteration are far from the true values, their ratio is nearly correct and this ratio is preserved as the estimates are refined toward the true values.
+
+next, we investigated the effect of appending data at additional time points to the original data set. figure
+ <dig> illustrates results from the original and three expanded datasets, all with Δt= <dig>  we display the mcem <dig> mles along with 68%, 95%, and 99% confidence ellipses  that represent parameter uncertainty as a function of both parameters. we see that as d increases,
+θ^ approaches θ∗ until at d= <dig> they are approximately equal. this trend demonstrates the increasing accuracy of mles with increasing d. furthermore, although the true parameter values are always contained within the 95% confidence ellipses, all of the ellipses shrink in size as d increases. this behavior indicates the reduction in estimate uncertainty resulting from the addition of data points. finally, all of the ellipses are clearly skewed, with major axes nearly overlapping the line passing through the origin whose slope is the ratio of the true parameter values . this geometry shows that most of the uncertainty involves the magnitude of the parameters, whereas their ratio can be determined confidently from relatively few data points. we note that the computational run time of mcem <dig>  on each of the four datasets was approximately the same: one hour.
+θ2∗/θ1∗, highlighting that the uncertainties of the parameter ratio are lower than the uncertainties of the parameter magnitudes. for all datasets, the 95% confidence ellipse encloses the true parameter values.
+
+we also compared mcem <dig> performance to that of two recent methods: an mle method utilizing reversible jump markov chain monte carlo coupled with stochastic gradient descent 
+ <cit>  and a bayesian method using a poisson process approximation 
+ <cit> . for the former, we used the provided matlab package to run sgd with the maximum number of iterations set to  <dig> and the initial sample size set to  <dig> . for the latter, we used the provided c code from the author’s web site implementing the program to run the poisson method with tuning parameter . <dig> and total number of iterations  <dig> . these options were chosen to yield sufficient mixing and convergence properties as evidenced by the diagnostic plots from the r package. we then computed the mean value of each parameter to arrive at point estimates. as with mcem <dig>  we set
+θ^= for both methods. figure
+ <dig> displays the sgd and poisson method results for the four birth-death process datasets. when compared to mcem <dig>  all three methods identified parameters with comparable accuracy, with sgd and poisson methods performing better when d= <dig> and d= <dig> and mcem <dig> performing better when d= <dig> and d= <dig>  the confidence ellipses generated by the poisson method were very similar in appearance to those of mcem <dig>  conveying the same information regarding the ratios of the two parameters . as noted above, the sgd method did not provide parameter uncertainty estimates. regarding run time, the poisson method required between  <dig> and  <dig> minutes to identify parameters for the four datasets, while the sgd method needed between  <dig> minutes and several days .
+
+we next modified the birth-death process such that the equilibrium value of species s gradually approached zero. specifically, we created five models with true parameter values
+θ1∗=. <dig> and
+θ2∗ taking the increasing values . to insure that each system started roughly at stochastic equilibrium, we also set x <dig> to each of the following values : . we then generated  <dig> independent datasets for each of the five models, using t= <dig> and d= <dig>  figure
+ <dig> displays boxplots of the mean relative error  when applying mcem <dig> and the poisson method to each of these datasets. although both methods perform equally well for the first three models , mcem <dig> clearly identifies parameters more accurately than the poisson method for the last two datasets . this result illustrates the gradual loss of accuracy of the poisson approximation for systems in which a species tends stochastically to zero. in contrast, mcem <dig>  which generates exact system trajectories using the ssa, experiences no such loss of accuracy. unfortunately, we were unable to evaluate sgd on these modified birth-death process datasets, as the matlab package consistently terminated with an error related to the zero molecule count of s.
+
+decay-dimerization model
+the next system contains reactions involving species decay and dimerization. we begin with the following three reactions, where the dimerization step is reversible: 
+
+ s1→θ1∅s1+s1→θ2s2s2→θ3s1+s <dig> 
+
+ with x0=. we generated ten single-trajectory datasets for a model where θ∗=, using t= <dig> and d= <dig>  we then modified the model such that the dimerization step is no longer reversible, leading to the following description: 
+
+ s1→θ1∅s1+s1→θ2s2s2→θ3∅ 
+
+ with all other properties unchanged. we again generated ten single-trajectory datasets for this model. finally, we evaluated mcem <dig>  the poisson approximation method, and sgd on each of the  <dig> datasets. figure
+ <dig> displays the results for each of the methods in terms of mean relative error. we see that mcem <dig> and the poisson method perform very similarly in terms of accuracy , with a slightly higher error for the irreversible model. in contrast, use of sgd results in higher errors for both models, with the irreversible model consistently yielding estimates with infinite error. this latter error is due to the estimate of θ <dig> quickly tending to infinity, regardless of how small we set the initial gradient descent step size. these results highlight a significant limitation of the sgd method: in order to generate a diversity of consistent trajectories, there must exist combinations of reactions that do not alter species counts. the reversible decay-dimerization model contains such a combination , while the irreversible model does not, leading to a divergent gradient descent.
+
+to further explore the ability of mcem <dig> to estimate parameters for a decay-dimerization, we introduced a third model which adds a conversion reaction to the reversible model above. previously analyzed in
+ <cit> , the precise system description is as follows: 
+
+ s1→θ1∅s1+s1→θ2s2s2→θ3s1+s1s2→θ4s <dig> 
+
+ with x0=. we generated single trajectory data for a model where θ∗=, using t=. <dig> and d= <dig>  figure
+ <dig> shows the data points for each of the three species. given that Δt=. <dig>  hundreds of reactions occur before the first observed time point. as the system evolves closer to its steady state, the number of reaction firings decreases, with only dozens of reactions firing between the last two time points. we note that the initial propensity for reaction r <dig>  is nearly  <dig> times larger than the propensity of its backwards counterpart r3; consequently, we expect observed data to reflect relatively few r <dig> firings .
+
+to investigate the impact of parameter perturbation on the performance of mcem <dig>  we estimated parameters from this decay-dimerization dataset using both λ=. <dig>  and λ= <dig> . figure
+ <dig> shows the progression of each parameter during the cross-entropy phase of the algorithm for both default perturbation  and no perturbation . with λ=. <dig>  the ce phase required only  <dig> iterations before beginning mcem, whereas setting λ= <dig> increased the number of ce iterations to  <dig>  more importantly, the ce phase computing times for perturbation and no perturbation were  <dig> s and  <dig> min, respectively, resulting in a ∼33-fold speedup when perturbing parameters. the reason for this large reduction in computational time is due to the larger parameter values explored by the ce phase without perturbation , which equates to simulating trajectories with many more reaction firings. by using perturbation, mcem <dig> appears to navigate the parameter space more efficiently and hence require much less computational time. we note that three of the four parameters reach approximately the same values at the end of the ce phase in the perturbed and non-perturbed cases, with
+θ^ <dig> providing a slight exception. however, as we show below, the large uncertainty associated with
+θ^ <dig> prevents us from determining whether this parameter is substantially different between the two cases. we thus conclude that perturbation does not systematically alter the final parameter estimates returned by the ce phase.
+θ^ <dig> 
+θ^ <dig> 
+θ^ <dig>  and
+θ^ <dig>  respectively, as a function of cross-entropy  phase iteration number. solid lines display parameter values observed using perturbation , while dotted lines depict parameter values obtained without perturbation . perturbation substantially accelerated completion of the ce phase, both in number of iterations  and, more strikingly, in simulation time . final ce phase parameter estimates were approximately the same whether or not perturbation was used.
+
+figure
+ <dig> displays the mles and pairwise confidence ellipses computed by mcem <dig> when applied to this decay-dimerization dataset. specifically, mcem <dig> returned
+θ^=, which represents a  <dig> % mean relative error when compared to the truth. for all combinations of parameters, the corresponding 68% confidence ellipses enclose the true parameter values, and apart from
+θ^ <dig> these ellipses are relatively compact. as noted above, the uncertainty associated with reaction r <dig> is much larger than for the other reactions, confirming our hypothesis that the dataset contains substantially less information about the backwards rate of the dimerization.
+θ^ <dig> 
+
+auto-regulatory gene network
+to further compare mcem <dig> to the poisson method and sgd, we tested all methods on a system for which sgd was previously shown to perform well: a prokaryotic auto-regulatory gene network
+ <cit> . this system contains the following eight reactions, organized as four reversible pairs: 
+
+ dna+p2→θ1dna-p2dna-p2→θ2dna+p2dna→θ3dna+mrnamrna→θ4∅p+p→θ5p2p2→θ6p+pmrna→θ7mrna+pp→θ8∅, 
+
+ where dnapp <dig>  and mrna  represent dna promoters, protein gene products, protein dimers, and messenger rna molecules, respectively. we set x0≡ =  and generated single trajectory data using θ∗= with t= <dig> and d= <dig>  using the same options as before, we applied mcem <dig> and sgd to this dataset using
+θ^=. we also applied the poisson method using total number of iterations  <dig>  with  <dig> burn-in iterations and  <dig> thinning interval . as in previous examples, we initially used ρ=. <dig> in the ce phase of mcem <dig>  however, this proportion was not small enough to enable the generation of ⌉ρk⌉ consistent trajectories for this system . to compensate, we re-ran mcem <dig> using ρ=. <dig> and k= <dig>  this time, the ce phase completed easily in five iterations.
+
+figure
+ <dig> displays mles for all three methods, as well as the mcem <dig> pairwise confidence ellipses for the four reversible reaction pairs. we see that all methods estimate most parameters with approximately equal accuracy, although mcem <dig> and sgd more accurately determine
+θ1∗ and
+θ2∗, while the poisson method and sgd more accurately determine
+θ5∗ and
+θ6∗. the mean relative errors for mcem <dig>  sgd, and the poisson method were 52%, 20%, and 30%, respectively. the mcem <dig> 95% confidence ellipses enclose all true parameters except
+θ5∗ and
+θ6∗, and as in the birth-death system, all ellipses attribute most of the uncertainty to knowledge of the magnitudes of parameter pairs rather than their ratios. the ellipses generated by the poisson method were skewed in the same manner, conveying similar information regarding parameter ratios . regarding run times, the poisson method was by far the fastest, requiring only  <dig>  hours to estimate parameters. in contrast, sgd and mcem <dig> required  <dig>  and  <dig>  days on a single processor, respectively, to complete.
+θ^= , true parameter values , and mcem <dig> 68%, 95%, and 99% confidence ellipses. a, b, c, and d compare the four reversible pairs of reactions in the system. mean relative errors for mcem <dig>  sgd, and the poisson method were 52%, 20%, and 30%, respectively. mcem <dig> 95% confidence ellipses enclosed all true parameter values except
+θ5∗ and
+θ6∗; like the birth-death system, their skew indicates that the uncertainties of the parameter ratios are lower than the uncertainties of the parameter magnitudes.
+
+in
+ <cit> , the sgd method was also used to identify parameters from datasets where only a subset of species were observed. we modified our original dataset by removing observed molecule counts for species dna and dna−p <dig> at all time points except t= <dig> and re-ran mcem <dig>  upon convergence, we obtained
+θ^= for a 107% mean relative error. this roughly translates to a 2-fold increase in relative error due to a 40% decrease in observed data points. unfortunately, we were not able to compare to the performances of sgd or the poisson method, as neither implementation was executable on datasets with missing species.
+
+yeast-polarization model
+the final system we used to evaluate mcem <dig> models the pheromone-induced g-protein cycle in saccharomyces cerevisiae <cit> . this model consists of the following eight reactions: 
+
+ ∅→θ1rr→θ2∅l+r→θ3rl+lrl→θ4rrl+g→θ5ga+gbgga→θ6gdgd+gbg→θ7g∅→θ8rl, 
+
+ where rl, and rl represent pheromone receptors, ligands, and receptor-ligand complexes, respectively. species g corresponds to a g-protein with separate subunits gagbg, and gd. we used x0≡= and generated single trajectory data for θ∗= using t= <dig> and d= <dig>  figure
+ <dig> displays the data points for all species. as with the final decay-dimerization model, this dataset is sparsely observed, particularly with respect to species gga, and gbg at early time points.
+
+we first tested mcem <dig> on this dataset with
+θ^= and ρ=. <dig>  as with the auto-regulatory gene network, this value of ρ was not small enough to enable the generation of ⌉ρk⌉ consistent trajectories. given the greater computational expense of simulating the yeast-polarization model, we decided against reducing ρand increasing k further until the ce phase converged. instead, we prematurely terminated the ce phase once the distance from the observed data reached a steady minimum value, and proceeded to mcem. this occurred at ∼ <dig> iterations, when δ≈. <dig> . although we expected premature entry into mcem to increase the time required to simulate consistent trajectories in the first few iterations, we did not notice an appreciable trend and mcem converged  in  <dig> iterations. the resulting mles and available 68% confidence intervals  are displayed in table
+ <dig>  mcem <dig> achieved a  <dig> % mean relative error, and all determined cis enclosed the corresponding true parameter values.
+
+we next tested the poisson method on the yeast-polarization dataset, using
+θ^= and the same options as in the auto-regulatory gene network example. table
+ <dig> displays the resulting parameter estimates, along with the 68% cis. compared to mcem <dig>  the poisson method incurred a  <dig> -fold higher mean relative error, and only half of the cis enclosed the true parameter values. although less accurate for this example, the poisson method required substantially less run time than mcem2: three hours versus ∼ <dig> days on a single processor. this difference reflects the significant cost of simulating trajectories with the ssa rather than using a poisson approximation.
+
+finally, we tested sgd on the yeast-polarization dataset using the same options as in previous examples . as in the decay-dimerization model, the sgd estimate for one of the parameters  tended to infinity within nine steps of the algorithm , even when using an initial gradient descent step size as small as 10− <dig>  we then retested sgd using initial parameter values much closer to the truth :
+θ^= and other options unchanged . this is in contrast to mcem <dig> and sgd <dig>  which were run with initial parameter values set to a vector of ones. as before, the same parameter estimate tended to infinity, although this time  <dig> steps were required to do so. although the yeast-polarization system contains combinations of reactions that leave species numbers unchanged, they are evidently not sufficient to allow adequate trajectory generation for a non-divergent gradient descent. table
+ <dig> displays both sets of sgd parameter estimates without cis, as the method does not provide uncertainty estimates.
+
+discussion
+this work presents mcem <dig>  a novel enhancement of mcem that accurately estimates unknown parameters of stochastic biochemical systems from observed data. mcem <dig> combines a state of the art, adaptive implementation of mcem  with algorithms from rare event simulation  to substantially accelerate parameter estimation. unlike a previous application of the em algorithm to stochastic parameter estimation
+ <cit> , which performs an error-prone estimation of likelihood via reaction modification, mcem <dig> concludes by executing an unmodified mcem iteration. this places mcem <dig> on solid theoretical foundations, with the ce phase of the algorithm serving only to accelerate the eventual mcem phase. we note that this acceleration is essential for the method to be useful, as the use of unmodified mcem is computationally tractable only when initial parameter estimates are close to the true values . we demonstrated that the addition of a third technique, parameter perturbation, accelerated execution of mcem <dig> even further, without noticeable effects on the resulting parameter estimates. this was true even when using values of λ  other than . <dig> . if we decreased λtoward zero, the ce phase ran progressively slower with the same final results. if instead we increased λ toward one, the ce phase ran faster for some models while requiring larger sample sizes to converge  for others. this latter effect is due to the increased noise conferred by using larger parameter perturbations. ultimately, we found that by setting λ=. <dig>  we achieved a useful speedup for all models tested without imposing larger sample size requirements.
+
+mcem <dig> requires selection of three additional user-defined quantities to achieve good performance: d, an observed data distance function; k, the total number of simulated trajectories; and ρ, the proportion of trajectories selected that are closest to observed data. for the former, we chose a normalized l <dig>  distance, intended to provide approximately equal weight to each of the system species. although this distance function yielded excellent performance, other functions are certainly possible . however, we note that work performed using the related approximate bayesian computation  methods suggests that the resulting parameter estimates are not sensitive to the choice of the distance metric
+ <cit> . the latter two parameters dictate the number of trajectories ⌉ρk⌉ used to refine parameter estimates at each step of the ce phase. additionally, in order for the ce phase to converge, the proportion of simulated trajectories that are consistent with data in each time interval must be ≥ρin the final step. in the first three models tested in this work, we found k= <dig> and ρ=. <dig> to be sufficient for relatively fast completion of the ce phase. for the auto-regulatory gene network model, these values were not adequate to enable the generation of % consistent trajectories, and we increased k to 105and lowered ρto . <dig> to achieve convergence. similarly, the original values were not sufficient for the yeast-polarization model, although we chose to terminate the ce phase prematurely rather than incur an additional simulation cost by increasing k. this practice did not noticeably impact the time required to execute mcem iterations, which suggests that the actual proportion of simulated consistent trajectories was only slightly less than . <dig>  in general, we suggest starting with k=104and ρ=. <dig> and increasing k only if computationally favorable. otherwise, we would recommend terminating the ce phase when the distance from the observed data reaches a steady minimum value. we note that the ce phase of mcem <dig> with early termination resembles the abc method of toni et al. <cit> , with two important differences. first, the abc method requires a user-defined threshold for selecting simulated trajectories based on their distances from observed data, whereas mcem <dig> automatically chooses this threshold using the parameter ρ. second, the method of toni et al. requires accurate prior bounds on parameter values, whereas mcem <dig> needs no prior parameter information. this latter difference also sets our method apart from the sml and histogram-based approaches for identifying mles
+ <cit> , both of which require prior parameter bounds to execute a genetic algorithm.
+
+another important advantage of mcem <dig> over existing mle methods is the ease with which it can estimate parameter uncertainty. existing mle methods return parameter point estimates, but these estimates carry no measures of confidence or interdependency. in contrast, mcem <dig> returns a multivariate parameter uncertainty estimate. this estimate indicates correlations between particular parameter estimates , along with measures of the information content of the observed data for each unknown parameter . in order to generate uncertainty estimates, mcem <dig> assumes that mles are multivariate log-normally distributed, which can be shown to be true as the number of data points increases asymptotically. however,  <dig> data points appear to be sufficient to satisfy this assumption , with possibly as few as five being acceptable . of the pairwise confidence ellipses generated in this work , we observed only one instance where the true parameter pair did not reside within the 99% confidence ellipse . nevertheless, we note that the true parameter values in this case line up with the major axis of the corresponding ellipse, suggesting that mcem <dig> was still able to correctly identify the ratio of the parameters. we note that bayesian approaches like the poisson approximation method also generate multivariate parameter uncertainty estimates which provide similar information to that given by mcem <dig> 
+
+we compared mcem <dig> to the recently proposed poisson approximation and sgd approaches by applying all three methods to four examples: birth-death process, decay-dimerization, auto-regulatory gene network, and the yeast-polarization model. overall, the results demonstrate that mcem <dig> performs relatively well for all examples. the first example illustrated that predictions made by the poisson approximation method increasingly lose accuracy as species molecule counts tend to zero. mcem <dig> avoids any such accuracy loss due to its exact simulation of consistent trajectories. the second example illustrated a limitation of the sgd method: to function properly, it requires systems to contain combinations of reactions that do not alter species counts. mcem <dig>  imposes no such requirement. the divergence of the gradient descent in the yeast-polarization model also suggests that the mere presence of these combinations of reactions are not sufficient to lead to good sgd performance.
+
+when functioning correctly on larger systems, an advantage of both sgd and the poisson approximation method over mcem <dig> is their lower required computational time. in particular, sgd ran  <dig> -fold faster than mcem <dig> for the auto-regulatory gene network, and the poisson method ran an additional  <dig> -fold faster than sgd. on the yeast-polarization model, the poisson method ran 240-fold faster than mcem <dig>  these speed-ups are due to both methods’ “simulation free” approaches for generating consistent trajectories, which is advantageous for computationally expensive models. although the ce phase of mcem <dig> typically completes in only a few iterations, the mcem phase can require ≥ <dig> iterations, with each iteration modifying the parameter estimates only slightly. thus, a modified version of mcem that takes larger steps in parameter space would further accelerate convergence. such modifications have previously been described in the literature
+ <cit> ; consequently, current work focuses on incorporating these modifications into mcem <dig>  we note that one simple way to reduce the computational time required by mcem <dig> is to simulate trajectories in parallel, using either clusters of cpus  or gpus . since each consistent trajectory can be simulated independently of all others, the computation time of each mcem <dig> iteration can in principle be reduced to the longest time required to simulate a single consistent trajectory.
+
+one final enhancement that would broaden the applicability of mcem <dig> involves accommodating measurement error in the observed data. implementing this enhancement would be relatively straightforward given probabilistic error with known distribution. in this case, we could simply replace the indicator function in equation 4b with the corresponding density function of the error, given a simulated trajectory. this modification would substantially improve the efficiency of mcem <dig>  as any simulated trajectory could now have a nonzero likelihood of generating the observed data . future work will focus on incorporating this enhancement into mcem <dig> 
+
+CONCLUSIONS
+in this work, we developed monte carlo expectation-maximization with modified cross-entropy method , a novel method for maximum likelihood parameter estimation of stochastic biochemical systems. through applying mcem <dig> to five example systems, we demonstrated its accurate performance and distinct advantages over existing methods. we expect these advantages to permit analysis of larger and more realistic biochemical models, ultimately providing an improved mechanistic understanding of important biological processes.
+
+algorithm 1: pseudo-code for ce phase of mcem2
+1:
+θ^←,δ←∞,m←0
+
+2: whileδ>0do
+
+3:
+m←m+1
+
+4:
+t0←0
+
+5:
+rjk←0∀j,k
+
+6: fori= <dig> to ddo
+
+7: fork= <dig> to kdo
+
+8: generate
+θ~i,k≡θ~ <dig> i,k,…,θ~m,i,k by evaluating equation  m times
+
+9:
+t←ti−1
+
+10: ifi=1then
+
+11:
+x←x0
+
+12: else
+
+13:
+x← final state of
+zi− <dig> k
+
+14: end if
+
+15: whilet≤tido
+
+16: compute all hj
+
+17: generate τ,j′ using the ssa with
+θ~i,k,augment
+zi,k
+
+18:
+t←t+τ,
+rj′k←rj′k+ <dig>  update x to reflect the firing of reaction
+rj′
+
+19: end while
+
+20: end for
+
+21:
+δ←th quantile of
+d,yi),…,d,yi)
+
+22: ifi<dthen
+
+23: replace
+zi, <dig> …,zi,k by sampling with replacement from the
+zi,k satisfying
+d,yi)≤δ
+
+24: end if
+
+25: end for
+
+26: compute
+θ^ according to equation 
+
+27: end while
+
+28: returnθ^ce=θ^
+
+algorithm 2: pseudo-code for mcem phase of mcem2
+1:
+θ^←θ^ce,
+n←0
+
+2: while  do
+
+3:
+n←n+1
+
+4: ifn>1then
+
+5: increment k′ as described in
+ <cit> 
+
+6: end if
+
+7:
+t0←0
+
+8:
+rjk′←0∀j,k′
+
+9: fori= <dig> to ddo
+
+10: fork′= <dig> to k′do
+
+11:
+t←ti−1
+
+12: ifi=1then
+
+13:
+x←x0
+
+14: else
+
+15:
+x←xi−1′
+
+16: end if
+
+17: whilet≤tido
+
+18: compute all hj
+
+19: generate τ, j′ using the ssa with
+θ^, augment
+zi,k′
+
+20:
+t←t+τ,
+rj′k′←rj′k′+ <dig>  update x to reflect the firing of reaction
+rj′
+
+21: end while
+
+22: ifd,yi)>0then
+
+23: reset
+zi,k′,
+rj′k′ to values held before step 17
+
+24: go tostep 11
+
+25: end if
+
+26: end for
+
+27: end for
+
+28: compute
+θ^ according to equation 
+
+29: end while
+
+30: returnθ^=θ^
+
+algorithm 3: pseudo-code for computing mcem <dig> uncertainty estimates
+1:
+t0←0
+
+2:
+rjk′←0∀j,k′
+
+3: fori= <dig> to ddo
+
+4: fork′= <dig> to k′do
+
+5:
+t←ti−1
+
+6: ifi=1then
+
+7:
+x←x0
+
+8: else
+
+9:
+x←xi−1′
+
+10: end if
+
+11: whilet≤tido
+
+12: compute all hj
+
+13: generate τ, j′ using the ssa with
+θ^, augment
+zi,k′
+
+14:
+t←t+τ,
+rj′k′←rj′k′+ <dig>  update x to reflect the firing of reaction
+rj′
+
+15: end while
+
+16: ifd>0then
+
+17: reset
+zi,k′,
+rj′k′ to values held before step 11
+
+18: go to step 5
+
+19: end if
+
+20: end for
+
+21: end for
+
+22: compute
+Σ^ according to equation 
+
+23: returnΣ^
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+conceived and designed the experiments: bjdj mkr lrp jn. performed the experiments: bjdj mkr. wrote the paper: bjdj lrp jn. all authors read and approved the final manuscript.
+

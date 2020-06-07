@@ -1,0 +1,96 @@
+BACKGROUND
+the advance of next generation sequencing technologies has made it possible to perform detailed studies of splicing mechanisms among eukaryotic organisms. a popular strategy is to first sequence their transcriptomes, then map the reads to reference databases. in non-model organisms, such reference databases are often unavailable, and de novo transcriptome assembly algorithms are employed to obtain predicted transcripts  <cit> . this is often achieved by first constructing a de bruijn graph structure that contains all branching possibilities  <cit> , then obtaining predicted transcripts based on coverage information along the paths.
+
+in many of these studies, there is often a need to investigate the transcriptomes of two related organisms at the same time in order to study their similarities and differences. in these cases, rna-seq libraries are obtained from both organisms under different experimental conditions and the goal is to compare their transcriptome assemblies. the traditional approach to address this problem is to perform transcriptome assemblies to obtain predicted transcripts for the two organisms separately . similarity comparison algorithms such as blast  <cit>  are then employed to extract corresponding transcripts that are shared in the two organisms.
+
+since predicted transcripts are constructed independently for each organism based on coverage information only, this strategy is often unreliable. to address this problem, we develop an algorithm to allow direct comparisons between paths in the two intermediate de bruijn graph structures by an iterative extension strategy . since sequence similarity information is often more reliable, this strategy allows the direct extraction of shared transcripts based on evolutionary support.
+
+methods
+de bruijn graph
+given a set of reads and a parameter k, a de bruijn graph is constructed by taking each k-mer that appears within the reads as a vertex. two k-mers are connected by a directed edge if the -suffix of the first k-mer is the same as the -prefix of the second k-mer  <cit> . the de bruijn graph implicitly assembles the reads by linking together the overlapping parts, and it is employed as the main intermediate structure by most short read assembly algorithms  <cit> . to obtain a more compact structure, each linear sequence of vertices that have no branches is collapsed into a single node that corresponds to contigs.
+
+iterative extension
+given de bruijn graphs g <dig> and g <dig> that correspond to transcriptome assemblies of two related organisms, we first apply blast to obtain similarity scores between each pair of nodes u from g <dig> and v from g <dig>  we then start the iterative extension process as follows. for each node u from g <dig>  we extract its most similar node v from g <dig> with e-value below a cutoff. if such a node v exists, we retain u as a single-node path. we extend u by one node along all its outgoing edges into multiple paths, and apply blast from each of these extended paths from u against v. if at least one of these extended paths gives a better e-value against v, we retain all the paths that have better e-values and continue to extend the top path that gives the best e-value. we repeat the procedure starting from this new path until the e-value no longer improves. note that only one best direction is chosen since extending in more than one direction is very time-consuming. by starting from each node u in g <dig> independently, the probability of missing the real best path is reduced a lot.
+
+after the above procedure, we have retained u and all the extended paths from u that have improved e-values, with the top path that gives the best e-value being fully extended. we then retain v as a single-node path and perform a similar extension process starting from v by extending it by one node along all its outgoing edges into multiple paths. we apply blast from each of these extended paths from v against all the retained paths from u. if at least one of these extended paths gives a better e-value, we retain all the paths that have better e-values and continue to extend the top path that gives the best e-value. similar to above, we repeat the procedure starting from this new path until the e-value no longer improves to obtain a fully extended path and a set of retained paths from v that have improved e-values .
+
+we then repeat the entire extension procedure in turn in g <dig> and g <dig> by replacing u by the fully extended path from u and comparing against all the retained paths from v, and replacing v by the fully extended path from v and comparing against all the retained paths from u. the entire process is repeated until no more improvements can be made, and the algorithm is applied again by switching the role of g <dig> and g <dig> and repeating all the steps.
+
+to obtain longer paths, we consider the retained paths from each node u and the retained paths from its twin node u′, in which u′ represents the reverse complementary sequence of u on the opposite strand. we merge the twin paths that are complementary to the retained paths from u′ with the retained paths from u, and keep those paths with improved e-values.
+
+extraction of predicted transcripts
+we consider all the retained paths in g <dig> as predicted transcripts in the first organism and all the retained paths in g <dig> as predicted transcripts in the second organism. since the collection of all these retained paths can be very big, we only keep a path if it contains a node in the de bruijn graph that is not covered by another path with a better e-value according to the top blast alignment. in this condition, a node is covered by a path if it contains the node itself or its twin node. to avoid a large number of incorrectly predicted isoforms, we remove paths with worse e-values so that each node in the de bruijn graph along with its twin node appears at most  <dig> times within the final set of paths.
+
+extraction of predicted shared transcripts
+to obtain predicted shared transcripts that have correspondences between the two organisms, we apply blast from each predicted transcript in one organism against the set of all predicted transcripts in the other organism as database. we retain a predicted transcript as a predicted shared transcript if it appears both as a query with blast hits from one direction and as a subject blast hit in the other direction.
+
+RESULTS
+validation
+we implement our algorithm mutual as a postprocessing module of velvet  <cit> , which is a popular sequence assembly algorithm that returns a set of contigs along with the de bruijn graph. we compare our performance to oases  <cit> , which uses output from velvet to construct predicted transcripts. we validate our algorithm by applying it to simultaneously recover transcripts in mouse against rat and in mouse against human from publicly available rna-seq libraries at the sequence read archive  <cit> , including two libraries from mouse in  <cit>  , one library from rat in  <cit>  , and four libraries from human in  <cit>  . we perform quality trimming by removing all positions including and to the right of the first position that has a quality score of less than  <dig>  resulting in a size of  <dig>  g for the mouse libraries,  <dig>  g for the rat libraries and  <dig>  g for the human libraries.
+
+we apply each algorithm over k =  <dig>   <dig>  and over k-mer coverage cutoff c =  <dig>   <dig>   <dig>  in our algorithm mutual, iterative extension is applied twice with an e-value cutoff of  <dig>  using the bl2seq  variant of blast, once with translated blast and once with nucleotide blast. velvet and oases are applied independently in each organism. since oases applies the coverage cutoff itself to obtain a de bruijn graph by modifying velvet's original de bruijn graph without coverage cutoff, mutual is applied on the two de bruijn graphs given by oases to obtain predicted transcripts.
+
+to obtain predicted shared transcripts for both oases and mutual, we apply both translated blast and nucleotide blast with an e-value cutoff of 10− <dig> or 10− <dig> from each predicted transcript in one organism against the set of all predicted transcripts in the other organism as database. the predicted transcripts that appear both as a query with blast hits from one direction and as a subject blast hit in the other direction are retained as predicted shared transcripts. to evaluate the accuracy of the predicted shared transcripts, we apply nucleotide blast to compare them against known mouse, rat or human transcriptome databases using the same e-value cutoff as the one used to obtain the transcripts, which is 10− <dig> or 10− <dig>  to assess the extent of translocated transcripts, we apply gmap  <cit>  to map the predicted shared transcripts to known mouse, rat or human genomes.
+
+predicted transcripts
+tables  <dig> and  <dig> show that mutual constructed less predicted transcripts than oases. note that the predicted transcripts from mutual are obtained by extending similar paths that appear in the two organisms through iterative blast, while the predicted transcripts from oases are obtained independently in each organism. the similarity constraints in mutual ensure that a predicted transcript in one organism has a similar counterpart in the other organism, albeit with a loose e-value cutoff. the later reciprocal blast is needed to enforce more stringent e-value cutoffs. on the other hand, the predicted transcripts from oases have no such constraints, and reciprocal blast is used to obtain shared transcripts.
+
+note that these numbers are not directly comparable between oases and mutual since the predicted transcripts from mutual are obtained by extending similar paths that appear in the two organisms with an e-value cutoff of  <dig>  from bl2seq, while the predicted transcripts from oases are obtained independently in each organism without such constraints.
+
+notations are the same as in table  <dig> 
+
+predicted shared transcripts
+when compared to tables  <dig> and  <dig>  tables  <dig> and  <dig> show that only a small percentage of predicted transcripts were shared in the two organisms, with a smaller decrease by mutual than by oases. the decrease by mutual is due to more stringent e-value cutoffs, while the decrease by oases is due to imposing similarity constraints between the two organisms. while the actual amount of predicted shared transcripts that can be recovered depends on the size of libraries, the evolutionary distance between the two organisms and the experimental conditions, tables  <dig> and  <dig> show that mutual recovered more predicted shared transcripts than oases. almost all these predicted shared transcripts are found in the corresponding known transcriptome database, with comparable percentages between mutual and oases. the percentages are lower in rat, probably due to the fact that the rat genome is less well annotated. the number of predicted shared transcripts decreases as the assembly parameters become more stringent, but these transcripts are of higher quality.
+
+the number in parentheses is the percentage of predicted shared transcripts that have blast hits from each organism to its known transcriptome database.
+
+notations are the same as in table  <dig> 
+
+top blast hits to databases
+by applying blast from each set of predicted shared transcripts in each organism to its known transcriptome database, tables  <dig> and  <dig> show that mutual recovered more shared transcripts than oases, with many more shared transcripts recovered when the assembly parameters are less stringent. when compared to tables  <dig> and  <dig>  there is an effect of diminishing returns since a few thousand more predicted shared transcripts are needed to recover a few hundred more shared transcripts.
+
+
+k_c
+k_c
+only the top hit with e-value below the cutoff is considered. the number in parentheses is the change by mutual over oases.
+
+notations are the same as in table  <dig> 
+
+length distribution of transcripts
+figures  <dig> and  <dig> show that the lengths of predicted shared transcripts recovered by mutual were comparable to the ones recovered by oases, which are slightly shorter in mouse but have slightly higher medians in rat. these transcripts are generally longer when the k-mer coverage cutoff c increases.
+
+recovery of full length transcripts
+the situation is different when considering predicted shared transcripts that are close to full length. tables  <dig> and  <dig> show that mutual recovered more or a comparable number of 80% full length transcripts as oases when the assembly parameters are more stringent, and less 80% full length transcripts than oases when the assembly parameters are less stringent. although mutual performs worst in rat that recovers less 80% full length transcripts than oases, its predicted shared transcripts have slightly higher median lengths when considering all the transcripts together , instead of just the ones that are 80% full length transcripts.
+
+these transcripts are the ones in which 80% of the coding region is included in the best blast alignment from each organism to its known transcriptome database. the number in parentheses is the change by mutual over oases.
+
+notations are the same as in table  <dig> 
+
+presence of translocated transcripts
+as reported by gmap, tables  <dig> and  <dig> show that mutual recovered a much larger number of predicted shared transcripts that are uniquely mapped than oases, while at the same time returning more translocated transcripts that can be considered to be errors due to their rare occurrences  <cit> . the ratio of the number of translocated transcripts to the number of uniquely mapped transcripts is at most about twice as much for mutual when compared to oases. this ratio increases when k decreases or when the k-mer coverage cutoff c increases.
+
+the number in parentheses is the ratio of the number of translocated transcripts to the number of uniquely mapped transcripts.
+
+notations are the same as in table  <dig> 
+
+accuracy of transcript reconstruction
+by investigating the fitness of the alignment between the predicted shared transcripts and the known transcriptome database sequences, figures  <dig> and  <dig> show that with respect to the accuracy of shared transcript reconstruction, there are tradeoffs between precision and recall by mutual when compared to oases. mutual has slightly lower f-scores than oases in most cases.
+
+availability
+a software program that implements our algorithm  is available at http://faculty.cse.tamu.edu/shsze/mutual.
+
+CONCLUSIONS
+we have developed an algorithm that makes use of evolutionary information to simultaneously recover significantly more shared transcripts from rna-seq data in two related organisms that may be missed by traditional de novo approaches. while more shared transcripts are recovered due to the smaller evolutionary distance between mouse and rat, our algorithm can be applied to related organisms that are evolutionarily farther away, such as between mouse and human.
+
+while known transcriptomes are used as databases during validation, one important characteristic of our algorithm is that no reference transcriptomes or a closely related model organism are needed. our algorithm can be used to recover shared transcripts that are specific to two closely related non-model organisms, which may not be present in a related model organism that is evolutionarily farther away.
+
+depending on the size of the de bruijn graphs, our algorithm can take many processor-hours to run. it takes more than  <dig> processor-hours to obtain all the predicted transcripts in mouse against rat or in mouse against human for the least stringent values of k and the k-mer coverage cutoff c. although our algorithm can take much more computational time than the de novo algorithms velvet or oases, the iterative blast searches can be run independently in parallel on a computing cluster. while an additional  <dig> processor-hours are needed to obtain predicted shared transcripts from the predicted transcripts, a similar procedure is also needed for oases. no special memory requirement is needed after the de bruijn graphs are obtained.
+
+one drawback of our algorithm is that only a weak recovery of non-coding regions of mrna is possible since these regions may not be conserved. due to the use of similarity information between two related organisms to extend transcripts, our algorithm cannot identify extended transcripts that are not shared between the two organisms.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+amt and s-hs designed the computational work. sf developed the algorithm and software, did the computational experiments and analyzed the data. all authors wrote, read and approved the final manuscript.
+

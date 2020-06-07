@@ -1,0 +1,101 @@
+BACKGROUND
+next-generation sequencing  technology facilitates genome sequencing in an unprecedented high throughput and cost-effective way  <cit> . since the entire genome sequencing of major model organisms, huge numbers of short reads have been generated at a relatively low cost compared to prior sanger sequencing technology  <cit> . although the cost per read has been decreasing dramatically in recent years  <cit> , a great effort is still required to assemble billions of whole genome short reads in the absence of a reference genome.
+
+alternatively, ngs sequencers can be used to sequence targeted genomic regions from a very large number of samples arranged in multidimensional pools. multi-dimensional pooling, specifically 3-d pooling, has been used to identify a specific individual within a group of up to several thousand individuals with a limited number of pcrs  <cit> . the same concept applies to target-enriched high throughput sequencing libraries. genomic regions are sheared to a specific size range, selectively amplified and then sequenced. experimental design varies depending on the target, yet most involve nested pcr amplification in order to increase the representation of the desired dna sequence segments. different protocols have been developed to achieve the best balance between sensitivity, specificity and uniformity  <cit> .
+
+short-read sequencers can yield tens of millions of reads in a single run, allowing many targets to be sequenced simultaneously as long as the coverage is deep enough for analysis. in mutation discovery, hundreds to thousands of mutants may need to be tested in parallel. a protocol for multiplexed barcoded sample pooling has been developed  <cit> . samples are distinguished by their locations in the multidimensional sample pool, each pool barcoded with a unique short dna sequence. after sequencing, reads can be deconvoluted according to barcodes and coordinates in the sample pool. in an appropriate experimental design, thousands of samples can be sequenced in one run. however, there is at present no available generalized tool for the computational analysis of target-enriched ngs data from multidimensional pools.
+
+here we present insertionmapper, a pipeline tool for the identification of targeted sequences from multidimensional high throughput sequencing data. from the design of primer for different target elements to the arrangement of samples in pools, all parameters are adjustable for specific experiments. identified elements are categorized into two grades, each with an empirical filter threshold. insertionmapper consists of four independently working modules: data preprocessing, database modeling, dimension deconvolution and element mapping. we illustrate the use of insertionmapper with an example from our maize genome project that aims to create a large set of single gene knockouts with a transgenic ds transposon marked with green fluorescent protein . this pipeline tool is applicable to similar situations that require analysis of the tremendous output of short reads produced in ngs sequencing experiments of targeted genome sequences.
+
+implementation
+modules overview
+insertionmapper consists of four modules, each designed for a single function or a group of cohesive functions in the whole workflow . the output from one module sequentially serves as the input for the next module downstream in the pipeline. each module works independently as a stand-alone command-line program, with configurable settings for contingencies of data quality, experimental design and primers. while modules are invoked over a system terminal, tasks can be easily organized by calling them from system shells  for higher efficiency.
+
+modules will be illustrated for the most common scenarios of 3-d pooling  <cit>  with the three dimensions named “plate”, “row” and “column”, though insertionmapper works for even higher dimensions if designed accordingly. one sample is placed in a single unit container  in the sample pool denoted by its 3-d coordinates. there is one enriched targeted sequence in each of our samples, namely the dsg insertion site to be identified by this insertionmapper tool.
+
+data preprocessing
+this module takes high throughput reads from the dna sequencer as input, converts reads format when necessary, and filters out unrelated reads based on experiment design . because of sequencing error, mispriming, and/or the amplification of related endogenous elements in the host genome , raw reads have to be filtered, otherwise the undesired reads would hinder further analysis by diminishing the significance of desired ones. ideally, the output of the data preprocessing module retains only the reads of the target-enriched regions and passes them to the next module. regular expression is adopted for customized filtering requirements, for instance, allowing read mismatches to tolerate minor sequencing errors, extending match length for extra 'identifier sequence’ to exclude misprimed reads, and preloading endogenous elements from a configuration file to avoid them. furthermore, endogenous elements can be also inferred in the dimension deconvolution module.
+
+next-generation sequencers, such as solid and illumina, support the fastq format for raw reads, a text-based format for nucleotide sequences and their quality scores, whereas the fasta format, which includes only sequence composition and annotations, is in more general use because of its simplicity. therefore, in this module, data conversion from fastq to fasta is provided as an option, in case users plan to analyze raw sequences with other tools.
+
+filter criteria comprise barcodes of libraries, primers, and a short piece of 'identifier sequence’. any reads that do not match certain criteria are removed. read prefixes  are trimmed off in the output files since they do not provide information after filtering. for dna transposons, target site duplications  are sliced from full-length reads as index sequences for database operations in the following module.
+
+database modeling
+this module imports tabular text files of filtered reads from the data preprocessing module into a relational database. if there are n types of targeted sequences in all l libraries, the total count of data tables will be n * l. every data table shares the same structure, with fields including sequence index , full-length read and raw read id.
+
+without a powerful database engine, even filtered reads can be overwhelming  for the computer memory to handle. a typical database management system  allows users to add, delete, access, modify, and manipulate massive data very efficiently in terms of memory footprint and cpu usage. especially when reads have to be grouped, sorted, and ranked for every type of targeted sequences in all dimensions, using sequence indices as supported by dbms will save significant computation resources.
+
+insertionmapper eliminates the need for the user to write sql queries by embedding query logic and generating sql sentences on the fly, exchanging data through the jdbc api from the standard java library . considering that users may run insertionmapper on different platforms, an sql connection string could be configured by users with sufficient privilege to make changes to the database.
+
+dimension deconvolution
+the dimension deconvolution module is the heart of insertionmapper. robustness is crucial to the success of deciphering sample coordinates from multidimensional pools since data quality may vary greatly and reads retained through the data preprocessing module can still contain variable noise. the premise of this module is that the chance of a sequence being amplified and sequenced at deep coverage is much higher for the targeted sequences than for undesired noise sequences; on the other hand, any endogenous elements  are inferred by their high coverage in more than 50% of all data pools due to abundance from the host genome background, in contrast to real elements prominent in only  <dig> data pools. once inferred, any endogenous elements can be saved as known ones into a configuration file for future filtering out of undesired reads at the beginning.
+
+read coverage is defined as the number of reads sharing the same sequence indices in one library and is normalized according to the total number of reads in that library in order to reduce bias from sample preparation or sequencing. reads are grouped by their sequence indices to get normalized coverage, and then sorted by coverage in a descending order. thereafter, reads are ranked sequentially from one to the total number of sequence types in the library.
+
+based on the following criteria, deconvoluted targeted sequences are categorized into two grades:
+
+grade-1: for a 3-d pool comprising p plates, r rows and c columns, there are r × c, p × c and p × r genuine elements in each plate, row and column respectively. genuine elements ideally exist with high coverage only in their true p, r, and c dimensions, so the top r × c, p × c and p × r ranking elements in the respective dimensions are taken to be the genuine ones. in practice, we introduce a threshold th_g <dig>  to allow more candidates for screen. in plate, row and column pools, the top th_g1 × r × c, th_g1 × p × c and th_g1 × p × r ranking elements are picked out as grade- <dig> candidates. if a candidate exists in one and only one unique combination of the three dimensions, it is chosen as a grade- <dig> targeted sequence. in rare occasions, candidate elements can be assigned to multiple wells as per their ranks, which should also be recorded for further investigation .
+
+grade-2: ideally, all wells in sample pools are occupied by genuine grade- <dig> elements. in practice, some of them lack viable candidates because of stringent selection criteria, thus requiring the parameters to be loosened in order to identify additional candidates. one possibility is that genuine elements do not have high enough coverage in any pool in a particular dimension, but their coverage in one of the pools is still much higher than in the other pools. therefore, another threshold th_g <dig>  is introduced to include elements with two “good” dimensions, as required by grade- <dig>  and one “not-so-good” dimension, in which elements are beyond grade- <dig> range, but high enough to meet the grade- <dig> threshold.
+
+this module dynamically generates sql queries for all wells, retrieves data from dbms, and applies user-defined criteria to obtain targeted sequences in two grades. ambiguous and suspicious well assignments are marked for further investigation and verification. a set of html pages is generated to present visual summaries of well assignment, along with a fasta format file containing all targeted sequences with their well locations for the next element mapping module.
+
+element mapping
+targeted sequences are mapped to the host genome  based on sequence similarity. a sequence alignment module is not implemented here. instead, the element mapping module takes output from known alignment software  and compares the matched locations to user-chosen genome annotation files.
+
+if targeted sequences come from the same line as the genome used for mapping, all should be mapped to at least one locus. otherwise, unmapped sequences are possibly due to genome structure variation  <cit>  or to an incomplete reference genome.
+
+primers are normally designed for both 5’ and 3’ ends of the insertion element in order to target both sides of the insertion. the sequences generated from each end are filtered and treated independently based on end-specific primers. being mapped to the same location on the host genome constitutes strong evidence that both terminal sequences are genuine.
+
+RESULTS
+the insertionmapper pipeline tool was originally designed for the identification of ds-targeted sequences from ngs data, but should suit most scenarios in which biologists want to identify and map targeted sequences from large multidimensional sample pools using high throughput sequencing technology. the experiment methods we used for ds-targeted sequences are detailed in additional file  <dig> 
+
+identification of ds-targeted sequences
+in our nsf-pgrp-funded project, we are creating a maize reverse genetics resource based on the classical ds transposon  <cit> . the resource consists of a large sequence-indexed library of at least  <dig>  transposants, i.e. lines carrying transposed ds elements, most of which are inserted into a gene or its regulatory region  <cit> . these elements have transposed from single t-dna platforms  <cit>  scattered around the genome. our transgenic dsg  element is marked with the jellyfish green fluorescence proteins , allowing amplification of dsg-adjacent sequences with nested pcr primers based on gfp and the region at the end of ds <cit> . dna samples of pooled transposants are sheared and amplified in multiple phases so as to enrich for dsg elements and their adjacent insertion sites for high throughput ngs.
+
+a 3-d pooling strategy  <cit>  is adopted here to sequence large numbers of transposant samples efficiently. each sample is placed into one of  <dig> wells  on a particular plate, and plates are stacked up to accommodate a large number of samples, each in a 3-d well with unique coordinates. each pool is barcoded with a short unique sequence before being fed into a solid  <dig> sequencer. in practice, the number of samples in each dimension has to be chosen judiciously so as to balance sequencing efficiency with read length after all prefixes to reads  are trimmed off.
+
+the raw data consist of reads assigned to different libraries according to their barcodes. in each run,  <dig> samples in a “cube” of  <dig> plates,  <dig> rows and  <dig> columns generate  <dig> libraries of raw reads from the sequencer.
+
+as shown in figure  <dig>  out of  <dig> samples placed in wells, dsgs from  <dig> wells were identified and 67% of them were anchored to unique loci of the maize b <dig> genome, the only public maize genome. a putative sequence is validated only if confirmed in all three dimensions, as shown in the example in figure  <dig>  among the sample pools, only plate  <dig>  row e, and column  <dig> give the expected pcr band . among unmapped dsgs, some fell in repetitive regions and others did not map to the reference genome of the inbred b <dig>  most probably because our genetic resource is in a w22/b73/a <dig> hybrid genetic background.
+
+dsg transposition in the maize genome
+single-gene-knockout mutants caused by the insertion of transposable elements are of great utility to biologists. we annotated dsgs that transposed into unique loci, based on gene annotations provided by maizegdb  <cit> .  <dig> dsgs had inserted inside or within ± <dig> kb of genes. many of these transpositions will result in loss-of-function mutations, which are powerful tools for biologists to analyze gene function. table  <dig> exemplifies data for  <dig> wells from plate  <dig> and plate  <dig>  each dsg is inserted in a unique location in the maize genome, more interestingly, in an exon of a gene, and has most likely knocked out the function of that gene. a full list of sequence-indexed dsgs can be viewed at our project website http://acdsinsertions.org/showt/dsg.
+
+ <dig> dsgs from plate  <dig> and plate  <dig> are shown with their 3-d coordinates in sample pools , chromosome  locations on the maize b <dig> genome , 8-bp target site duplication  of host junction sequences , sequences within ±1kb to the insertion site , the exon where dsg inserted relative to the total number of exons in that gene  and the gene description. a full list of sequence-indexed dsgs can be viewed at our project website http://acdsinsertions.org/showt/dsg.
+
+scalability and performance
+the main body of insertionmapper is written in the scala programming language, and runs on top of the java virtual machine , which is compatible with all mainstream operating systems. in the data preprocessing module, large-scale raw reads are filtered one by one, where the massive data are not loaded into computer memory at once, causing no memory pressure at all to any modern computer. the filtered reads are then manipulated in dbms that is highly optimized for a huge amount of data. generally the insertionmapper scales very well with raw reads up to tens of gigabytes.
+
+in our last run of the dsg experiment, the  <dig>  gb sized raw reads generated by illumina miseq sequencer comprise ds elements from  <dig> plate pools,  <dig> column pools and  <dig> row pools. on our macpro  <dig>   with  <dig> quad-core intel xeon  <dig>  ghz processors and an  <dig> gb memory, it takes about  <dig> minutes to identify all the target-enriched elements from the huge amount of raw reads. the mysql community server  <dig> . <dig> is used as dbms.
+
+CONCLUSIONS
+insertionmapper is designed for the identification of targeted sequences from multidimensional high throughput sequencing data, and is proven efficacious for the identification of target-enriched dsg elements in our project. pcr assays were conducted to validate the identified sequences. with adjustable parameters and experiment configurations, insertionmapper can save great computational effort to biologists interested in identifying their sequences of interest within the huge output of modern dna sequencers.
+
+availability and requirements
+project name: insertionmapper
+
+project home page:https://sourceforge.net/p/insertionmapperorhttp://bo.csam.montclair.edu/du/insertionmapper.
+
+operating systems: mac os x, windows, and unix-like operating systems that support java virtual machine version  <dig>  or above.
+
+programming language: the main body of insertionmapper is written in scala  <dig> , while sql scripts are used in the configuration file for database manipulation.
+
+license: gnu
+
+any restrictions to use by non-academics: no
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+designed and wrote the software: wx cd. created dsg launching platforms: yl hkd. performed the pcr validation experiments: lh. analyzed the data: wx lh hkd cd. wrote the paper: wx hkd cd. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+experiments methods.
+
+click here for file
+
+ acknowledgments
+the authors would like to acknowledge funding support for the dsg research from nsf-pgrp grant # <dig> and for the computer cluster on which insertionmapper is deployed from nsf grant # <dig> 

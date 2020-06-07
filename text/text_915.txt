@@ -1,0 +1,236 @@
+BACKGROUND
+accurate and fast identification of pathogens is a crucial task for public safety and health  <cit> . genomic sequencing provides a high resolution methodology for epidemiological studies and has recently been applied in cases such as cholera outbreaks in haiti and escherichia coli spread in germany  <cit> . one approach in such investigations is to use ‘naive mapping’, where alignment software is used to classify clinical and metagenomic sequenced reads to determine the strain involved . more recently, frameworks have been developed that incorporate read mapping to classify sequencing data to the correct strain. such frameworks typically align reads to the entire reference , whereafter ambiguous alignments are for example reassigned using the joint probabilities of the mapped reads, or use a genomic marker approach such that reads are aligned to a reference of genes  <cit> . sequence alignment is hence critical in both the naive mapping approach and classification frameworks, which by default typically utilize software such as blast  <cit>  or bowtie <dig>  <cit>  but also allow the use of other alignment methods.
+
+many alignment methods use finite state automa , which provide an efficient and powerful means of finding the optimal alignment between two sequences. the chance of a match, deletion, or insertion in an fsa is assigned a ‘score’, where a score can be interpreted as a log-likelihood ratio for each of these events. it is hence important to utilize scores that accurately represent the true event probability distributions. although it is known that higher order genome nucleotide distributions contain unique information, and vary significantly across different types of organisms , standard fsas are limited to 0th order likelihood representations that are often approximated using integer values.
+
+efforts have been made to develop fsas that use higher order likelihoods, and crooks et al.  <cit>  for example extended the smith-waterman algorithm  <cit>  for dipeptide protein alignment. their model uses a pairwise substitution score matrix that contains approximated log-likelihood values for dipeptide combinations at different distances apart , while indels are handled using standard gap alignment penalty scores. no significant improvement was observed compared with the standard smith-waterman algorithm however. hara et al.  <cit>  extended this model to include estimated transition probabilities between dipeptide alignments, and improved protein alignment performance when they modified multiple sequence aligner tcoffee  <cit>  with their method. more indirect methods have also been developed, where lu and sze  <cit>  applied a post-alignment algorithm that re-calculates alignment scores by using an average across a position and its neighboring sites. their method was applied to different multiple sequence aligners and significantly improved protein alignment performance.
+
+although extended fsas have shown promising improvements, they have primarily been designed for multiple protein sequence alignment and do not model probability distributions directly. they are also limited to dipeptides or post-alignment processing, and use standard gap penalties for indels. thus for nucleotide sequence alignment and classification, a different model may be more suitable.
+
+paired hidden markov models  are very similar to fsas but use probabilities instead of scores, and are thus well suited if we want to directly model the probability distributions for different alignment events. higher order hmms in particular, can provide a more detailed representation of alignment distributions than fsas and 0th order hmms, but their application in sequence alignment has so far been very limited. this is partly because paired hmms can be slow, but also due to additional complexities that are introduced by higher order models.
+
+attempts to move beyond a standard 0th order paired hmm for sequence alignment has hence been more limited than the case of fsas, though nánási et al.  <cit>  recently developed two different types of hmms that are able to use previous sequence information to process tandem repeats. both of their models use a standard paired hmm, but in their first model they add profile hmm states to handle repeats, while in their second model they extend the standard model with states that follow the implementation in the repeat finder tantan  <cit> ; an hmm developed for detecting repeats in single nucleotide/protein sequences. nánási et al. do not model probability distributions, but instead utilize estimated indel and mutation rates based on earlier studies. their models have so far only been tested in simulated scenarios but show a promising approach for scoring repeat regions differently than other parts of a sequence.
+
+in addition to the nánási et al.  <cit>  models, hmms have been developed that correct alignments of homopolymer regions when using ion torrent reads  <cit> . such methods do not utilize higher order models to capture general matches and indels, but specifically model repeats of different lengths. as these approaches correct existing alignments, they are complementary to read alignment and can further improve results in the case of homopolymer sequencing errors.
+
+although it is common to use sequence alignment when performing pathogen classification with sequenced dna, alternative approaches have been developed for classifying guanosine triphosphate proteins  and protein folds, which use techniques such as neural networks  <cit> , random forests  <cit> , and profile-based composition vectors  <cit> . such techniques rely on at least one descriptor such as hydrophobicity or secondary structure, and for example perform linear interporlation to normalize sequence lengths, so it is unclear how well such models can be applied in the case of classification based on dna reads. their use of sequences and data dimension reduction offer an interesting approach however, and may provide benefits if adopted for next generation sequencing and classification.
+
+we here present a variable order paired hmm for sequence alignment and read classification that we term varhmm, which addresses higher order modeling issues and exploits similarities between reads to improve processing time. in contrast to previous methods, we directly model probability distributions for higher order alignment and indel likelihoods, and our method has been developed for nucleotide sequence alignment and classification. varhmm uses the same states as a standard paired hmm, and is not mutually exclusive with hmms such as the nánási et al.  <cit>  models, and can for example be extended with states to handle tandem repeats. our model is applicable for distinguishing amongst known bacterial strains, and is evaluated in classification tests where it is compared with commonly used alignment software packages as described in the results section. several different next generation sequencing methods can be utilized for pathogen classification, and we focused on reads from ion torrent sequencing which offers a fast and viable method for pathogen detection  <cit> .
+
+implementation
+sequence data and aligners
+our alignment method varhmm, is based on a higher order paired hmm implementation. we implemented varhmm as well as 0th, 1st, and 2nd order models for comparison . in the following, we describe how seeding, alignment, and training are performed, and how varhmm and the higher order paired hmms were implemented.
+
+sequence alignment using paired hmms
+in this section, we briefly describe how the probability of a single alignment is calculated, and in the next section we will explain how this can be used to find the ‘best’ alignment.
+
+all of the paired hmms that we implemented use five states as shown in fig. 1
+a, where for a given alignment, we start with the begin state  and an finish with the end state . we enter a match state  when two nucleotides align, and enter an output state  when there is a nucleotide output in only one of the sequences as can be seen in the example in fig. 1
+b.
+fig.  <dig> paired hmm: a states and connections: b = begin and e = end states, and m = match, x,y = output states . b example of an alignment between two sequences 
+
+
+
+
+if we use a 0th order paired hmm to align sequence <dig> and sequence <dig> in fig. 1
+b, then the probabilty of their alignment p
+ <dig> is: 
+ p0=abm·p·amm·p·amx·qx·axm·p·amm·p·amy·qy·aym·p·ame 
+
+
+where the a values denote the state transion probabilities , and for example p is the probability that a matches with a and q
+x is the probability of outputting a t nucleotide in sequence <dig> .
+
+in the case of a 1st order model, the alignment probability of sequence <dig> and sequence <dig> is instead: 
+ p1=abm·p·amm·p·amx·qx·axm·p·amm·p·amy·qy·aym·p·ame 
+
+
+where p for example is the probability that t matches t given the prior alignment between a and a, and q
+y is the probability of outputting a c with a g occurring immediately before in sequence <dig>  when a gap occurs immediately before a match between two nucleotides , then a 0th order model is used to calculate the probability as can be seen in the case of the last match which uses p. as will be described in further detail in the next section, all of the paired hmm models use the highest order possible after previous gaps in the alignment have been taken into account, while varhmm also adjusts the order based on which probabilities have sufficient training data to be considered reliable.
+
+viterbi and higher order paired hmms
+in order to find what we think is the best alignment between two sequences, we compare the probabilities of different alignments. the general idea is to store the different alignment probabilities in an alignment matrix and then use them to find the alignment we think is best. for example, we can use the alignment matrices to store the probability that we align the first nucleotide in sequence <dig> in fig. 1
+b to nucleotide  <dig> ,..., <dig> in sequence <dig>  and then repeat again for sequence <dig> nucleotides 2– <dig> 
+
+there are different ways to implement the alignment matrices and select a final alignment, but one approach is to use the viterbi algorithm  <cit> , which uses the matrices to find the path that gives us the highest alignment probability. figure  <dig> provides a short summary of the viterbi algorithm and how it is implemented with a paired hmm , where fig. 2
+a shows an example of an alignment matrix, fig. 2
+b illustrates how the alignment matrices are traversed for sequence <dig> and sequence <dig>  and fig. 2
+c describes how the alignment with the highest probability is found using viterbi.
+fig.  <dig> finding the alignment using viterbi: a for each state m, x, y we calculate an alignment matrix: each matrix position contains the alignment probability v up until the position i in sequence <dig> and j in sequence <dig> . b example of how the alignment matrices are traversed using the alignment from fig.  <dig>  c to find the alignment with the highest probability: v is calculated for each of the states m: v
+m, x: v
+x, y: v
+y. the probability of transitioning between two states is given by a , and is multiplied by the alignment probability v of the state and position we are coming from =a
+xm·v
+x if going from state x to m). we then transition from the previous state and position which maximizes v
+m for alignment matrix m, and v
+x, v
+y for the x,y matrices. we perform this for each i,j position and always store which previous state was transitioned from. the alignment with the highest probability v
+max can then be found using traceback: given a sequence <dig> of length n and a sequence <dig> of length m, traceback starts from the state given by: v
+max=max{a
+me·v
+m, x: a
+xe·v
+x, y: a
+ye·v
+y} where a
+me, a
+xe, and a
+ye are the transition probabilities from m, x, and y respectively to e
+
+
+
+
+one difficulty with higher order paired hmms is that they need to look back at the preceding nucleotides at each position in an alignment. hmms are designed with the assumption that probabilities in a state are independent however, and so using higher ordered probabilities with a paired hmm and an algorithm such as viterbi introduces difficulties that must be addressed. in particular, a higher order probability is dependent on the preceding alignment, but matches between the preceding nucleotides are not decided until we have calculated the alignment matrices as seen in fig.  <dig>  for example, if there are indels in the preceding aligned nucleotides then we must take them into account when we calculate the higher order probabilities at each position in an alignment matrix. to address this issue, we exploited the same traceback system as the viterbi algorithm to keep track of when an insertion was last made for each position in an alignment. in the following, we consider the alignment between sequence <dig> and sequence <dig> to describe how this functions, and use i and j to refer to the nucleotide positions in sequence <dig> and sequence <dig> respectively.
+
+in the higher order models, the markov order that is used for the alignment probability is dependent on what occurred in the preceding states, which can be seen if we consider the three following examples:
+
+
+
+if we are in the m state, and the previous state produces an indel as shown in the first example, then we utilize an order of  <dig> because the immediate position before our current one contains a gap in sequence <dig>  in contrast, if we are in state x as in the first and second examples, then we only need to be concerned with preceding gaps in sequence <dig> and can ignore sequence <dig> . at each position i,j in the alignment matrix , we therefore count the number of nucleotides since a gap last occurred in either sequence, which we store in matrices x
+c and y
+c: x
+c counts the number of nucleotides since a gap was made in sequence <dig> and y
+c contains the counts for sequence <dig> 
+
+as shown in fig. 3
+a and b, the counts are updated at each position i,j similar to how the viterbi matrices are updated . if we for example enter a match state, then the number of times that we had a nucleotide output in both sequence <dig> and sequence <dig> increases by one, and we therefore increase the xcm and ycm counts by one. this is done by adding a value of one to xc∗ and yc∗, which represent the x
+c and y
+c values that are chosen from the viterbi path when we use the equations in fig. 3
+b . in contrast, if we entered state x, then there was a nucleotide output in sequence <dig> and a gap in sequence <dig>  in this case, we increase the counts for xcx by one, but set ycx= <dig>  by one and set xcx=0). we again update using the counts from the previous state in the viterbi path, as given by xc∗ and yc∗. for initialization at position i= <dig> and j= <dig> all counts are set to zero.
+fig.  <dig> 
+a the viterbi equations, extended for the higher order paired hmms. in addition to the x
+c and y
+c counts, a higher order hmm is also restricted by its order which we term n
+order . the order used to calculate pxinyjn, qxin, qyjn is then taken as the minimum between the x
+c,y
+c counts and n
+order as shown above. b update of count matrices, where xc∗ and yc∗ are the x
+c and y
+c values we from the viterbi path we take in the  equations  c the order used and the x
+c and y
+c values updated at each alignment position for a 2nd order paired hmm . the order used at each position is based on the x
+c and y
+c counts from the previous position and the equations in . for example when a aligns to a at v
+m, the previous alignment position was at  in state x, and so the order used to calculate v
+m is the minimum of [xcx, ycx, n
+order], which is equal to zero as ycx=0
+
+
+
+
+
+the x
+c and y
+c counts are then used to help determine the order when we calculate the probability of an alignment pxinyjn and the nucleotide output qxin, qyjn at each i,j position for the alignment matrices as shown in fig. 3
+a and c.
+
+datasets
+we used sequencing data from e. coli k <dig> substrain dh10b for training and testing. two different sequencing sets from an ion torrent pgm 314v <dig> were used : 1) c24- <dig>  mode read length >200bp  and  <dig> x average coverage, 2) b22- <dig>  mode read length of 400bp  and  <dig> x average coverage . we refer to the first dataset as r <dig> and the second dataset as r <dig>  half of the r <dig> dataset was used for training and the other half testing, which we term r200-train and r200-test respectively.
+
+training
+the training set was constructed by first aligning the r200-train reads to e. coli dh10b with last using its default parameters . only alignments that were greater than  <dig> in length and which had a last mismap probability score less than  <dig>  were used for training. we then utilized maximum likelihood estimation  with this set for all of the pair hmms to estimate initial transition, alignment, and output probabilities . after initialization, we used the viterbi algorithm to re-align all of the alignments in the training dataset with the hmm, and re-estimated all of the probabilities with mle. training was stopped if the difference between the logarithmic values of the total probability of the new and old alignments was less than p
+stop= <dig> , or if n
+it= <dig> iterations was reached .
+
+varhmm: a variable higher order paired hmm
+when training higher order hmms, the training data set might not be sufficiently large to properly capture the higher order distributions in which case the model may perform worse than a lower order hmm. this was noticeable in the training set, where a 3rd order hmm appeared to yield worse results than a 2nd order model. to address this issue, we implemented varhmm, which is a variable order paired hmm. varhmm uses the same implementation as the higher order paired hmms, but for each order , it also counts the number of samples for all of the alignment and nucleotide output probabilities ,p,...etc.). if the counts for a given alignment or output is below a count of c
+min, then a lower-order conditional probability is used . we used a maximum order of  <dig> for both the m and the x and y states, and a value of  <dig> for c
+min.
+
+seeding and alignment
+varhmm and the 0th, 1st, and 2nd order paired hmm models all performed global alignment, and used the same method for seeding and aligning sequences. a detailed description of how this was implemented, as well as parameter values used for all of these models is provided in additional file  <dig> 
+
+RESULTS
+to evaluate varhmm and the different paired hmms, we compared their performance with commonly used alignment software packages: bowtie <dig>  <cit> , last  <cit> , segemehl  <cit> , and tmap . we evaluated each method by aligning reads from e. coli k <dig> substrain dh10b, and focused on classification between substrains as this can be particularly difficult due to the high degree of similarity.
+
+reads from the r <dig> and r <dig> datasets were aligned to a sequence database comprising two genomes: e. coli dh10b  and either 1) e. coli mg <dig> , or 2) e. coli c <dig> . all of the alignment software parameters except for last were set according to caboche et al.  <cit>  .
+
+in each test, if a read was classified to the e. coli dh10b genome it was marked as a correct mapping. if a read was mapped to more than one position it was classified to a genome according to two criteria: 1) if all the aligned positions were in the same genome, then the read was classified to that genome, 2) if the first criterion were not true, then the highest scoring alignment was selected if it was greater than the second best alignment by a given threshold value .
+
+in the case of tmap, the first criterion caused the results to decrease significantly in one of the test sets because it was unable to find any matches in the e. coli dh10b genome for a set of reads . we therefore derived two sets of results for tmap, with one set based on both criteria that we label ‘tmap’ in the plots, and an additional set where only the second criterion was used which we label ‘tmap*’ .
+
+for each alignment method, we compared the percent of wrongly mapped reads with the percent that was correctly mapped. figure 4
+a and b show the results for the first test set, where reads from r <dig> and r <dig> where aligned to e. coli dh10b and mg <dig>  for both the r <dig> and r <dig> sets, varhmm showed the best performance, followed by last which at most points outperformed the 0th, 1st, and 2nd order models. the 1st order model sometimes performed better than the 2nd order model, and illustrates how the performance of a higher order paired hmm can decrease due to insufficient training data as described in the methods section. bowtie <dig> performed slightly better than tmap, while tmap scored higher than segemehl for the r <dig> set in fig. 4
+b but worse for the r <dig> set in fig. 4
+a.
+fig.  <dig> comparison of different alignment methods: a r <dig> reads aligned to dh10b and mg <dig>  b r <dig> reads aligned to dh10b and mg <dig>  c r <dig> reads aligned to dh10b and c <dig>  d r <dig> reads aligned to dh10b and c3026
+
+
+
+
+
+when using both criteria  <dig> and  <dig> for classifying reads, tmap was able to align a small number of extra reads compared with the other alignment methods when the percent of wrongly mapped reads was relatively high in fig. 4
+a and b. in this case, tmap appears to only have aligned reads to dh10b which the other aligners likely matched to both dh10b and mg <dig>  although this benefited tmap in the first test, in the second test with e. coli dh10b and c <dig>  tmap aligned a set of reads to only c <dig> and not dh10b, resulting in a significant number of incorrectly mapped reads.
+c and d show the results for e. coli dh10b and c <dig>  for the sake of visual clarity, the results for tmap are not included but shown in additional file 1: figure s <dig> instead . the results in fig. 4
+c and d show that varhmm again performed the best and was followed by last. bowtie <dig> showed stronger results than tmap*, while the tmap* results were better than segemehl in the case of the r <dig> reads but worse for the r <dig> dataset. although the tmap results in both tests didn’t differ greatly from segemehl and bowtie <dig>  tmap has been designed for ion torrent sequencing, and so the results were lower than expected.
+
+as varhmm was trained using last alignments, the hmm models may have achieved higher accuracy than the other aligners in part due to last’s performance. to rule out this possibility, and also ensure that our estimated parameters  for varhmm were not tailored to the last training data, we trained two separate versions of varhmm with alignments from bowtie and tmap alignments . a comparison was then made between these two versions of varhmm and the other alignment methods, where we used the same parameters for varhmm as before . as can be seen in additional file 1: figure s <dig>  this prompted a smaller decrease in varhmm’s performance compared with the results in fig.  <dig>  but performance was otherwise similar for both varhmm trained with bowtie and with tmap alignments.
+
+unlike the other hmms, varhmm uses c
+min as a cutoff as explained in the “varhmm: a variable higher order paired hmm” section. this posed questions such as how often the c
+min threshold was met during training, and how results would be affected by a smaller training set. an analysis of how frequently the c
+min threshold is met, and what portion of the data the higher orders capture, is described in additional file 1: section s <dig>  . interestingly, increasing c
+min only caused more rare cases to be excluded in the higher order modeling of the m state, while the x and y states were largely unaffected. as an additional control, we trained a varhmm model with half of the last training data that was used to train the varhmm in fig.  <dig> . the results are shown in additional file 1: figure s <dig>  and as can be seen, varhmm showed only very minor changes compared with fig.  <dig>  illustrating how the variable order model can compensate for changes in the training data size.
+
+in addition to the alignment tests performed in fig.  <dig>  we made a more detailed comparison between varhmm and the other aligners to measure how well they could determine a strain using a given set of reads. we implemented a similar test framework as francis et al.  <cit> , who used low coverage datasets to model factors such as use of multiplexed sequencing and contamination of samples from other genomic sources . similar to the results seen in fig.  <dig>  varhmm showed the best performance, followed by last and then bowtie and tmap. the results suggest that an aligner such as bowtie or last is likely to provide the same accuracy when classifying a purified sample to a small number of strains, while varhmm can provide greater accuracy in more difficult scenarios as described in francis et al.  <cit> . our results here also illustrate how varhmm can be applied for pathogen detection, or for example to distinguish between pathogenic and non-pathogenic strains.
+
+a comparison between the run times of the different alignment methods was made using the r <dig> dataset with e. coli dh10b and mg <dig> and can be seen in table  <dig>  all of the aligners were run on a basic system consisting of a  <dig>  ghz intel core i <dig> and  <dig> gb of memory to see if they could run on a relatively lower end system. the paired hmms were the slowest , followed by segemehl. bowtie <dig>  last, and tmap were all significantly faster, though bowtie <dig> had the fastest run time. although varhmm was able to run on a low level system, using more high end specifications such as an intel core i <dig> based system is hence recommended, allowing for run times under an hour.
+
+
+
+CONCLUSIONS
+varhmm achieved the best performance amongst all of the alignment methods that we compared with. although we focused on ion torrent reads, accurately modeling nucleotide distributions is fundamental to alignment of any sequenced data. as such, a higher order based model such as varhmm should also provide advantages with other types of sequencing.
+
+all of the paired hmms were slower than the other alignment methods that we compared with, and future work will be focused on improving algorithm design and implementation to increase speeds. we also limited varhmm to a maximum 3rd order model, but it would be possible to make a more dynamic design that uses higher orders for the output states to further improve performance.
+
+varhmm is complementary rather than competitive to fast aligners such as bowtie <dig>  its relative slowness makes it inappropriate for huge datasets, and its niche is smaller datasets where best-possible accuracy is desired. an obvious example is bacterial strain discrimination, where our results suggest that varhmm can provide better sensitivity and accuracy for more difficult scenarios as described in the results section. in addition to smaller datasets, varhmm could also be applied alongside a fast alignment method for mapping shorter reads as they tend to be harder to align. ultimately, standard zero-order methods will hit an accuracy ceiling that can be broken only by higher-order sequence modelling.
+
+pathogen detection and biosurveillance is crucial for public safety, and accurate classification of reads is fundamental when using epidemiological methodologies. our results show that varhmm can achieve both high accuracy and sensitivity when classifying reads, providing a powerful tool that can be used for pathogen detection. these findings also have important implications going forward, where our results demonstrate the advantages of using higher ordered probability distribution modeling, and suggest that further development of such models would benefit read mapping in a range of other applications as well.
+
+availability and requirements
+
+project name: varhmm
+
+
+project home page:
+https://github.com/gitvarhmm/varhmm
+
+
+
+operating system: windows, mac, linux
+
+
+programming language: c++
+
+
+other requirements: none
+
+
+licence: gnu general public license v <dig> 
+
+additional file
+
+additional file  <dig> supplementary information. this file contains the following sections: s <dig> - details about seeding, alignment steps, and parameter selection. s <dig> - contains details and graphs for additional testing and results described in the results section of the main text. s <dig> - version details for the different aligners. s <dig> - parameters used for last training and alignment, and also last training results. s <dig> - where to download and how to use varhmm software, as well as training results from varhmm. 
+
+
+
+
+abbreviations
+e. coliescherichia coli
+
+fsafinite state automaton
+
+hmmhidden markov model
+
+hmm00th order hidden markov model
+
+hmm11st order hidden markov model
+
+hmm22nd order hidden markov model
+
+varhmmvariable order hidden markov model
+
+electronic supplementary material
+
+the online version of this article  contains supplementary material, which is available to authorized users.
+

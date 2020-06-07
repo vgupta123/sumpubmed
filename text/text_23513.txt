@@ -1,0 +1,268 @@
+BACKGROUND
+stochastic simulation of reaction kinetics has emerged as an important computational tool in molecular systems biology. in cases for which mean-field analysis has been shown to be insufficient, stochastic models provide a more accurate, yet computationally tractable alternative  <cit> . for example, a frequently studied topic is the mechanisms for robustness of gene regulatory networks relative to intrinsic and extrinsic noise  <cit> . in a stochastic mesoscopic model the time evolution of the number of molecules of each species is described by a continuous-time discrete-state markov process. realizations of this process can be generated using techniques such as the stochastic simulation algorithm   <cit> .
+
+if the system can be assumed to be spatially homogeneous, or well-stirred, simulations are simplified considerably compared to a spatially varying setting. however, there are many phenomena inside the living cell for which spatial effects play an important role  <cit> . in such cases, a mesoscopic spatial model can be formulated by first discretizing the computational domain into subvolumes, or voxels. molecular transport processes are then modeled as combined decay- and creation events that take a molecule from one voxel to an adjacent one  <cit> . for appropriate discretizations  <cit> , the assumption of spatial homogeneity holds approximately within each voxel, where reactions can be simulated as in the well-stirred case. the governing equation for the probability density function is called the reaction diffusion master equation  and methods to generate realizations in this framework have been used previously to study reaction-diffusion systems in the context of molecular cell biology  <cit> .
+
+modern experimental techniques can provide information not only on the total copy numbers but also on the spatial localization of individual molecules  <cit> . as such techniques are further developed and spatial models can be calibrated to biological data, methods and software for flexible and efficient simulation of spatial stochastic models will likely continue to grow in importance. as a coarse-grained alternative to detailed microscopic models based on smoluchowski reaction dynamics  <cit> , or other similar microscale simulators such as mcell  <cit> , simulations in the rdme framework are orders of magnitude faster than microscopic alternatives  <cit> .
+
+for most applications, a large number of sample realizations need to be generated to allow for a useful statistical analysis. exploring parameter regimes or estimating responses to different stimuli adds to the complexity so that the generation of tens of thousands of independent realizations is not uncommon. computational efficiency is therefore an important concern and has motivated research in many types of approximate or optimized methods .
+
+despite advances in the development of approximate methods, spatial stochastic simulation in realistic geometries is still challenging. one of the main reasons is the complexity involved in handling the 3d geometry and the associated mesh. the purpose with this paper is to introduce urdme, a modular software framework for spatial stochastic simulation. the goal of urdme is twofold: firstly, it provides applied users with a powerful and user-friendly modeling environment that supports realistic geometries. secondly, urdme facilitates the development of new computational methods by taking care of the technical details concerning the geometry, the mesh generation, and the assembly of local rate constants. by providing a well-defined interface to the modeling environment, new algorithms can be incorporated into the urdme framework as plug-in solvers. we anticipate that this modular structure will facilitate the development and dissemination of advanced simulation methodologies to real-world molecular biology applications.
+
+urdme differs from other public domain software for mesoscopic simulations such as mesord  <cit>  or smartcell  <cit> , in that it uses unstructured tetrahedral meshes to discretize the domain, offering a much greater geometrical flexibility and better resolution of curved surfaces compared to cartesian meshes. urdme shares its utilization of tetrahedral meshes with another reaction-diffusion simulation software, steps  <cit> , which we will discuss later in the paper. one of the defining features of urdme is that it is structured to be highly modular in order to be useful as a platform for developers of the associated computational tools. this design also allows for flexible work-flows for result generation. when used interactively, urdme’s matlab interface provides for convenient model construction and evaluation. since the solvers are automatically compiled into optimized stand-alone executables, urdme can also be used to define batch jobs using the very same matlab interface. in this way, urdme is a convenient platform both in the initial modeling phase as well as when performing high-performance and/or high-throughput computational analysis.
+
+implementation
+in this section we describe how the urdme framework is structured, how it is used to simulate a model, and how to interface with it to add new simulation algorithms. for more details we refer to the software manual  <cit>  included in the software distribution .
+
+overview
+the urdme framework consists of three logical layers connected by well-defined interfaces . at the top level, a third-party software for mesh-generation is used to define the geometry and to generate the mesh. currently, urdme interfaces with comsol multiphysics  <dig> a for this functionality. the middle layer routines in matlab serve as an interactive environment for model construction, and connects the geometry and mesh-handling facilities of comsol with the core simulation algorithms .
+
+with this modular structure, the top level can be replaced by other mesh generation software such as for example gmsh  <cit> , provided that the appropriate interface routines are added to the middle level interface. relying on comsol multiphysics for the geometry definition and mesh-generation provides for a convenient interactive environment for the model construction, allowing advanced models to be formulated quite easily.
+
+the default core solver at the bottom level is an optimized implementation of the next subvolume method   <cit> . since the solver layer is kept separate from the model building interface, new solvers can easily be added to urdme while taking advantage of all of the infrastructure related to model management and post-processing. the data passed to the solvers is well-defined and documented . it is our goal for urdme to grow through the contribution of solvers from the community. one such solver has already been contributed and distributed in this way: the diffusive finite state projection  algorithm  <cit> . additionally, the urdme framework has been utilized in the development of new algorithms  <cit>  and a master equation formulation of active transport on microtubules  <cit> .
+
+using urdme for model development and simulation
+the process of analyzing a reaction-diffusion model with urdme begins with the creation of a comsol model file that defines the geometry of the domain, including  the subdomains where specific localized reactions are to be defined . at this stage, the biochemical species and their associated diffusion rates are also defined. once the model is set up, the mesh generation facilities of comsol are used to create a tetrahedral discretization of the domain. next, this information is exported to matlab via an api connection as illustrated in figure 2a . the interface routines of urdme are then used to assemble the data structures needed by the core simulation routines. this whole process is summarized in figure 2a .
+
+apart from defining the geometry, the user also needs to create two additional program files to be used by urdme. the first is a matlab function , that defines the data related to the actual simulation. this includes the initial distribution of molecules, the stoichiometric matrix defining the topology of the reaction network, a certain dependency graph for events in the model, and the simulation interval . this model file can also be used to define custom configurations for the model, including restricting a species to a specific subdomain, adding modified transport terms, and evaluating expressions over the geometry such that this information can be passed on to the core solver. in this way, urdme supports custom modeling that would be very hard to achieve with a less flexible software architecture. this, we argue, is one of the defining and unique features of the urdme framework.
+
+the second program file a user must create is a templated c-program file that defines the propensity functions for the chemical reactions of the model. this file defines one function for each chemical reaction in the system and are called by the core solver routines to calculate the propensity for each reaction in each voxel. the propensity function template requires the output to depend only on the system state at the current time, but is unique to a voxel and allows for additional data to be passed on to the function. the propensity function file is later automatically compiled and linked with the core solver, resulting in a highly efficient solution procedure.
+
+once the model data structure has been exported to matlab and the model and propensity functions have been defined, the next step is to let urdme execute a simulation of the model. from the users’ perspective, simulation now only requires to invoke the urdme function in matlab with the proper arguments,
+
+>> model = urdme;
+
+the arguments passed are the comsol data structure, the model function, the propensity functions, and various optional arguments. urdme now invokes gcc to compile the propensity function file with the specified solver  to create a dedicated executable for the model. this executable is then invoked using the model and geometry data structure as inputs. note that compilation and execution of the low-level components of the system is fully automatic, and requires no additional action from the user. following a successful execution of the core solver the urdme function returns a modified model data structure with a single stochastic solution trajectory attached to it.
+
+since the layers of urdme are decoupled, it is also possible to execute the solvers in non-interactive batch mode to allow for more flexible result generation and distribution of computations on a multicore platform. for example, to conduct the simulation in background mode and write the resulting trajectory to the file ‘output.mat’ one simply invokes urdme with a few additional arguments,
+
+>> model = urdme;
+
+here, control returns to matlab directly after execution of the solver executable, without waiting for it to complete.
+
+visualization and post-processing are important components in most simulation software. once a urdme simulation is complete, users can easily visualize the spatially varying concentration of biochemical species in their model by using matlab’s interface to the comsol graphics routines. examples of this will be presented in the results section. similarly, most modeling and simulation projects require custom data analysis once the simulation data has been generated. to facilitate this, urdme supports the creation of post-processing scripts in matlab using its native high-level scripting language and computational libraries. examples of complex post-processing routines implemented as matlab functions and scripts are available as part of the example directories in the urdme software distribution package, and in additional file  <dig>  additional file  <dig> and additional file  <dig> 
+
+structure and implementation of core simulation algorithms
+taken together, the components of urdme that was introduced in the previous section create a flexible and expandable platform. while an applied user need not know any details about how a core solver is implemented, a developer of a new simulation algorithm can use the infrastructure to develop a plug-in solver to urdme. figure 2c illustrates the structure of the plug-in solver that implements the dfsp algorithm  <cit> . note the similarities with the flow diagram of the core nsm solver in figure 2b. urdme plug-in solvers have three main components: a makefile, the solver source files, and  a pre-execution script intended to be invoked by the middle-level scripting interface. the solver makefile is used for compiling and building the solver automatically from the matlab interface. the name of this file tells urdme what solver it builds; when urdme is invoked with the option to run a simulation using a specific solver, it will look for a makefile with the correct naming pattern. this makefile then compiles the solver along with the propensity functions associated with the model being simulated into a stand-alone binary executable. hence a different and unique executable is automatically produced for each new combination of model and solver.
+
+the source code of the solver itself can formally consist of any number of files in any language as long as the makefile can create the final executable called by the middle-level interface. to enable a seamless integration with the urdme matlab interface, the urdme c api contains library routines to read and parse the data structures generated by the urdme model files. these api routines will parse all data-structures required by the core nsm solver. a plug-in solver that needs additional input will have to make sure that these are parsed correctly as part of the solver main routines. to pass such additional data to the solver, it need only be appended to the ‘model.urdme’ field, either by the matlab model file, or by a pre-execution script . urdme will then write this data to the solver input file. such a pre-execution script is an optional component of the solver integration. simply put, when executing a model, urdme always looks for a matlab function defined in the file ‘urdme_init_<solver>.m’.
+
+all current solvers are written in ansi-c and use gnu-style makefiles. the process of integrating a simulation algorithm in the urdme framework is described in more detail in  <cit>  and is also exemplified by the source code for the dfsp plug-in that is included in the urdme distribution.
+
+in conclusion, when all the components of a solver is in place as described above, the only difference to an end-user of urdme is a single additional argument
+
+>> model = urdme;
+
+the use of the urdme framework to implement and analyze the performance of a simulation algorithm will be further exemplified in the results section.
+
+RESULTS
+in this section we will use three different examples to illustrate how the design of urdme makes the software framework a useful tool to accomplish different simulation tasks.
+
+in the first example we show how an established model from the molecular systems biology literature is simulated in urdme. this example illustrates the powerful nature of the urdme scripting environment in setting up and conducting a parameter sweep.
+
+in the second example we demonstrate how urdme can aid in the development of efficient simulation algorithms by explaining how a novel method, the diffusive finite state projection   <cit> , was integrated into urdme as a plug-in solver.
+
+as a final example we simulate a model of molecular transport in a neuron. here, the unstructured mesh is a critical feature in order to be able to resolve the complex geometry with a feasible number of voxels. we also show with this example how a model of active, molecular motor driven transport as proposed in  <cit>  can be implemented in urdme to simulate molecular transport in the different parts of the neuron.
+
+simulating min oscillations in e. coli
+in e. coli, the min family of proteins are believed to play a key role in the regulation of symmetric cell division. in a mechanism thought to be self-organized and to function in a manner similar to the formation of turing-patterns, the mind protein oscillates from pole to pole with a period close to  <dig> seconds. another min protein, minc, co-localizes with mind and acts as a repressor for the formation of the cell division site by destabilizing ftz polymerization  <cit> . on average, mind  will spend less time near the center of the cell, allowing the division ring to assemble there. both deterministic and stochastic models of this system have been studied previously in the literature  <cit> .
+
+to illustrate how to use urdme to conduct a parameter sweep we will simulate the min-system for increasing lengths of the bacterium and observe the behavior of the oscillations. the example is representative for how experiments using different sets of parameters can be defined and organized with the current version of urdme. a detailed account for how to create all model files to run simulations of the model from  <cit>  can be found in the software manual  <cit>  in the form of a tutorial. there, the model is run interactively from the matlab prompt as detailed in the previous sections. in order to conduct the experiment outlined here in the same fashion we would have to manually rebuild the geometry and execute the simulations for the different parameter cases. this would be time-consuming and error prone. instead, here we exemplify how to automate such a task by using the matlab scripting environment and the urdme matlab interface. the code block below shows how the parameter sweep can be specified in a simple script in the matlab language. the function ‘coli_model’  was automatically generated from the comsol interface using the model of an e. coli bacterium shown in figure 3a. it was then slightly modified by manipulating the original consecutive solid geometry  description. the geometry of the bacterium is parametrized by creating a copy of the original geometry and then translating it along the x-axis. the union of these two objects is the final geometry and the variable ‘xsep’ specifies the extent of the translation. note that, as shown in figure 3c, the bacterium will ultimately split into two separate geometric objects.
+
+below we show a matlab script that simulates the min e. coli model with varying cell length. % define the parameter space nval = 30; xsep = linspace; xsep = ; %  save results/info.mat xsep for i = 1:nval 
+
+ % generate the e. coli cell by
+
+ % merging two cells with separation
+
+ % xsep along the positive x-axis
+
+ fem = coli_model);
+
+ % run an instance of urdme in
+
+ % background mode
+
+ fem = urdme});
+
+ % save input separately for later use
+
+ save
+
+ ,’fem’);
+
+end
+
+the results of the parameter sweep is summarized in figure  <dig>  figure 3a shows the geometry of a model of an e. coli bacterium with length  <dig>  μmand radius  <dig> μmdiscretized with a tetrahedral mesh. figure 3b shows the temporal average of membrane bound mind obtained in a simulation of the model from  <cit>  with urdme, as well as a time series of pole-to-pole oscillations of the membrane bound fraction of mind. as can be seen, the model predicts a minimum of mind near the center of the cell. figure 3c shows a visualization of the e. coli bacterium at six different lengths, including the temporal average of the relative concentrations of the mind protein. figure 3d shows the stability of oscillations when increasing the ‘xsep’ parameter.
+
+for values of the parameter ‘xsep’ less than about 2μm, coherent oscillations are observed and the mind protein is concentrated at the poles of the bacterium. for larger values, the oscillations cease and mind is distributed evenly in the cell. hence, in order to maintain oscillations also for longer cells, the model needs to be modified in some way. for example, the total copy number of mind is currently kept constant as the cell grows. different initial conditions such as constant concentration can of course be tested with equal ease by making the appropriate changes to the model file.
+
+in this example, urdme is invoked in background mode allowing for several parameter cases to be run in parallel on a multicore workstation. instead of returning the results directly in the workspace, we direct urdme to store the result files and the input files on disk for later post-processing.
+
+developing and benchmarking a new algorithm for spatial stochastic simulation
+generally, a large fraction of the effort in developing simulation tools goes into software infrastructure as opposed to code pertaining to the underlying solver algorithms. urdme is designed to provide that infrastructure. the first two layers of the framework provides handling of geometry and meshing, assembly of diffusion jump-rate constants, model integration, pre- and post-processing and data visualization. in this section we will illustrate how to use urdme’s infrastructure to enhance the development and benchmarking of a new stochastic simulation algorithm, dfsp  <cit> . we will describe the components of this solver and how they are integrated with urdme. this example may therefore serve as a design pattern for algorithm integration into the urdme framework.
+
+since the diffusion intensity scales differently than the reaction propensities with increasing mesh resolution, diffusion events often occur on a faster time scale than the reactions in the system. effectively, as the mesh becomes finer a larger and larger percentage of the simulation events will be diffusion jumps. a similar phenomenon, stochastic stiffness, often occurs in simulations of well-stirred models and has led to extensive methods development  <cit> . the dfsp algorithm is an approximate spatial stochastic simulation algorithm which aggregates a large number of diffusive transfers over a time-step. it does this by calculating the probability distribution of a molecule starting in a given voxel after some fixed time-step τd, and then samples from this distribution to redistribute the molecules. dfsp can in this way give great enhancements in simulation speed at the cost of approximation errors which can be controlled .
+
+integration of a new solver into the urdme framework is designed to be a simple process, with the largest fraction of the required new code being specific to the underlying solver algorithm. urdme solvers have three main components: the solver source code, a makefile, and an optional pre-execution script. the makefile creates a standalone unix executable from the source code. the dfsp solver uses a pre-execution script in matlab to calculate data specific to the algorithm. this data is then added to the input file that urdme creates upon execution of the solver. table  <dig> describes the files that are part of the dfsp solver.
+
+this structure shows the design pattern for solver integration into the urdme framework .
+
+% dfsp performance and error benchmark
+
+% code
+
+tic;
+
+solution = urdme; nsm_simulation_time = toc
+
+nsm_period= find_mincde_period for tau_d = 
+
+       tic;
+
+       solution = urdme;
+
+       dfsp_simulation_time = toc
+
+       dfsp_period = find_mincde_period
+
+       
+
+       error = abs/
+
+       nsm_period
+
+end
+
+in addition to the lower integration overhead of implementing a new algorithm in the urdme framework, urdme allows developers to easily benchmark their solvers. the code block above shows a matlab script that sets up a benchmarking experiment to assess the performance and error of the dfsp solver when simulating the model for min-oscillations described in the first example in this paper. this code also illustrates the calling signature for the function when used with the nsm and dfsp solvers. the dfsp solver takes the additional arguments ‘tau’ as the time-step, ‘max_jump’ as the maximum spatial jump distance, and ‘dfsp_cache’ as the cache file used to store the data specific to the dfsp algorithm. the utility function finds the peak period of the oscillations through straightforward spectral analysis using built-in routines in the matlab scripting environment, again illustrating the advantage of using the scripting layer’s post-processing capabilities. figure  <dig> shows the results of the benchmarking experiment. we find that the dfsp method with  <dig> <τd< <dig>  produces simulation results faster than nsm and with good accuracy in the oscillation period.
+
+active transport in a neuron
+diffusion is the dominating mechanism of molecular transport in prokaryotes such as e. coli, and it was in that context the nsm was first applied  <cit> . however, diffusion is not the only mechanism for molecular transport in eukaryotic cells. intra-cellular cargo can be transported by motor proteins along cytoskeletal structures made up of microtubule and actin polymers  <cit> . molecular motor proteins bind to the cargo and to the filaments and move the cargo along the fiber, always in a specific direction depending on the type of motor and fiber. this transport is usually much faster than diffusion but requires an energy input. vesicles, organelles, mrna and proteins involved in signaling are examples of cargo that are transported in this way inside living cells.
+
+due to the ubiquity of active transport in biological systems, it is important that simulation software have the capability to handle mesoscopic models with general transport mechanisms. in  <cit> , the rdme was extended to include an advection term that models cargo transport on the microtubule network. a simple model of signaling in a yeast cell was considered and urdme was used for model development and simulation. to illustrate both the geometrical flexibility of urdme as well as its capability to model more general transport mechanisms, we show here how to simulate active transport in a model of a neuron with a detailed geometry.
+
+active transport of cellular cargo is of fundamental importance to maintain the highly polarized state of a healthy neuron. in the axon, microtubules are uniformly oriented with plus-end towards the soma and minus-end towards the synapse. kinesin transports cargo in the anterograde direction, from the cell body to the synapse. for example, kinesin drive the transport of synaptic vesicles from the cell body through the axon where they are subsequently docked to the plasma membrane in the presynaptic terminus. dynein drives transport in the opposite direction  in the axon, and may aid in transporting for example rna from the cell body to the dendrites  <cit> . in the dendrites, the situation is more complex than in the axon, since the microtubules form an array of mixed orientation. while the particular motor protein transports cargo in a specific direction on the fibers, a single cargo such as a vesicle can have many different motors bound to it simultaneously and therefore may move in a bidirectional manner  <cit> . the details of how kinesin and dynein-driven transport is coordinated and regulated to achieve differential targeting and localization of cargo is still a largely unresolved issue  <cit> . as an example of a possible mechanism of regulation, the microtubule binding protein tau effects the binding affinity of kinesin to the microtubule, while dynein is less sensitive to elevated tau concentrations  <cit> .
+
+to illustrate how diffusion and active transport can simultaneously be modeled with urdme in the neuron geometry shown in figure  <dig> we consider a straightforward model where a cargo species is transported to different regions of the neuron. the motor proteins are modeled implicitly, that is, we assume that a population of motor proteins is associated to the cargo species at all times. although an approximation, there are recent experimental evidence that the distributions of motors on vesicles are relatively stable  <cit> . table  <dig> summarizes the model. here, the cargo species v  is created uniformly in the cell body . v  can diffuse and bind reversibly to microtubule filaments, either with a kinesin motor as vk or with a dynein motor as vd. when bound to a filament, v  is actively transported in a direction dictated by the kind of motor that is currently active. the cargo can reverse its direction on the fiber in bidirectional transport by letting the currently active motor protein change with some probability . the quotient σkd/σdk then dictates the direction of net transport. finally, v  is uniformly degraded  in the whole neuron so that the total number of cargo v  reaches a steady-state level.
+
+model of active transport of a cargo species v that is transported on microtubule filaments in a direction determined by the orientation of the fibers  and the current motor protein bound to the fiber .
+
+to illustrate the ability of cargo to localize to different compartments of the cell depending on the dominating motor protein we consider the following scenario. first, we let σdk=10σkd, so that on the average, kinesin will spend more time bound to the microtubule than dynein will do. in this case, the cargo will travel through the axon and eventually localize to the axon terminus. after half of the total simulation time has elapsed, the situation is reversed and σkd=10σdksuch that the cargo will localize to the dendrites.
+
+in order to setup this simulation in urdme, a matlab function for the velocity field modeling the average orientation of the fibers at any point in the domain needs to be provided. obviously, specification of this velocity field requires biological knowledge. the ability to work in the matlab environment greatly simplifies parametrization of the velocity field. since this geometry was given as a surface mesh, which is also often the case when the domain is obtained from cell imaging, we have no analytical expression for the parametrization of the geometry to rely on. in this example we want the velocity field to trace the axon and dendrite structures. to achieve this, we first compute surface normals to all triangles on the surface of the neuron. an interpolation table containing vectors with base in the centroids in the triangles of the surface mesh and pointing in the direction of suitably chosen reference points was thus constructed. for simplicity, we only used two different reference points, one near the center of the cell body and the other beyond the axon terminus along the long axis of the axon. the smoothness of the velocity field can easily be improved by adding more reference points. for any point inside the domain, we evaluate the velocity by nearest neighbor interpolation using the interpolation table. from this description of the microtubule network and the information about the mesh, utility routines available as add-ons to the basic urdme package can be used to assemble jump rate constants to be used in the definition of the stochastic transport process in much the same way as for diffusion  <cit> . this procedure may seem complicated at a first glance, but can be performed quite easily in matlab using built-in utility routines. the model files required to run this example can be found in additional file  <dig> 
+
+discussion
+the design of urdme is motivated by both modeling and algorithm development. systems biology investigations are typically computational intensive, and often require large ensembles of trajectories spanning parameter space to match data, or to conduct a sensitivity and robustness analysis.
+
+development of more efficient simulation methods is needed to make such large scale investigations feasible. however, due to the overhead of handling complex geometries, mesh generation and visualization of results, algorithm developers often tend to consider only simple test models in simple geometries, often restricted to one or two spatial dimensions. while this can be enough to illustrate the potential benefits of a new method, the resulting software is often not general enough for use on complex biological models. urdme aims to bridge this gap by facilitating for method developers by providing a large part of the infrastructure needed for simulation of realistic models. we exemplified this in the paper by the extension of the approximate algorithm dfsp to a full 3d simulation.
+
+the theory and methodology for spatial stochastic simulation is still undergoing extensive development, and no single mathematical modeling framework or method has emerged as a de facto standard. the utility of the urdme framework is not restricted to mesoscopic rdme simulations; we have used urdme to develop solvers based on the smoluchowski model and a microscopic–mesoscopic hybrid methods  <cit> .
+
+another benefit of the modular architecture is that it simplifies the use of different execution models for the simulations. as part of work on methods for enactment of computation in grid environments, we are developing a urdme server module that enables remote execution in distributed computing environments  <cit> . this enables highly task-parallel investigations to utilize distributed computational resources such as clusters, grids, and clouds to greatly increase productivity for the end-user.
+
+comparison of spatial stochastic software packages
+to further illustrate the design of our software, we have compared its features to two other publicly available packages for mesoscopic spatial stochastic simulation. table  <dig> shows a comparison between urdme  <dig> , mesord  <dig> , and steps  <dig> . mesord was one of the first software projects aimed at simulation of the rdme. steps was developed for simulation of detailed models of dendrites and synapses, but is generally applicable to a lager set of reaction-diffusion models.
+
+this table summarizes the main differences and similarities between the software packages urdme, mesord and steps.
+
+there are three significant ways a user interacts with a spatial stochastic software package: the environment for model development, execution of a simulation, and post-processing and analysis of the data generated by the simulation.
+
+the interface and model development environment used by urdme and steps are similar in that both are closely tied to a programming language environment: matlab in the case of urdme and python for steps. urdme provides a single function entry point, and models are developed in external programming files. this design pattern follows that of the matlab ode suite. steps provides an object oriented python interface for creation, simulation and post-processing of models. steps claims that a programmatic interface offers significant advantages over non-interactive software interface  <cit>  , and we share this opinion.
+
+the major differences between urdme and steps are the feature set and the performance. the execution platform of urdme is the matlab-comsol environment, thus urdme has full access to the scientific libraries of matlab as well as the advanced geometry and mesh handling interface of comsol. another major difference is one of aim. urdme is developed by a team of biological model developers as well as of algorithm developers, and it aims itself at both communities. this is reflected in its expandable solver interface and performance centric design.
+
+in contrast to the design pattern used in urdme and steps, mesord functions as a command line program that uses an input file in the systems biology markup language   <cit>  format to describe the model. sbml is a community effort with the aim to standardize descriptions of biochemical reaction network models. mesord extends the format with a custom consecutive solid geometry  description of the domain geometry of the model. sbml has been widely adopted as a standard to exchange non-spatial models, but the limitations in its capability to describe spatial models has restricted its adoption for rdme simulations.
+
+the post-processing environment of urdme is closely integrated into matlab. mesord provides a matlab toolbox for analyzing the simulation data files. steps utilizes the python programming environment and packages such as numpy, scipy, and matplotlib for post-processing and analysis.
+
+compared to static xml input files, the programmatic paradigm used by urdme and steps provides a more powerful but also more complex modeling environment. constructing model files using a complete programming language reduces the restrictions imposed on the software by the model format. for example, the model of the neuron presented in the results section could not have been described by an sbml document, nor the extended sbml format used by mesord. since propensities in urdme are defined in a program file, any type of functional propensity can be used in urdme models, including michaelis-menten and hill term style propensities, and even arbitrary logical expressions can be employed.
+
+this offers great flexibility in terms of the models that can be simulated, but also places more responsibility on the end-user. mesord uses mathml as part of the sbml definition, which allows the use of any mathematical expression in the propensities and facilitates handling of units and error checking. this is a powerful and robust, but also a computationally very expensive strategy. the steps reaction object only supports mass action kinetics, which results in an efficient but less flexible strategy.
+
+in addition to having the most efficient and expandable design of the model propensity, urdme also provides the largest set of geometry and mesh model features of the three software packages. urdme supports volume compartments with internal and external 2d surfaces embedded in the 3d geometry, as well as diffusion and reactions on surfaces and in the 3d volume. urdme also supports directed transport  in 3d through an add-on module. steps  <dig>  supports 3d compartments and volume diffusion. it is capable of localizing species to a curved surface embedded in 3d, but does not support surface diffusion. mesord  <dig>  supports 3d compartments and volume diffusion only. to represent cellular membranes, their models typically use a small 3d volume on the exterior of the domain.
+
+in summary, as a consequence of the design of the model environment, mesord is simpler to learn and use than both urdme and steps and also offers a better support for e.g. handling units, but the latter two offer a much more flexible and efficient modeling and simulation environment. in addition to the programmatic environment, both urdme and steps provide limited support for sbml. urdme has an experimental conversion utility that will create templates for the model and propensity file from an sbml description of the chemical reactions, see additional file  <dig>  this utility will be fully included in the next version of urdme. steps provides a function to convert an sbml file into python model objects. in addition to the sbml document defining the biochemical reaction network, both urdme and steps require a mesh describing the model domain geometry be provided.
+
+simulation performance
+to compare the performance of the software packages, we implemented the model of min oscillations in e. coli as described in  <cit>  in each of the three software environments. figure  <dig> shows simulation time as a function of the number of voxels in the mesh. the simulation was run for  <dig> seconds , with the system state recorded every second. a detailed description of the model setup in the different packages can be found in additional file  <dig> and the scripts used for producing these benchmarks are provided in additional file  <dig>  the urdme framework has a strong emphasis on efficient simulation algorithms which is also visible in the figure. urdme clearly outperforms the other packages and we believe that this is in large parts due to urdme’s modular design and the fact that the solver source files and the propensity functions file are compiled into a dedicated executable for each separate model .
+
+the numerical treatment of mesoscopic diffusion
+urdme emphasizes the use of unstructured tetrahedral and triangular meshes to discretize the geometry. unstructured meshes offer distinct advantages over cartesian meshes for resolving complex geometries with non-trivial boundaries and they are more flexible than cut-cell approaches when it comes to describing processes occurring on a curved boundary embedded in 3d space, such as the cell membrane of a spherical cell or the nuclear membrane  <cit> . the first version of urdme was developed as a product of theoretical work on how to obtain mesoscopic diffusion jump constants on triangular and tetrahedral meshes  <cit> . in short, the methodology used by urdme is based on the fact that a numerical discretization scheme for the standard diffusion equation will give jump coefficients that result in mesoscopic simulations that are consistent with both the behavior of mean values of a large ensemble of particles and the probability density function for a single particle diffusing according to brownian motion. the latter is true since the fokker-planck equation for the one-particle probability density function is mathematically equivalent to the macroscopic diffusion equation. urdme currently uses a discretization with the finite element method to obtain the diffusion jump coefficients.
+
+the quality of the tetrahedral mesh is an important aspect of a numerical discretization. an in-depth discussion of the requirements on the mesh for use in the mesoscopic model is given in  <cit> . tetrahedra should not be too irregular, and between regions in the domain with much different resolution, the size of the elements should not grow too fast. this is also true for the solution of pdes, and mesh generation software is aware of these issues and attempts to optimize the meshes accordingly. surface meshes in 2d from state-of-the art mesh generation software such as comsol tend to be of very high quality. in 3d, many meshes will violate the assumptions in  <cit>  to some degree. generation of high quality unstructured meshes is an active area of research due to their importance in industrial applications. the modular design of urdme ensures that we can accommodate new results in this area without major restructuring of the code.
+
+the influence of mesh quality on rdme simulations on unstructured meshes in 3d was studied for several different discretization schemes in  <cit>  using particularly revealing and highly sensitive model problems. they show that unless the meshes are of high quality, discretization errors may lead to small but persisting errors for both the finite element and the finite volume methods, i.e. the convergence properties of the schemes are affected negatively. in some of these cases, simulations using a structured cartesian mesh will have better numerical properties if the geometry permits resolution of the domain with a feasible number of subvolumes. on the other hand, it is not difficult to think of cases for which this is very difficult and for which sensitive processes occur on the parts of the domain which are hard to resolve.
+
+using mesord, surfaces in a 3d model are modeled as volume geometry objects by ensuring that the thickness of the membrane is small compared to its size, approaching a true 2d model as the thickness of the membrane becomes small. unless one desires to resolve some dynamics on such high level of detail as to consider vertical movement of molecules in the membrane, this will be unnecessarily expensive since the mesh elements has to be sufficiently small to resolve the narrow 3d volume. the mesh generation in mesord needs several grid points in the extent of a membrane to give a fully connected diffusion volume  <cit> . with a uniform grid, this will lead to expensive simulations since the size of the voxels necessary to accurately resolve the membrane must be used everywhere in the domain. in order to demonstrate this, we conducted a simple diffusion-only numerical experiment, described in detail in additional file  <dig>  we let molecules diffuse freely on the surface of a unit sphere, and be absorbed by a small circular patch at one of the poles. simulations using urdme are in excellent agreement with the exact solution even for fairly coarse meshes . for example, using an ensemble size of  <dig> molecules to compute the mean absorption time, the error was ≈ <dig> %for a mesh with  <dig> voxels. the computing time to generate the solution was  <dig> seconds. by contrast, for a membrane thickness of  <dig> nm and a voxel size of  <dig> nm, mesord  <dig>  produces a solution with about 14% error using  <dig> voxels and a simulation time of  <dig> hour and  <dig> minutes on the same  <dig>  ghz intel core i <dig> with 8gb of ram.
+
+for complex models with both volume diffusion, surface diffusion, and reactions, it is difficult to predict what impact different sources of error in the diffusion will have on the output metric of interest. for example, for the min system used to benchmark the different software packages in figure  <dig>  urdme, steps, and mesord give quite similar period times of oscillations .
+
+in addition to errors caused by the discretization, errors intrinsic to the rdme mathematical model arise for highly diffusion limited reactions when the voxels become very small  <cit> . to some extent, this can be alleviated using modified, mesh dependent bimolecular reaction rates  <cit> , but there is a critical size of the voxels under which no correction to the traditional rdme can make it consistent with more fine scaled particle based methods  <cit> . since unstructured meshes can more accurately resolve complex geometries, their spatial accuracy is often higher for equivalently sized voxels when compared to cartesian meshes. this can help in avoiding geometrical features of the model to force us to approach the critical regime for the voxel sizes. the combined effects of diffusion discretization error and error caused by small subvolumes were investigated for several additional models in  <cit> . for the examples studied there, it was concluded that the error introduced by small subvolumes in 3d could be a bigger source of error than any numerical discretization errors of the diffusion operator.
+
+CONCLUSIONS
+as demonstrated by the examples in this paper, the urdme infrastructure offers great flexibility at the stage of model construction and execution. using a simple script in matlab, urdme was used to set up and conduct a series of experiments in which the geometry of an e. coli bacterium was automatically varied. in another example, the basic reaction-diffusion modeling framework was extended to include active transport in a highly complex geometry obtained from external cad and meshing software.
+
+the urdme software framework offers unique features for both model and methods developers in computational systems biology. the support of unstructured meshes provides the capability to create models with a complex geometry that closely match the physical descriptions of the systems under study. urdme integrates easily with widely used scientific computing software to provide a versatile platform for mathematical and computational modeling, allowing for the implementation of complex and customized models and pre- and post-processing routines. the modular design ensures extensibility and interchangeability of the third-party tools used for model specification and mesh generation, as well as of the core simulation algorithms.
+
+availability and requirements
+· project name: urdme.
+
+· project home page: http://www.urdme.org.
+
+· operating systems: linux, macos x.
+
+· programming language: c, matlab, bash shell script.
+
+· other requirements: gnu gcc version ≥  <dig> , matlab, comsol multiphysics  <dig> a.
+
+· license: gnu general public license, version  <dig> 
+
+· any restrictions to use by non-academics: none.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+bd, se and ah contributed equally to the design and implementation of the software and to the preparation of this paper. all authors read and approved the final manuscript.
+
+funding
+the swedish graduate school in mathematics and computing , the swedish research council and the linnaeus centre of excellence upmarc , the royal swedish academy of sciences foa08h- <dig>  foa09h- <dig>  foa09h- <dig> , ssf grant a <dig> 02: <dig> , u.s. nsf grant dms- <dig>  u.s doe award de-fg02-04er <dig>  u.s. nsf igert dge-02- <dig>  institute for collaborative biotechnologies grant w911nf-09- <dig> from the u.s. army research office  and the national institute of biomedial imaging and bioengineering of the national institute of health under award number r <dig> eb <dig> . the content is solely the responsibility of the authors and does not necessarily represent the official views of the national institute of health.
+
+supplementary material
+additional file 1
+urdme.tar.gz. the current release of urdme. also available for download via http://www.urdme.org.
+
+click here for file
+
+ additional file 2
+minsweep.tar.gz. model files required to run the first example in the main paper.
+
+click here for file
+
+ additional file 3
+benchmark.tar.gz. model files required to run the second example in the main paper.
+
+click here for file
+
+ additional file 4
+neuron.tar.gz. model files required to run the third example in the main paper.
+
+click here for file
+
+ additional file 5
+urdme_sbml_converter.tar.gz. sbml conversion tool to create urdme model files from a sbml model file describing chemical reactions.
+
+click here for file
+
+ additional file 6
+validation.pdf. simulation results for a simple diffusion problem on the surface of a sphere and for the min system  <cit> .
+
+click here for file
+
+ additional file 7
+urdme_software_comparision.tar.gz. model files and scripts used to conduct the performance benchmark in the discussion section and the simulations described in additional file  <dig> 
+
+click here for file
+
+ acknowledgements
+we would like to acknowledge the contribution by josef cullhed to the implementation of an early version of the software and mark sturrock for his thorough testing of the beta-release. the authors are grateful to per lötstedt, linda petzold, and stefan hellander for valuable inputs during the development of urdme and the writing of this manuscript.

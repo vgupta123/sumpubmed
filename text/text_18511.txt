@@ -1,0 +1,388 @@
+BACKGROUND
+mathematical models of signaling pathways are tools that answer biological questions. the most commonly used mathematical formalisms to answer these questions are ordinary differential equations  and boolean modeling.
+
+ordinary differential equations  have been widely utilized to model signaling pathways. it is the most natural formalism for translating detailed reaction networks into a mathematical model. indeed, equations can be directly derived using mass action laws, michaelis-menten kinetics or hill functions for each reaction according to the observed behaviors. this framework has limitations, though. the first one concerns the difficulty to assign values to the kinetic parameters of the model. ideally, these parameters would be extracted from experimental data. however, they are often chosen by the modeler so as to fit qualitatively the expected phenotypes. the second limitation concerns the cell population heterogeneity. in this case, odes are no longer appropriate since the approach is deterministic and thus focuses on the average behavior. to include non-determinism, an ode model needs to be transformed into a stochastic chemical model. in this formalism, a master equation is written on the probabilities of the number of molecules for each species. in the translation process, the same parameters used in odes  can be used in the master equation, but in this case, the number of initial conditions explodes along with the computation time.
+
+boolean  formalism is another formalism used to model signaling pathways where genes/proteins are parameterized by 0s and 1s only. it is the most natural formalism to translate an influence network into a mathematical model. in such networks, each node corresponds to a species and each arrow to an interaction or an influence . in a boolean model, a logical rule linking the inputs is assigned to each node. as a result, there are no real parameter values to adjust besides choosing the appropriate logical rules that best describe the system. in this paper, we will refer to a state in which each node of the influence network has a boolean value as a network state, and the set of all possible transitions between the network states as a transition graph. there are two types of transition graphs, one deduced from the synchronous update strategy
+ <cit> , for which all the nodes that can be updated are updated in one transition, and another one deduced from the asynchronous update strategy
+ <cit> , for which only one node, of all the possible nodes, is updated in one transition. in the boolean formalism, each transition can be interpreted as a “time” step, though this “time” does not characterize real biological time but rather an event. stochasticity is an important aspect when studying cell populations. in boolean framework, it can be applied: on nodes , on the logical rules , and on the update rules . one of the main drawbacks of the boolean approach is the explosion of solutions. in an asynchronous update strategy, the size of the transition graph can reach 2#nodes.
+
+both logical and continuous frameworks have advantages and disadvantages above-mentioned. we propose here to combine some of the advantages of both approaches in an algorithm that we call the “boolean kinetic monte-carlo” algorithm . it consists of a natural generalization of the asynchronous boolean dynamics
+ <cit> , with a direct probabilistic interpretation. in bkmc framework, the dynamics is parameterized by a biological time and the order of update is noisy, which is less strict than priority classes introduced in ginsim
+ <cit> . a bkmc model is specified by logical rules as in regular boolean models but with a more precise information: a numerical rate is added for each transition of each node.
+
+bkmc is not intended to replace existing tools but rather to complement them. it is best suited to model signaling pathways in the following cases: 
+
+• the model is based on an influence network, because bkmc is a generalization of the asynchronous boolean dynamics. see “examples” section. note that this is a common requirement for most of boolean software.
+
+• the model describes processes for which information about the duration of a biological process is known, because in bkmc, time is parameterized by a real number. this is typically the case when studying developmental biology, where animal models provide time changes of gene/protein activities
+ <cit> .
+
+• the model describes heterogeneous cell population behavior, because bkmc has a probabilistic interpretation. for example, modeling heterogeneous cell population can help understand tissue formation based on cell differentiation
+ <cit> .
+
+• the model can contain many nodes , because bkmc is a simulation algorithm that converges fast. this can be useful for big models that have already been modeled with a discrete time boolean method
+ <cit> , in order to obtain a finer description of transient effects .
+
+previous published works have also introduced a continuous time approach in the boolean framework. in this article, we will first review some of these works and present bkmc algorithm. we will then describe the c++ software, maboss, developed to implement bkmc algorithm and finally illustrate its use with three examples, a toy model, a published model of p53-mdm <dig> interaction and a published model of the mammalian cell cycle.
+
+all abbreviations, definitions, algorithms and estimates used in this article can be found in additional file
+ <dig>  throughout the article, all terms that are italicized are defined in the additional file
+ <dig>  “definitions”.
+
+RESULTS
+bkmc for continuous time boolean model
+continuous time in boolean modeling: past and present
+in boolean approaches for modeling networks, the state of each node of the network is defined by a boolean value  and the network state by the set of node states. any dynamics in the transition graph is represented by sequences of network states. a node state is based on the sign of the input arrows and the logic that links them. the dynamics can be deterministic in the case of synchronized update
+ <cit> , or non-deterministic in the case of asynchronized update
+ <cit>  or probabilistic boolean networks
+ <cit> .
+
+the difficulty to interpret the dynamics in terms of biological time has led to several works that have generalized boolean approaches. these approaches can be divided in two classes that we call explicit and implicit time for discrete steps.
+
+the explicit time for discrete steps consists of adding a real parameter to each node state. these parameters correspond to the time associated to each node state before it flips to another one . because data about these time lengths are difficult to extract from experimental studies, some works have included noise in the definition of these parameters
+ <cit> . the drawback of this method is that the computation of the boolean model becomes sensitive to both the type of noise and the initial conditions. as a result, these time parameters become new parameters that need to be tuned carefully and thus add complexity to the modeling.
+
+the implicit time for discrete steps consists of adding a probability to each transition of the transition graph in the case of non-deterministic transitions . it is argued that these probabilities could be interpreted as specifying the duration of a biological process. as an illustration, let us assume a small network of two nodes, a and b. at time t, a and b are inactive:  =  <cit> . in the transition graph, there exist two possible transitions at t+1:  <cit>  →  <cit>  and  <cit>  →  <cit> . if the first transition has a significant higher probability than the second one, then we can conclude that b will have a higher tendency to activate before a. therefore, it is equivalent to say that the activation of b is faster than the activation of a. thus, in this case, the notion of time is implicitly modeled by setting probability transitions. in particular, priority rules, in the asynchronous strategy, consist of putting some of these probabilities to zero
+ <cit> . in our example, if b is faster than a then the probability of the transition  <cit>  →  <cit>  is zero. as a result, the prioritized nodes always activate before the others. from a different perspective but keeping the same idea, vahedi and colleagues
+ <cit>  have set up a method to deduce explicitly these probabilities from the duration of each discrete step. with the implementation of implicit time in a boolean model, the dynamics remains difficult to interpret in terms of biological time.
+
+as an alternative to these approaches, we propose bkmc algorithm.
+
+properties of bkmc algorithm
+bkmc algorithm was built such as to meet the following principles: 
+
+• the state of each node is given by a boolean number , referred to as node state;
+
+• the state of the network is given by the set of node states, referred to as network state;
+
+• the update of a node state is based on the signs linking the incoming arrows of this node and the logic;
+
+• time is represented by a real number;
+
+• evolution is stochastic.
+
+we choose to describe the time evolution of network states by a markov process with continuous time, applied to the asynchronous transition graph. therefore, the dynamics is defined by transition rates inserted in a master equation .
+
+markov process for boolean model
+consider a network of n nodes . in a boolean framework, the network state of the system is described by a vector s of boolean values, i.e.si∈{ <dig> },i =  <dig> …,n where si is the state of the node i. the set of all possible network states, also referred to as the network state space, will be called Σ.
+
+a stochastic description of the state evolution is represented by a stochastic processs:t ↦ s defined on
+t∈i⊂r applied on the network state space, where i is an interval: for each time
+t∈i⊂r, s represents a random variable applied on the network state space. thus, the probability of these random variables is written as: 
+
+  ps=s∈ <cit> for any states∈Σwith∑s∈Σps=s= <dig> 
+
+notice that for all t, s are not independent, therefore
+ps=s,s=s′≠ps=sps=s′. from now on, we define
+ps=s as instantaneous probabilities. since the instantaneous probabilities do not define the full stochastic process, all possible joint probabilities should also be defined.
+
+in order to simplify the stochastic process, markov property is imposed. it can be expressed in the following way: “the conditional probabilities in the future, related to the present and the past, depend only on the present” . the formal definition of a markov process is a stochastic process with the markov property.
+
+any markov process can be defined by : 
+
+ <dig>  an initial condition: 
+
+  ps=s;∀s∈Σ 
+
+ <dig>  conditional probabilities : 
+
+  ps=s|s=s′;∀s,s′∈Σ;∀t′,t∈i;t′<t 
+
+concerning time, two cases can be considered: 
+
+• if time is discrete: t ∈ i = {t <dig> 
+t <dig> ⋯}, it can be shown that all possible conditional probabilities are function of transition probabilities
+ <cit> :
+ps=s|s=s′. in that case, a markov process is often named a markov chain.
+
+• if time is continuous: t ∈ i = [a,
+b], it can be shown that all possible conditional probabilities are function of transition rates <cit> :
+ρ∈.
+
+notice that a discrete time markov process can be derived from continuous time markov process, and is called a jump process with the following transition probabilities: 
+
+ ps→s′≡ρs→s′∑s′′∈Σρs→s′′ 
+
+if the transition probabilities or transition rates are time independent, the markov process is called a time independent markov process. in bkmc, only this case will be considered. for a time independent markov process, the transition graph can be defined as follows: a transition graph is a graph in Σ, with an edge between s and s′ if and only if
+ρs→s′> <dig> =s|s=s′> <dig> if time is discrete).
+
+asynchronous boolean dynamics as a discrete time markov process
+asynchronous boolean dynamics
+ <cit>  is widely used in boolean modeling. it can be easily interpreted as a discrete time markov process
+ <cit>  as shown below.
+
+in the case of asynchronous boolean dynamics, the system is given by n nodes , with a set of directed arrows linking these nodes and defining a network. for each node i, a boolean logic bi is specified and depends only on the nodes j for which there exists an arrow from node j to i . the notion of asynchronous transition  can be defined as a pair of network states
+∈Σ, written
+ such that 
+
+  sj′=bjfor a givenjsi′=sifori≠j 
+
+to define a markov process, the transition probabilities
+ps=s|s=s′ can be defined: given two network states s and s′, let γ be the number of asynchronous transitions from s to all possible states s′. then 
+
+  ps=s′|s=s=1/γifis an atps=s′|s=s=0ifis not an at 
+
+in this formalism, the asynchronous boolean dynamics completely defines a discrete time markov process when the initial condition is specified. notice that here the transition probabilities are time independent, i.e.ps=s|s=s′=ps=s|s=s′. therefore, the approaches, mentioned in section “continuous time in boolean modeling: past and present”, that introduce time implicitly by adding probabilities to each transition of the transition graph, can be seen as a generalization of the definition of γ.
+
+continuous time markov process as a generalization of asynchronous boolean dynamics
+to transform the discrete time markov process described above in a continuous time markov process, transition probabilities should be replaced by transition rates
+ρ. in that case, conditional probabilities are computed by solving a master equation . we present below the corresponding numerical algorithm, the kinetic monte-carlo algorithm
+ <cit> .
+
+because we want a generalization of the asynchronous boolean dynamics, transition rates
+ρ are non-zero only if s and s′ differ by only one node. in that case, each boolean logic biis replaced by two functions
+riup/down∈[ <dig> ∞[. the transition rates are defined as follows: if i is the node that differs from s and s′, then 
+
+  ρ=riupifsi=0ρ=ridownifsi= <dig> 
+
+where riup corresponds to the activation rate of node i, and ridown corresponds to the inactivation rate of node i. therefore, the continuous markov process is completely defined by all these rup/down and an initial condition.
+
+asymptotic behavior of continuous time markov process
+in the case of continuous time markov process, instantaneous probabilities always converge to a stationary distribution . a stationary distribution of a given markov process corresponds to the set of instantaneous probabilities of a stationary markov process which has the same transition probabilities  as the given discrete  time markov process. a stationary markov process has the following property: for every joint probability
+ps=s,s=s,… and ∀τ: 
+
+  ps=s,s=s,…=ps=s,s=s,… 
+
+notice that instantaneous probabilities
+ps=s of a stationary stochastic process are time independent.
+
+the asymptotic behavior of a continuous time markov process can be detailed by using the concept of indecomposable stationary distributions: indecomposable stationary distributions are stationary distributions that cannot be expressed as a linear combination of different stationary distributions. a linear combination of stationary distributions is also a stationary distribution, since instantaneous probabilities are solutions of a master equation which is linear . therefore, a complete description of the asymptotic behavior is given by the linear combination of indecomposable stationary distributions to which the markov process converges.
+
+oscillations and cycles
+in order to describe a periodic behavior, the notion of cycle and oscillation for a continuous time markov process is defined precisely.
+
+a cycle is a loop in the transition graph. this is a topological characterization in the transition graph that does not depend on the exact value of the transition rates. it can be shown that a cycle with no outgoing edges corresponds to an indecomposable stationary distribution .
+
+the question is then to link the notion of cycle to that of periodic behavior of instantaneous probabilities. the set of instantaneous probabilities cannot be perfectly periodic. they can display a damped oscillating behavior, or none at all . a damped oscillatory markov process can be formally defined as a continuous time process that has at least one instantaneous probability with an infinite number of extrema.
+
+according to theorems described in additional file
+ <dig> , a necessary condition for having damped oscillations is that the transition matrix has at least one non-real eigenvalue . in that case, there always exists an initial condition that produces damped oscillations. for the transition matrix to have a non-real eigenvalue, a markov process needs to have a cycle. however, the reverse is not true: a markov process with a cycle does not necessarily imply the existence of a non-real eigenvalue in the transition matrix. in the toy model of a single cycle, presented in the “examples” section, non-real eigenvalues may or may not exist, according to different values of transition rates.
+
+bkmc: kinetic monte-carlo  applied to continuous time asynchronous boolean dynamics
+it has been previously stated that a continuous time markov process is completely defined by its initial condition and its transition rates. for computing any conditional probability , a set of linear differential equations has to be solved . theoretically, the master equation can be solved exactly by computing the exponential of the transition matrix . however, because the size of this transition matrix is 2n×2n, the computation soon becomes impossible if n is large. to remedy this problem, it is possible to use a simulation algorithm that samples the probability space by computing time trajectories in the transition graph.
+
+the kinetic monte-carlo
+ <cit>   is a simple algorithm for exploring the probability space of a markov process defined by a set of transition rates. in fact, it can be understood as a formal definition of a continuous time markov process. this algorithm produces a set of realizations or stochastic trajectories of the markov process, given a set of uniform random numbers in  <cit> . by definition, a trajectory
+s^ is a function from a time window [ <dig> tmax to Σ. the set of stochastic trajectories represents the given markov process in the sense that these trajectories can be used to compute probabilities. a finite set of these trajectories is produced, then, from this finite set, probabilities are estimated . the algorithm is based on an iterative step: from a state s at time t <dig>  it produces a transition time δt and a new state
+s′, with the following interpretation: the trajectory
+s^ is such that
+s^=s for t∈t0t <dig> + δt and
+s^=s′. iteration of this step is done until a specified maximum time is reached. the initial state of each trajectory is based on the  initial condition that also needs to be specified.
+
+the exact iterative procedure is the following. given s and two uniform random numbers u,u′∈ <cit> : 
+
+ <dig>  compute the total rate of possible transitions for leaving state s:
+ρtot≡∑s′ρ.
+
+ <dig>  compute the time of the transition:
+δt≡−log/ρtot
+
+ <dig>  order the possible new states
+s′,j=1… and their respective transition rates
+ρ=ρ).
+
+ <dig>  compute the new state
+s′ such that
+∑j=0k−1ρj<≤∑j=0kρj =0).
+
+this algorithm will be referred to as boolean kinetic monte-carlo or bkmc.
+
+practical use of bkmc, through maboss tool
+biological data are translated into an influence network with logical rules associated to each node of the network. the value of one node depends on the value of the input nodes. for bkmc, another layer of information is provided when compared to the standard definition of boolean models: transition rates are provided for all nodes, specifying the rates at which the node turns on and off. this refinement conserves the simplicity of boolean description but allows to reproduce more accurately the observed biological dynamics. the parameters do not need to be exact as it is the case for nonlinear ordinary differential equation models, but they can be used to illustrate the relative speed of reactions. we developed a software tool, maboss, that applies bkmc algorithm. maboss stands for markov boolean stochastic simulator.
+
+how to build a mathematical model using maboss
+once maboss is installed , the protocol to follow to simulate a model can be described in four steps: 
+
+ <dig>  create the model using maboss language in a file :  write the logic for each node, and  assign values to each transition rate.
+
+ <dig>  create the configuration file  to define the simulation parameters.
+
+ <dig>  run maboss :
+
+maboss -c myfile.cfg -o myfile_out myfile.bnd
+
+.maboss creates three output files: 
+
+• myfile_out_proptraj.csv
+
+this file contains the network state probabilities on a time window, the entropy, the transition entropy and the hamming distance distribution 
+
+• myfile_out_statdist.csv
+
+this file contains the stationary distribution characterization 
+
+• myfile_out_run.txt
+
+this file contains a summary of maboss simulation run.
+
+ <dig>  import output csv files in excel or r and generate your graphs.
+
+transition rates in maboss
+maboss defines transition rates
+ρ by the functions riup/down  . the functions can be written using all boolean operators , arithmetic operators , comparison operators and the conditional operator . examples of the use of the language are given below to illustrate three different cases:  different speeds for different inputs,  buffering effect and  the translation of discrete variables  into a boolean model. 
+
+ <dig>  modeling different speeds for different inputs.suppose that c is activated by a or b, but that b can activate c faster than a, and that c is inactivated when a and b are absent. in this case, we write: 
+
+node c {
+
+ rate_up = b ? $kb : ;
+
+ rate_down = ! ?  <dig>  :  <dig> ;
+
+ }
+
+ when c is off , it is activated by b at a speed $kb. if b is absent, then c is activated by a at a speed $ka. if both are absent, c is not activated. note that if both a and b are present, because of the way the logic is written in this particular case, c is activated at the highest speed, the speed $kb. when c is on , it is inactivated at a rate equal to  <dig> in the absence of both a and b.
+
+ to implement the synergistic effect of a and b, i.e. when both a and b are on, c is activated at a rate $kab, then we can write:
+
+node c {
+
+rate_up = + + ;
+
+ rate_down = ! ?  <dig>  :  <dig> ;
+
+ }
+
+ <dig>  modeling buffering effect.suppose that b is activated by a, but that b can remain active a long time after a has shut down. for that, it is enough to define different speeds of activation and inactivation:
+
+node b {
+
+rate_up = a ?  <dig>  :  <dig> ;
+
+rate_down = a ?  <dig>  :  <dig> ;
+
+}
+
+ b is activated by a at a rate equal to  <dig>  when a is turned off, b is inactivated more slowly at a rate equal to  <dig> .
+
+ <dig>  modeling different levels for a given node.suppose that b is activated by a, but if the activity of a is maintained, b can reach a second level. for this, we define a second node b_h  with the following rules:
+
+node b {
+
+rate_up = a ?  <dig>  :  <dig> ; 
+
+rate_down =  ?  <dig>  :  <dig> ;
+
+}
+
+node b_h {
+
+rate_up =  ?  <dig>  :  <dig> ;
+
+rate_down =  ?  <dig>  :  <dig> ;
+
+}
+
+ in this example, b is separated in two variables: b which corresponds to the first level of b and b_h which corresponds to the higher level of b. b is activated by a at a rate equal to  <dig>  if a disappears before b has reached its second level b_h then b is turned off at a rate equal to  <dig>  if a is maintained and b is active, then b_h is activated at a rate equal to  <dig>  when a is turned off, b_h is inactivated at a rate equal to  <dig> 
+
+simulation parameters in maboss
+to simulate a model in maboss, a set of parameters needs to be adjusted . maboss assigns default values, however, they need to be tuned for each model to achieve optimal performances: the best balance between the convergence of estimates and the computation time needs to be found. therefore, several simulations should be run with different sets of parameters for best tuning. 
+
+• internal nodes: node.is_internalas explained in “methods” , internal nodes correspond to species that are not measured explicitly. practically, the higher the number of internal nodes, the better the convergence of the bkmc algorithm.
+
+• time window for probabilities: timetickthis parameter is used to compute estimates of network state probabilities . a time window can be set as the minimum time needed for nodes to change their states. this parameter also controls the convergence of probability estimates. the larger the time window, the better the convergence of probability estimates.
+
+• maximum time: max_timemaboss produces trajectories for a predefined amount of time, set by the parameter max_time. if the time of the biological process is known, then the maximum time parameter can be explicitly set. if the time of the biological process is not known, then there exists a more empirical way to set the maximum time. it is advised to choose a maximum time parameter that is slightly bigger than the inverse of the smallest transition rate.note that the computing time in maboss is proportional to this maximum time. moreover, the choice of the maximum time impacts the stationary distribution estimates: a longer maximum time increases the quality of these estimates.
+
+• number of trajectories: sample_countthis parameter directly controls the quality of bkmc estimation algorithm. practically, the convergence of the estimates increases as the number of trajectories is increased.
+
+• number of trajectories  and similarity threshold  for stationary distribution estimatesthe statdist_traj_count parameter corresponds to a subset of trajectories used only for stationary distribution estimates. to avoid explosion of computing time, this parameter needs to be lower than the number of trajectories .the statsdist_cluster_threshold parameter corresponds to the threshold for constructing the clusters of stationary distribution estimates. ideally, it should be set to a high value . however, if the threshold is too high then the clustering algorithm might not be efficient.
+
+comparison with biological data
+each node of the network should account for different levels of activity of the corresponding species . it is possible to have more than two levels for one node, as shown in the example “modeling different levels for a given node”.
+
+it is possible to extract the transition rates from experimental data, using the following property: the rate of a given transition is the inverse of the mean time for this transition to happen. it should be noticed than bkmc is an algorithm based on a linear equation ; therefore, small variations of transition rates will not affect the qualitative behavior of the model.
+
+bkmc algorithm provides estimates of the network state probabilities over time. these probabilities can be interpreted in terms of a cell population. the asymptotic behavior of a model, represented by a linear combination of indecomposable stationary distributions, can be interpreted as a combination of cell sub-populations. indeed, a sub-population can be defined by network states with non-zero probability in the indecomposable stationary distribution. therefore, a cell in a sub-population can only evolved in this sub-population .
+
+comparison of maboss with other existing tools for qualitative modeling
+maboss contributes to the effort of tool development for qualitative modeling of biological networks. we propose to compare maboss to some existing tools. however, it is difficult to compare the performance of these tools since each of them achieves different purposes and provides different outputs. as an alternative, we recapitulate, in figure
+ <dig>  the characteristics and implications for each software. some tools may be more appropriate than others according to the type of input, network size and expected output. figure
+ <dig> is intended to help the users decide which software to use in a practical situation. we consider the following tools: ginsim
+ <cit> , cellnetanalyzer
+ <cit> , boolnet
+ <cit> , gna
+ <cit> , and squad
+ <cit> . this list is not exhaustive but informs on where maboss stands.
+
+as an illustration, the third example of the “examples” section below, the mammalian cell cycle, was implemented in three of the tools presented in figure
+1: maboss, ginsim, boolnet .
+
+examples
+we have applied bkmc algorithm to three models of different sizes. the first one is a toy model illustrating the dynamics of a single cycle; the second one is a published boolean model of p53-mdm <dig> response to dna damage and illustrates a multi-level case; and the third one is a published boolean model of mammalian cell cycle regulation. note that maboss has been used for these three examples, but markov process can be computed directly for the two first ones, without our bkmc algorithm because these models are small enough , as proposed in
+ <cit> . bkmc is best suited for larger networks, when the network state space is too large to be computed with standard existing tools . the first two examples were chosen for their simplicity, and because they illustrate how global characterizations  can be used. the third example shows the use of bkmc/maboss for a more consequent and complex model for which the analysis is not obvious.
+
+for the purpose of this article, we built the transition graphs for the first two examples  in order to help the reasoning. however, it is important to note that bkmc algorithm does not construct the transition graph explicitly.
+
+all input files and results are given in the webpage of maboss  with additional examples.
+
+toy model of a single cycle
+we consider three species, a, b and c, where a is activated by c and inhibited by b, b is activated by a and c is activated by a or b .
+
+the model is defined within the language of maboss by a set of logical rules associated to each node  and simulation parameters set for optimal performances . the associated transition graph, generated by ginsim, is shown in figure
+ <dig> 
+
+the only stationary distribution is the fixed point = <cit> . we study two cases: when the rate of the transition from state  <cit>  to state  <cit>   is fast and when this rate is slow. we will refer to this transition rate as the escape rate. for both cases, we plot the time trajectories of the probabilities of the fixed point = <cit>  and of the probabilities of a active = where ∗can be either  <dig> or  <dig>  along with the trajectories of the entropy and the transition entropy.
+
+in the first case, when the escape rate is fast, we set the parameter for the transition to a high value . in figure
+ <dig>  we notice that the probability that  is equal to  <cit>  converges to  <dig>  we can conclude that = <cit>  is a fixed point. in addition, the entropy and the transition entropy converge to  <dig>  with bkmc, these properties confirm that = <cit>  is a fixed point. the peak in the trajectory of the entropy  corresponds to a set of states that are transiently activated before reaching the fixed point.
+
+in the second case, when the escape rate is slow, we set the parameter for the transition to a low value . as illustrated in figure
+ <dig>  the transition entropy is and remains close to zero but the entropy does not converge to zero, which is the signature of a cyclic stationary distribution . this corresponds to the cycle  <cit>  →  <cit>  →  <cit>  →  <cit>  in the transition graph . however, as seen in the transition graph, one state in the cycle has an outgoing edge that leads to the fixed point . if the trajectories are plotted on a larger time scale , the entropy eventually converges to  <dig> and the trajectory of the fixed point converges to  <dig>  which corresponds to the case of fast escape rate. since the value of the transition entropy of figure
+ <dig> is not exactly zero, but 10− <dig>  it can be anticipated that the cyclic behavior is not stable. we can conclude on stable cyclic behaviors only when the transition entropy is exactly  <dig> 
+
+by considering the spectrum of the transition matrix , it can be proven that the model with a slow escape rate is a damped oscillatory process whereas the model with a large escape rate is not. as mentioned previously, a cycle in the transition graph may or may not lead to an oscillatory behavior. moreover, if the transition entropy seems to converge to a small value on a small time scale, and the entropy does not, this behavior illustrates the case of a transient cycle in the transition graph.
+
+p53-mdm <dig> signaling
+we consider a model of p <dig> response to dna damage
+ <cit> . p <dig> interacts with mdm <dig>  which appears in two forms, cytoplasmic and nuclear. on one hand, p <dig> upregulates the level of cytoplasmic mdm <dig> , which is then transported into the nucleus, and inhibits the export of nuclear mdm <dig> . on the other hand, nuclear mdm <dig>  facilitates the degradation of p <dig> through ubiquitination. in the model, stress regulates the level of dna damage , which in turn participates in the degradation process of mdm <dig> in the nucleus. p <dig> inhibits dna damage signal by promoting dna repair. here, stress is not shown explicitly .
+
+the model is written in maboss, with two levels of p <dig> , as it is done in abou-jaoudé et al. <cit>  with the appropriate simulation parameters . the associated transition graph, also generated by ginsim, is given in figure
+ <dig>  it shows the existence of two cycles and of a fixed point  =  <cit>  where nuclear mdm <dig> is on and the rest is off.
+
+in order to represent the activity of p <dig>  the trajectories of the probabilities of all network states with p <dig> equal to  <dig> and with p <dig> equal to  <dig> are plotted , with the initial condition:  =  and for the situation when p <dig> is set to its highest value  and thus can promote mdm <dig> cytoplasmic activity.
+
+the qualitative results obtained with maboss are similar to those of abou-jaoudé and colleagues. however, at the level of cell population, some discrepancies appear: in figure
+ <dig>  no damped oscillations can be seen as opposed to figure
+ <dig> of their article. the reason is that, in their computations, the noise imposed on time is defined by a square distribution on a limited time frame, whereas in bkmc, markovian hypotheses imply that the noise distribution is more spread out from  <dig> to infinity. the consequence is that synchronization is lost very fast. damped oscillations could be observed with bkmc with a particular set of parameters: fast activation of p <dig> and slow degradation of p <dig> .
+
+with maboss, we clearly interpret the system as a population and not as a single cell. in addition, we can simulate different contexts, presented in the initial article as different models, within one single model that uses different simulation parameters to account for these contexts.
+
+note that the existence of transient cycles, as shown in the toy model, can be deduced from the trajectory of the entropy that is significantly higher than the trajectory of the transition entropy  .
+
+mammalian cell cycle
+for the last example, we propose a model of the mammalian cell cycle initially published as on ode model by novák and tyson
+ <cit>  and translated into a boolean model by fauré and colleagues
+ <cit> . the latter model encompasses  <dig> nodes, which describe the mechanisms controlling the activity of the different cdk/cyclin complexes, the main actors of cell cycle regulation and the dynamics of entry into the cell cycle in presence of growth factors.
+
+we implement the logical rules of the published model in maboss and define two parameter values for the transition rates: a slow one  and a fast one . the choice between slow and fast rates for each transition is based on the choice made in the published boolean model: different priority classes were used in mixed discrete a/synchronous simulation and corresponded to the differences in speed of cellular processes such as transcription, degradation and protein modification. we could, of course, refine the analysis by setting different rates for each transition. the network, the logical rules and the simulation parameters can be found on the webpage.
+
+as mentioned before, maboss can provide two types of outputs: the probabilities of different network states over time  and the indecomposable stationary distributions.
+
+we consider two biological cases, in the presence of growth factors where the cell enters its division cycle and in the absence of growth factors where the cell is stuck in a g1-like state . in the model, the activity of cyclind , a g1-cyclin, illustrates the presence of growth factors. in our simulations, we set an initial condition corresponding to a g <dig> state with two cdk/cyclin inhibitors, p <dig> and cdh <dig>  on, and with cyclind on in order to account for the external growth signal. we plot the trajectories of the probabilities of all the cyclins a, b and e . the cyclins’ activities exhibit an oscillatory behavior. each oscillation can be interpreted as a cell division cycle. however, these oscillations are damped. this can be explained by the fact that these probabilities should be interpreted at the cell population level and after few cycles, the cells become desynchronized. moreover the trajectories of the entropy and the transition entropy exhibit the signature of cyclic attractors .
+ <dig> 
+
+the indecomposable stationary distributions are identified by the clustering algorithm of maboss and illustrated in figure
+ <dig>  the two clusters in figure
+11a show the two types of solutions for random initial conditions: one multi-cyclic solution when cyclind is on, and which corresponds to the distribution of network states of the asymptotic solution of figure
+11b, and one fixed point corresponding to a g <dig> arrest when cyclind is off .
+
+these two indecomposable stationary distributions correspond to the two attractors identified by discrete time modeling in fauré et al. in the discrete time algorithm, the asymptotic behavior is described in terms of attractors ; in our algorithm, the asymptotic behavior is described in terms of network state probability distributions.
+
+CONCLUSIONS
+we have presented a new algorithm, boolean kinetic monte-carlo or bkmc, applicable to dynamical simulation of signaling networks based on continuous time in the boolean framework. bkmc algorithm is a natural generalization of the asynchronous boolean dynamics
+ <cit> , with time trajectories that can be interpreted in terms of biological time. the variables of the boolean model represent biological species and the parameters represent rates of activation or inactivation of these species that, ideally, could be deduced from experimental data.
+
+we applied this algorithm to three different models: a toy model that illustrates a simple cyclic behavior, a published model of p <dig> response to dna damage, and a published model of mammalian cell cycle dynamics.
+
+this algorithm is provided within a freely available software, maboss, that can run bkmc algorithm on networks up to  <dig> nodes in the present version. the construction of a model uses a specific language that introduces logical rules and transition rates of node activation/inactivation in a flexible manner. the software provides global and semi-global outputs of the model dynamics that can be interpreted as signatures of the dynamical behaviors. these interpretations become particularly useful when the network state space is too large to be handled. the convergence of bkmc algorithm can be controlled by tuning some simulation parameters: maximum time of the simulation, number of trajectories, length of a time window on which the average of probabilities is performed, and the threshold for the definition of stationary distribution clusters.
+
+the next step is to apply bkmc algorithm with maboss on other existing large signaling networks, e.g. egfr pathway
+ <cit> , the apoptosis pathway
+ <cit> , etc. the translation of existing boolean models in maboss is straightforward but requires the addition of transition rates. in these future works, we expect to illustrate the advantage of bkmc on other simulation algorithms. moreover, in future developments of maboss, we plan to introduce methods for sensitivity analyses, refine approximation methods used in bkmc, and generalize markov property.
+
+we also expect to implement maboss in broadly used software environments for boolean modeling, like ginsim
+ <cit>  or cellnetanalyzer
+ <cit> .
+

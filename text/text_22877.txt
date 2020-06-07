@@ -1,0 +1,380 @@
+BACKGROUND
+genetic studies of complex human diseases typically involve multiple iterations of genetic marker generation. for example, a set of individuals may first be assayed with a genome-wide chip that measures genotypes at hundreds of thousands of markers. then a subset of interesting signals may be followed up by custom genotyping using a different technology. if there are technical problems, yet another round of custom genotyping using a third technology might be carried out on a subset of the samples. managing and reconciling these multiple sources of data, often with different sample ids, allele labels, and marker names, is best managed using a database system.
+
+while several database systems have been developed for managing genetic data <cit> , when we tried some of these, we found that some relied on commercial database systems that were so complicated that they required a database administrator to routinely maintain and apply regular security updates. others did not scale well as the numbers of markers genotyped per experiment rapidly increased. some were written with sophisticated web-based interfaces, that, while elegant, were difficult to extend and customize as needed. therefore, we set out to build our own database system, based on open-source mysql, driven by command-line programs written in python. we named our database system “dbvor”, after vör, the inquiring norse goddess of wisdom from whom nothing can be concealed.
+
+overview
+we have created a series of programs and a database called, dbvor, to store, manage, and retrieve genetic data. figure  <dig> illustrates the overall operations of dbvor. the raw data flows into the database tables using one of several programs. finally, the genout program can be used to filter and merge data to be output in one of several file formats.
+
+
+the rest of this document is organized as follows: in the implementation section, we first describe dbvor’s ancillary database tables used to store pedigree, trait, and marker data. then we show the tables used for storing genotype data: one for targeted experiments and the other set for genome-wide experiments. the key difference between these is that for genome-wide data we store multiple genotypes per record, in blocks. we next discuss the programs that are used to enter data into the aforementioned tables. a subsequent program is presented that extracts data from the database tables. the next few sections are intended to give a feel for details of the implementation: configuration files, log files, note storage, and database commit policy. the example section illustrates the format and use of the targeted and genome-wide genotype tables. it also illustrates how multiple conflicting genotypes for the same person and marker coming from multiple or even the same experiment get resolved. the data statistics section show how conflicting genotype information is summarized for user review. the results section compares the efficiency of the genome-wide multiple genotypes per record representation to that of the simpler single genotype per record representation. the performance is also illustrated in the discussion section via comparisons with existing systems. finally, the appendix shows the full database schema.
+
+we maintain the following typographic conventions: all programs and subcommands are shown in a bold typeface. the names of database tables are shown in bold italic.
+
+implementation
+database tables
+dbvor stores information about the collected genetic data in several tables. we will explain the important aspects of each table. for completeness, the entire schema is presented in the appendix. this section describes the auxiliary tables while the next section describes the tables that store the genotype data.
+
+the samples table stores plate, well, and miscellaneous study-related information about a sample, relates the sample identifier to a subject, and specifies the person from whom the sample was taken. if multiple samples exist for the same person, a preferred sample may be indicated, causing the other samples to be ignored.
+
+the members table stores a pedigree and person name for a subject; it also stores the parent identifiers and sex of the subject . an auxiliary table, member_aliases, provides alternate names for members and supports multiple differently named samples from the same person.
+
+the traits table provides values for specified phenotypic traits for each subject. not all subjects need to have known values for all traits. a glue table, traitmeta, links trait name strings with trait ids and contains a type  for each trait. the type is used to validate the trait values, and to ensure proper formatting on output.
+
+the markers table associates a marker name string with an id. it is used to check the input marker names for typographical errors in that marker names appearing in other contexts are verified against the names in the markers table. there is also a marker_aliases table that provides alternate names for markers to be used when marker names change over time.
+
+the marker_info table contains the chromosome number and base pair position as well as the genetic positions  of each marker. each record is tagged with the build number from which the positions were derived.
+
+occasionally allele data coming back from our collaborators will be labeled differently from our other data. for example, a genotype might be designated as 1/ <dig> when another genotyping platform might designate the genotype as a/g. the allele_map table can specify a remapping from one set of allele labels to another. entries also contain an experiment id key and a marker id key.
+
+the individual tables described so far are relatively small even for the larger data collections.
+
+the genotypes table holds the genotype data for member-marker pairs. in addition to a member key and a marker key, each record contains a technology id key and an experiment id key. these two ids come from the technologies table and the experiments table, respectively, which map name strings to ids. technology is used to label the technology used to generate the marker data  while experiment describes a specific instance or batch of genotyping data generated using a particular technology.
+
+the genotypes table provides an effective way to manage small volumes of data, thousands of members with several thousands markers, and gives adequate performance on moderately powered machines. but this strategy is not effective for large-scale studies with hundreds of thousands or millions of markers; this is illustrated in the example section. we have a novel data representation for large numbers of markers. rather than store a single marker’s genotype information per record, we store all the genotypes for a contiguous run of markers on a chromosome in the genotypeblocks table and use multiple blocks for each chromosome; this is also illustrated in the example section. an auxiliary table, snpblocks, is necessary to map a marker to the corresponding chromosome, block, and offset. this strategy is designed to efficiently read all the data on a chromosome or the data from ranges of markers on a chromosome; this is usually how data are read from the database. to be clear, the efficiency is for writing and reading records for experiments involving genome-wide large-scale data from the database; not for storage efficiency.
+
+data entry programs
+data are entered into all but the genotype tables using the command line program, dbvor. it is immediately followed by a subcommand, for example marker_info. this option loads the marker_info table. the list of subcommands is indicated in table  <dig> some of the programs that populate the database tables
+
+
+
+program name
+table
+behavior
+
+dbvor createdb
+
+dbvor newmarker
+markers
+
+dbvor missingmarkerinfo
+markers, marker_info
+
+dbvor allelemap
+allele_map
+
+dbvor marker_info
+marker_info
+
+dbvor markeralias
+marker_aliases
+
+dbvor gmimarker
+marker_info
+
+dbvor gmimarkeralias
+marker_aliases
+
+dbvor sample
+samples
+
+dbvor trait
+traits, traitmeta
+
+dbvor member
+members
+
+dbvor memberalias
+member_aliases
+
+dbvor create_experiment
+experiments
+
+dbvor set_experiment_date
+experiments
+
+dbvor delete_experiment
+experiments
+
+dbvor set_active
+genotypes
+
+
+to initially set up a project, one would first use the dbvor subcommand createdb, which creates a data schema in the database and loads the dbvor table definitions into it. this subcommand also adds users to the database and grants them the appropriate privileges to use the data schema. there is a complimentary subcommand to undo these actions.
+
+after initializing the dbvor tables, then one would use the dbvor program to move data from flat files into the database . the subprograms inherit from a hierarchy of python classes that support the standard operations of insert, update, compare and delete, all of which work in a similar way across each utility. a typical utility, dbvor marker_info, stores map information for collections of markers. the flat file containing the input data is referenced from the configuration file, as described in the ‘configuration files’ section below. additional information in the configuration file indicates which column contains the markername, chromosome, base pair position, average genetic position, female genetic position and male genetic position. all columns except for marker name are optional. the configuration file must also specify the map build. typing the command “dbvor marker_info <configuration file>” will parse data files and test for correctness. adding the commit flag will insert the data into the database if there are no errors. running the utility a second time with the commit flag but with no change to the underlying flat input file will make no changes to the database. you can extend the flat file with new rows. now, redoing the commit operation will add just the new entries to the database. thus in the end, the database will have the same information as the extended flat file. the flat file data may be revised  from what was originally in the database. processing the revised flat file with the compare flag will show those entries where the flat file and database differ. the commit flag only adds new information into the database; it will not change existing records. it will just print a warning. the replace flag together with commit will copy any changed records and new records into the database. for each changed record, the program first removes the old record and then adds a new record. for some usages, this may violate database consistency checks in which case the update flag can be used instead of replace. for example, it you wanted to change the parents of a pedigree member whose database identifiers had been used in other tables , database integrity checks would not let you remove the member record from the database. but you can update the member record. finally, the delete flag will remove all the records in the flat file from the database.
+
+similar utilities  are available to add markers, pedigrees, traits, aliases, etc. they all use the same set of flags, which behave as described above.
+
+the geno program  enters data into the genotypes table. it accepts genotype data in several formats: alleles in separate columns, allele pairs in a column, all genotypes for a person on one line, etc. if errors are detected, the data are rolled back out of the database. for example, each marker name used by geno must already be in the marker table, thus ensuring internal consistency of marker information within the database. the main reason the geno program is separate from the utilities accessed through the dbvor program is that there are a number of automated tests performed and statistics compiled as the genotype data are entered into the database. in particular, a warning will be raised for person/markers that are already in the database with a different genotype value for a given marker name, technology, and experiment. we do allow multiple genotype entries for the same member-marker if they have different technologies/experiments.programs that add genotype data to the database
+
+
+
+program name
+table
+behavior
+
+geno
+genotypes
+
+genoi
+genotypeblocks, snpblocks, marker_info
+
+genoa
+genotypeblocks, snpblocks, marker_info
+
+genok
+genotypeblocks, snpblocks, marker_info, members, samples, traits
+
+
+illumina genome-wide marker data are often contained in many files, with one sample per file, complemented with an additional file which maps the chip assay ids to markers. . all these flat files contain simple columnar data. the genoi program  inserts illumina data by reading the marker mapping file and the collection of sample files. the marker data are inserted into the genotypeblocks table in the database and the relevant columns from the marker mapping data are inserted into the marker_info table as well as the snpblocks table.
+
+affymetrix data could, in principle, be represented the same way as illumina data with one sample per file, but affymetrix data are typically presented as a varying number of samples per file, along with a file of marker map information. the genoa program  handles reading this type of data.
+
+plink  <cit>  uses a handful of flat files to efficiently hold genome-wide data. it is common to use plink binary format for processed genome-wide study data. one flat file, defines the markers, another file defines the pedigrees, and a final file in a compressed  format defines the genotypes for the markers and pedigrees. the flat files contain simple columnar data. the genok program  inserts the marker info into the marker table, the markerinfo table, as well as the snpblocks table. the pedigree data go into the members table, samples table, and traits table. finally, the binary file is parsed to populate the genotypeblocks table.
+
+the dbvor code modules for processing genome-wide data consist of a base class that handles processing and storing the genotype and marker data and a derived class responsible for fetching the genotype data from the input files. this structure makes it possible to extend the processing to new input data formats with minimal revision of dbvor.
+
+data extraction
+the genout program extracts genotype and phenotype data from the database. the extracted data may be formatted as simple columnar tables separated by tabs, commas or white space. in addition, the data may be extracted in mega <dig>  <cit>  format or most of the plink  <cit>  formats , facilitating further analysis.
+
+the extracted data can be filtered by including specific pedigrees and persons and/or excluding specific pedigrees and persons. as the filtering criteria might remove people needed to specify complete pedigree structures, the pool of selected individuals may be increased to include all members of any previously selected pedigree. traits that should appear in the output can be listed and the population can be filtered by requiring members to have specific values for specified traits.
+
+unreliable measurements can be removed from the output. markers of a given experiment may be filtered out via a list in the configuration file  used by the extraction program, genout. in addition, ranges of markers on a chromosome, possibly associated with some particular individuals, can similarly be filtered out. alternatively, filtering decisions can be recorded in the database by setting the ’active’ flag appropriately. this mechanism allows the user to tag data already in the database as not to be used.
+
+alternatively, a filter may be used to select a list of desired markers. or all the markers on one or more chromosomes can be selected. in addition, sub-ranges of each chromosome, indicated in base pairs or genetic distance, can be requested. if any marker has no observations for all the subjects selected, it can be dropped from the output.
+
+since the database contains experiment and technology keys, the markers can be restricted to only those coming from particular experiments and/or technologies. in addition, the subjects can be restricted to those having markers from a specific experiment and/or technology.
+
+configuration files
+all the dbvor programs are run from the command line. most input programs read one or more files of data and load them into the appropriate database tables. additional configuration information is needed for these programs. to avoid having numerous command line switches and flags, a configuration file is usually used . this technique makes it easy to repeat a previous run, as well as to supply many parameters and lists among the arguments: markers, persons, etc.
+
+log files
+error reports and status information are written into a log file during each run. the log file incorporates the date and time of the run to create a unique file name . after a run, it can be useful to review the log file to investigate errors, find problems, and read complete reports. each log file is divided into several sections. the first few lines of each section are displayed on the screen during the program run to indicate to the user the kinds of activities and/or problems that are occurring. if the normal program operation does not present enough status information, one can add a verbose flag  to write more details of the internal operations of the program to the log file.
+
+note storage
+most dbvor tables contain a time stamp to record when each record was changed. but a time stamp is insufficient for documenting what changed and why. our preferred way to keep notes is to record changes and their reasons to a  "note file". we provide a notes table as part of dbvor that contains fields for notes and data as well as keywords and comments for easy retrieval. thus the venerable “note file” and the related data can become a permanent part of the database. we typically would expect to store the log file associated with a commit of data to the database; there is a flag that can be added to any program to create a note in the database containing the log file of a commit as well as user-supplied notes.
+
+computing resources
+all the dbvor programs are written in python version  <dig> . the database used is mysql. in our customary usage, both the database and the dbvor programs run on the same machine. python and mysql are available for many different platforms. thus dbvor should be very portable, though we developed it on macintoshes running os x. version  <dig>  of dbvor is available in additional file  <dig>  along with a companion program needed for full functionality: version  <dig>  of the genetic map interpolator   <cit>  as additional file 2; for updated versions of these, please check the dbvor home page .
+
+it should be possible to replace mysql with a different choice of database. dbvor should be portable, because its sql commands are exclusively constructed in python - there are no stored procedures used in dbvor. the sql table definitions  would need to be adjusted to the new database syntax and a python interface package to the database would also be required. the sql used for data manipulation should be simple enough to be supported by most database engines.
+
+database commit/rollback policy
+we want clarify our use of the commit flag described earlier; it is part of a protocol to ensure that no incorrect data is stored into the database. each program that prepares data for insertion into the database checks many details, but it does not actually put data in the database unless the commit flag is given. further, if any errors happen while inserting the data when a commit was requested, all the data are rolled back. one must then fix all errors that were found and run the program again.
+
+example
+given the database design and programs described above, we now will show, using a simple example, how genotypes are pulled from the database. as a sample can be genotyped more than once at a given marker, we illustrate dbvor’s support for handling and resolving any disagreements among the repeated genotypes.
+
+extracting genotypes
+our dbvor database design has two major tables: the genotypes table for a small number of markers and the genotypeblocks table for genome-wide scale data. each row of the genotypeblocks table contains multiple genotypes; the example portrayed in figure  <dig> part f has  <dig> genotypes per record. we now illustrate how genotypes are fetched, both from the genotypes table and from the genotypeblocks table. this is presented in figure  <dig>  the tan lines show a request for a specific marker. genotypes for rs <dig>  are selected from experiment ‘exp d’ in the genotypes table  and experiment ‘exp f’ in genotypeblocks table . ). this selection pulls 0/ <dig> from exp d in the genotypes table  and a/c from exp f in genotypeblocks table , as summarized in line  <dig> of figure  <dig>  note that the example tables in figure  <dig> are simplifications and in the full dbvor system, the experiment is attached to the row information.
+
+
+next, the yellow lines show a request for markers by chromosome range. suppose we request markers on chromosome  <dig> between positions  <dig> and  <dig>  the selected markers are shown in yellow in the marker_info table  - these represent markers rs <dig> and rs <dig> . retrieving genotypes for these markers from exp f requires one select from genotypeblocks table; genotypes for both markers are stored in the same record . but retrieving genotypes from exp d requires multiple selects from the genotypes table . this selection pulls 1/ <dig> and a/c from the genotypes table  and g/t and a/c from the genotypeblocks table , as summarized in lines  <dig> and  <dig> of figure  <dig> 
+
+finally, for the green lines the marker name and position have changed over time: rs <dig> was on chromosome  <dig> when first imported into the snpblocks table ; now it is on chromosome  <dig> . furthermore, rs <dig> is now aliased to rs <dig> in the marker_alias table . this marker was requested by either name or by asking for chromosome  <dig> . a genotype at this marker is not available in genotypes table , but is g/t from the genotypeblocks table  of figure  <dig> 
+
+genotype conflicts
+if data are fetched from more than one experiment, some markers may have more than one measured genotype for a given individual. it does not matter if the experiments are all targeted or all genome-wide or if we have some of each. whenever there are multiple measurements for the same person and marker, a conflict may arise. note also that a single experiment may have two or more measurements for the same marker and person. any conflicts must ultimately be resolved prior to outputting the data for further analysis. if all the known measurements concur with each other and the rest are unknown, the common measured value is output. this is illustrated in figure  <dig> lines  <dig> and  <dig> . if the genotype measurements conflict , we offer several mechanisms to resolve the conflict. if some experiments are deemed to be more trustworthy than others, a trust level can be specified for the experiment or marker. alternatively, some poor quality experiments, though still stored in the database, can be marked as “not to be used” under normal circumstances. if after applying the trust metric, there are still multiple conflicting genotypes for a single member/marker, dbvor will record the conflict in its log and output a missing genotype into the output file. a similar trust/ignore mechanism can be used to select which sample to use when a sample has been run on more than one plate .
+
+data statistics
+as the data pass from the dbvor database to the output files, information is accumulated by the genout program so that summary statistics can be produced. for example, the allele and genotype frequencies for each marker can be displayed. in addition, all the member/marker measurements that show more than one measurement are recorded for further analysis and to display potential conflicts. however, for a large scale studies with thousands of people and millions of markers, statistical record keeping can, in our experience, exhaust the resources of the machine. under these circumstances, we suggest that the user gather statistics for one chromosome at a time, as this is more manageable. alternatively, a flag is available to request that no statistics be gathered by genoutand that one person’s worth of data be processed at a time, written out, deallocated from memory, and so forth.
+
+when statistics are requested, then for every marker genotype that is measured by more than one experiment for a given person, dbvor shows a matrix indicating the agreement of the experiment results for each experiment pair. for example, consider the following agreement matrix for a marker at two experiments: exp <dig> and exp <dig> . from the first column, we observe that the second experiment did not measure  <dig> people that were successfully genotyped in the first experiment and in the first row we find two people that were not typed in the first experiment but were in the second experiment. we also see that the two experiments mostly agree on the other measurements except for three people: one person at  <cit>  meaning exp1’s genotype was 1/1while exp2’s was 1/ <dig> and two people at  <cit> meaning exp1’s genotype was 1/2for two people while exp2’s was 1/ <dig>  we would output a missing genotype 0/ <dig> for these  <dig> cases.example agreement matrix between two experiments, exp <dig> and exp2
+
+
+
+exp1
+↓
+/exp <dig> →
+0/0
+1/1
+1/2
+2/2
+
+0/0
+
+1/1
+
+1/2
+
+2/2
+the genotypes from the first experiment label the rows and those from the second label the columns.
+
+
+
+in table  <dig>  the agreement matrix informs us that these two experiments used different labeling schemes for reporting the genotypes. the automatic mechanism would see a conflict and would output a value of 0/ <dig> for all these data. if supported by the laboratory records, the allele_map table can be used to resolve this difficulty by remapping allele  <dig> to a, and allele  <dig> to c for the marker in exp <dig> example agreement matrix between two experiments, exp <dig> and exp4
+
+
+
+exp3
+↓
+/exp <dig> →
+0/0
+a/a
+a/c
+c/c
+
+0/0
+
+1/1
+
+1/2
+
+2/2
+the genotypes from the first experiment label the rows and those from the second label the columns.
+
+
+
+RESULTS
+here we discuss some timing data based on a real data set, as well as compare dbvor to other previously published database software.
+
+performance
+to measure performance, we used an illumina humanexome-12v <dig> exome chip data set where  <dig>  samples were genotyped at  <dig>  markers by the center for inherited disease research. these data were generated in accordance with the declaration of helsinki as part of our genetics of age-related macular degeneration study, with the approval of the ucla and university of pittsburgh institutional review boards. our performance measurements were performed on an imac with a  <dig>  ghz intel core  <dig> duo processor having  <dig> gb memory. first, we used a small subset of our illumina exome chip data with  <dig>  markers measured on  <dig>  samples contained in  <dig>  files. this is about 10% of the available markers; these markers were chosen randomly from the  <dig>  markers available. loading these data into the genotypeblocks table required  <dig> seconds . the genotypeblocks table has  <dig>  blocks ;  <dig> blocks per sample . for each sample, chromosome  <dig> occupies  <dig> blocks, chromosomes  <dig>   <dig>  and  <dig> each occupy  <dig> blocks, chromosomes  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>  and  <dig> each occupy  <dig> blocks, chromosomes  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>  and  <dig> each occupy  <dig> blocks and the remaining chromosomes  each occupy just  <dig> block. all these data were output into a single file similar to plink ped format ; and read into an empty genotypes table. the populated genotypes table contained  <dig> , <dig> records.  these records are  <dig> times the records of the genotypeblocks table. loading the data took  <dig>  seconds. this is six times slower but this number does not tell the whole story. the time spent doing the database insert for the genotypeblocks table was  <dig> seconds while the time for the genotypes table was  <dig>  seconds, a factor of  <dig> slower. in addition, as the genotypes table is  <dig> times larger, this slows down database operations such as select and delete .
+
+extracting data from the database was faster when pulling from the genotypeblocks table than from the genotypes table. fetching all the genotype data into plink bed format using the genotypeblocks table took  <dig> seconds while fetching from the genotypes table took  <dig> seconds. both these timings are for fetching the data while keeping no statistics on the results.
+
+the full illumina exome chip data set has  <dig>  markers for  <dig>  samples. loading this into the genotypeblocks table took  <dig>  seconds . if loading the genotypes table is  <dig> times slower, it would take  <dig>  seconds  to load the same data. scaling the load times shown earlier, we predict that the genotypeblocks load for a data set with  <dig>  samples and  <dig> , <dig> markers should take  <dig> hours and  <dig> minutes, while genotypes should take  <dig> hours . extracting all the markers for  <dig>  members from the genotypeblocks table into plink bed format took  <dig>  sec, while extracting just the markers from chromosome  <dig>  required  <dig> seconds.
+
+we also timed dbvor using the publicly-available illumina hapmap data , gse <dig> , and gse <dig> ) containing  <dig>  markers for  <dig>   <dig>  and  <dig> samples, respectively  <cit> . it took  <dig> seconds to load the marker names and positions into the markers table, marker_info table, and snpblocks table. after that, it took  <dig> seconds to load the  <dig> ceu samples,  <dig> seconds to load the  <dig> chb+jpt samples, and  <dig> seconds to load the yri samples. all these load times should be about the same because they read the snpblocks table and then use it to create the genotype blocks for the about the same number of samples. but the time to load the first of the hapmap data sets  is  <dig> seconds longer than the rest because, being first, it has to pull the snpblocks table into the database server cache whereas when loading the next two datasets the table is read from the server cache.
+
+scaling
+currently, each record in the genotypeblocks table holds exactly one  <dig> genotype block and some additional fields. this appears optimal for the data we currently load into dbvor. we varied the number of genotypes per block from  <dig> to  <dig>  and evaluated the impact on performance and space. the last block for each chromosome is usually not completely full of genotypes, nonetheless space is always reserved for a full block. the extra space is wasted. our illumina exome chip data with  <dig>  markers has a total of  <dig>  samples  but we had pedigree data for only  <dig>  individuals. we prefer to use all  <dig>  samples for the following experiments. if we scale the previous load time of  <dig>  seconds for  <dig>  samples by 1379/ <dig>  we would have predicted a load time of  <dig>  seconds; we measured  <dig>  seconds.
+figure  <dig> time to load the genotypeblocks table with  <dig>  markers for  <dig>  samples as a function of number of genotypes in a block.
+
+
+figure  <dig> number of records in the genotypeblocks table and total space usage in bytes for alleles as a function of the number of genotypes per block, as computed on an example data set of  <dig>  samples typed at  <dig>  markers.
+
+
+
+discussion
+a number of database systems for handling human genetics data have been proposed, starting as early as  <dig> when the “human genetics database management system” was developed; this database system handled not only marker data on pedigrees, but also clinical and laboratory data  <cit> . before embarking on writing our own database software, we explored other options. as a small research group with limited funds, the capable integrated genotyping system  <cit>  was not an option for us because we were not prepared to set up and maintain a windows server machine. however, we did have a sun solaris machine, and so explored using genelink  <cit> . genelink was originally developed using sybase sql server, but we chose to get the oracle version working, as we had a site license for oracle. while we got it working, we found that keeping oracle secure and updated was a major undertaking, requiring the skills of an experienced database system administrator. we failed at our attempts to extend genelink to handle non-integer pedigree ids - changing the pedigree id type in the database tables was simple, but adjusting the sophisticated web interface to accommodate this change was beyond our skill set. these experiences led us to focus on creating a database system, modeled on genelink, that used open source free components, was easy to install and maintain, and has a simple interface, enhancing the ability to subsequently modify it as needed.
+
+in passing, we note that plink  <cit>  is a formidable data analysis tool and it provides at least as much filtering capabilities as dbvor. plink can do a variety of tasks - it can recode allele labels, flip strands, update individual information, zero out a set of genotypes, and merge sets of genotypes. however, plink only supports flat files; it has no database capabilities. further, it cannot easily manage collections of experiments to process. merging data sets with plink requires that both data sets use the same sets of person ids and allele labels, while dbvor allows one to resolve these issues via the use of appropriate aliases. and, having been written primarily for data sets of unrelated individuals, when working with family data it can be challenging with plink to avoid filtering out ungenotyped individuals required to maintain family structures. while our final merged and cleaned data sets are often analyzed with plink, in our experience dbvor greatly facilitates the process of preparing a single plink-ready data set.
+
+we have compared dbvor to snppy, a recently developed database system  <cit> . both snppy and dbvor are database systems that store and retrieve genotype information from experiments. both systems access their database in python and by a command line interface. they both deal with the large amount of marker data in current genome-wise studies, but in different ways. snppy more heavily uses database features and uses c++ code embedded in python to improve database performance. in addition, snppy can take advantage of multiple cores, when available. however, snppy supports only one phenotype and no parental information. dbvor is specifically designed for linkage studies containing families, and so stores parent data. it also stores marker genetic positions ; in addition, it stores map information for multiple builds. dbvor stores all the data as it was originally sourced from flat files, illumina files, or affymetrix files. but it allows for later marker aliasing, person name aliasing, and allele value remapping. it provides statistics to show patterns/anomalies in the data without judging them as errors.
+
+on data extraction, dbvor allows poor data to be marked and ignored. it resolves multiple measurements of the same person/marker in an automated but customizable way. dbvor can filter subsets of the database via simple lists and ranges and does not required the construction of complicated sql expressions . further, filtering can be constrained to keep the family structures intact. dbvor reports data out in the less compact text-based plink formats like snppy does, as well as in the compact binary plink format. it also can output mega <dig> files  <cit> . dbvor’s data representation is particularly efficient for fetching all the markers from a given chromosome or chromosome range.
+table  <dig> 
+performance comparison: average time  to insert all the illumina hapmap data into the database and generate a plink “ped” file using dbvor and snppy
+
+
+
+task
+cold database
+hot database
+dbvor
+snppy
+dbvor
+snppy
+the timings under cold database are for performing a task just after the database server is started. the hot database timing are for repeating the task a second  time. the cold numbers are averaged over three runs and the hot numbers are averaged over six runs.
+
+
+
+regarding the average loading times seen in the first line of table  <dig>  snppy is faster than dbvor. similarly, when selecting and writing out all the genotypes, snppy is much faster than dbvor. however, when smaller portions of the data are selected, dbvor is faster than snppy. the ‘cold’ timings indicate performance right after the database has been started, while the ‘hot’ timings indicate the effect of repeating a task that has previously been carried out. both systems show improvements in ‘hot’ mode when reading a chromosome or less; presumably because data are cached in the server and so do not have to be fetched from the database files
+
+one might question why our database system contains two different subsystems for storing genotypes: the genotypes table is used for storing small volumes of data, while the genotypesblocks table approach is used for genome-wide large-scale genotype data. one reason is historical: we developed the genotypes table approach first for targeted experiments. the other reason is that in our experience, in a given research project, it is common to start with genome-wide large-scale data and then follow-up with much smaller scale targeted follow-up data. the genome-wide representation is more efficient for reading and writing large-scale genotype data; however, it is less space efficient for targeted data . the genotypes table representation is just the opposite; it is efficient where the genome-wide representation is not and vice versa. the genome-wide representation for reading and writing uses fewer database records. the database must maintain indices, consistency constraints and atomicity of operations for each record. with fewer records, there is less total time overhead.
+
+finally, it is important to note that efficiency is context dependent: the genome-wide representation is inefficient in the case when one is selecting a small number of markers, each in a separate block. such a selection would, when using the genotypeblocks representation, require extraction and handling of a lot of unneeded marker data, as each block containing a selected marker would need to be pulled in its entirety from the database.
+
+CONCLUSIONS
+our dbvor database provides useful solutions to data management problems commonly encountered during an ongoing study of the genetics of a complex trait. in such a study, oftentimes genome-wide data are first generated, and then later regions of interest are followed up via targeted custom genotyping using a different technology. differing technologies may return different allele labels for a given marker. genotyping experiments may partially fail, and so need to be redone. clinical data may be presented with identifiers that differ from the identifiers used in the laboratory. accordingly, dbvor was designed to handle data from multiple sources with possibly conflicting measurements as well as conflicting codings when the underlying data are actually the same. it was designed to process not only targeted experiments but also genome-wide experiments and to merge their results into a coherent whole. dbvor allows you to select subsets of the data by several different criteria and to output the results in tabular, mega <dig>  or plink format.
+
+we now enumerate some of the strengths of our dbvor database: 
+dbvor was designed to be easy to install, maintain, and modify. it is purposely lean, requiring just two software components , and it is open source.
+
+our dbvor database handles both genome-wide scale data, as well as targeted follow-up data of limited scale. while the genome-wide data are stored in a special way that maximizes efficiency, our database is capable of merging the two types of data together during export.
+
+dbvor handles not only unrelated individuals, but also handles family data. it can keep family structures intact after filtering.
+
+our database is capable of handling multiple different phenotypes, both categorical and quantitative, and provides summary statistics.
+
+dbvor is designed to handle the reconciliation of overlapping genotype data from different experiments. in the process, it provides feedback to the user in the form of agreement matrices, clearly showing how many repeated genotypes agreed with each other and how many did not.
+
+our database can resolve multiple id systems, alternate marker names, and differing marker allele labels.
+
+dbvor retains all original data while providing the ability to selectively turn off untrusted portions of the data.
+
+our database supports flexible and powerful filtering during export. for example, specific pedigrees or persons can be excluded or included, and markers can be selected by name, chromosomal position, or chromosomal range.
+
+dbvor supports the storage of multiple builds of map information, as well as supports genetic maps.
+
+our database uses a command-line interface, augmented with flexible configuration files.
+
+dbvor has the ability to do a test run of requested actions before committing such changes to the database. this permits iterative improvement to the choice of configuration options.
+
+dbvor provides a system for storing and retrieving notes. the data analyst can use these notes to document data cleaning decisions and data manipulation choices.
+
+dbvor supports illumina, affymetrix, and flat file input, largely by letting the user choose columns from the input files. it also supports input in plink binary ’bed’ format.
+
+
+
+as with all software projects, dbvor is a work in progress, and so there are a number of possible improvements that could be made in the future. these include: 
+dbvor could be extended to use multiple cores in parallel when available. such an extension should enable the speed up of some currently slow operations.
+
+it might be useful to add support for data constraint checking, mainly for phenotype data.
+
+dbvor could be extended to provide easy control of database user privileges, permitting us to supplement administrator roles with more limited reader and specialized roles.
+
+our database could be extended to store and manage intensity data generated by genome-wide chips.
+
+while dbvor can currently handle imputed genotypes that have been called, it could be extended to store and manage uncalled imputed genotypes which are represented by a trio of posterior genotype probabilities.
+
+
+
+availability
+current versions of our dbvor and gmi programs are attached as additional files. updated stable releases will be available, after a simple registration, at our software registration site https://watson.hgen.pitt.edu/register. our current working version of dbvor can be found at the dbvor bitbucket repository: https://bitbucket.org/dweeks/dbvor/, where no registration is required.
+
+availability and requirements
+project name:dbvorproject home page:https://watson.hgen.pitt.edu/registeroperating system: platform independentprogramming language: python  <dig> .x,  <dig> .xother requirements: mysql, python mysql modulelicense: gnu gpl 3any restrictions to use by non-academics: none beyond those in the gnu gpl  <dig> license
+
+appendix
+data schemafigure  <dig> the dbvor schema. the blue tables  map a string name to a database identifier and occasionally supply additional data. the yellow tables  contain pedigree and phenotype data. the red tables  contain the genotype data. each record in genotypes contains the data for a member and single marker, while a record in genotypeblocks contains a block of data for a member and several hundred contiguous markers. the green table  provides an index into genotypeblocks, specifying where a particular marker is in a block of contiguous markers. the green tables  map a marker name to a database identifier and supply map position information. the allele_map table optionally remaps the allele names for a specified experiment and marker to different values. the samples table stores information about samples, the most important being the mapping from the sample identifier to the pedigree and person of the subject. the notes table provides a facility for documenting decisions made as the data are cleaned and processed.
+definitions of the field-specific symbols used in figure 
+6
+
+
+
+symbol
+meaning
+
+
+additional files
+additional file  <dig> 
+contains the entire dbvor package, version  <dig> .
+
+
+
+
+additional file  <dig> 
+contains the entire genetic map interpolator  package, version  <dig> .
+
+
+
+
+additional file  <dig> 
+contains the configuration files and some data files for dbvor vs snppy performance comparisons.
+
+
+
+
+additional file  <dig> 
+contains additional documentation regarding the details of how we carried out the performance measurements.
+
+
+
+
+abbreviations
+gmigenetic map interpolator
+
+ididentifier
+
+cephcentre d’etude du polymorphisme humain
+
+ceuceph 
+
+chbhan chinese in beijing, china
+
+jptjapanese in tokyo, japan
+
+yriyoruba in ibadan, nigeria
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+rvb designed, debugged, and maintains dbvor. ycc provided data. mbg provided data and also added constructive criticism and suggestions. dew provided inspiration and provided the problems that dbvor solves. rvb, with assistance from dew, wrote this manuscript, which was subsequently improved and reviewed by all authors. all authors read and approved the final manuscript.
+
+this work was supported by the national institutes of health grants r <dig> gm <dig> , r <dig> ey <dig> , and american recovery and reinvestment act supplement r <dig> ey009859-14s <dig> , and the university of pittsburgh. exome chip genotyping was carried out by johns hopkins university genetic resources core facility snp center staff under the direction of dr. kim doheny. we would like to thank yingda jiang for providing feedback early in the development process. we would also like to thank both reviewers for their thorough reviews and helpful suggestions.

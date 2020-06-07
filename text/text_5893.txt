@@ -1,0 +1,278 @@
+BACKGROUND
+during the past decade, next generation sequencing  technology has revolutionized genomic studies, and tremendous development has been made in terms of throughput, scalability, speed and sequencing cost. rna-sequencing , also called whole transcriptome shotgun sequencing , is a technology that uses the capabilities of ngs to study the entire transcriptome. compared with microarray technologies that used to be the major tool for transcriptome studies, rna-seq technologies have several advantages including a larger dynamic range of expression levels, less noise, higher throughput, and more power to detect gene fusions, single nucleotide variants and novel transcripts. hence, rna-seq technologies have been popularly applied in transcriptomic studies.
+
+in a typical rna-seq experiment, messenger rna  molecules are extracted from samples, fragmented, and reverse transcribed to double-stranded complementary dna . the cdna fragments are then sequenced on a high-throughput platform, such as hiseq by illumina or solid by applied biosystems. after sequencing, millions of dna fragment sequences, called reads, are recorded and aligned to a reference genome. the number of reads mapped to each gene measures the expression level for that gene. thus, rna-seq provides discrete count data serving as measurements of mrna expression levels, which is different from the fluorescence intensity measurements from microarray technologies that have been considered as continuous variables after transformation. as a result of high frequency of low integers, the statistical methods developed for analyzing microarray data are not directly applicable for rna-seq data.
+
+in the statistical analysis of rna-seq data, identifying differentially expressed  genes across treatments or conditions is a major step or main focus. a gene is considered to be de across treatments or conditions if the mean read counts differ across treatment groups. otherwise, we say the gene is equivalently expressed . many statistical methods have been proposed for the detection of de genes with rna-seq data. some popular methods, including edger , deseq  <cit>  and deseq <dig>  <cit> , are based on the negative binomial  distribution. quasiseq  <cit>  presented quasi-likelihood methods with shrunken dispersion estimates. a more recently proposed method by the smyth group  <cit>  works with log-transformed count data and captures the mean-variance relationship of the log-count data through a precision weight for each observation  and then applies the limma method  <cit>  for differential expression analysis.
+
+due to the genetic complexity and high-dimensionality of the resulting datasets, rna-seq experiments require complicated bioinformatic and statistical analysis in addition to the cost of experimental materials and sequencing. many experiments only employ a small number of replicates, in which cases the power of statistical inference is limited. however, if the sample size is too large , it is also a waste of experimental materials and manpower. for these reasons, one of the principal questions in designing an rna-seq experiment is: how many biological replicates should be used to achieve a desired power? in other words, how large of the sample size do we need?
+
+to answer this question, we need to determine a sample size that is required to achieve a desired power while controlling an appropriate error rate. when calculating sample size for a single test, type i error rate is commonly used. fang and cui  <cit>  discussed a sample size formula for a single gene based on likelihood ratio test or wald test. hart et al.  <cit>  and their associated r package rnaseqpower  <cit>  proposed a sample size calculation method for any single gene based on score test while controlling type i error rate. however, for rna-seq data analysis, tens of thousands of genes are simultaneously tested for differential expression, which requires the correction of multiple testing error, and false discovery rate   <cit>  has been the choice of error criterion in rna-seq data analysis.
+
+several sample size calculation methods while controlling fdr have been proposed in microarray experiments. for example, liu and hwang  <cit>  developed a method to calculate sample size given a desired power and a controlled level of fdr by finding the rejection region for the test procedure and hence power for each sample size. hereafter, we call this sample size calculation method the lh method. orr and liu  <cit>  assembled the ssize.fdr r package which implements the lh method.
+
+however, sample size calculation for rna-seq data analysis while controlling fdr is underdeveloped. some earlier studies performed sample size and power estimation for rna-seq experiments under poisson distribution , but the additional biological variation across rna-seq samples yields overdispersion, which means the equal mean-variance relationship for the poisson distribution does not adapt to the variability present in rna-seq data. to account for overdispersion, the negative binomial distribution is more flexible to use. li et al.  <cit>  proposed a sample size determination method while controlling fdr based on the exact test implemented in edger that tests for genes differentially expressed between two treatments or conditions. this method calculates a sample size based on the minimum fold change of de genes, the minimum average read counts of de genes in the control group, and the maximum dispersion of de genes under negative binomial models. as expected, such a method would be very conservative and not practically informative. the rnaseqsamplesize r package  <cit>  provides an estimation of sample size based on single read count and dispersion which implements li et al.’s method. also, instead of using the minimum average read counts and the maximum dispersion, rnaseqsamplesize gives an estimation of sample size based on the read count and dispersion distributions estimated from real data, together with the minimum fold change, which is much better than li et al.’s method, but would still be conservative due to the usage of the minimum fold change. the lh method is applicable as long as we can compute the power and type i error rate given a rejection region. however, there are no closed-form formulae for power for the popularly applied nb based methods. then we have to rely on a lot of simulation to figure out quantities such as power and type i error rate for each sample size and each simulation setting  <cit> . ching et al.  <cit>  provided a power analysis tool that calculates the power for a given budget constraint for each size of samples, and then determined the sample size for a desired power. wu et al.  <cit>  introduced the concepts of stratified targeted power and false discovery cost, and estimated sample size by the evaluation of statistical power over a range of sample sizes based on simulation studies. both ching et al. and wu et al.’s methods are simulation-based, thus we need to do a lot of simulations for power assessment for each sample size, which is time-consuming.
+
+in this paper, we propose a much less computationally intensive method, which only demands one-time simulation, for sample size calculation in designing rna-seq experiments. first, we use the voom method to model the mean-variance relationship of the log-count data of rna-seq and produce a precision weight for each observation. second, based on the normalized log-counts and associated precision weights, we estimate the distribution of weighted residual standard deviation of expression levels. then for two-sample experiments, we derive a formula of the t test statistic in the weighted least squares setting and estimate the distribution of effect sizes for differential expression. next, we apply the lh method to calculate the required sample size for a given desired power and a controlled fdr level. our simulation demonstrates that the desired power is reached for data with the sample size calculated from our method for several popular tests for differential expression.
+
+the article is organized as follows. the ‘methods’ section describes our proposed method illustrated with the two-sample t-test. in the ‘results and discussion’ section, we present four simulation studies based on either negative binomial distributions or real rna-seq dataset, and our method provide reliable sample sizes for all simulation studies. the ‘conclusions’ section discusses our results and some future work.
+
+methods
+in this section, we first review the voom method  <cit>  and the lh method of sample size calculation. then, we introduce our approach for calculating sample size while controlling fdr in designing rna-seq experiments.
+
+the voom method
+suppose that an rna-seq experiment includes a total of n samples. each sample has been sequenced, and the resulting reads are aligned with a reference genome. the number of reads mapped to each reference gene is recorded. the rna-seq data then consist of a matrix of read counts rgij, where g= <dig> ,…,g denotes gene g, i= <dig>  denotes group where i= <dig> is for the control group and i= <dig> is for the treatment group, and j= <dig> ,…,ni denotes replicates in each group with n=n1+n <dig>  the idea of the voom method proposed by law et al.  <cit>  is to use precision weights to account for the mean-variance relationship and apply weighted least square analysis to rna-seq data.
+
+the method of voom starts from transforming the rna-seq count data to the log-counts per million  value calculated by 
+ ygij=log2rgij+ <dig> rij+1× <dig>   where rij=∑g=1grgij is the library size for the ith treatment and jth replicate. as has been done in  <cit> , law et al. then fit a linear model to the transformed data according to the experimental design. for each gene g, the following linear model 
+ yg=xβg+εg  is fitted to yg=′, the vector of log-cpm values, where x is the design matrix with rows xijt, βg is a vector of parameters that may be parameterized to include log2-fold changes between experimental conditions, and εg is the error term with e= <dig> 
+
+assuming that e=μgij=xijtβg, then by ordinary least squares, the above linear model is fitted for each gene g, which yields regression coefficient estimates β^g, fitted values μ^gij=xijtβ^g, residual standard deviations ηg and fitted log2-read counts 
+ l^gij=μ^gij+log2−log <dig>  
+
+to obtain a smooth mean-variance trend, law et al. fit a lowess curve to the square root of residual standard deviations ηg1/ <dig> as a function of average log-counts r~g, where r~g=y¯g+log2−log <dig> with y¯g being the average log-cpm value for each gene g and r~ being the geometric mean of library sizes. then for each observation ygij, the predicted square root residual standard deviation η^gij1/ <dig> is obtained to be the lowess fitted value corresponding to l^gij.
+
+finally, the voom precision weights are defined as the inverse variances wgij=1η^gij <dig>  law et al. recommended analyzing the log-cpm data with weighted least squares, and the weights  are used to account for the mean-variance relationship in the log-cpm values. assuming normal distribution for residual errors , methods such as t-tests or moderated t-tests can then be applied for differential expression analysis.
+
+the lh method of sample size calculation
+in genomic studies, we simultaneously test a large number of hypotheses, each relating to a gene. hence, multiple testing is commonly used in the analysis. assume there are g genes in total and each gene is tested for the significance of differential expression. table  <dig> summarizes the various outcomes that occur when testing g hypotheses, where v is the number of false positives, r is the number of rejections among the g tests, and π <dig> is the proportion of non-differentially expressed genes.
+u
+v
+π
+0
+g
+t
+s
+w
+r
+g
+
+
+false discovery rate , defined by benjamini and hochberg  <cit> , is the expected proportion of false positives among the rejected hypothesis: 
+ fdr=evrr>0pr,  while positive fdr , proposed by storey  <cit> , is defined to be 
+ pfdr=evrr> <dig>  
+
+both fdr and pfdr are widely used error rates to control in multiple testing encounted in genomic studies. in rna-seq experiments, most often we end up detecting de genes, i.e. r> <dig>  hence, in this paper, we do not differentiate between fdr and pfdr.
+
+liu and hwang  <cit>  proposed a method for a quick sample size calculation for microarray experiments while controlling fdr. let h= <dig> represent no differential expression  and h= <dig> represent differential expression . based on the definition of pfdr and assumptions in  <cit>  =π <dig>  where π <dig> is the proportion of ee genes), they derived that 
+  α1−α1−π0π0≥prpr, 
+
+where α is the controlled level of fdr, t denotes the test statistic and Γ denotes the rejection region of the test. then for each comparison, the lh method calculates the sample size as follows. first, for a fixed proportion of non-differentially expressed genes, π <dig>  and the level of fdr to control, α, they find a rejection region Γ that satisfies  for each sample size. then for the selected rejection region Γ for each sample size, the power is calculated by pr. according to the desired power, a sample size is determined.
+
+the rejection region depends on the test applied for differential expression, and the method based on  can be applied to any multiple testing procedure where the same rejection region is used. this lh method can be implemented using an r package, ssize.fdr, developed by orr and liu  <cit> , and applied for designing one-sample, two-sample, or multi-sample microarray experiments. the method would be applicable to rna-seq experiments if we can calculate power and type i error rate given a rejection region.
+
+proposed method for rna-seq experiments with two-sample comparison
+for the popularly applied tests in rna-seq differential expression analysis such as edger and deseq, there are no closed-form expressions to calculate the two quantities pr and pr. hence, the lh method cannot be directly applicable to these methods. however, the recently proposed voom and limma analysis for rna-seq data  <cit>  is based on weighted linear models and we can obtain tractable formulae for power and type i error rate. in this paper, our idea is to derive formulae to calculate power and type i error rate based on voom and weighted linear model analysis, and then apply the lh method for sample size calculation. we will use two-sample t-tests to illustrate our idea. similar methods can be derived for other designs such as paired-sample or multiple treatments comparison.
+
+suppose our interest is to identify the differentially expressed  genes between a treatment and a control group. assuming that for gene g, group i and replicates j, we observe the rna-seq data read counts rgij, where the mean for gene g in group i is λgij=dijγgi. here, dij stands for a normalization factor or effective library size that adjusts the sequencing depth for sample j in group i, γgi stands for the normalized mean expression level of gene g in group i. then for each gene g, to test for differential expression means to test the hypothesis: 
+ h0g:γg1=γg2vs.h1g:γg1≠γg <dig>  
+
+as reviewed in the first part of the ‘methods’ section, when applying the voom method, the rna-seq read counts rgij are transformed to log-cpm values ygij with associated weights wgij and mean μgi for each sample j in group i. with this parameterization, testing for de means testing 
+ h0g:μg1=μg2vs.h1g:μg1≠μg <dig>   where μg <dig> and μg <dig> are the expectation of log-cpm values of gth gene for control and treatment group, respectively.
+
+for each individual gene g, the weighted linear model 
+ yg=xβg+σgwg−12ε  can be fitted to log-cpm values 
+ yg=yg <dig> …,yg1n <dig> yg <dig> …,yg2n <dig>  with design matrix 
+ x=10⋮⋮1011⋮⋮ <dig>   coefficients vector 
+ βg=βg1βg <dig>   unknown gene-specific standard deviation σg, and associated voom precision weights 
+ wg=diag. 
+
+assuming ε∼mvn, where mvn stands for multivariate normal distribution, the t-test statistic for gene g is 
+  tg=β^g2s.e., 
+
+where the estimated log2-fold change between treatment and control group β^g <dig> and its standard error s.e. could be obtained through weighted least squares estimation.
+
+to make the t-test based method more straightforward to apply, we reparameterize the formula  to 
+  tg=Δgsg1n1+1n <dig>  
+
+where 
+ sg=yg−xβg′wgyg−xβgn1+n2− <dig>  can be viewed as the pooled sample standard deviation, which is an estimator of σg, and 
+  Δg≡β^g2w¯g1·w¯g2·w¯g·· 
+
+can be viewed as the scaled effect size which is defined by weighted mean difference of log-cpm values. here, w¯g1·=1n1∑j=1n1wg1j, w¯g2·=1n2∑j=1n2wg2j and w¯g··=1n1+n2∑i=12∑j=1niwgij. details of the derivation for  is provided in the appendix a.
+
+after generating the effect size Δg, and the standard deviation σg for each gene g, we could assume, as in  <cit> , that the effect size follows a normal distribution 
+ Δg∼nμΔ,σΔ <dig>   and the variance of log-cpm values for each gene follows an inverse gamma distribution 
+ σg2∼inv−gamma  with mean ba− <dig>  then we apply the lh method to calculate the optimal sample size given desired power and controlled fdr level. see appendix b for a brief review of the calculations in the lh method involving in choosing the rejection region Γ safisfying formula .
+
+our proposed method requires the estimation of hyperparameters μΔ, σΔ, a, and b. if a relatively large pilot dataset is available, these parameters can be estimated based on the pilot data. otherwise, we can simulate data to obtain the values for these hyperparameters. it has been shown that the nb model fits real rna-seq data well  <cit> . in addition, many popularly applied tests for differential expression analysis of rna-seq data are based on nb models. hence, we suggest to simulate data according to nb models, and then use such simulated data to obtain the estimates of μΔ, σΔ, a, and b, which are then used to calculate sample size. we outline our proposed procedure for sample size calculation as follows: 
+for a given rna-seq experiment, specify the following parameters:
+
+g: total number of genes for testing;
+
+π0: proportion of non-de genes;
+
+α: fdr level to control;
+
+pow: desired average power to achieve;
+
+λg: average read count for gene g= <dig> …,g in control group ;
+
+ϕg: dispersion parameter for gene g;
+
+δg: fold change for gene g.
+
+note that λg and ϕg could be estimated from real data using methods such as edger.
+
+simulate rna-seq read count data from a nb distribution with given parameters in step  <dig> 
+
+use the voom and limma method to obtain the log-cpm value and the associated precision weight for each count, and then estimate effect size Δg according to  for each gene g and parameters a, b for the prior of σg.
+
+estimate μΔ and σΔ by fitting 
+ Δg∼nμΔ,σΔ <dig>  
+
+use the lh method to determine the sample size n to achieve desired power and controlled fdr level.
+
+
+
+RESULTS
+in this section, we present four simulation studies to evaluate our proposed method for sample size calculation for rna-seq experiments. in the first three simulation studies, we set the total number of genes to be g= <dig>  and the desired average power to be  <dig> %. the last simulation is real data-based.
+
+simulation  <dig>  same set of parameters
+we start from the simplest simulation setting where all genes share the same set of parameters for the nb distribution. although such cases are unrealistic, they allow the method of li et al.  <cit>  to perform best because this method uses a single set of nb parameters  when calculating sample size. hence, we use this simulation setting to study the performance of our method and compare it to the method of li et al. we refer to the parameter settings from table  <dig> in  <cit> , and compare the resulting sample size and power calculated by both li et al.’s method and our proposed method.
+
+in the main manuscript, we present results for one of those parameter settings as an example: the proportion of non-de genes π0= <dig> , the mean read counts for control group λ= <dig> with normalization factors dij= <dig>  dispersion parameter ϕ= <dig> , fdr controlling at level  <dig> , and fold change δ= <dig> for differentially expressed genes. suppose rgij denotes the read count for gene g, group i and replicate j= <dig> ,…,ni in each group with n1=n2=n. then, for ee genes, both rg1j and rg2j were drawn from nb; for de genes, rg1j were drawn from nb and rg2j were drawn from nb or nb.
+
+after setting these simulation parameters in step  <dig>  we follow steps 2- <dig> to simulate data and obtain the values of hyperparameters. to investigate the effect of this simulation step, we tried different sizes of simulated data, m= <dig> , <dig> , <dig>  where m is the sample size for each group in step  <dig> of our procedure. for each m, we generated read counts rg1j  and rg2j  from independent nb distributions for every gene g and sample j, g= <dig> …,g, j= <dig> …,m. after using voom and lmfit in the r package limma  <cit>  to produce weights wgij for each observation, we then obtained effect size Δg for each gene and parameters a, b for the prior distribution of σg <dig>  the fitted inverse gamma distributions of σg <dig> for each m are shown as in fig.  <dig>  with vertical lines indicating the modes. it seems that the mode doesn’t change much, and the distribution of σg <dig> shrinks towards the center as sample size gets larger.
+fig.  <dig> fitted inverse gamma distributions of σg <dig> for sample size m=  <dig>   <dig>   <dig>   <dig>   <dig> for simulation 1
+
+
+
+after obtaining the fitted parameters, we calculated sample size according to our proposed method described in the third part of the ‘methods’ section to achieve a desired power of  <dig> %. we then simulated data according to each calculated sample size and checked whether the desired power was achieved. in table  <dig>  the first three columns listed our simulation results corresponding to this simulation setting. as m increased from  <dig> to  <dig> to  <dig>  the calculated sample size dropped from  <dig> to  <dig> and  <dig>  respectively. this decrease is expected because the parameters were estimated more precisely with larger m. for example, the distribution of σg <dig> shrank as m increased as shown in fig.  <dig>  the effect on the resulting sample size is not big, at most with a difference of  <dig> .
+rnaseqsamplesize
+we also present the comparison between our method and rnaseqsamplesize r package for simulation  <dig>  where the right two columns are sample size and power calculated by the rnaseqsamplesize r package
+
+
+
+we now choose a sample size n= <dig> and demonstrate this sample size indeed reaches the desired power  <dig> . at n= <dig>  we simulated  <dig> datasets and performed several popularly applied tests such as the edger exact test, the voom and limma method, deseq, deseq <dig> and quasiseq using the corresponding r packages. desired power  was achieved for all testing methods when controlling fdr at  <dig>  using q-value procedure  <cit> , and the observed fdr was controlled successfully under all the five methods. the results are shown in fig.  <dig>  for the voom and limma pipeline method, the observed power curves while fdr was controlled using the benjamini and hochberg’s method  <cit>  and the q-value procedure  <cit>  and the power curve based on our calculation are shown in fig.  <dig>  the observed power was obtained by averaging actual power over  <dig> simulated datasets for each sample size. the observed power and the power calculated by our method are close with our calculation being a little conservative. hence, our proposed method provides an accurate estimate of power, and the sample size calculated by our method is reliable.
+fig.  <dig> results from simulation  <dig>  data were simulated with sample size n= <dig>  a observed average power from different methods of differential expression analysis is plotted against the nominal fdr level controlled using the q-value procedure. b the actual fdr level versus the nominal fdr level for different methods
+
+fig.  <dig> anticipated power curve calculated by ssizerna and observed power curves using voom and limma while fdr was controlled using either the benjamini and hochberg method  or the q-value procedure by storey and tibshirani  for simulation 1
+
+
+
+finally we would like to compare our method with other existing sample size calculation methods, including li et al.’s approach  <cit>  and wu et al.’s approach  <cit> . li et al. proposed to calculate the sample size by “using a common ρ∗=argming∈m1{|log2|} minimum fold change”, where ρg in their paper denotes the fold change and is equivalent to δg in this paper. however, we found that the direction of fold change does matter when applying their code. if we set ρg= <dig>  the sample size calculated by their method is n= <dig>  as presented in their table  <dig>  the plot of average power vs. nominal fdr for their method is shown in fig.  <dig>  from which we notice that the desired power  is not achieved at sample size n= <dig> when controlling fdr at  <dig> . in fact, the observed power is  <dig>  when using the edger exact test based on which they derived their method. when applying the the voom and limma pipeline, the observed power is  <dig>  for sample size  <dig>  if we set ρg= <dig> , then the sample size will be  <dig>  same as our proposed method, and we get power of  <dig>  using the edger exact test and  <dig>  using the voom and limma pipeline for differential expression analysis. wu et al.  provided a simulation-based power evaluation tool, which requires a lot of simulations to assess the power for each sample size. table  <dig> presents the computation time needed for the calculation. it took proper  <dig>  hours to get the resulting sample size while the other two methods only needed seconds. proper is more than  <dig>  fold time-consuming than our proposed method. the resulting sample size from proper is  <dig>  less than our proposed method. this is because proper is based on edger exact test, which tends to be more powerful than the voom and limma pipeline.
+fig.  <dig> observed average power vs. nominal fdr for five methods at sample size n= <dig> calculated by li et al.’s method for simulation 1
+
+
+rnaseqsamplesize
+
+proper
+results determined by our method were based on parameters estimated at m= <dig>  power was evaluated based on the voom and limma pipeline for our method, while edger for rnaseqsamplesize and proper. the computation time for each simulation was calculated on a macair laptop with  <dig>  ghz i <dig> cpu and 4gb ram
+
+
+
+results for other parameter settings under m= <dig> are presented in the additional file  <dig>  with li et al.’s results in the first row, and our results in the second row.
+
+simulation  <dig>  gene-specific mean and dispersion with fixed fold change
+in the second simulation setting, we used a real rna-seq dataset to generate gene-specific mean and dispersion parameters. a maize dataset was obtained from a study by tausta et al.  <cit> , who compared gene expression between bundle sheath and mesophyll cells of corn plants.
+
+similar to simulation  <dig>  we generated  <dig>  genes from nb, with fold change δ= <dig> for de genes, λg and ϕg from the means and dispersions estimated for each gene in the maize dataset. for ee genes, both rg1j and rg2j were drawn from nb; for de genes, rg1j were drawn from nb and rg2j were drawn from nb or nb. the proportion of non-de genes was π0= <dig> .
+
+the fitted inverse gamma distributions of σg <dig> for m=  <dig> and  <dig> are very similar, as shown as in fig.  <dig>  where vertical lines indicate the modes. the middle three columns in table  <dig> give the sample size and average power calculated by our ssizerna package. as shown in table  <dig>  the resulting sample sizes are all  <dig> when m ranges from  <dig> to  <dig>  this is expected because fig.  <dig> indicates that the estimated distributions of σg <dig> are very close using different m values for this dataset.
+fig.  <dig> fitted inverse gamma distributions of σg <dig> for sample size m=  <dig> and  <dig> for simulation 2
+
+
+
+at n= <dig>  we checked the plots of average power vs. nominal fdr and true fdr vs. nominal fdr, and the results were similar to those obtained in simulation  <dig>  more specifically, the desired power  was achieved, and fdr was controlled successfully. actually, the desired power can be reached at sample size n= <dig>  figure  <dig> gives the power curve calculated by our method based on hyperparameters estimated at m= <dig> together with observed power curves with fdr controlled by the benjamini and hochberg’s method and the q-value procedure, respectively. the anticipated power curve based on m= <dig> is close to the other two observed power curves.
+fig.  <dig> anticipated power curve calculated by ssizerna and observed power curves using voom and limma while fdr was controlled using either the benjamini and hochberg method  or the q-value procedure by storey and tibshirani  for simulation  <dig> ) and  <dig> )
+
+
+
+the rnaseqsamplesize r package  <cit>  could give an estimation of sample size and power by prior real data. they first use user-specified number of genes to estimate the gene read count and dispersion distribution, then sample_size_distribution and est_power_distribution functions will be used to determine sample size and actual power. when we used the same real dataset as our simulation setting  <dig>  the sample size calculated by their method was  <dig>  with actual power  <dig> , which did not reach the desired power  <dig> . we also tried to apply their method using our simulated data , the resulting sample size is larger . the power estimated by their method at n= <dig> are shown in table  <dig>  and all their estimated power were actually smaller than  <dig> . proper started from an estimation of mean and dispersion parameters, which is similar to our method. the sample size calculated by their method is  <dig>  with power  <dig>  based on de detection method edger. the comparison results of our proposed method and these three approaches are shown in the middle three columns of table  <dig>  still, proper is much more time-consuming than the other two methods.
+
+simulation  <dig>  gene-specific mean and dispersion with different fold change
+in this simulation, the setting is the same as the second simulation study, except that the fold change δg was simulated from a log-normal distribution for differentially expressed genes. for ee genes, both rg1j and rg2j were drawn from nb; for de genes, rg1j were drawn from nb and rg2j were drawn from nb or nb where 
+ δg∼log−normal, <dig> log). 
+
+the last three columns in table  <dig> give the sample size and power calculated by our method. as in simulation  <dig>  varying the size of simulated data  did not result in different sample sizes. anticipated and observed power curves are presented in fig.  <dig>  from which we notice that the three curves are almost indistinguishable after power reaches  <dig> %. this more realistic simulation demonstrates that our proposed method provides accurate power and sample size.
+
+we also applied rnaseqsamplesize to this simulation setting. since their method is based on minimum fold change, such results will be conservative due to the variability of fold change, especially as in this case, the minimum fold change is close to  <dig>  when we used the 10th percentile of fold change of de genes as the “minimum” fold change, the sample size calculated by their method was  <dig>  which is still much larger than what we actually need, but the power calculated by their method based on the “minimum” fold change was less than the desired power  <dig> . proper gave a result of sample size  <dig> with power  <dig>  based on de detection method edger. the comparison results of our proposed method and these two approaches are shown in the last three columns of table  <dig> 
+
+based on results from simulations, our proposed method and rnaseqsamplesize provided answers much faster than proper, and our proposed method and proper provided good sample size estimation. overall, our proposed method worked the best while both accuracy and computation time are considered.
+
+simulation  <dig>  real data-based simulation
+our method involves simulating data based on negative binomial distributions. to check the robustness of our method, we conducted a simulation based on a real rna-seq dataset from  <cit> , which was upon an rna-seq experiment that sequenced  <dig> lymphoblastoid cell lines  derived from unrelated nigerian individuals. we used the genes with minimum read counts across all individuals larger than  <dig>  which results in  <dig> genes. first, we estimated the mean and dispersion across all  <dig> individuals for each gene. assume that fold change comes from a log-normal distribution as in simulation  <dig>  
+ δg∼log−normal, <dig> log),  the proportion of non-de genes being  <dig> %, to reach a desired power  <dig>  while controlling fdr at  <dig> , the sample size calculated by our method is  <dig> at m= <dig> 
+
+to check whether desired power can be achieved at the calculated sample size, we simulated  <dig> datasets. for each simulation, we randomly picked  <dig> out of the  <dig> individuals and randomly assigned  <dig> individuals to the control group and the remaining  <dig> individuals to the treatment group. consider all  <dig> genes among the  <dig> individuals as ee since the samples were randomly selected from the same population. then we randomly generated  <dig> % of the  <dig> genes to be de, and their counts in the treatment group were multiplied by fold change δg which were drawn from a log−normal, <dig> log) distribution. the scaled counts were rounded to the nearest integers. this strategy likely results in more realistic data because all counts come from real dataset and no distributional assumptions were imposed. the plot of average power vs. nominal fdr at n= <dig> is shown in fig.  <dig>  where desired power  was achieved for most testing methods, including edger, deseq <dig>  quasiseq, voom and limma methods, when controlling fdr at  <dig>  using q-value procedure. figure  <dig> gives the power calculated by our method based on hyperparameters estimated at m= <dig>  it also presents the observed average power curves when fdr was controlled by either the benjamini and hochberg’s method or the q-value procedure. the anticipated power curve based on m= <dig> is close to the other two observed power curves. hence, our proposed method also provides a reliable estimation of sample size and power in the most realistic simulation study.
+fig.  <dig> results from simulation  <dig>  a observed average power from different methods of differential expression analysis is plotted against the nominal fdr level controlled using the q-value procedure at sample size n= <dig>  b anticipated power curve calculated by ssizerna and observed power curves using voom and limma while fdr was controlled using either the benjamini and hochberg method  or the q-value procedure by storey and tibshirani 
+
+
+
+CONCLUSIONS
+in recent years, rna-seq technology has become a major platform to study gene expression. with large sample size, rna-seq experiments would be rather costly; while insufficient sample size may result in unreliable statistical inference. thus sample size calculation is a crucial issue when designing an rna-seq experiment. although we could use a lot of simulations for each sample size and determine the one that reach our desired power as suggested in  <cit> , this requires generous calculation and lacks efficiency. our method provides a quick calculation for sample size, which only demands one-time simulation. from the simulation studies in the section of results and discussion, we demonstrate that our proposed method offers a reliable approach for sample size calculation for rna-seq experiments.
+
+for each gene g, when we use a two-sample t-test to do differential expression analysis, the effect size Δg in formula  depends on the simulated sample size m. larger m may lead to better estimation of the prior distributions and hence a more accurate sample size. based on our simulation studies, the effect of m on the resulting sample size is not big, and m= <dig> should be enough for providing a relatively precise sample size.
+
+the ordinary t-test instead of the moderated t-test  <cit>  was used in ssizerna r package. because the ordinary t-test is a bit less powerful than the moderated t-test, it tends to overestimate the sample size which might be the reason why our calculated sample size in simulation  <dig> is a little bit larger than what we actually need according to the observed power curves using voom and limma. however, the overestimation is not dramatic and far less than the method of li et al.  <cit> .
+
+in this article, we illustrate our idea using a method for two-sample comparison with the t-test, because detecting differentially expressed genes between two treatment groups is the most common case in rna-seq analysis. our idea could be applied to multi-sample comparison with an f-test or tests for linear contrasts of treatment means as well.
+
+the r package ssizerna implements our proposed sample size calculation method for rna-seq experiments and it is freely available on the comprehensive r archive network . to install this package, start r and enter: 
+■■■ source
+
+■■■ bioclite
+
+
+
+appendices
+appendix a: derivation of eq. 
+for each individual gene g, the weighted linear model 
+ yg=xβg+σgwg−12ε  can be fitted to log-cpm values 
+ yg=′  with design matrix 
+ x=10⋮⋮1011⋮⋮ <dig>   coefficients vector 
+ βg=βg1βg <dig>   unknown gene-specific standard deviation σg, associated voom precision weights 
+ wg=diagwg <dig> ⋯,wg1n <dig> wg <dig> ⋯,wg2n <dig>   and error 
+ ε∼mvn <dig> in1+n <dig>  
+
+thus we could obtain the coefficient estimators 
+ β^g=xtwgx−1xtwgyg  with variance-covariance matrix 
+ var=σg2xtwgx− <dig>   where σg <dig> is estimated by sg <dig> sg2=yg−xβg′wgyg−xβgn−p  with 
+ p=rank= <dig>  
+
+let vgk be the kth diagonal element of − <dig>  where 
+ xtwgx−1=∑i=12∑j=1niwgij∑j=1n2wg2j∑j=1n2wg2j∑j=1n2wg2j−1=∑j=1n2wg2j−∑j=1n2wg2j−∑j=1n2wg2j∑i=12∑j=1niwgij∑j=1n1wg1j∑j=1n2wg2j. 
+
+under the assumptions as made in smyth , 
+ β^gk|βgk,σg2∼nβgk,vgkσg <dig>  and 
+ sg2|σg2∼σg2dgχdg <dig>   where dg is the residual degrees of freedom for the linear model of gene g, the ordinary t-test statistic will be 
+ tgk=β^gksgvgk,  which follows an approximate t-distribution with dg degrees of freedom.
+
+assuming equal variance between treatment and control group, then the statistic for testing 
+ h0g:μg1=μg2vs.h1g:μg1≠μg <dig>  for the gth gene is 
+ tg=β^g2s.e.=β^g2sgvg2=β^g2sg∑i=12∑j=1niwgij∑j=1n1wg1j∑j=1n2wg2j=β^g21n1+1n2∑j=1n1wg1j∑j=1n2wg2j∑i=12∑j=1niwgijsg1n1+1n2=β^g2∑j=1n1wg1j/n1∑j=1n2wg2j/n2∑i=12∑j=1niwgij/sg1n1+1n2=β^g2w¯g1·w¯g2·w¯g··sg1n1+1n2≡Δgsg1n1+1n <dig>  
+
+where 
+ Δg≡β^g2w¯g1·w¯g2·w¯g··  with w¯g1·=1n1∑j=1n1wg1j, w¯g2·=1n2∑j=1n2wg2j and w¯g··=1n1+n2∑i=12∑j=1niwgij.
+
+appendix b: choice of rejection region Γ satisfying formula 
+for the two-sample comparison with t-test statistics tg as in eq. , we assume as in lh method that the effect size follows a normal distribution 
+ Δg∼nμΔ,σΔ <dig>   and the variance of log-cpm values for each gene follows an inverse gamma distribution 
+ σg2∼inv−gamma  with mean ba− <dig>  then formula  becomes 
+  α1−α1−π0π0≥prpr=pr∫∫prπ1π2dΔgdσg=pr∫∫prπ1π2dΔgdσg, 
+
+where π <dig> and π <dig> denote the probability distribution function  of Δg and σg respectively. the numerator in  equals 
+ 2·tn1+n2− <dig>   where td denotes the cumulative distribution function  of a central t-distribution with d degrees of freedom, and the denominator in  equals 
+  1−∫∫tn1+n2−2c|θgπ1π2dΔgdσg+∫∫tn1+n2−2−c|θgπ1π2dΔgdσg. 
+
+here, td denotes the c.d.f. of a non-central t-distribution with d degrees of freedom and non-centrality parameter 
+ θg=Δgσg1n1+1n <dig>  
+
+the integration in  with respect to Δg could be avoided through mathematical derivation, and the integration with respect to σg is approximated using static quadrature rules, which allows a stable calculation to get the root of c. details of derivation could be found in appendix b of  <cit> .
+
+once the choice of c has been made for each sample size, power would be calculated accordingly by integrating over the prior distributions on effect size and residual variance. hence based on the desired power, sample size is finally determined.
+
+additional file
+additional file  <dig> this excel file contains comparison of resulting sample size and power between li et al.’s method  <cit>  and our proposed method for simulation  <dig>  with parameter settings from table  <dig> in  <cit> . the results are obtained under m= <dig>  with li’s result in the first row from each parameter setting, and our result in the second row. 
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+rb and pl developed the method. rb implemented the ssizerna r package. rb and pl drafted the manuscript. both authors read and approved the final manuscript.
+

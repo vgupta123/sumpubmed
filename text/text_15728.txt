@@ -1,0 +1,239 @@
+BACKGROUND
+constraint-based reconstruction and analysis  methods have allowed the study of metabolism on a genome-wide scale  <cit> . these models have been used to understand the interplay between environmental and genetic perturbations and the metabolic capabilities of an organism. applications of cobra methods have led to increased understanding in the fields of bioprocess optimization  <cit> , pathogenicity  <cit> , symbiosis  <cit> , biofuel production  <cit> , and human disease  <cit> .
+
+the gene-protein-reaction relationship
+cobra models often contain two sets of biological information, a matrix of stoichiometric data for metabolic reactions, and a mapping between gene-encoding enzymes and the reactions they catalyze . predicting the metabolic capabilities of a cobra model is possible with flux balance analysis , a two-stage mathematical technique based on the observation that metabolic networks often display optimal dynamics  <cit> . in the first stage of fba, genes in the modeled organism are classified as either "on" or "off" to create an in silico genetic state. turning genes "off" can be used to simulate significant reductions in expression levels or complete knockouts. the gpr for each reaction, represented as a binary rule, determines if a sufficient collection of proteins  is present for the reaction to carry flux. all reactions with satisfied gpr rules are collected into a stoichiometric matrix. the second stage of fba uses linear programming to calculate a thermodynamically-feasible, mass-balanced flux distribution that maximizes the flux through an objective reaction. the objective reactions used in fba vary among organisms, ranging from atp maintenance to biomass production  <cit> . by assuming that the fluxes through a metabolic network have evolved to maximize an objective, fba eliminates the need for detailed kinetic information for each of the thousands of reactions in a complete metabolic reconstruction.
+
+the gpr rules do not always describe a one-to-one mapping between genes and reactions . for example, a cobra reconstruction for the yeast saccharomyces cerevisiae  <cit>  contains  <dig> metabolic reactions;  <dig>  of these reactions have complex gpr associations. the most complex gpr in this model involves the products of  <dig> open reading frames. the entire set of gpr rules contains  <dig> instances of isozyme-like behavior  and  <dig> different complexes of protein subunits.
+
+because of the complexity of the gpr mappings, early extensions to fba were reaction, rather than gene, centric. for example, the optknock  <cit>  algorithm removed reactions from a fba model to design a strain of e. coli with optimal production of a metabolic byproduct. ideally, optknock would operate by removing genes, not reactions, since it is not straightforward to independently remove reactions from a biological system without genetic manipulations. an optimization using genes as decision variables would require a method for encoding the gpr logic into a set of linear inequalities. this encoding was developed as sr-fba  <cit>  using a mixed integer optimization approach for gpr logic and other boolean regulatory rules. an sr-fba-based approach was later used to develop optorf, a method to design microbial strains through gene knockouts and overexpression  <cit> . other gene-centric, fba-related algorithms have been developed, each using a variation of the sr-fba method  <cit> . however, a general software platform for coupling gpr rules of arbitrary complexity with a cobra model using mixed integer programming was not available. such a tool would speed the development of new algorithms by removing the need for researchers to re-implement this complex process.
+
+transcriptional regulatory networks
+the accuracy of cobra models has been improved through the addition of transcriptional regulatory networks   <cit> . the trn is a set of rules that relate the expression states of metabolic genes to various genetic and environmental cues. because of the paucity of kinetic details available to describe these relationships, genome-scale models often represent gene expression and environmental cues in a binary, "on" or "off" format. this approach allows trns to be described with boolean logic.
+
+the first genome-scale trns were applied to models of escherichia coli  <cit>  and saccharomyces cerevisiae  <cit>  metabolism. the rules were written in standard boolean format, where each boolean variable is given by an explicit function of the other variables. this method creates two significant problems. first, the trn uses the absence or presence of metabolites in the extracellular environment to calculate which genes  will be active. however, certain metabolic pathways secrete byproducts into the extracellular space, thereby changing the environment. studies with the e. coli and s. cerevisiae trns used an iterative approach  <cit>  - applying the trn to the metabolic network in a starting environment, determining which metabolites would be secreted, and then repeating the process in the new environment until the environment no longer changes between iterations. a more straightforward approach would be to solve the trn and metabolic networks simultaneously by formulating both problems in a single optimization.
+
+a second obstacle with trn integration is that the explicit rule formulation used by previous studies  <cit>  can over-constrain the metabolic model.  consider the following subnetwork of the imh <dig> trn for s. cerevisiae  <cit> :   
+
+transcription factor mth <dig> is repressed by mig <dig> and promotes expression of rgt <dig>  extracellular l-glutamine  represses rgt <dig> expression. the original imh <dig> study required this set of constraints be described with the following set of explicit rules  <cit> :
+
+ not mig1⇔mth1 mth1 and ⇔rgt <dig> 
+
+an implicit representation of  is
+
+ mig1⇒not mth1mth1⇒rgt1gln-l⇒not rgt <dig> 
+
+the three transcription factors and one metabolite in these rules can be arranged in  <dig> =  <dig> possible states. as shown in table  <dig>  only four of the sixteen states are feasible for the explicit rules. the implicit formulation of the same system allows four new states and makes one of the explicit states infeasible. this example illustrates that two mathematical descriptions of the same biological process can lead to distinct model predictions. the model developer should be free to choose the rule formulation that best encompasses the underlying biology. however, implicit rules require simultaneous solution with a metabolic model and are often more difficult to parse into a mixed integer linear program. as a result, previous trn integration studies have relied solely on explicit rules to describe regulatory interactions  <cit> . a software platform that can correctly parse both explicit and implicit rules would ease the development of large trn models.
+
+
+                              mig1
+                              mth1
+                              rgt1
+feasible states for explicit and implicit rules describing the transcriptional regulatory network . rules are taken from the s. cerevisiae regulatory network model imh <dig>  <cit> 
+
+objectives
+software suites have been developed to enable cobra analyses. packages such as cellnetanalyzer  <cit> , the biomet toolbox  <cit> , and the cobra toolbox  <cit>  implement several useful algorithms for studying cobra models and trns. however, to date, no single software platform has been developed to  <dig> ) convert cobra models and trns into integrated optimization problems,  <dig> ) analyze these integrated models with existing algorithms to incorporate high-throughput expression data, and  <dig> ) allow users to easily develop new algorithms for the integrated models. to overcome these limitations, we present a toolbox for integrating genome-scale metabolism, expression, and regulation . tiger automatically converts a list of implicit or explicit gpr and trn rules into a set of linear inequalities; these equations are integrated with an existing cobra model. the software allows rules to be written in a generalized boolean format, enabling trn logic to more accurately reflect the underlying biology. we demonstrate how this increased expressivity can overcome inconsistencies in existing trn models. we will also show how tiger simplifies the development of gene-centric extensions to fba by improving three algorithms for integrating high-throughput expression data with a cobra model.
+
+implementation
+the primary functions of tiger are shown in figure  <dig>  tiger converts a gpr and additional regulatory rules into an equivalent mixed integer linear program . the milp constraints are added to a cobra metabolic model to create a tiger model that combines metabolism, gpr associations, and transcriptional regulation. this integrated model serves as a platform for applying many gene-centric extensions to fba, including algorithms that incorporate "omics" data for model refinement. in this section, we describe how the rules parsed by tiger are constructed, and how they are converted to an milp. sample files depicting a cobra model, gpr, and trn are provided in the "test/samples" directory of the tiger distribution.
+
+creating rules
+the gpr uses boolean logic to describe the nonlinear relationship among genes, their protein products, and the reactions they catalyze. examples of gpr relationships appear in figure  <dig>  the majority of metabolic reactions adhere to a one gene, one enzyme, one reaction relationship, as demonstrated by gene a, enzyme a, and reaction  <dig>  if gene a is expressed, fba assumes that reaction  <dig> can carry any physiologically feasible flux. some enzymes, such as enzyme b, can catalyze two or more separate reactions. other reactions, such as reaction  <dig>  require two enzymes  to carry any flux. enzymes c and d are commonly protein subunits of an enzymatic complex; if either is absent, no substrate conversion is possible. genes e and f encode isozymes; either protein can independently catalyze reaction  <dig> 
+
+these gpr relationships can be described as a boolean expression using the standard operators and and or. for example, a reaction that is catalyzed by either of two isozymes, the second of which is composed of two subunits, would have a gpr of the form "isozyme <dig> or ". two expressions are joined with an implication operator , to form a rule. for gpr associations, rules are formed as "gpr ⇔ reaction", where reaction is an indicator variable that constrains the flux through a reaction to be zero when the gpr expression is false.
+
+tiger expressions allow additional features to describe logical relationships that are more complex than those typically found in gprs. the not operator allows logical negation, which is often used to construct rules for transcriptional repression. expressions can also contain conditionals that compare the numerical values of individual variables. if a gene g was known to be expressed when glucose uptake is greater than  <dig> flux units, this relationship could be represented by the rule "glc_ex > <dig> ⇒ g", where "glc_ex" is the glucose exchange reaction in the metabolic model. any two expressions of arbitrary complexity can be combined as a rule and parsed by tiger. the grammar used by tiger for rules was designed to resemble logical operations in common programming languages and to be compatible with the gprs of widely-used cobra models. a complete description of the tiger syntax appears in additional file  <dig> 
+
+some transcriptional regulators, such as the response of crp to camp in e. coli, display multiple levels of activity and cannot be easily described with boolean logic  <cit> . rather than require users to create several variables describing each state of activation, tiger allows multilevel variables. if a transcription factor t activates target genes glow at low levels of expression and ghigh at high levels of expression, then this relationship could be described with the rules
+
+  ⇒g1ow 
+
+  ⇒ghigh 
+
+where t =  <dig>   <dig>  and  <dig> corresponds to no, low, and high expression. logical operators have a different interpretation when applied to multilevel variables. if proteins x and y form a promoter complex for expression of gene z, then the corresponding rule for z expression would be "x and y ⇒ z", since both x and y are required for z transcription. if x and y were multilevel, one would assume that z expression would be proportional to the promoter subunit in lower abundance, since this species would limit the amount of complete promoter complex that could be formed. thus, the and operation often corresponds to a minimization:
+
+  xandy≡ min{x,y} 
+
+the or operation would be used in situations where either factor can independently induce expression. in this situation, the species in higher abundance determines the target gene's transcription level. tiger implements the multilevel or as a maximization:
+
+  xory≡ max{x,y} 
+
+the not operator can have two interpretations when applied to multilevel variables:
+
+  notx≡x>0pseudo - binaryx ¯-xinversion,x∈{ <dig> …,x ¯} 
+
+where x∈{ <dig> …,x¯}. the first case  regards any nonzero value as true, regardless of the number of levels the variable may occupy. the second case  requires that the value of x and the quantity notx always sum to the maximum value that x can occupy. in this case, notx is a measure of how far x is from its upper bound. users are able to select the pseudo-binary or inversion representation depending on which interpretation is a better approximation of the biological context. for example, consider a gene/repressor relationship r ⇒ not g, where the repressor r can take on three biologically distinct levels - "off," "low," and "high". if both "low" and "high" levels of r prevent any expression of g, then the pseudo-binary not operator would be appropriate as g is off whenever r is not "off". however, if g also has the same three levels of expression, then the inversion interpretation of the not operator is more appropriate. this choice implies that
+
+  r=off→g=high 
+
+  r=low→g=low 
+
+  r=high→g=off 
+
+any variable in a tiger model can be declared with multiple levels. such declarations are made when rules are added to a model using the add_rule function in two ways:  <dig> ) setting the default upper bound to all variables to any integer greater than one, or  <dig> ) providing a list of variable names and a set of upper and lower bounds.
+
+rule simplification
+simple boolean rules can be represented by systems of linear inequalities of integer variables  <cit> . a general boolean rule can be converted by the following procedure to a set of simple rules before conversion to an milp.
+
+we define an "atomic" expression as either a variable  or a negated variable . if a not operator appears before an expression that is not atomic, tiger applies demorgan's laws to move the negation onto atomic expressions  becomes the equivalent expression  or ). a simple rule then conforms to one of the following patterns
+
+  xz 
+
+  xand yz 
+
+  xoryz 
+
+  x⟨op⟩yz 
+
+where x, y, and z are atomic, and 〈op〉 is a conditional operator . non-simple rules are converted to simple rules through a series of recursive substitutions. for example, the rule
+
+  )and z⇒w 
+
+is not simple, since the expression x or  is not atomic. by defining an indicator variable i, which is true if and only if the expression x or  is true, equation  can be written as two simple rules:
+
+  xor⇔i 
+
+  iand z⇒w 
+
+the bounds of i are determined by the bounds of x and y. if x∈{ <dig> …,x¯} and y∈{ <dig> …,ȳ}, then i∈{ <dig> …,Ī}, where
+
+  Ī=max{x¯,ȳ}for xorymin{x ¯,ȳ}for xandy 
+
+thus, if x and y are binary, x¯=ȳ= <dig>  so i is binary as well.
+
+tiger applies the above substitutions recursively, creating indicator variables as necessary until all rules are simple. each simple rule is converted to a set of linear inequalities that are added as constraints to the model structure. if a variable name already appears in the model, tiger assumes that these variables represent the same quantity and thus allows new rules to be added to an existing model without recompiling previous rules. at the same time, tiger creates variables to substitute for negated variables. for efficiency, tiger ensures that only one negated variable is created for each original variable, regardless of the number of times the negated expression appears in the set of simple rules. details of the conversion between simple rules and inequalities, along with methods for handling conditionals, are provided in additional file  <dig> 
+
+reaction coupling
+if the gpr expression for a reaction is not satisfied, the reaction is not allowed to carry flux. to enforce this relationship during an optimization, a set of discrete variables ri are defined, where ri =  <dig> if the gpr for reaction i is not satisfied, and ri > <dig> otherwise. to enforce the gpr's effect on flux, tiger adds the constraint
+
+  viminri≤vi≤vimaxri 
+
+where vi is the flux through the ith reaction, with lower and upper bounds vimin and vimax.
+
+model structure
+tiger models are represented as matlab structures. the layout of this structure is shown in figure  <dig>  the structure contains fields obj, a, b, lb, and ub that correspond to the values in the following milp problem:
+
+ minobj′xsubject toaxblb≤x≤ub 
+
+the type of equality for each constraint in a is determined by the character vector ctype. the type of variable for each entry in x is specified by the field vartype, where 'c', 'b', and 'i' denote continuous, binary, and general integer variables. reaction fluxes are continuous variables, while all other variables are either binary or integer depending on the corresponding upper bound. the fields rownames and varnames contain descriptive names of the constraints and variables, stored as cell arrays of strings. functions in tiger allow variables to be interchangeably referenced by their name, column index, or through matlab's logical indexing features.
+
+the format for tiger models is designed for compatibility with the model structure for the cobra toolbox  <cit> . tiger can use a cobra toolbox model as a starting point for converting a genome-scale reconstruction; therefore, any model in a file format supported by the cobra toolbox  can be converted to a tiger model.
+
+accessing the milp solver
+tiger uses a custom matlab class cmpi  to create and solve mathematical programming problems. cmpi defines a consistent structure for milp  problems, providing independence from the underlying milp solver software. tiger currently supports the cplex, gurobi , and glpk  software packages, all of which are freely available for academic use. porting tiger to use a new solver requires modifying only the cmpi method solve_mip to specify the new interface. cmpi also provides a standardized method for configuring common solver parameters .
+
+previous work has indicated that the computation time of some fba-related algorithms, such as flux variability analysis  <cit> , can be reduced by saving information about the problem structure between calls to the milp solver  <cit> . cmpi provides a method, solve_multiple_milps, to preserve the solver state between successive calls to the cplex optimizer and reduce runtime in this manner.  if the cplex optimizer is not installed, cmpi will automatically make successive calls to the installed optimizer. while this removes the potential speed increase from using solver restarts, it allows tiger code to remain solver independent and portable.
+
+using tiger
+tiger source code and installation instructions are available online at http://bme.virginia.edu/csbl/downloads/ or http://csbl.bitbucket.org/tiger the version of tiger used for the examples in this study is included as additional file  <dig>  all functions in the toolbox are documented using matlab's "help" facilities. complete documentation and a step-by-step tutorial are also available on the tiger website. the software includes a testing suite to verify the installation. these tests contain examples that build a tiger structure from a simple cobra model, add a set of trn rules, call a milp solver, and display the solution.
+
+RESULTS
+refining integrated models for saccharomyces cerevisiae
+tiger was used to couple the  <dig> reactions in ind <dig>  <cit> , a genome-scale model of saccharomyces cerevisiae metabolism, with  <dig> metabolic genes. the resulting tiger model contained  <dig> constraints in  <dig> variables. a model of s. cerevisiae transcriptional regulation, imh <dig>  <cit> , was added. the additional  <dig> rules contributed  <dig> constraints and  <dig> variables to the tiger model. the conversion took  <dig>  s for ind <dig> and  <dig>  s to add the trn using an intel  <dig>  ghz i7-quad core processor running linux.
+
+as mentioned above, previous methods for integrating trns involve an iterative process, alternating between calculating gene states from a given environment and determining an environment based on metabolic byproducts  <cit> . however, the multiple layers of trascriptional regulation may require several iterations of this method to reach a stable gene state. the number of iterations to reach a stable state varies by environment and cannot easily be determined a priori  <cit> . in fact, some feedback mechanisms in trns may lead to a stable cycle of gene activation/inactivation rather than a single gene state. tiger solves the trn and fba problems simultaneously, so the resulting gene state is always stable .
+
+applying large-scale trns to cobra models may result in infeasible models, i.e., models unable to produce any biomass. this is often due to a small number of rules that turn off reactions that are essential for biomass production. previous work has developed techniques for finding which rules create the model infeasibility  <cit> . tiger includes the function find_infeasible_rules to identify rules that prevent feasible solutions to the resulting milp. given a model and a set of rules that prevent a feasible solution, find_infeasible_rules creates a milp that preserves the logic of the rules but allows each rule to be artificially satisfied. the objective of this milp is to minimize the number of rules that must be artificially satisfied while finding a feasible solution for the model. 
+
+analysis by tiger reported that the combined ind750/imh <dig> metabolic and trn network was unable to produce biomass under aerobic conditions in a glucose minimal media. since s. cerevisiae is well-known to grow in this environment, we used tiger's find_infeasible_rules function to identify the following three rules that prevented growth:
+
+  o2or⇔hap <dig> 
+
+  o2andhap1⇔rox <dig> 
+
+  glucoseandhap1and⇔erg <dig> 
+
+the product of gene erg <dig>  lanosterol 14α-demethylase, is an essential enzyme for the production of ergosterol, a main sterol in s. cerevisiae  <cit> . this gene is essential in the ind <dig> metabolic model and must remain "on" during aerobic growth on glucose. however, the stable gene state for erg <dig> in the above rules is always "off" after three iterations, as described in table  <dig>  because the imh <dig> study used the results of the second iteration as the final gene state, this inaccuracy was unnoticed.
+
+to start, all transcription factors are assumed to be "off", and all metabolic genes are "on". the extracellular environment contains only glucose , oxygen , and essential salts and minerals. each iteration calculates the next gene state based on the current state of metabolites in the environment and transcription factors. after three iterations, expression of erg <dig> turns off, unless a modified rule is used that account for high oxygen uptake. the modified rule  is more consistent with the results in turi & loper  <cit>  rules are taken from the s. cerevisiae regulatory network model imh <dig>  <cit> 
+
+rule  was originally derived from turi & loper  <cit> . re-examination of this manuscript revealed that while rox <dig> represses erg <dig>  complete repression is only observed under low oxygen conditions. to incorporate these findings, we create an indicator "high o2" that is true if and only if the cell uptakes more than 10% of the maximum oxygen consumption rate. this relationship is expressed as
+
+  high_02⇔ex_02<- <dig>  
+
+where "ex_o2" is the ind <dig> name for the oxygen exchange reaction, and the maximum oxygen uptake rate for growth on glucose is  <dig>  mol//h . rule  for erg <dig> expression was re-written to only exhibit rox <dig> repression under low oxygen conditions:
+
+  glucoseand hap1 and ⇔erg <dig> 
+
+the set of refined rules  reproduces the correct growth phenotype in aerobic glucose conditions. this example demonstrates a three-step procedure for refining existing trn models using tiger:  <dig> ) apply the existing trn to a cobra model,  <dig> ) use the find_infeasible_rules function to identify rules that cause the model to differ from a known phenotype, and  <dig> ) re-examine the evidence for these rules and make appropriate modifications. as shown in the previous example, new biological information can often be incorporated into existing rules using tiger's support for complex logical expressions.
+
+improved methods for expression data
+coupling the gpr with a metabolic model is a starting point for several algorithms designed to refine metabolic models by integrating high-throughput gene or protein expression data. the tiger package contains implementations of three of these methods.
+
+gimme
+gimme was designed to generate context-specific metabolic networks by designating each reaction as "on" or "off"  <cit> . given expression data and a minimum expression threshold, gimme calculates a normalized gene "score" for each reaction by averaging the expression values of all genes that appear in the gpr for the reaction. reactions with a score below a cutoff are turned off; only reactions scoring above the cutoff are allowed to carry flux. because this thresholding does not guarantee a functioning model, an optimization problem is formed to minimize the number of "off" reactions that must carry flux when the model produces a minimum objective flux.
+
+the gimme algorithm is an excellent candidate for conversion to a gene-centric approach. rather than average the gene expression values for each reaction, a simpler approach is to turn genes "on" or "off" if their expression is above or below a threshold. using an integrated gpr/metabolic model, an optimization problem could re-activate "off" genes to allow the network to produce an objective flux. tiger provides a gimme function that implements this gene-centric approach. similar to the original algorithm, tiger's gimme uses the distance below the expression threshold as a weight when selecting genes for re-activation. in addition to removing discrepancies caused by the averaging of gene expression values over each reaction, tiger's integrated approach allows gimme to identify each gene as either "on" or "off" in the resulting network .
+
+we applied gimme to the prototypic network shown in figure 4a. in this network, three metabolites, a, c, and f, are transported into the system and undergo chemical transformation into products e and g. the metabolic objective for this system is the production of e. the gpr associations are also shown in figure 4a. reactions  <dig> through  <dig> are gene associated. reactions  <dig> and  <dig> both require two enzymatic subunits to carry flux, and reaction  <dig> can carry flux through either of two isozymes.
+
+the expression data applied to this network are shown in table  <dig>  using simple thresholding at a threshold expression level of  <dig> does not produce a functional model. as shown in table  <dig> and figure 4b, gimme reactivates the genes g5a and g7b. because reaction  <dig> is the only method of producing metabolite e , this reaction must be active and both subunits  must be expressed. production of e also requires metabolite b and either reaction  <dig> or reaction  <dig>  the expression data showed that both genes g5a and g <dig> were below the expression threshold; gimme chose to activate g5a since its expression was closer to the threshold.
+
+expression values for genes of the network shown in figure 5a. "simple thresholding" is the gene state after a simple threshold of  <dig> is applied to the expression values. "gimme" is the gene state calculated by gimme that produces a functioning model. all expression values are arbitrary units.
+
+imat
+shlomi, et al.  <cit> , introduced the imat algorithm to create tissue-specific models of mammalian metabolism. briefly, reactions or genes were classified as having either low, regular, or high activity using information from several databases. an optimization problem was formulated such that
+
+  vi≥εif reaction ihas high activity≤εif reaction ihas low activity 
+
+for each reaction flux vi and some small flux ε. the optimization attempted to preserve the reaction classifications while enforcing that the resulting set of reaction fluxes be feasible . the mass-balance approach attempts to yield functional models in multicellular organisms that lack a clearly defined metabolic objective.
+
+tiger includes a gene-centric version of the imat algorithm. because tiger allows multilevel variables, each gene in the gpr is allowed to occupy a state of low , medium , or high  activity. the multilevel operators in the gpr then combine the gene expression values to create a reaction indicator with the same three levels. rules are added to enforce the constraints in equation . additionally, if a metabolic objective is available for the organism, the flux through the corresponding objective reaction can be constrained above a minimum value.
+
+imat was used to integrate the activity data in table  <dig> with the network model in figure 4a. the results are shown in figure 4c. notice that the high activity of gene g8b requires that reactions  <dig> and  <dig> carry flux. because production of metabolite g is not a part of the system's metabolic objective, reaction  <dig> would most likely not carry flux in the fba flux distribution for this network; the activity seen in this side pathway is enforced by the imat constraints.
+
+classification of genes according to "low", "medium", or "high" activity for imat. genes correspond to the network shown in figure 5a. imat produces the integrated network shown in figure 5c.
+
+made
+metabolic adjustment by differential expression  removes the need for a pre-defined "on"/"off" threshold when integrating expression data  <cit> . instead, made uses the differential expression between two or more conditions to determine which genes or proteins are likely to be "on" or "off". if a gene increases significantly between conditions  <dig> and  <dig>  made attempts to turn the gene "off" in condition  <dig> and "on" in condition  <dig>  the expression data are mapped while ensuring model functionality in all conditions, and the statistical significance of the expression changes are used to prioritize discrepancies.
+
+the tiger implementation of made offers two improvements. first, genes are allowed to be multilevel instead of binary. the user is allowed to define a mapping between the multiple levels of gene expression and the flux constraints for the corresponding reactions. second, tiger made allows comparisons among states that do not appear as a linear sequence. the original made algorithm used a series of n conditions c <dig>  c <dig>  ..., cn, and n -  <dig> sets of expression data describing the changes c <dig> → c <dig>  c <dig> → c <dig>  ..., cn- <dig> → cn. tiger made allows any number of connections between the n states.
+
+a conceptual example of tiger made's capabilities is presented in figure  <dig>  the goal in this example is to use expression data from five bacterial strains to develop strain-specific metabolic models. strains a and b were evolved from the same parent strain p. strain a later gave rise to two additional strains, a <dig> and a <dig>  a matrix containing the differential expression between each strain and its predecessor is calculated. a transition matrix t is defined as follows: if t = k, then the kth column of the differential expression matrix was calculated between strains i and j. values greater than one in this column indicate that expression is higher in strain j than in strain i. these two matrices are used by tiger made to create a single optimization problem. the result is a functional gene state for each condition that maximizes the significant changes in gene expression between each strain and its parent.
+
+                                 p
+                                 p
+                                 p
+fold change and p-values for the made example. column " <dig> → 2" and indicates the fold change in expression between conditions  <dig> and 2; p is the p-value for this change. "made states" are the binary gene states returned by the algorithm. the states maximize the transitions in the expression data while retaining model functionality in each condition. gene names correspond to the network in figure 5a. results are also depicted in figure 5d.
+
+source code for all of the examples in figure  <dig> are available in the file test/gimme_imat_made_examples.m of the tiger distribution.
+
+CONCLUSIONS
+we have presented tiger, a software platform for converting generalized boolean and multilevel rules to mixed-integer linear programs, and coupling these rules to genome-scale models of metabolism. the flexibility of tiger's generalized rule format allows for a more accurate description of biological processes such as catalysis by isozymes and multi-meric proteins, metabolic flux control, and transcriptional regulation. these features were used to identify and correct inconsistencies within an existing trn model of saccharomyces cerevisiae. we have also demonstrated how tiger can be used as a starting point for implementing and improving existing algorithms for genome-scale analysis.
+
+in addition to adding implementations of other gene-centric algorithms to tiger, we are exploring methods to improve the solution efficiency of the generated milp. possible strategies include exploiting indicator constraints, specially-ordered-sets , and other solver optimizations through cmpi.
+
+availability and requirements
+project name: tiger
+
+project home page: http://bme.virginia.edu/csbl/downloads or http://csbl.bitbucket.org/tiger
+
+operating system: platform independent
+
+programming language: matlab
+
+other requirements: matlab v <dig>  or higher, a mixed-integer linear programming solver 
+
+license: mit
+
+non-academic use restrictions: none
+
+list of abbreviations used
+tiger: toolbox for integrating genome-scale metabolism, expression, and regulation; cobra: constraint-based reconstruction and analysis; fba: flux balance analysis; gpr: gene-protein-reaction; trn: transcriptional regulatory network; milp: mixed-integer linear program; sr-fba: steady-state regulatory fba; ind750: genome-scale model of saccharomyces cerevisiae metabolism; imh805: genome-scale transcriptional regulatory network for saccharomyces cerevisiae.; cmpi: common mathematical programming interface; gimme: gene inactivity moderated by metabolism and expression; imat: integrative metabolic analysis tool; made: metabolic adjustment by differential expression.
+
+authors' contributions
+paj designed and wrote the tiger software and performed the simulations. kal prepared the trn validation study and contributed tiger functions. the project was conceived by paj and jp, and advised by jp. all authors wrote and reviewed the manuscript.
+
+supplementary material
+additional file 1
+supplementary methods. detailed grammar for tiger rules and specifics on the rule to milp conversion process.
+
+click here for file
+
+ additional file 2
+tiger source code. source code, documentation, and tutorials are also available online at http://bme.virginia.edu/csbl/downloads/ or http://csbl.bitbucket.org/tiger.
+
+click here for file
+
+ acknowledgements and funding
+we thank the reviewers for their thoughtful suggestions. charles haggart tested many of the functions and offered helpful feedback. this work is supported by the nsf  and the nih .

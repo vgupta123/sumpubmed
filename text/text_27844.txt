@@ -1,0 +1,207 @@
+BACKGROUND
+recent rna-seq technology  <cit>  opened a new high-throughput, low cost way for isoform identification and quantification, leading to new understanding of gene regulation in development and disease . in an rna-seq experiment a set of short reads is produced from mrna transcripts. the difficulty in assembling these short reads into the transcripts from which they were sampled is non-trivial due to the fact that the transcripts  may share exons. as a result, all methods for solving this problem rely on an explicit or implicit graph model. the nodes represent individual reads , or contiguous stretches of dna uninterrupted by spliced reads , while the edges are derived from overlaps or from spliced read alignments. each node and edge has an associated observed coverage, and the problem of isoform identification and quantification is seen as separating the coverage of the graph into individual path components, under different models. furthermore, this problem was also coined under the broad name 'multiassembly problem'  <cit> , a hint that it can arise not only with rna-seq data, but also in other biological settings, such as assembling metagenomics reads  <cit> .
+
+except for cufflinks  <cit> , all tools mentioned above rely on some optimization engine, whose solving is generally difficult. isoinfer/isolasso  <cit> , slide  <cit> , scripture  <cit> , and cliiq  <cit>  exhaustively enumerate all possible candidate paths. for efficiency reasons, each has some restrictions on what a valid candidate path might be, and for each candidate isoform, they define a fitness function. isoinfer/isolasso and slide use a least sum of squares fitness function; isolasso and slide both add different shrinkage terms to the fitness function in order to favor isoforms with fewer transcripts, which is computed with a modified lasso algorithm, or a quadratic program; cliiq uses a least sum of absolute differences fitness function, solved by a linear integer program. cufflinks avoids the problem of exhaustively enumerating all possible paths by returning a minimum path cover, and then assigning expression levels to each path in this cover based on a statistical model. incidentally, note that computing a minimum path cover  is done by computing a maximum matching, which can be easily reduced to a flow problem. however, such reduction solves a different  optimization problem that can be considered as a consensus model in the literature  <cit> , mostly because the fitting of expression levels is separated in the process.
+
+our contribution
+in this paper we propose a radically different and very general method relying on the established field of minimum-cost network flow problems  <cit> . this will not only provide a simple method and a fast polynomial time algorithm for solving it , but it can also lean on the ample literature on splitting a  flow into paths, e.g.,  <cit> .
+
+as in the case of the other tools, our method assumes that a splicing graph has been built for each gene. each node of the graph corresponds to a stretch of dna uninterrupted by any spliced read alignment; such sequences are called segments in  <cit> , but for simplicity we just call them exons. each edge of the graph corresponds to two exons consecutive in some transcript, that is, to some spliced read whose prefix aligns to the suffix of one exon, and whose suffix aligns to the prefix of another exon. observe that such a graph can be seen as a directed acyclic graph , the direction of the edges being according to the absolute position of the exons in the genome. for each exon v we can deduct its coverage cov as the total number of reads aligned to the exon divided by the exon length, and the coverage cov of an edge  as the total number of reads split aligned to that junction between exons u and v. an mrna transcript candidate thus becomes a path from some source node to some sink node. the requirement that the transcripts start in a source node and end in a sink node is no restriction, as we can add dummy source/sink nodes as in-/out-neighbors to the nodes where we have indication that some transcript might start/end. indeed, our splicing graph creation tool uses splicing alignments and coverage information to discover such start/end nodes and accordingly indicates them to our tool.
+
+in order to define a fitness function in the broadest possible terms, let us assume that for each node v and edge  of the graph we have convex cost functions fv,fuv:ℝ→ℝ modeling how close that node and edge must be explained by the candidate isoform. then, we can state the problem of isoform identification and quantification as following problem.
+
+problem  <dig>  given a splicing dag g =  with coverage values cov and cov, and cost functions fv and fuv, for all v ∈ v and  ∈ e, the unannotated transcript expression cover problem is to find a tuple  p of paths from the sources of g to the sinks of g, with an estimated expression level e for each path p∈p, which minimize
+
+ sum-err:= ∑v∈vfvcov-∑p∈p:v∈pe+∑∈efuvcov-∑p∈p:∈pe. 
+
+for example, if for all nodes v and edges , fv = x, fuv = x, then we have a least sum of absolute differences model as in cliiq. if fu = x <dig>  fuv = x <dig>  then we have a least sum of squares model as in isoinfer/isolasso and slide; this is the model which we also use in the implementation reported in this paper. another cost function, suggested by  <cit> , is fv=x/cov, fuv=x/cov for all nodes v and edges . observe that many of the other biological assumptions of the other tools can be incorporated in the model of problem utec.
+
+we will show that problem utec can be solved in polynomial time, by a reduction to a min-cost flow problem with convex cost functions. we will argue that finding the optimal tuple of paths explaining the graph is equivalent to finding the optimal flow in an offset flow network. moreover, any splitting of this optimal flow into paths attains the minimum of problem utec. in the same way as some of the other tools try to limit the number of paths explaining a splicing graph by a lasso approach, we can rely on established methods for splitting any flow into few paths . in this paper, we employ only the simple linear-time heuristic of repeatedly removing the heaviest path, see e.g.,  <cit> .
+
+we give experimental results to study how well the predictions match the ground-truth on simulated data, and how well it fares on real-data, compared to cufflinks  <cit>  and isolasso  <cit> ; our method is very competitive, providing in many cases better precision and recall. we expect our lead to be even greater once we incorporate paired-end read information.
+
+methods
+we begin by recalling the basic notions of flow and of a min-cost flow problem, and refer to the excellent monograph  <cit>  for further details. a flow network  is a tuple n = , where g =  is a directed graph, b is a function assigning a capacity buv∈ℕto every arc  ∈ e, and q is a function assigning an exogenous flow qv∈ℕ to every node v ∈ v, such that ∑v∈vqv= <dig>  we say that a function x assigning to every arc  ∈ e a numberxuv∈ℕ is a flow over the network n, if the following two conditions are satisfied:
+
+ <dig>   <dig> ≤ xuv ≤ buv, for every  ∈ e,
+
+ <dig>  ∑u∈vxvu-∑u∈vxuv=qv, for every v ∈ v,
+
+in a min-cost flow problem, one is additionally given flow cost functions cuv, for every arc  ∈ e, and is required to find a flow which minimizes:
+
+ ∑∈ecuv. 
+
+it is well-known that, under the assumption that all the flow cost functions cuv are convex, a min-cost flow can be found in polynomial time  <cit>  .
+
+the reduction to a min-cost flow problem
+we will model problem utec as a min-cost flow problem, thus showing that it can be solved in polynomial time. first, we argue that it can be transformed into the following equivalent problem, where the input exon chaining graph has measured coverages only on arcs.
+
+problem  <dig>  given a splicing dag g =  with coverage values cov, and cost functions fuv, for all  ∈ e, the unannotated transcript expression junction cover problem is to find a tuple  p of paths from the sources of g to the sinks of g with an estimated expression level e for each path p∈p, which minimize
+
+ ∑∈efuvcov-∑p∈p:∈pe. 
+
+given an input g =  for problem utec, we construct an input for problem utejc by replacing every node v ∈ v with two new nodes, vin and vout, and an arc , with cov = cov, and fvinvout=fv. furthermore, for every arc  ∈ e, we replace arc  with the arc , with the same coverage as . it is immediate that optimal solutions for g to problem utec are in bijection with the optimal solutions for the transformed graph to problem utejc.
+
+to solve problem utejc, we build an auxiliary offset network with convex costs of the form cuv = fuv. an optimal flow for this network will model the offsets  between the measured coverages of the exon chaining graph and their actual expression levels in an optimal solution. then, we argue that a min-cost flow on this network naturally induces a solution for the utejc problem.
+
+onwards, we denote by ng+ the set of out-neighbors of v in the directed graph g, that is, the set {w :  ∈ e}. similarly, we denote by ng- the set of in-neighbors of v in the directed graph g, that is, the set {u :  ∈ e}. when g is clear from the context, we will skip it as subscript.
+
+given a splicing dag g with coverage values cov, and cost functions fuv, for all  ∈ e, we construct the offset network n* =  with cost function c, as follows :
+
+ <dig>  we add to g* all nodes and edges of g, together with
+
+ a new source s <dig> and a new sink t <dig> with qs0:=qt0:= <dig> 
+
+ arcs , for every source s of g, and arcs  for every sink t of g, each with infinite capacity and null cost function,
+
+ arc  with infinite capacity and null cost function,
+
+ nodes s* and t*, with initial exogenous flow qs*:=qt*:=0;
+
+ <dig>  for every arc  ∈ e,
+
+ buv := ∞, cuv : = fuv,
+
+ we add the reverse arc  to g* with bvu := cov, cvu : = fuv;
+
+ <dig>  for every v ∈ v,
+
+ its exogenous flow qv is zero,
+
+ if ∑u∈n+cov-∑u∈n-cov> <dig>  we add arc  to g* where:
+
+i. bvt*:= ∑u∈n+cov-∑u∈n-cov,cvt*:= <dig> 
+
+ii we update qt*:=qt*+ ∑u∈n-cov-∑u∈n+cov;
+
+ if ∑u∈n+cov-∑u∈n-cov< <dig>  we add arc  to g* where:
+
+i. bs*v:= ∑u∈n-cov-∑u∈n+cov,cs*v:= <dig> 
+
+ii. we update qs*:=qs*+ ∑u∈n-cov-∑u∈n+cov.
+
+the next lemma shows that there exists a min-cost flow x* on n*.
+
+lemma  <dig> given a digraph g with arc coverages cov, the offset network n* =  constructed as above is a flow network, i.e., ∑v∈vqv= <dig> 
+
+proof: since qv =  <dig>  for all v ∈ v  \ {s*, t*}, it remains to show that qs*+qt*= <dig>  indeed,
+
+ qs*+qt*= ∑v∈v∑u∈ng-cov-∑u∈ng+cov= ∑v∈v∑u∈ng-cov-∑v∈v∑u∈ng+cov= ∑∈ecov-∑∈ecov= <dig> 
+
+   □
+
+from such a flow x*, we construct the function x on the edges g as follows. first, observe that for every arc  ∈ e, at most one of xuv* or xvu*is nonnull. indeed, if this were not the case, then a flow y* which coincides with x*, except for yuv*:=xuv*-min and yvu*:=xvu*-min, is also a flow on n* and has a strictly smaller cost than x*, contradicting the fact that x* is of minimum cost. then, for each arc  ∈ e we set:
+
+ xuv:=cov+xuv*-xvu*. 
+
+from a flow to a set of paths
+theorem  <dig> below will argue that the above defined function x is a flow on g , ), whose arcs we consider to have unbounded capacities and whose nodes, apart from the sources and sinks, have exogenous flow  <dig>  it is a well-known result from classical network flow theory that such a flow can be decomposed into paths, that is, there exist paths p <dig> , . . . , pt from the sources of g to the sinks of g, having weights w <dig>  . . . , wt, respectively, such that, for every  ∈ e we have
+
+ xuv= ∑i:belongstopiwi. 
+
+moreover, a decomposition of x into at most |e| paths always exists and can be found in time |v | · e. theorem  <dig> also shows that the paths of any decomposition of x are an optimal solution for g to problem utejc ).
+
+theorem  <dig> given an optimal flow x* on g*, the function × on g just constructed satisfies the properties, where s denotes the set of sources of g, and t denotes the set of sinks of g:
+
+ for all v ∈ v  \ , ∑u∈ng-xuv= ∑u∈ng+xvu;
+
+ ∑s∈s∑v∈ng+xsv= ∑t∈t∑u∈ng-xut
+
+ any decomposition of × into paths attains the minimum of the objective function of problem utejc, on input g.
+
+proof: : let v ∈ v  \ ; by the definition of x, we can write
+
+ ∑u∈ng−xuv−∑u∈ng+xvu=∑ng−+xuv*−xvu*)−∑u∈ng++xvu*−xuv*)= ∑u∈ng−cov−∑ng+++ ∑u∈ng−xuv*+∑u∈ng+xuv*−∑u∈ng−xvu*−∑u∈ng+xvu*= ∑u∈ng−cov−∑u∈ng+cov+∑u∈ng−∪ng+xuv*−∑u∈ng−∪ng+xvu*. 
+
+observe that for all edges entering t* , their flow equals their capacity, as we have adjusted the exogenous flow of t*  at point  <dig> ii. ii.) in the construction of g*. we distinguish three cases.
+
+first, if ∑u∈ng-∪ng+xuv*-∑u∈ng-∪ng+xvu*> <dig>  then ∑u∈ng-∪ng+xuv*-∑u∈ng-∪ng+xvu*=xvt**. since the flow x* uses the arc  with its maximum capacity, we have that xvt**=bvt*= ∑u∈ng+cov-∑u∈ng-cov, which shows that ∑u∈ng-xuv-∑u∈ng+xvu= <dig>  proving the claim.
+
+second, if ∑u∈ng-∪ng+xuv*-∑u∈ng-∪ng+xvu*< <dig>  then ∑u∈ng-∪ng+xuv*-∑u∈ng-∪ng+xvu*-=-xs*v*. since the flow x* uses the arc  with its maximum capacity, we have that xs*v*=bs*v= ∑u∈ng-cov-∑u∈ng+cov, which again proves the claim.
+
+finally, if ∑u∈ng-∪ng+xuv*-∑u∈ng-∪ng+xvu*= <dig>  then, by construction there is no edge between v and t* or s*, implying, again by construction, that ∑u∈ng-cov= ∑u∈ng+cov, from which the claim follows.
+
+: from the definition of x, we have
+
+  ∑s∈s∑v∈ng+xsv= ∑s∈s∑v∈ng++xsv*-xvs*) 
+
+  = ∑s∈s∑v∈ng+cov+ ∑v∈ng+xsv*-∑v∈ng+xvs* 
+
+by construction, since qs =  <dig> for all s ∈ s, we have xst**+ ∑v∈ng+xsv*= ∑v∈ng+xvs*+xs0s*. therefore, ∑v∈ng+xsv*-∑v∈ng+xvs*=xs0s*-xst**=xs0s*-bst*=xs0s*-∑v∈ng+cov. plugging this into , we obtain
+
+  ∑s∈s∑v∈ng+xsv= ∑s∈sxs0s*=xt0s0*. 
+
+similarly,
+
+  ∑t∈t∑u∈ng-xut= ∑t∈t∑u∈ng-+xut*-xtu*) 
+
+  = ∑t∈t∑u∈ng-cov+ ∑u∈ng-xut*-∑u∈ng-xtu* 
+
+by construction, since qt =  <dig> for all t ∈ t, we have xs*t*+ ∑u∈ng-xut*=xtt0*-∑u∈ng-xtu*. therefore, ∑u∈ng-xut*-∑u∈ng-xtu*=xtt0*-xs*t*=xtt0*-bs*t=xtt0*-∑u∈ng-cov. plugging this into , we prove the claim, since by  we get
+
+  ∑t∈t∑u∈ng-xut= ∑t∈txtt0*=xt0s0*= ∑s∈s∑v∈ng+xsv. 
+
+: since any tuple of paths p= from sources of g to sinks of g, induces a flow on g, where the exogenous flow of all nodes which are not sources nor sinks is zero, and any such flow can be split into paths from sources to sinks, the minimum value of
+
+  ∑∈efuvcov-∑pi∈p.⋅∈piei, 
+
+over all k, all k-tuples of paths p= from a source of g to a sink of g, and over all expression levels ei for each pi, is equal to miny is a flow on g
+∑∈efuv-yv′v|). since any flow on g induces a flow on g*, and vice versa, the above is equal to
+
+ minz is a flow on g*∑∈efuv. 
+
+since
+
+  x*=argminz is a flow on g*∑∈efuv+fuv, 
+
+and from minimality, for all arcs  ∈ e, at most one of zuv or zvu is non null, we have that x* also attains the minimum in , proving the theorem. □
+
+in our implementation we use the min-cost flow engine available in the lemon graph library  <cit> . if no engine for arbitrary convex cost functions is available, or, more generally, if the cost functions themselves happen not to be convex, one can approximate any cost function with piecewise constant or convex cost functions: e.g., one can replace an arc  of capacity buv, with |buv| arcs of capacity  <dig>  such that first arc has cost f, and the ith arc, i > <dig>  has cost f - f , see  <cit>  for further details.
+
+decomposing the min-cost flow into few paths
+as already shown by the other tools, we are generally interested in parsimoniously explaining an rna-seq experiment, that is, in finding, among the optimal solutions to problem utec, one with a low number of paths. at a closer analysis it can be seen that any flow on a graph g =  can be decomposed into at most |e| - |v| +  <dig> paths  <cit> . however, decomposing a flow into a minimum number of paths is an np-hard problem in the strong sense, even when restricted to dags  <cit> . to overcome this limitation, various heuristics and approximations have been put forth, see, e.g.,  <cit>  and the references therein. the advantage of our method is that once we have obtained the optimal flow, we can apply any of these methods to split the flow into few paths. for simplicity, in this paper we employ the policy of repeatedly removing the heaviest path, see, e.g.,  <cit> : until the network has null flow, we select a path from the sources to the sinks whose minimum flow on its edges is maximum, report it as transcript, and remove it from the flow network.
+
+RESULTS
+we call our tool traph . we compared traph to the most used isoform prediction tool cufflinks  <cit>  and with isolasso  <cit> . we also tried to include slide  <cit>  and cliiq  <cit> , but we could not make the former work reliably, and for the latter the publicly available version was not yet available. full experiment data is available at  <cit> .
+
+we should point out from the start that traph is not yet employing paired-end read information. nonetheless, the experiments we report  are with paired-end reads, cufflinks and isolasso having access to the paired-end information. moreover, since traph is not yet employing existing gene annotation information, we ran cufflinks and isolasso without annotation. as already mentioned, we use a least sum of squares model. we experimented in the current implementation with other cost functions, as mentioned in the introduction, fz=x,fz=x/cov, or fz=x/cov, respectively, for all nodes and edges z, but they currently give worse results.
+
+matching criteria
+in order to match the predicted transcripts with the true transcripts, we take into account the dna sequences but also the expression levels. for each gene, we construct a bipartite graph with the true transcripts t= as nodes in one set of the bipartition, and the predicted transcripts p= as nodes in the other set of the bipartition. empty sequences with  <dig> expression level were added so that both sets of the bipartition had an equal number of nodes.
+
+to define the costs of the edges of this bipartite graph, let us introduce  the binary encoding of a true transcript t and its expression level e with respect to a predicted transcript p with expression level e
+
+  code=γγeditsencodedγ-e)), 
+
+where γ = 0|bin- <dig> 1bin, bin being the binary encoding of x > <dig>  j is the index of p in the list of predicted transcripts, d is the unit cost  edit distance of t and p, editsencoded lists the edits and gaps between edits using 2-bit fixed code for edit type, 2-bit fixed code for substituted/inserted symbol, and γ for gap  of length x, and f is a bijection between { <dig>   <dig>  - <dig>   <dig>  - <dig>  . . .} and { <dig>   <dig>   <dig>   <dig>   <dig>  . . .} defined as f = 2x for x >  <dig> and f =  <dig> +  <dig> otherwise.
+
+then, the edge cost between nodes ti∈t and pj∈p is defined as |code| - |γ|. the closer to zero this number is, the better the match between true transcript ti, with true expression level e and predicted transcript pj with predicted expression level e. the minimum weight perfect matching was then computed; this gives a one-to-one mapping between true and predicted transcripts, therefore true transcripts can be ordered in the same order as they match predicted transcripts and code for the index, γ, is no longer required. let edit code length for an edge between ti and pj be |γ editsencoded|, where d is the edit distance. let bitscore be edit code length divided by |γ editsencoded|; bitscore is asymmetric, and possibly greater than  <dig> if ε would be a better match to ti than to pj, but minimum weight perfect matching chose otherwise for global minimality. let us also call relative expression level difference the ratio |e-e|/e. each matched node pair with relative expression level difference and  bitscore under some given thresholds define a true positive event . the other kind of nodes define false positive  and false negative  events depending on which side of the bipartite graph they reside. prediction efficiency based on precision, recall and f-measure is also employed in  <cit> .
+
+simulated human data
+as in the case of the other tools, we deem that validating against simulated data is a prerequisite, since, in general, on real data, we do not have available ground-truth. we designed the following validation experiment, closely following the approaches in  <cit> . we chose a set of genes at random, and looked up the corresponding annotated transcripts from the ensembl database. out of these genes, we selected only those having between  <dig> and  <dig> transcripts. in all, we had  <dig> genes. for each transcript, we simulated reads with the rnaseqreadsimulator  <cit> . this simulator chooses an expression level at random from lognormal distribution with mean - <dig> and variance  <dig>  for each gene, it simulated paired-end reads, with fragment length mean  <dig> and standard deviation  <dig>  as follows: a transcript was chosen randomly using its expression level as distribution weight, while the position of the read within the transcript was chosen uniformly. as argued in the case of isolasso  <cit> , various error models can be incorporated in these steps, but we chose to compare the performance of the methods in neutral conditions. we mapped the reads with tophat  <cit> : these read mapping results were given as input to the tested prediction software, and to a python program which we wrote to construct the splicing graphs needed for traph. cufflinks and isolasso were ran with the default parameters, because the parameters they offer relate to rna-seq lab protocol, which was not simulated; we could not see changes to other parameters which could be relevant to the prediction. we use fpkm values as expression levels.
+
+we devised two experiment setups. in the first one, which we call single genes,  <dig>   <dig> paired-end reads were generated independently from the transcripts of each of the  <dig> genes, with the already assigned expression levels. they were independently given to tophat for alignment, and these independent alignment results were fed to each tool. in the second, more realistic experiment, which we call batch mode, the transcripts and their assigned expression levels were combined into one file, and from this file  <dig> *  <dig>   <dig> paired-end reads were simulated. all these reads were fed to tophat for alignment, and these combined alignment results were fed to the tools. the fragment length mean and standard deviation were passed to the tools, except for cufflinks in batch mode, when it was able to infer them automatically.
+
+performance of the three tools under scrutiny in the single genes scenario; precision, recall and f-measure are computed for  ∈ {,}
+
+real human data
+we used the same real dataset from the isolasso paper  <cit> , caltech rna-seq track from the encode project , consisting of 75bp paired-end reads. out of these reads, we picked the  <dig> , <dig> which mapped to human chromosome  <dig>  we selected the  <dig> genes where all three tools made some prediction; these genes have  <dig> annotated transcripts.
+
+first, we match the transcripts predicted by each tool with the annotated transcripts, employing the same minimum weight perfect matching method introduced before, this time without taking into account expression levels. a true positive is a match selected by the perfect matching with bitscore under  <dig> . traph predicted in total  <dig> transcripts for these genes, out of which  <dig> match the annotation. cufflinks predicted in total  <dig>  out of which  <dig> match the annotation, while isolasso predicted  <dig>  out of which  <dig> match the annotation. we also include a histogram  of the lengths of the annotated transcripts of these genes, and of the ones reported by traph, cufflinks and isolasso. here we round all transcript lengths to the nearest multiple of  <dig>  we see that the distribution in the case of traph is closer to the distribution in the case of the annotated transcripts; than the distributions for cufflinks and isolasso.
+
+third, we match the transcripts predicted by one software to the transcripts predicted by the other two, employing the same matching method. as in  <cit> , we depict in figure  <dig> a more detailed venn diagram of the intersections between the sets of transcripts reported by the three tools.
+
+running times
+on the real dataset, cufflinks finished in  <dig> min, isolasso in  <dig> min, and traph in  <dig> min. we should however stress that for solving the min-cost flow problem and for identifying the transcripts, traph uses in fact  <dig> min, the rest of the time being spent by our graph creation tool, which is written in python. we could not make such a detailed analysis in the case of the other two tools. the running time of our python script is as well included in the last column of table  <dig>  where we listed the average running time per gene with simulated reads of each tool.
+
+CONCLUSIONS
+all tools for isoform identification and quantification use an explicit or implicit graph model. resorting to such a representation, the main contribution of this paper consists in a novel, radically different method based on minimum-cost flows, an established problem, for which there exist polynomial-time algorithms and solvers. we implemented this method into our tool traph. even though traph is not using paired-end information at this moment, traph is competitive with state-of-the-art tools.
+
+this leads us to expect that once we incorporate paired-end read information, the performance of traph will increase significantly. note also that in the current implementation, each exon equally contributes to the fitness function, independently of its length; we plan to include exon lengths in the fitness function in a future implementation. we also plan to integrate existing gene annotation into a more refined construction of the splicing graph and into the fitness model. our method is general enough to easily accommodate other biological assumptions. in order to evaluate the tools against real ground-truth data, we have started a process of acquiring long sequencing reads  of the true isoforms of a gene.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+ait, vm and rr designed the method. vm, ak and ait designed the experiments. ak evaluated the methods. ait, vm and ak contributed to the writing. all authors read and approved the final manuscript.
+

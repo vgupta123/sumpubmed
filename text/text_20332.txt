@@ -1,0 +1,318 @@
+BACKGROUND
+the basic local alignment search tool   <cit>  is a fundamental algorithm in life sciences that compares a query sequence to a database of sequences, i.e., subject sequences, to identify sequences that are the most similar to the query sequence. the similarities identified by blast can be used to infer functional and structural relationships between the corresponding biological entities, for example.
+
+with the advent of next-generation sequencing , whether at the outset or downstream from ngs, the exponential growth of sequence databases is arguably outstripping our ability to analyze the data. specifically, the increasing demands to mine sequence databases for useful information requires substantial computing power. consequently, significant research effort has been invested into accelerating the blast search algorithm.
+
+much of this research effort has focused on the parallelization of blast on different parallel architectures due to its compute- and data-intensive nature. ncbi blast+  <cit>  uses pthreads to speed up blast on a multicore cpu. on cpu clusters, turboblast  <cit> , scalablast  <cit> , and mpiblast  <cit>  have been proposed. to achieve higher throughput on a per-node basis, blast has also been mapped and optimized onto various accelerators, including fpgas  <cit>  and gpus . however, there are few recent studies that focus on improving the performance of cpu implementations of the widely-used blast algorithm.
+
+most previous studies  <cit>  adopt query indexing for sequence search. query indexing uses a lookup table to record positions of each word in the input query. these blast algorithms then scan each database sequence to find short matches, extend these matches to optimal alignments, and then calculate the final similarity scores. in contrast, other approaches suggest that database indexing can yield much faster speed than query indexing  <cit> . examples of such tools include blat  <cit> , ssaha  <cit> , megablast  <cit> , and cafe  <cit> . however, these tools cannot provide the same level of sensitivity as the blast algorithm  <cit> , or support nucleotide sequence search.
+
+ssaha and blat, for example, are significantly fast for finding near-identical matches. however, to reduce memory footprint and search space, both tools build indexes of non-overlapping words from the database, which leads to extremely fast search but compromised sensitivity. more specifically, blat, for example, builds database index with non-overlapping words of length w. with this approach, the size of database index is significantly reduced, roughly 1w the size of an index with overlapping words. however, it requires a matching region of 2w− <dig> letters between two sequences for guaranteeing to detect it. cafe is another search tool supporting protein sequence with database index, but the search method and scoring phase are substantially changed. megablast is the only blast variant based on database index. megablast accelerates the search for highly similar sequences by using a large word size  to reduce the search workload and the memory usage. however, according to the previous studies , increasing word size could sacrifice the sensitivity and accuracy. furthermore, megablast only supports nucleotide sequences, as the authors claimed that it is very challenging to support protein sequence based on their design.
+
+because query indexing usually contains a high percentage of empty slots due to few letters in a query, most of the optimizations of query indexing seek to reduce the sparsity of the index, e.g., the thick backbone and the position array in ncbi blast  <cit>  and the deterministic finite automaton  in fsa-blast  <cit> . for database indexing, which is full of positions from millions of subject sequences from a database , the major challenges differ substantially from query indexing. first, the size of the database index can be prohibitive, especially for the protein database, which has the increased alphabet and the short word length. second, unlike nucleotide sequence search, protein sequence search needs to search the hits of similar words, i.e. the neighboring words rather than merely and exactly matched words. including neighboring words increases the size of the index by one or two orders of magnitude. third, blast employs input-sensitive heuristics to quickly eliminate unnecessary search spaces. however, this heuristic introduces significant irregularities in memory access patterns and in control flow paths, e.g. during two-hit ungapped extension in protein sequence search. thus, database indexing that aligns a query to millions of database sequences instead of a single database sequence iteratively will suffer more from such irregularities, leading to serious performance degradation.
+
+to overcome these challenges of database indexing for protein sequence search, we propose mublastp , a novel blastp algorithm that includes an advanced index data structure for sequences of the database and a set of optimizations for the blastp algorithm. the experimental results show that on a modern multicore architecture, namely intel haswell, for a single query, the single-threaded mublastp can deliver up to a  <dig> -fold speedup for alignment stages, and up to a  <dig> -fold end-to-end speedup over the single-threaded ncbi blast. for a batch of queries, the multithreaded mublastp can achieve up to a  <dig> -fold speedup for alignment stages, and  <dig> -fold end-to-end speedup over the multithreaded ncbi blast using  <dig> threads. the experimental results also shows that on a older generation multicore architecture, namely intel nehalem, for a single query, mublastp still can deliver up to a  <dig> -fold speedup for alignment stages, and up to a  <dig> -fold end-to-end speedup over the single-threaded ncbi blast. for a batch of queries, the multithreaded mublastp can achieve up to a  <dig> -fold speedup for alignment stages, and  <dig> -fold end-to-end speedups over the multithreaded ncbi blast using  <dig> threads. in addition to improving performance significantly, mublastp produces identical hit returned to ncbi blast, which is important to the bioinformatics community.
+
+implementation
+database index
+the most challenging component of mublastp is the design of the database index. the index should include the positions of overlapping words from all subject sequences of the database. thus, each position contains the information for the sequence id and the offset in the subject sequence, i.e., subject offset. for the protein sequence search, the blastp algorithm uses the small word size , large alphabet size , and neighboring word comparisons. because these factors may make the database index very large, we design our database index with the following techniques: index blocking, sorting, and compression.
+
+index blockinga illustrates the design of index blocking. we first sort the database by the sequence length; partition the database into small blocks, where each block has the same number of letters; and then build the index for each block separately. in this way, the search algorithm can go through the index blocks one by one and merge the high-scoring results of each block in the final stage. index blocking can enable the database index to fit into main memory, especially for large databases whose total index size exceeds the size of main memory. by configuring the size of the index block, we can achieve better performance. for example, if the index block is small enough to fit into the cpu cache, the hit detection and gapped and ungapped extension may achieve better data locality.
+fig.  <dig> an example of building a compressed database index. the figure shows the flow from the original database to the compressed index. a index blocking phase partitions the sorted database into blocks. b basic indexing phase generates basic index, which contains positions of all words in the database. c index sorting sorts positions of each word by subject offsets. d index compression-merge merges positions with the same subject offset. e index compression-increment done on the merged positions generates increments of subject offsets and sequence ids
+
+
+
+
+another benefit of using index blocking is to reduce the index size. without index blocking and assuming a total of m sequences in the database, we need log2m bits to store sequence ids. after dividing the database into n blocks, each block contains mn sequences on average. thus, we only need log2⌈mn⌉ bits to store sequence ids. for example, if there are  <dig> sequences in a database, we need  <dig> bits to represent the sequence ids. with  <dig> blocks, if each block contains  <dig> sequences, then we only need a maximum of  <dig> bits to store the sequence ids. in addition, because the number of bits for storing subject offsets is determined by the longest sequences in each block, after sorting the database by the sequence length, we can use fewer bits for subject offsets in the blocks having short and medium sequences, and more bits only for the blocks having extremely long sequences. .
+
+furthermore, index blocking allows us to parallelize the blastp algorithm via the mapping of one block to a thread on a modern multicore processor. for this block-wise parallel method to achieve the ideal load balance, we partition index blocks equally to make each block have a similar number of letters, instead of an identical number of sequences. to avoid cutting a sequence in the middle, if this sequence reaches the cap of the block size, we put it into the next block.
+
+after the database is partitioned into blocks, each block is indexed individually. as shown in fig. 1
+b, the index consists of two parts: the lookup table and the position array. the lookup table contains a
+w entries, where a is the alphabet size of amino acids and w is the length of the words. each entry contains an offset to the starting position of the corresponding word. in the position array, a position of the word consists of the sequence id and the subject offset. for protein sequence search, the blastp algorithm not only searches the hits of exactly matched words, but it also searches the neighboring words, which are similar words. the query index used in existing blast tools, e.g., ncbi blast, includes the positions of neighboring words in the lookup table. however, for the database index in mublastp, if we store the positions for the neighboring words, the total size of the index becomes extraordinarily large. to address this problem, instead of storing positions of the neighboring words in the index, we put the offsets, which point to the neighboring words of every word, into the lookup table. the hit detection stage then goes through the positions of neighbors via the offsets after visiting the current word. in this way, we use additional stride memory accesses to reduce the total memory footprint for the index.
+
+index compression
+as shown in fig. 1
+b, a specific subject offset for a word may be repeated in multiple sequences. for example, the word “abc” appears in position  <dig> of sequence  <dig> and  <dig>  in light of this repetition, it is possible to compress the index by optimizing the storage of subject offsets. next, we sort the position array by the subject offset to group the same subject offsets together, as shown in fig. 1
+c. after that, we reduce the index size via merging the repeated subject offsets: for each word, we store the subject offset and the number of positions once and store the corresponding sequence ids sequentially, as shown in fig. 1
+d. after the index merging, we only need a small array for the sorted subject offsets. furthermore, because the index is sorted by subject offsets, instead of storing the absolute value of subject offsets, we store the incremental subject offsets, as noted in fig. 1
+e, and only use eight  bits for the incremental subject offsets. because the number of positions for a specific subject offset in one block is generally less than  <dig>  we can also use eight  bits for the number of positions. thus, in total, we only need a 16-bit integer to store a subject offset and its number of positions.
+
+however, this compressed method presents a challenge. when we use eight  bits each for the incremental subject offset and the number of repeated positions, there still exist a few cases that the increment subject offsets or the number of repeated positions is larger than  <dig>  when such situations are encountered, we split one position entry into multiple entries to make the value less than  <dig>  for example, as shown in fig. 2
+a, if the increment subject offset is  <dig> with  <dig> positions, then we split the subject offset into two entries, where the first entry has the incremental subject offset  <dig> and the number of repeated position  <dig>  and the second entry has the incremental subject offset  <dig> for the  <dig> positions. similarly, as shown in fig. 2
+b, for  <dig> repeated number of positions, the subject offset is split into two entries, where the first entry has the incremental subject offset  <dig> for  <dig> positions, but the second has the incremental subject offset  <dig> for an additional  <dig> positions.
+fig.  <dig> an example of resolving overflows in the compressed index. a resolving the overflow in the number of positions. b resolving in the incremental subject offsets
+
+
+
+
+optimized blastp algorithm with database index
+because the blastp search algorithm introduces a more irregular memory access pattern when using a database index , we propose and realize hit reordering with two-level binning in order to mitigate the irregular memory access pattern and irregular control flow, especially for the two-hit ungapped extension.
+
+hit reordering with two-level binning
+the two-hit ungapped extension in protein sequence search requires searching for two-hit pairs, where two hits are on the same diagonal and close together, to trigger ungapped extensions. the traditional method, namely the last-hit array-based method, is commonly used in query-indexed blast. the last-hit array method uses an array to record the last hit of each diagonal. when a new hit is detected, the algorithm checks the distance between the newly found hit and the last hit in the same diagonal of the last-hit array and updates the last hit with the new hit. although the algorithm scans the subject sequence from the beginning to the end, the diagonal access for a new hit can be random. the random memory accesses on last-hit arrays is a critical problem for database-indexed blast, which aligns a query to thousands of subject sequences at once . therefore, to improve the performance of finding two-hit pairs, we propose a new method that reorders hits with two-level binning.
+
+as shown in fig.  <dig>  each bin is mapped to a diagonal in the first level of binning, and the hits are grouped into bins by diagonal ids, which are calculated by subject offsets minus query offsets. because query offsets can be calculated by subject offsets minus diagonal ids, we only store the sequence ids and subject offsets directly from the index in order to to minimize memory usage.
+fig.  <dig> an example of two-level binning without filtering. first-level binning groups hits into bins according to their diagonal ids. second-level binning scans hits in the first-level bins bin by bin, and regroups hits into second-level bins by their sequence ids
+
+
+
+
+after the first-level binning, hits having the same diagonal ids are placed into the same bins. however, in each bin, the hits from different sequences are interleaved. thus, we design a second level of binning to reorder the hits by sequence ids. in contrast to first-level binning, where the bin id is equal to the diagonal id, second-level binning sets the bin id to the sequence id. because we scan the bins of the first-level binning one by one, the hits in a second-level bin are sorted naturally by the diagonal id. as shown in fig.  <dig>  a hit in the second-level bin contains the subject offset and the diagonal id. with the second-level binning, hits from different sequences are put into different bins and sorted by diagonal ids. after that, we can quickly detect two-hit pairs by scanning every second-level bin.
+fig.  <dig> an example of two-level binning with filtering. while scanning hits in first-level bins, we check the distance of each hit to the last hit in the last-hit array. only if the distance fits into the threshold, the hit can be put into the second-level bins
+
+
+
+
+to improve the performance of the two-hit ungapped extension further, we filter out the hits that cannot be used to trigger the ungapped extension . this optimization, as captured in fig.  <dig>  can dramatically reduce processing overhead by reducing memory usage, and in turn, improving performance.
+
+specifically, before writing a hit into a second-level bin, we check its distance to the last hit in last-hit array. only if the distance of the current hit to the last hit satisfies the distance thresholds, i.e., less than threshold_a and greater than or equal to overlap, the hit can be put into the second-level bins. as the number of sequences in a index block can be adjusted by configuring the size of the index block, the size of the last-hit array may be small enough to fit in the cache: not only in the last-level cache  on the haswell cpu in our evaluation but also in the l <dig> cache. as a result, this optimization to ungapped extension exhibits excellent data locality when accessing the reordered hits, thus improving performance. moreover, because our optimization filters out the majority of hits, we also significantly reduce the time spent on memory-write operations, and in turn, improve performance further.
+
+if the subject offsets are unsorted in the database index, as shown in fig. 5
+a, the binning method can introduce random memory accesses, which would adversely impact performance. however, sorting the subject offsets in the database index, as shown in in fig. 1
+c, can resolve this problem. once the index sorting is complete, as shown in fig. 5
+b, both the reads on the database index and the writes on the first-level binning are contiguous, thus improving the binning performance via better data locality.
+fig.  <dig> an example of first-level binning hits with unsorted index and sorted index. in the example, the hits are generated for the word in query offset  <dig>  a first-level binning with unsorted index. b first-level binning with sorted index
+
+
+
+
+optimizations via multithreading
+in blast algorithm, the query sequence is aligned to each subject sequence in the database independently and iteratively. thus, we can parallelize the blast algorithm with openmp multithreading on the multicore processors in a compute node, e.g., our pair of 12-core intel haswell cpus or  <dig> cores in total. however, achieving robust scalability on such multicore processors is non-trivial, particularly for a data-/memory-intensive program like blast, which also introduces irregular memory access patterns as well as irregular control flow. at a high level, two major challenges exist for parallelizing blast within a compute node:  cache and memory contention among threads on different cores and  load balancing among these threads.
+
+because the alignment on each query is independent, a straightforward approach to parallelization maps the alignment of each query to a thread. however, this approach results in different threads potentially accessing different index blocks at the same time. in light of the limited cache size, this approach results in severe cache contention between threads. to mitigate this cache contention and maximize cache-sharing across threads, we exchange execution order, as shown in algorithm  <dig>  that is, the first two stages, i.e., hit detection and ungapped extension, which share the same database index, access the same database block for all batch query sequences . so, we apply the openmp pragma on the inner loop to make different threads process different input query sequences but on the same index block. then, threads on different cores may share the database index that is loaded into memory and even cache. the aligned results for each index block are then merged together for the final alignment with traceback, as shown on line  <dig> 
+
+
+
+
+
+for better load balancing, and in turn, better performance, we leverage the fact that we already have a sorted database with respect to sequence lengths. we then partition this database into blocks of equal size and leverage openmp dynamic scheduling.
+
+discussion
+in mublastp, we use the composition-based statistics presented in  <cit> , which is also the default method used in ncbi blast. for other composition-based statistics methods in ncbi blast, such as  <cit> , our current code base does not support it. we leave this work for the future versions.
+
+moreover, the current version of mublastp can only produce the identical results to ncbi blast when both use the default output format  and the default composition-based statistics method. as a result, our software can only generate the similar results to ncbi blast if any other parameter is set. in the future updates of this software, we will add the supports for different formats, making mublastp to be a comprehensive tool as ncbi blast.
+
+RESULTS
+we conducted our experimental evaluations on two different multicore cpu platforms — haswell platform and nehalem platform. haswell platform consists of two intel haswell xeon cpus , each of which has  <dig> cores,  <dig> mb shared l <dig> cache, and  <dig> kb l <dig> cache and  <dig> kb l <dig> private cache on each core. haswell platform also has  <dig> gb of 2133-mhz ddr main memory. nehalem platform consists of two intel nehalem xeon cpus , each of which has  <dig> cores,  <dig> mb shared l <dig> cache, and  <dig> kb l <dig> cache and  <dig> kb l <dig> private cache on each core. nehalem platform also has  <dig> gb of 1600-mhz ddr main memory. in the experiments, all programs are compiled by an intel c/c++ compiler  <dig>  with the compiler option -o <dig> -fopenmp. in the experiments, all performance numbers are average values of multiple runs.
+
+
+databases we used three typical protein ncbi databases from genbank  <cit> : uniprot_sprot, env_nr and nr. the uniprot_sprot database includes approximately  <dig>  sequences with a total size of  <dig> mb and whose median length and average length are  <dig> and  <dig> amino acids , respectively. the env_nr database consists of about  <dig> , <dig> sequences with the total size at  <dig>  gb and whose median length and average length are  <dig> and  <dig> amino acids , respectively. the nr database consists of about  <dig> , <dig> sequences with the total size at  <dig> gb and whose median length and average length are  <dig> and  <dig> amino acids , respectively.
+fig.  <dig> sequence length distribution of uniprot_sprot, env_nr and nr database
+
+
+
+
+
+queries the performance of blast depends in part on the query length. based on the length distribution shown in fig.  <dig>  we evaluated the performance of our single-thread mublastp using three sets of queries with different lengths — around  <dig>   <dig> and  <dig> — where each query set contains  <dig> queries. for the evaluation of our multithreaded mublastp, we built three query batches, each containing  <dig> queries with lengths around  <dig>   <dig>  and  <dig>  respectively. in addition, we constructed a mixed-length batch of sequences by randomly selecting  <dig> queries of arbitrary size in order to evaluate the real world performance of multithreaded mublastp, especially with respect to scalability and load balancing. table  <dig> captures the statistical profile of query lengths from our mixed-length query batches of the uniprot_sprot, env_nr and nr databases, respectively. the details for queries are given in additional file  <dig> 
+
+uniprot_sprot
+
+env_nr
+
+nr
+
+
+
+to align queries with mublastp, as the following commands, we first formatted and sorted the database using the formatdb and sortdb program, respectively. and then, we indexed the database with a configurable block size using the indexdb program, and finally aligned queries against the database using the mublastp program. 
+formatdb <–i database>
+
+sortdb <–i database> <–o sorted_database>
+
+indexdb <–i sorted_database> ∖
+
+
+
+mublastp <–i query> <–d sorted_database> ∖
+
+
+
+
+
+
+in experiments, we compared mublastp with ncbi blast , which was configured and built with the following commands. 
+./configure cc=icc cxx=icpc ∖
+
+—without–gui —without–debug
+
+make
+
+make install
+
+
+
+
+we formatted database, and ran ncbi blast with default parameters, as noted below. 
+makeblastdb <–in database> <–dbtype prot>
+
+blastp <–query query> <–db database> ∖
+
+
+
+
+
+
+as the usage of indexdb program shown above, the index block size is a configurable variable. by default, its value is set to  <dig> k amino acids , making the index block size around  <dig> kb and fitting into the l <dig> cache . the reason to set the index block size based on the l <dig> cache is that since the l <dig> cache is private for each core, we could avoid heavy cache contentions across different threads in the multithreading mode if the index data can be located from the l <dig> cache. if mublastp is running with a single thread, we could increase the index block size and try to fully utilize the l <dig> cache as well as the l <dig> cache. because increasing index block size may generate much more hits in each block, the practical values are  <dig> k amino acids  on haswell and  <dig> k amino acids on nehalem in our experiments for the single thread mode.
+
+index sizetable  <dig> size of database and index files in gigabytes 
+
+uniprot_sprot
+env_nr
+nr
+
+
+
+performance comparison for alignment stages
+to evaluate the performance improvement with index structure and re-factored blast algorithm, we used gettimeofday() functions to measure the execution time of all four alignment stages for both mublastp and ncbi blast without i/o.
+
+single-threaded mublastp vs. single-threaded ncbi blastfig.  <dig> speedup for alignment stages of single-threaded mublastp over single-threaded ncbi blast on haswell platform with different query lengths on uniprot_sprot database , env_nr database  and nr database 
+
+
+
+fig.  <dig> speedup for alignment stages of single-threaded mublastp over single-threaded ncbi blast on nehalem platform with different query lengths on uniprot_sprot database , env_nr database  and nr database 
+
+
+
+
+multithreaded mublastp vs. multithreaded ncbi blast
+when using query batches of different lengths, table  <dig> shows that our multithreaded mublastp on haswell platform achieves up to a  <dig> -fold speedup over multithreaded ncbi blast when using the uniprot_sprot database, up to a  <dig> -fold speedup when using the env_nr database, and up to a  <dig> -fold speedup when using the nr database.
+uniprot_sprot
+env_nr
+nr
+uniprot_sprot
+env_nr
+nr
+
+aver is the average value of three runs, and sd is the standard deviation of three runs
+
+
+
+
+we also tested mublastp performance with query batches of mixed lengths. table  <dig> shows that on haswell platform mublastp achieves a  <dig> -fold speedup over ncbi blast on uniprot_sprot database, a  <dig> -fold speedup over ncbi blast on env_nr database, and a  <dig> -fold speedup on nr database. table  <dig> also shows that on nehalem platform mublastp achieves a  <dig> -fold speedup over ncbi blast on uniprot_sprot database, a  <dig> -fold speedup over ncbi blast on env_nr database, and a  <dig> -fold speedup on nr database.
+
+multithreaded mublastp vs. single-threaded mublastp
+we also evaluated parallel efficiency of multithreaded mublastp. table  <dig> shows that multithreaded mublastp using  <dig> threads on haswell platform can achieve  <dig>  ∼ <dig> -fold speedups over single-thread mublastp with query batches of different lengths on different databases. table  <dig> also shows that multithreaded mublastp using  <dig> threads on nehalem platform can achieve  <dig>  ∼ <dig> -fold speedups over single-thread mublastp with query batches of different lengths on different databases.
+uniprot_sprot
+env_nr
+nr
+uniprot_sprot
+env_nr
+nr
+
+aver is the average value of three runs, and sd is the standard deviation of three runs
+
+
+
+
+end-to-end performance comparison
+to evaluate the end-to-end performance of mublastp, we measured the end-to-end execution time of the program via linux time command. to minimize the impacts disk i/o, we loaded database and index into ram disk, i.e., tmpfs, which is a memory based file system for fast and stable disk i/o.
+
+single-threaded mublastp vs. single-threaded ncbi blastfig.  <dig> end-to-end speedup of single-threaded mublastp over single-threaded ncbi blast on haswell platform with different query lengths on uniprot_sprot database , env_nr database  and nr database 
+
+
+
+fig.  <dig> end-to-end speedup of single-threaded mublastp over single-threaded ncbi blast on nehalem platform with different query lengths on uniprot_sprot database , env_nr database  and nr database 
+
+
+
+
+multithreaded mublastp vs. multithreaded ncbi blast
+when using query batches of different lengths, table  <dig> shows that our multithreaded mublastp on haswell platform achieves up to a  <dig> -fold speedup over multithreaded ncbi blast when using the uniprot_sprot database, up to a  <dig> -fold speedup when using the env_nr database, and up to a  <dig> -fold speedup when using the nr database.
+uniprot_sprot
+env_nr
+nr
+uniprot_sprot
+env_nr
+nr
+
+aver is the average value of three runs, and sd is the standard deviation of three runs
+
+
+
+
+we also tested mublastp performance with query batches of mixed lengths. table  <dig> shows that on haswell platform mublastp achieves a  <dig> -fold speedup over ncbi blast on uniprot_sprot database,  <dig> -fold speedup over ncbi blast on env_nr database, and a  <dig> -fold speedup on nr database. table  <dig> shows that on nehalem platform mublastp achieves a  <dig> -fold speedup over ncbi blast on uniprot_sprot database, a  <dig> -fold speedup over ncbi blast on env_nr database, and a  <dig> -fold speedup on nr database.
+
+multithreaded mublastp vs. single-threaded mublastp
+we also evaluated parallel efficiency of multithreaded mublastp with end-to-end execution time. table  <dig> shows that multithreaded mublastp using  <dig> threads on haswell platform can achieve up to a  <dig> -fold speedup over single-thread mublastp with query batches of different lengths on different databases. table  <dig> also shows that multithreaded mublastp using  <dig> threads on nehalem platform can achieve up to a  <dig> -fold speedup over single-thread mublastp with query batches of different lengths on different databases.
+uniprot_sprot
+env_nr
+nr
+uniprot_sprot
+env_nr
+nr
+
+aver is the average value of three runs, and sd is the standard deviation of three runs
+
+
+
+
+CONCLUSIONS
+in this paper, we present mublastp, a database-indexed blastp that delivers identical hits returned to ncbi blast for protein sequence search. with our new index structure for protein databases and associated optimizations in mublastp, we deliver a re-factored blastp algorithm for modern multicore processors that achieves much higher throughput with acceptable memory usage for the database index. those optimizations and techniques in index structure and blast algorithm, such as index compression, sorting index, two-level binning, etc., are not merely beneficial to database-indexed search for protein sequence, also can be propagated to nucleotide sequence search and other alignment algorithms.
+
+on a modern compute node with a total of  <dig> intel haswell cpu cores, the multithreaded mublastp achieves up to a  <dig> -fold speedup for alignment stages, and up to a  <dig> -fold end-to-end speedup over multithreaded ncbi blast. mublastp also can achieve significant speedups on an older generation platform with dual  <dig> cores intel nehalem cpu, where mublastp delivers up to a  <dig> -fold speedups for alignment stages, and up to a  <dig> -fold end-to-end speedup over multithreaded ncbi blast.
+
+in the future, we plan to extend mublastp to many-core architectures, e.g., intel xeon phi, which currently contains  <dig> cores and supports  <dig> threads. the more complex cache/memory hierarchy may lead to significant challenges in achieving high throughput for the multithreaded blast algorithm. in addition, we plan to integrate our database-indexed blastp into mpiblast, thus combining intra-node and inter-node parallelism for even greater performance benefit on a high-performance computing cluster.
+
+availability and requirements
+
+
+project name: mublastp
+
+
+project home page:
+https://github.com/vtsynergy/mublastp
+
+
+
+operating system: unix / linux
+
+
+programming language: c/c++
+
+
+license: lgpl v <dig> 
+
+
+
+
+additional file
+
+additional file  <dig> tables of information for queries in the experiments. for each database, there are four tables for queries of length  <dig>   <dig>   <dig> and mixed. each table contains  <dig> queries in total for performance comparison of multithreading, and first  <dig> queries for single-threaded performance comparison. 
+
+
+
+
+abbreviations
+blastbasic local alignment search tool
+
+cpucentral processing unit
+
+dfadeterministic finite automaton
+
+fpgafield-programmable gate array
+
+gpugraphics processing unit
+
+ncbinational center for biotechnology information
+
+ngsnext-generation sequencing
+
+we thank parallel computing lab at intel corporation for support. we also thank advanced research computing at virginia tech for the use of their computational resources.
+
+funding
+this research was supported in part by the nsf bigdata program via iis- <dig> and the nsf xps program via ccf- <dig> 
+
+availability of data and materials
+software and manual: https://github.com/vtsynergy/mublastptest queries: https://github.com/vtsynergy/mublastp/tree/master/query_data.
+
+authors’ contributions
+jing zhang and sanchit misra developed mublastp. jing zhang, hao wang, and wu-chun feng wrote the manuscript. all authors read and approved the entire manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+not applicable.

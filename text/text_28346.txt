@@ -1,0 +1,79 @@
+BACKGROUND
+high-throughput sequencing has become the approach of choice in genomic experiments . continuous improvements in sequencing chemistry and hardware have translated into significant cost decreases with huge increases in productivity . this throughput often exceeds the sequencing depth required in many applications  <cit> , or when working with small genomes. protocols to sequence multiple samples within the same sequencer lane  are now common practice in both single end  and paired end  strategies. multiplexing can also be guided by experimental design considerations where samples are sequenced in different lanes to gain information on technical variance, or in staged sequencing approaches to reduce sequencing costs where samples are sequenced sequentially until the required sequencing depth is achieved  <cit> .
+
+in multiplexed libraries, dna fragments originating from the same sample are associated with a unique sequence of fixed length . this barcode  is later used to computationally identify the original sample of each sequenced read. in the illumina® truseq™ protocol , the barcode is inserted further down the dna fragment and debarcoding is usually performed using the illumina casava pipeline. in alternative protocols , the barcode is inserted directly upstream of the dna fragment during library construction and the debarcoding operation is typically performed using third party tools  <cit>   or custom code.fig.  <dig> barcoding strategies. a schematic view of the multiplexed library processing. a unique and different barcode  is used for each sample. the barcode is placed further down the dna fragment and sequenced in a specific sequencing round ; or directly upstream the dna fragment and sequenced concomitantly . after sequencing and image processing, reads of multiplexed samples are mixed together in the fastq result file. for each read, the barcoding sequence  is computationally clipped off the read end  or read from the additional barcode file ; and the original sample is identified by comparing this barcoding sequence to known barcodes. finally, read sequences are saved in sample specific fastq files. b in pe sequencing, barcodes can be added to one or both fragment ends. the je demultiplex bpos option indicates which read contain the barcode. c
+demultiplex options for barcodes present at both read ends. a decision is needed to specify which barcode is used to identify separate samples. d combining umis  with illumina sample indexing  or as composite barcode . in a composite barcode, the number of random base upstream and downstream the sample index is variable
+
+
+
+
+custom multiplexing protocols offer great design flexibility, in particular in pe sequencing where barcodes can be inserted at one or both ends of the dna fragment . in the latter, the barcode found in each read of the pair is usually the same, and this redundancy allows for more specificity when one of the barcoding sequences contains errors or bases of poor quality. the encoding possibilities are exponentiated by adapting a different barcode to each end of the dna fragment. lastly, the correct interpretation of experiments, such as single cell rna-seq , requires the disentanglement of biological read duplicates that reflect rna abundance in the cell from technical duplicates that result from sequencing the same rna molecule multiple times . a common procedure towards this goal is to barcode each dna fragments before pcr amplification i.e. each read is attached to a fixed-length  sequence that will act as a unique molecular identifier  . after read mapping, only duplicate reads with different umis will be kept in downstream processing. umis can be combined with sample barcodes in different ways, which varies between protocols: using separate ends of the dna fragments , combining illumina sample indexing with custom barcoding to add a umi to dna fragment ends  or using composite barcodes .
+
+currently available tools do not offer the flexibility required to process these different barcoding configurations and perform duplicate filtering using umis. here we present je, a suite of tools that can demultiplex fastq files , extract umis from demultiplexed files and filter  read duplicates taking umis into account .fig.  <dig> the different modules of je  and their usage in workflows. the clip, demultiplex and demulitplex-illu are the three possible entry points to process barcoded fastq files . in most setups , clipped or demultiplexed fastq files are mapped to the genome  using your favorite mapper and filtered for duplicate reads by the je’s markdupes module using extracted umis. in more complex barcoding designs , additional clipping before or after the sample demultiplexing step could be required 
+
+
+
+
+implementation
+je is implemented in java  <dig> and uses the htsjdk  and picard  <cit>  libraries. je has been designed with extensibility in mind with each sub-module  encapsulated in its own package. this is reflected on the command line level where the command to run  should be specified right after the je executable followed by relevant module’s options e.g. je demultiplex < options>, where < options > is the option list. the top level class je.java is responsible to parse this command line and invoke the appropriate sub-module’s class  with user’s provided options. the sub-module class is then responsible to validate user’s options before computing.
+
+the demultiplex command
+the demultiplex command is used when the sample-encoding barcode is found at the beginning of the read . it can deal with se and pe reads having barcodes in one or both reads, with or without umis . this includes situations where barcodes contain degenerate positions  protocol), are combined with umis into composite barcodes  or found in different reads . je’s demultiplex module offers many options to tune sample identification stringency , read processing  and output format . in all situations that include umis , demultiplex output is fully compatible with je’s markdupes command.
+
+the demultiplex-illu command
+the demultiplex-illu command is used when sample-encoding barcodes are provided in separate fastq file and umis are found at the beginning of the read. while casava’s bcl2fastq <dig> tool is usually used to convert bcl files to fastq files and perform demultiplexing at the same time; it can also generate non-demultiplexed fastq files together with associated fastq index files . this alternative proves useful when debugging new protocols that use the index position for other purposes than sample encoding; or to overcome bcl2fastq <dig> barcode matching limitations . je’s demultiplex-illu module offers the same options as the demultiplex module and its output is fully compatible with je’s markdupes command.
+
+the clip command
+the clip command is used to extract umis from fastq files that do not require sample demultiplexing at the same time. similarly to demultiplex and demultiplex-illu commands, extracted umis are added to the read headers  and read headers are reformatted to fulfill read mappers requirements . the clip module offers identical read processing  and output formatting options as the demultiplexing modules.
+
+the markdupes command
+the markdupes command extends the popular picard’s markduplicates tool  <cit>  by adding support for umis embedded in read headers . this module takes mapped reads as input  and identifies pcr  read duplicates based on their mapping positions and umis. in short, reads identified as duplicates based on their mapping locations are further regrouped based on their umis . all reads of a umi group are declared duplicates but one . finally, duplicate reads are either discarded or included in output . je’s markdupes module supports random umis  or runs with a predefined list of umis . in both situations, different options  are offered to tune umi comparison stringency like the number of mismatches to still consider two umis identical, or how to handle ns found in umis.
+
+galaxy integration
+a wrapper for integration in galaxy  <cit>  was written for each je sub-module following galaxy guidelines and best practices. all wrappers  were uploaded to the galaxy toolshed  <cit>  as a repository suite, enabling galaxy administrators to either install each sub-module separately or together as a suite.
+
+RESULTS
+using umis significantly increases the number of useable reads
+scrna-seq is a powerful tool to quantify the extent of gene expression variability amongst a population of cells and, for example, reveal sub-populations of cells or new cell types. the low amount of starting material  and the bias introduced by the substantial amplification required have been identified as major limitations and generally result in a high level of technical noise  <cit> . by eliminating the noise introduced at the amplification step, the use of umis was demonstrated to be critical towards an accurate and absolute quantification of the number of original rna messenger molecules present per cell  <cit> ; and globally facilitates distinguishing true biological variability from technical variability  <cit> . generally, scrna-seq data has a very high level of duplicate reads . therefore, increasing the number of unique reads available for gene expression quantification is key, in particular for lowly to moderately expressed genes  <cit> . to quantify the gain of tagging reads with umis that are processed using the je suite, we reprocessed  <dig> scrna-seq single cell experiments from islam et al.  <cit>   and identified unique reads with and without taking the umis into account ; which, in this case, directly translates to the number of rna molecules present in the cell. we quantified the gain obtained using the umis as the number of duplicate reads reassigned as unique reads once the umis were taken into account. expressed as a percentage relative to the number of unique reads identified without accounting for the umis, the gains ranged from  <dig> to 36 % with an average of 24 % .
+
+iclip also suffers high duplication rates due to the low number of biologically relevant genomic positions. to evaluate the impact of using umis for this type of experimental data, we analyzed iclip human samples published by zarnack et al.  <cit>   and observed gains in the number of useable reads ranging from  <dig> to 36 % with an average of 21 % .
+
+the advantage of using umis is not limited to scrna-seq or iclip experiments. indeed, duplicate read filtering  is standard practice in the processing of dnase i hypersensitive sites sequencing  and chromatin immunoprecipitation sequencing  data, which in single-end sequencing results in capping the coverage . as the sequencing depth increases, this approach severely impacts the signal-to-noise ratio as the background coverage increases while the signal coverage reached its upper limit. a straightforward solution is to systematically introduce umis and use je to uniquely identify fragments in dnase-seq and chip-seq libraries to avoid an artificial limitation of the dynamic range.
+
+je offers a unique set of features
+although a number of demultiplexing tools have been published, je comes with a unique set of features when compared to available tools . for instance, deml  <cit>  and bayexer  <cit>  focus on improving illumina truseq indices demultiplexing in the particular situation of low quality reads, taggd  <cit> , gbsx  <cit>  and flexbar  <cit>  specialize in barcode design and provide debarcoding algorithms able to handle barcodes of variable length or found at variable position in the read, while fastq-multx  <cit>  and fastx_barcode_splitter  <cit>  only accommodate the standard in-line barcoding approaches . although some of these tools might be more suited than je in particular situations, none of them offer umi support and should therefore be combined with specialized tools such as umi-tools  <cit>  or je  when reads contain umis. similarly, modules from migec  <cit> , a suite of tools specialized in the processing of t-cell receptor repertoire sequencing  data, can demultiplex and utilize umi-tagged data but with a fundamental different deduplication approach in that it directly works on non-aligned reads and assembles them into consensus sequences. in addition, migec  cannot accommodate for predefined list of umis. taken together, we believe that the extent and flexible nature of the features offered by je are unique, and constitute a valuable suite for data with complex experimental designs.
+
+CONCLUSIONS
+je offers the necessary tools to address most barcoding situations with and without umis  and the identification of pcr duplicates based on extracted umis. in standard experimental set ups  and using equivalent options , je demultiplex produced identical results when compared to other demultiplexing tools  <cit>  and performed  <dig>  times faster and  <dig>  times slower than the popular fastx  <cit>   and eautils  <cit>   packages, respectively . however, je demultiplex and demultiplex-illu can handle more complex designs such as mixing samples encoding barcodes and umis. using je to process complex public scrna-seq and iclip data that leverage the advantages of umis, we observed an increase of unique reads up to 36 % when compared to picard markduplicates  <cit> , which cannot account for the presence of umis.
+
+to broaden je accessibility, we developed wrappers for galaxy  <cit>  and made je available through the galaxy toolshed  <cit> .
+
+additional files
+
+additional file 1: supplementary text. installation notes, je usage details to address simple and advanced barcoding configuration with or without umis. supplementary methods. description of the scrna-seq and iclip data analysis. figure s <dig>  impact of using umis in single-cell rna-seq experiments. figure s <dig>  impact of using composite barcodes in iclip experiments. table s <dig>  comparison of diverse demultiplexing tools. 
+
+
+additional file 2: archive containing an executable jar and a wrapper script. 
+
+
+
+
+abbreviations
+chip-seqchromatin immunoprecipitation sequencing
+
+dnase-seqdnase i hypersensitive sites sequencing
+
+iclipindividual-nucleotide resolution uv crosslinking and immunoprecipitation
+
+ngsnext generation sequencing
+
+pcrpolymerase chain reaction
+
+pepaired end
+
+scrna-seqsingle-cell rna sequencing
+
+sesingle end
+
+umunique molecular identifier
+

@@ -1,0 +1,379 @@
+BACKGROUND
+a large amount of molecular biological data is stored in form of sequences of symbols in huge data bases, e.g., dna sequences or the primary structure of proteins. it is one main task of bioinformatics  <cit>  to develop algorithms  <cit>  which allow to find, via sequence comparison, for a given "query" sequence the most similar "subject" sequences in a data base. all widely-used algorithms depend on many parameters, the so-called scoring schemes  <cit> , which are usually suitably adopted to test sets of data. parts of these scoring schemes involve also rules how to deal with small non-similar subsequences, the so-called gaps. the most popular sequence-comparison algorithms are the smith-waterman algorithm  <cit>  for pairwise local sequence alignment  and the viterbi algorithm for sequence-to-hmm alignment. in the latter case, one specific sequence is compared to a full set of sequences which is specified via a hidden markov model   <cit> . for practical applications, often very fast heuristics are used, which do not find the exact best-matching sequences but only approximations of the optimum. the blast algorithm  <cit>  is used widely. sequence-comparison algorithms return a raw similarity score, i.e., a number, that quantifies the similarity between the input objects. unfortunately, this raw score is hard to interpret because one does not know its absolute scale.
+
+an interpretation becomes possible when we specify a probabilistic null model for the input: then the similarity score becomes a random variable s whose probabilities prob under the null model can be determined. sometimes this can be done analytically, but usually one has to apply numerical simulation  <cit> . the p-value assigned to an observed score s is defined as pval: = prob in the null model, and log pval is a measure of surprise  for s. the key problem is, of course, to find prob for a given sequence-comparison algorithm, a given scoring scheme, and a given null model.
+
+in this paper, we explain and extend an efficient and generally applicable numerical technique that solves this problem in many different sequence comparison settings, such as for a blast-like database search  <cit>  with a fixed query, for position-specific scoring and/or gap-cost schemes , or for normalized alignment  <cit> . in each of those settings a variety of null models in addition to the i.i.d. model is possible.
+
+previous work
+we start by introducing some necessary formal notations. for a full description, please refer to ref.  <cit> . let Σ be a fixed alphabet of symbols, denoting e.g. nucleotides  or amino acids .
+
+most of the existing statistical work for pairwise sequence comparison focuses on null models where both sequences are random and at each position a symbol σ ∈ Σ is chosen independently of the other positions , with a given frequency fσ > 0 . f often reflects the average composition of proteins in the uniprot/swissprot database  <cit> . an alignment of the two sequences is a set of pairs {}, which means that symbol of position ik of the first sequence is aligned  to the symbol at position jk of the second sequence. the pairs must not cross, i.e., if for two pairs   the condition ik <il holds, then also jk <jl. positions which are not paired, i.e., which do not appear in the alignment, contribute to the above mentioned gaps. the length of a gap is the number of adjacent ungapped positions. in the following example, where the two sequences are shown such that paired symbols are atop on each other,
+
+ qgeggda−−−wcqg−−gdatttwc⇔{,,,, ,} 
+
+two gaps of lengths two and three appear.
+
+scores for individual pairs of symbols are given by a constant  symmetric Σ × Σ scoring matrix with negative expected score, such as blosum <dig>  <cit> . the score of an alignment is given by the sum of the scores of the pairs, plus  contributions for the gaps. for the conventional gap-scoring schemes , each gap contributes a score which depends only linearly on its length  plus a constant . we shall refer to this model later as "random query - general-purpose scoring" .
+
+for gapless pairwise local sequence alignment, the raw score distribution can be derived numerically by markov chain analysis  <cit>  and also asymptotically for infinite sequences : it is an extreme-value distribution , also called gumbel distribution  <cit> :
+
+  prob=1−exp⇔prob=c⋅λ⋅exp×exp 
+
+where the parameters λ >  <dig> and c >  <dig> depend on the score matrix, on the symbol frequencies f, and on the query and subject sequence lengths lq and ls. asymptotically we have c = klqls for a length-independent k >  <dig> 
+
+for gapped pairwise local sequence alignment, which is the most relevant case in database queries there exist no universal analytic results, with the exception of few special cases  <cit> . empirical evidence also indicates convergence towards the gumbel form for long sequences; λ and k additionally depend on the gap-cost function  <cit> . several works have focused on efficient numerical estimation of these parameters  <cit> . the influence of varying lengths of the finite sequences  <cit>  is treated in various ways, e.g. by adjusting the lengths of the sequences to "effective lengths" but still assuming a gumbel form of the distribution. nevertheless, for moderate sequence lengths, which are biologically most relevant, the true distribution differs strongly from a gumbel form  <cit> , which can be dealt with by including a correction term to the gumbel form .
+
+the  model is convenient, because the problem of computing significance values reduces to the estimation of only two parameters, which can be precomputed for each scoring scheme. however, there are also several problems. for instance, even if one considers just the gapless case, it is in general not easy to extend the analytic asymptotic theory to more complex null models. furthermore, for practical applications where finite sequence lengths are considered, of even more importance is: the p-values reported by  blast only depend on the raw score, the query and the subject length, and not on the actual query sequence. this leads to large distortions when the composition of the query sequence does not match the composition of the null model. for example, when we run a homology search for the human transmembrane protein rhodopsin  with blast , we find a possibly remote homolog q8nh <dig> with an e-value of  <dig> · 10- <dig>  the e-value for score s is the expected number of database hits with score at least s and can be easily computed from pval and the database size. hence, it appears unlikely to obtain such a homolog by pure chance, i.e., the homolog appears to be relevant. however, using a recent "composition-based adjustment" option  <cit>  leads to a very different e-value of 0: <dig> for the same protein. this underlines the importance of query-specific or at least composition-based statistics, particularly for intermediate p-values.
+
+the statistics of position-dependent scoring and/or gap-cost schemes, as used in psi-blast  <cit>  or in hidden markov model  frameworks, are less well explored. the central question here is, "given a query q and a position-specific scoring scheme, what is the score distribution when random null-model sequences of given length are scored against q?". we refer to this model as "fixed query - position-dependent scoring" . as a compromise between the general  and the very specific  models, one may neither use a completely free  nor use a fixed query but draw query sequences according to more specific models, e.g., hmms for transmembrane proteins.
+
+in all these cases evds eq.  may still used heuristically by fitting the parameters of the evd to the simulated data. this can be achieved by generating pairs of random sequences according to the given null model while recording the histogram of observed alignment scores. using such a "simple sampling" approach, the large-probability region of the score distribution can be investigated, e.g., for probabilities about > 10- <dig> when generating  <dig> sequence pairs. such an approach is implemented, e.g. in the hmmcalibrate program from the hmmer package  <cit> . nevertheless, this procedure may fail to describe distribution in the "rare-even tail", i.e., where the probability is small , although this part of the distribution is most important for the estimation of the statistical significance.
+
+our motivation for a simulation-based method that makes no initial parametric assumption refers to the approach  <cit>  to increase the sensitivity of detecting homologs of a given transmembrane  protein in a database search: a bipartite scoring scheme with a  transmembrane helix specific scoring matrix  for the tm helices and a general-purpose scoring matrix  for the remaining regions of the query protein were applied, see figure  <dig>  this results in higher search sensitivity and specificity. however, a statistical theory or efficient computational method to obtain the score probabilities in such a  framework is missing so far.
+
+our contributions and paper outline
+we present a general framework for efficient estimation of raw score distributions in sequence comparison problems. in particular the rare-event tail for large scores can be accessed. we only make the following assumptions:
+
+ <dig>  we are able to sample pairs x, y of sequences according to the null model and to compute the null model probability of any given x, y.
+
+ <dig>  we have an efficient algorithm a that computes the score s, where x, y could be a pair of randomly drawn sequences , or one fixed and one random sequence .
+
+ <dig>  the scores are rational numbers with a common denominator. hence, without loss of generality, they can be assumed to be integers.
+
+ <dig>  optionally for the  approach, we have an efficient algorithm v that predicts the most likely state sequence for a given sequence.
+
+our framework is readily applicable to the ,  and  models, but also to more exotic settings, such as normalized alignment  <cit> , where the score is not additive, but normalized by the alignment length, for which no statistical framework exists so far. very recently eddy  <cit>  studied the distributions of viterbi and forward scores under probabilistic local alignment, for which a numerical analysis of the rare-event tail would be of interest as well.
+
+in the current stage of the methodology, the computation of an accurate "on the fly" p-value for each particular database query might be impracticable as each full calculation is not achieved within a few minutes.
+
+we will illustrate the approach for the hmm for tm proteins , which has been proven valuable in predicting tm helices. in this approach  one is able to specify the score distribution in more detail. each query may be classified to be a member of certain given sub-classes c. in this case, it could be meaningful to obtain an individual score distribution for each subclass. a natural classification of the tmhmm is the number of transmembrane regions. since for a given sequence this number is usually not known exactly, one takes the most likely one.
+
+the rest of the paper is organized as follows. the following section presents the mathematical background on importance sampling and markov chain monte carlo methods which are fundamental to the methods used to obtain the score distribution, in particular in the rare-event tail, for different null models. next, we present a description of the methodology. section "results" shows computational results on transmembrane protein similarity statistics in ,  and . a discussion closes the paper.
+
+methods
+importance sampling
+importance sampling is a general technique to reduce the variance in the estimation of quantities that can be written as an expectation e, where z is a random object representing the null model and h is a real-valued function. we assume that we can draw within a computer simulation n random samples z <dig>  ..., zn according the null model. the expectation is then approximated by the empirical mean e≈1/n⋅∑i=1nh.
+
+in our setting, to estimate the score distribution , we consider the state space z=Σlq×Σls, from which we generate n random pairs of sequences , y} ,..., {x , y}).
+
+these pairs are then aligned by a given algorithm a and the corresponding similarity scores s, y) are computed. to formally write a histogram as an expectation value, we consider the family of indicator functions hs=z→{ <dig> } for all s >  <dig>  defined by hs :=  <dig> if s = s, and hs :=  <dig> if s ≠ s, hence
+
+ prob =s)=e≈| {i:s,y)=s}|/n 
+
+this means, we approximate the unknown exact probability prob) by normalized score histograms over all sampled sequence pairs. if the probability to be estimated is small, say 10- <dig>  when using simple sampling, we need about  <dig> samples to estimate it with reasonable precision. thus, for very rare events, this sampling quickly becomes infeasible.
+
+importance sampling generates the "interesting" events more often by sampling from a different distribution and correcting for this bias afterward, which results in a more accurate estimate with a reasonable number of samples. let p be the probability mass function  of , and let q be another pmf satisfying q >  <dig> whenever p >  <dig>  then
+
+  ep=∑x,yh⋅p=∑x,yh⋅pq⋅q=eq≈1n∑i=1nh,y′)⋅p,y′)q,y′), 
+
+where each pair , y') is sampled from the pmf q. eq.  gives us the relationship between the expectation value w.r.t. the unknown distribution of interest, the target distribution p, and samples drawn from the actually used sampling distribution q. to successfully apply importance sampling, q has to fulfill three properties: first, it needs to put high probability on the region of interest; second, we need to be able to sample according to q; third, we need to be able to compute the correcting weight p/q. since directly sampling from q often is impossible, we shall use a general sampling method which we describe next.
+
+metropolis-hastings sampling
+if we need to generate samples from a discrete  distribution q but have no simple direct method to do so, the metropolis-hastings method  <cit>  provides a solution by constructing an ergodic markov chain with stationary distribution q in the following way.
+
+extensive introductions to such so-called monte carlo simulations can be found, e.g., in refs.  <cit> . here we just give a concise introduction specifically tailored to the problem of sampling pairs of sequences. let us call the elements  of the sample space zconfigurations. the sampling will be performed by randomly "moving" in the space of configurations, such that for each step a configuration is altered only slightly. configurations which can be visited and are connected by a move are called neighbors. hence, each configuration  has a algorithm-dependent set n of potential neighbors  ∈ n. the movement is performed in such a way that each neighbor exhibits a positive probability p,  as being the next configuration. the proposal is accepted with probability
+
+  α→)=min{ <dig> q⋅p,q⋅p,}, 
+
+in which case  becomes the new current configuration. otherwise  is discarded and  remains unchanged. thus, a sampling algorithm is specified via the neighborhoods n and the proposal probabilities p,
+
+the acceptance criterion equation  is quite general. by using a symmetric proposal probability matrix, p  = p , , the relationship simplifies to
+
+  α→)=min{ <dig> qq}. 
+
+since the distribution q appears only in form of a ratio we need to be able to compute q only up to a normalization constant. if q >q we accept the proposal and otherwise the proposal is accepted as new configuration with the finite probability q/q. hence, we need to choose the neighborhood of x, y such that that the ratio qq is not too far away from one. otherwise, virtually only proposals that increase the probability are accepted and the sampling procedure gets stuck at local maxima.
+
+equation  and its generalization equation  describe markov chains in the configuration space z=Σlq×Σls with the transition matrix t,  = p, ·α → ).
+
+for an appropriate choice of the neighborhoods n and of the proposal distribution p, , the so-constructed markov chain is ergodic . furthermore, one can show that the detailed balance condition
+
+  qt =qt , 
+
+which is fulfilled due to the choice of α according to eq. , implies that the chain converges towards the desired sampling distribution q.
+
+we say that the chain has reached equilibrium when convergence has occurred up to numerically negligible error. thus, if the configuration  is sampled after equilibration, it will behave like a sample from q. in practice, the exact speed of equilibration is unknown and convergence diagnostics are applied . several  independent samples are obtained by running the chain further and taking a sample every k-th step for sufficiently large k to allow time for "forgetting"  the state of the last sampled configuration. this time is usually referred as mixing time.
+
+implementation
+in this section we show how the sampling algorithm for pairs of sequences is actually designed, based on the background given in the two preceding sections, such that the tails of the probability distributions for the scores can be addressed. the crucial point of the metropolis-hastings update is the choice of an appropriate neighborhood n  and the computation of the probabilities of newly proposed states q. the neighborhood should be chosen such that the acceptance rate eq.  is between  <dig>  and  <dig> . we shall factorize the  pmf q in two contributions, firstly weights w: ℤ → ℝ+ that assign each score value of interest a weight and secondly the null probability, i.e.
+
+  q=w)⋅p. 
+
+note that we will leave w undetermined for a moment, until section "wang-landau sampling". the importance reweighting equation eq.  for hs is then
+
+  prob=e =∑x,yhs⋅p≈1z∑i=1nhs,y′)w 
+
+with the normalization constant
+
+ z=∑s∑i=1nhs,y′)w 
+
+for the  a single distribution of scores is not sufficient: each query is a member of a certain sub-class characterized by the number of transmembrane regions "# of tm helices" to be determined by the viterbi algorithm . thus, each class has its own probability pn = prob. in order to take this property into account, we deal with the joint probability prob. accordingly, the weights have a two dimensional domain, we write w. also hs in eq.  is replaced by an indicator function hs,n that depends on two parameters: hs,n equals  <dig> if s = s and # of tm helices of x = ntm. the sampling distribution is generalized to
+
+  q=w,ntm)⋅p, 
+
+and the the reweighting relationship reads as
+
+  prob=e=∑x,yhs,ntm⋅p≈1z∑i=1nhs,ntm,y′)w, 
+
+with, in this case, z=∑s,ntm∑i=1nhs,y′,ntm)w.
+
+generally the occurrence of two sequences x = x=x1 ... xlq and y = y1 ... yls is characterized by the null probability
+
+ p=prob=fquery⋅fsubject=fquery⋅fsubject. 
+
+this simple factorization allows us to draw proposals for the query and for the subject independently. hence, for simplicity, a neighboring configuration will leave one of the two sequences unchanged. thus, for selecting a neighboring configuration, first one of the two sequences is chosen at random with probability 1/ <dig>  in the case of  the subject is always chosen. then one sequence is chosen from the neighborhood of the selected sequence, as described next. formally, this means for  and  we use the factorized proposal densities p,  =  <dig> px, x' 1y, y' or p  = 1x, x' py, y'  depending on the choice of sequence in the first step.
+
+proposal densities for  and 
+in the simplest case either both sequences are i.i.d. or the query is fixed  and the null-model probabilities of their occurrence factorize, i.e.
+
+  fquery={fiid=∏i=1lqfxifor  and1{x=x˜}for  
+
+and of course in both cases
+
+  fsubject=fiid=∏i=1lsfyi 
+
+due to the factorization that occurs in eq.  it is possible to draw sequences from n such that the detailed balance condition fiid px,x' = fiid px', x is fulfilled by the following set of monte carlo moves 
+
+valid monte carlo operations for input sequence s = lgqiwtae . in order to obtain sequences of the same length as s, in the case of a deletion a character  to be appended at the border has to be specified.
+
+a) substitution of a single symbol at position k,
+
+b) insertion of a single new symbol at position k with left shift ,
+
+c) insertion of a single new symbol at position k with right shift ,
+
+d) deletion of a single symbol at position k with right shift and insertion of a single new symbol at the beginning,
+
+e) deletion of a single symbol at position k with left shift and insertion of a single new symbol at the end.
+
+operation a) appears with probability 1/ <dig> and the other ones with probability 1/ <dig> · 1/ <dig> each. this is one possible choice that guarantees detailed balance.
+
+note that all sequences in n have the same length and each operation involves a replacement of an existing symbol with a newly drawn symbol, in case a) by a direct substitution and in the cases b)-e) indirect via a shift operation. each position of a sequence has the same probability of being chosen and the replaced symbol is chosen in all cases according to the frequencies fσ .
+
+with this construction the metropolis-hastings ratio eq.  simplifies to the special case of the metropolis algorithm, i.e.
+
+ α→)=min{ <dig> q⋅p,q⋅p,}=min{ <dig> w)p⋅p,w)p⋅p,}=min{ <dig> w)w)}. 
+
+the right part in the second line cancels, because all contributions to p and p where symbols from  and y, y) agree cancel directly and for the few remaining letters, the proposal probability in the nominator contains exactly the frequencies of the null probability in the denominator, and vice versa. thus, the acceptance rate depends only on the score value of the current configuration s and the one of the proposal s. furthermore, it is easy to prove that the detailed balance conditions in eq.  is fulfilled for this chain which in turn implies that the chain converges towards the sampling distribution q.
+
+proposal densities for the 
+in contrast to the approach presented in the previous section, the generalized method we use here also works for null models that do not allow for direct sampling from n as in the case of i.i.d. sequences. this framework can be summarized by following algorithm:
+
+metropolishastingsupdate
+
+input: sequences x, y, a hidden state sequence z, the null probability p = fquery. fsubject, the score s = s, the sub-class n and weights w
+
+output: possibly new values for x, y, z, p, s, n.
+
+1: draw  ∈ n
+
+2: compute z' := v using v and determine the corresponding class n';
+
+3: compute p' := fquery  · fsubject;
+
+4: compute s' := s using a.
+
+5: compute α:=w⋅p′⋅px′,xw⋅p⋅px,x′.
+
+▷ designed such that
+
+p · p,  = p · p,
+
+6: with probability min { <dig>  α}:
+
+let ← 
+
+7: return 
+
+the algorithm is applicable to all models that allow for a rapid calculation of the null probabilities f. sequence models based on hmms fall into this class. in the following we brie y describe this framework. a detailed discussion can be found in the specialized literature on the topic  <cit> .
+
+in the probabilistic framework of hmms one assumes a sequence of "observed" symbols  which is generated conditioned on a sequence of "hidden" states. for the case of tm proteins, the state corresponds to the physical region where the corresponding amino acid is located in, as detailed below. within a modeling using hmms, this state sequence, also called path, follows a simple markov chain. the actually generated symbols are connected to the hidden states by conditional "emission" probabilities. more formally, a hmm consists of
+
+• a finite set ∑ of  symbols ,
+
+• a finite set Γ of  states,
+
+• initial state probabilities πμ for all μ ∈ Γ with ∑ μ∈Γ πμ =  <dig> 
+
+• emission probabilities pσμ in each state μ ∈ Γ Σ and for all σ ∈ ∑ with ∑σ∈∑pσμ =  <dig> for all σ ∈ ∑,
+
+• a stochastic transition probability matrix p = μ,τ ∈ Γ, i.e. ∑τ∈Γpμ,τ =  <dig> for all μ ∈ Γ.
+
+given these model parameters, the "most natural" application of a hmm is to generate a sequence of hidden states by a stochastic process and, in parallel, to generate a random sequence of symbols given the generated states. hence, the stochastic process describes pairs of states and symbols. but also given a fixed state z = z <dig> ... zl, the symbol sequence x = x <dig> ... xl is a stochastic process, furthermore the opposite case of a fixed sequence of output symbols, the state sequence is a stochastic process.
+
+for the monte carlo sampling as needed here, it is not possible to simulate a hmm directly to generate symbol sequences, since importance sampling changes the underlying sequence probabilities. nevertheless, one still needs to compute the probabilities fhmm for the monte carlo acceptance procedure, i.e. the probabilities that x is the observed symbol sequence generated by the hmm using any feasible state sequence. these probabilities can be computed in o time using the well known forward algorithm as described in the following. one introduces the auxiliary variables fμ, which correspond to the probability that the subsequence x <dig> ... xi is generated by the hmm given that the last state variable zi has the value μ, i.e. fμ  = prob. the overall probability is then fhmm = ∑ μ∈Γ fμ . the probabilities fμ  can be determined by the recursion
+
+  fμ=pxiμ∑τ∈Γfτpτ,μ 
+
+with initial conditions fμ=πμpx1μ.
+
+within the same time complexity the viterbi algorithm v computes the most probable state path for a given sequence of observations, that is
+
+ z1…zl=v=argmaxz¯1…z¯l∈Γlprob. 
+
+for this purpose one uses a different set of auxiliary variables: let vμ  be the probability of the most probable path ending in state μ ∈ Γ with observed partial output sequence x <dig>  ..., xi. these values can be computed recursively by
+
+  vμ=pxiμmaxτ∈Γ{vτpτ,μ} 
+
+with boundary condition vμ=π⋅px1μ. note that these probabilities are not normalized, in particular ∑μ∈Γvμ≤ <dig>  the missing normalization is no problem, since we are interested only in the most probable path, which is reconstructed by back-tracking  <cit> .
+
+for the approach discussed in this section, the subject sequences are drawn almost as above, see below. the hmm approach we use to sample transmembrane queries is the tmhmm developed by sonnhammer et. al.  <cit> . in this setting, the states are  domains. some of them are "tied", which means that they share the same emission probabilities. they are classified into seven groups:
+
+• helix core,
+
+• two different groups of caps on either side,
+
+• loops on the cytoplasmic side,
+
+• short and long loops on the non-cytoplasmic side,
+
+• globular domains.
+
+the internal structure of the helix core and loop module allows modeling different lengths of the corresponding protein domain by assigning jump probabilities. the globular domains have a self-looping structure and hence may also have various lengths. the other modules have fixed lengths. the overall number of model parameters is  <dig>  figure  <dig> shows the actual layout of tmhmm. each box represents a group of "tied" states. the states corresponding to "helix core" represent the transmembrane helices that connect states of the cytoplasmic side and the non-cytoplasmic side of the membrane. the prediction of the positions of the "helix core" states determines the loci of the special purpose scoring matrix slim for position specific alignment .
+
+the following metropolis-hastings update consists of two steps: first, the proposal of a new configuration from the neighborhood n is made by inserting/replacing symbols with equal weights fσ=1|∑| for all σ ∈ ∑ using one of the five monte-carlo moves described above. the acceptance ratio eq.  in that case is given by
+
+  α→)=min{1w,n′tm)fqueryfsubjectwntm)fqueryfsubject}. 
+
+the current and new number of tm regions ntm and n'tm are determined by the viterbi algorithm applied on the sequence x and x' respectively. the calculation of the query probabilities is based on the tmhmm. the subject sequence probability is simply calculated according to eq. . note that, in each step, one of the two probabilities cancels, because only one of the two sequences is changed within each step, as above.
+
+this approach allows us to sample noni.i.d. sequences with appropriate weights and to predict transmembrane helical regions that can be used in the position specific alignment scheme  even for random sequences.
+
+wang-landau sampling
+the idea of importance sampling is to choose the weights w, such that the drawn events in the region of interest have a high probability to occur in the simulation. ideally, p is already known and in that case one might choose w ∝ 1/p  on the entire range of interest. then all states are visited with equal probability, and hence a at score histogram is achieved in the limit of infinite sample size. still, for practical applications with finite sample size, the distribution of scores can be sampled with high accuracy over a large range of its support. this idea refers back to statistical physics and it is known as "generalized ensemble" or " flat histogram" methods. in the following we will denote this weights by wflat.
+
+of course the true p is unknown and the method requires some guesses which approximate wflat to a suitable accuracy. the achieved score histogram becomes only approximatively flat. the true  distribution can then be estimated by reweighting the histogram of visited states using the importance sampling formula eq.  for hs.
+
+many iterative sampling schemes to achieve initial guesses had been developed in the 1990ies, for example entropic sampling  <cit> , multicanonical sampling  <cit>  and later transition matrix monte carlo  <cit> , only to mention a few. here we use the wang-landau algorithm  <cit>  to approximate wflat as input for metropolis-hastings sampling.
+
+the wang-landau algorithm explicitly violates detailed balance by dynamically updated weights depending on the visited states in the following way: first, a score range of interest  is chosen. the algorithm basically employs a histogram h and weights w defined on the desired score range. for more complicated models such as the , these objects are two-dimensional depending on the score s and the class ntm, i.e. h and w. furthermore, real valued parameters ϕi >  <dig> are used in each iteration i. initially, the histogram values h are set to  <dig> in the desired range and all weights w to a constant, say  <dig>  for the first iteration, i =  <dig>  ϕi can be as large as e <dig>  then, a simulation is performed using acceptance ratio eq.  or eq. . after each step, corresponding to one step of a  random walk in the configuration space, w is updated as w ← w × ϕi, where s is the current score value and ntm the sub-class of the current state. also the histogram h is updated by one h ← h +  <dig>  in the literature this is often continued until an "approximately flat histogram" is achieved. a possible flatness criterion might be h> <dig> ⋅1smax−smin+1∑s′=sminsmaxh for all s, ntm. once the histogram is " flat", ϕ is decreased by the rule ϕi+1←ϕi and all entries of the histogram h are set to  <dig> again, while w is kept for the next iteration. note that the application of a flatness criterion is not essential for the good performance of the algorithm. it is enough to guarantee that all values of s have been visited, for example by requiring that the random walker has cycled several times through the interval of interest .
+
+to summarize, we have the following recipe:
+
+wanglandau
+
+input: initial guess w, initial and final modification factors ϕ, ϕfinal, number of samples for production run n
+
+output: histogram of visited scores, h:= number of samples with score s and class n and weights used in the production run w for all s and n
+
+1: ▷ initialize and estimate w
+
+2: pick any x, y ∈ x and compute its null probability p := fquery · fsubject;
+
+3: compute s := s using a
+
+4: compute z := v  using v and determine corresponding class n;
+
+5: while ϕ >ϕfinal do
+
+6:   h ←  <dig> for all possible score values s' and classes n'
+
+7:   while h is not at do
+
+8:       ←
+
+      metropolishastingsupdate ;
+
+9:      h ← h + 1; w w/ϕ;
+
+10:   end while
+
+11:   ϕ←ϕ
+
+12: end while
+
+13: ▷ obtain n samples from q and their score counts/histogram
+
+14: h ← <dig> for all possible score values s' and classes n'
+
+15: for i =  <dig> .n do
+
+16:   h ← h + 1
+
+17:   repeat
+
+18:       ←
+
+      metropolishastingsupdate ;
+
+19:   until mixing has occurred
+
+20: end for
+
+21: return counts h, weights w.
+
+due to the decreasing rule ϕi+1←ϕi, the modification factor ϕ converges towards  <dig>  the simulation is stopped when ϕ reaches a chosen threshold value which is close to  <dig>  it turned out that in our case the range from ϕ <dig> = exp ≈  <dig>  to ϕfinal = exp ≈  <dig>  has been proven valuable.
+
+since detailed balance is violated explicitly, the convergence of the algorithm can not be proven. for this reason one should always use the wang-landau part as a precomputation step just to obtain weights suitable w. after this, one performs a simulation with ϕ =  <dig> for data production, which corresponds to the metropolis-hastings algorithm.
+
+improvements
+of course there is much room for improvement. for example, consider the time evolution of the histogram h for  with lq = ls =  <dig> up to smax =  <dig> with prob ≈ 10- <dig> in figure 4a.
+
+when starting with an initial guess w =  <dig> for all s ∈  <cit> , the random walker needed about  <dig>  ×  <dig> monte-carlo steps for a round trip, i.e. to move from the lowest score smin =  <dig> to the highest one smax =  <dig> and back. the duration of a round trip is a measure of the mixing time of the corresponding markov chain. hence, the shorter the round trip is time, the faster the chain convergences. during the first round trip, the weights have been improved such that the second round trip  needed only 13% of the computational effort of the first one. once the random walker has performed its first round trip, the typical round trip time does not change significantly. this tight bottleneck in the very early stage of the algorithm can be overcome by suitable initial guesses of w. in figure 4b the time evolution of the same parameter set  is shown except for the choice of the weights, which have been chosen as w ≈  <dig> = prob, i.e. from a previous simulation of a different but similar setup. one observes that the histogram becomes "at" within a much smaller amount of monte-carlo steps. furthermore, the first round-trip time decreases to  <dig>  ×  <dig>  = 1). from a practical point of view, this allows us to save computing time for two distributions with close by parameters . one can use the results of one distribution as input for the second one. with this approach we may also explore the parameter space successively. in some cases it is sufficient to run a short batch run with the weights of a close by distribution and ϕ =  <dig>  i.e. a detailed balance simulation, and then apply importance reweighting and use the so obtained approximation of p for a longer production run. this kind of procedure is shown in the inset of figure 4b: the detailed balance simulations were performed with lq = ls =  <dig>  whereas the weights w came from a simulation with ls =  <dig> and ls =  <dig>  respectively. the result shows that the histograms are not " flat" at all, but the distributions were close enough to visit all score values on the range of interest. in this successive way of iterations a broad range of the parameter space is accessible.
+
+estimation of the statistical error
+statistical analysis of markov-chain monte-carlo data requires a careful inspection of correlation effects because the events depend on the history of the chain. this correlations vanish within a typical timescale: events that are separated by a sufficient number of steps can be assumed to be independent. however, since monte-carlo methods are only approximative, an assignment of statistical errors are requisite. in this study we used flyvbjerg and peterson's  <cit>  blocking method to estimate the error.
+
+RESULTS
+to our knowledge we present the first highly accurate score statistics for alignments with position-specific scoring schemes. the alignment scores were calculated with the standard smith-waterman algorithm with the blosum <dig> matrix for the  and a bipartite version blosum62/slim for  and  . for the a fine gap costs we have chosen the standard values with a gap-open penalty of  <dig> and a gap-extension penalty of  <dig>  and uniprot symbol frequencies for i.i.d. sequences.
+
+we discuss four different transmembrane proteins as queries  in the  scheme. the results are shown in figure  <dig>  where the distributions of  and  are compared against each other. the subject lengths are set to the query lengths. for the production run of one distribution in figure  <dig>   <dig> , <dig> metropolis-hastings updates have been performed. this took about  <dig> hours on an intel pentium  <dig> with  <dig>  ghz. the performance of the corresponding hmm is weaker for three reasons: firstly, we are interested in a joint distribution for that we need more samples. secondly, more proposals are rejected from the sampler due to the hmm-weights and finally the computation of the forward-probabilities requires additional floating point operations. the computation of  <dig> , <dig> metropolis-hastings updates for this model costs about  <dig> cpu hours. we use an  <dig> times larger sample size in order to account for the first drawback. hence, we put an overall computational effort on this model, which is  <dig> times as large as for  and  .
+
+a selection of transmembrane proteins. id: uniprot identifier; ac: accession number.
+
+here we observe in figure 5b that on the log scale the curvature of the tail of the distribution, i.e., the deviation from the exponential tail of the pure gumbel form eq. , is more pronounced in the  model: significant differences of shapes already show up in the high probability region, which is accessible by simple sampling . the  distributions for different lengths match almost perfectly , whereas the shape of the  distributions varies slightly with the sequence type. this supports the observation of müller et.al.  <cit>  that position-specific scoring in connection with a fixed query sequence may better discriminate between different sequences than the standard approach where two random sequences are compared with position-independent scoring matrices.
+
+the asymptotic theory for i.i.d. sequences predicts an evd of the form of eq. . the parameters λ >  <dig> and c >  <dig> depend on the score matrix, on the symbol frequencies f, and on the query and subject sequence lengths lq and ls. altschul and gish  <cit>  pointed out that asymptotic results where c = klqls  need to be corrected by using effective sequence lengths. an alignment may extend to the end of either sequence and the score will be distorted towards lower values and high scores become less probable. in the limit of infinite sequences this effect vanishes and the tail of the gumbel distribution can be understood as an upper bound for finite sequences. indeed, we clearly see that the curves in figure 5b are not straight lines in the right tail, but have negative curvature.
+
+a better t to the empirical distribution is obtained by determining parameters s <dig>  λ >  <dig>  λ <dig> >  <dig> for a "modified" gumbel distribution with
+
+  logprob=log−λ−λ <dig>  
+
+where s <dig> can be interpreted as the center of the distribution. this corresponds to a evd multiplied with a gaussian correction factor, given by the last term. the parameter λ <dig> is generally small . it vanishes for sequences of equal length as the length tends to infinity. previously, such a correction has been proposed for  statistics and has been computed for different parameter sets of blosum <dig> and pam <dig> with a ne gap costs  <cit> .
+
+more pronounced differences are seen in the behavior of the tail , which is only accessible via importance sampling approach. the difference between the probabilities spans several orders of magnitude; hence a wrong choice of the model would falsify the estimation of significance drastically. most importantly, the pmf obtained using the position-specific scoring is considerably curved. thus, using evds from fits to data of the high-probability region is even more questionable here than in the  model, where the pmf is almost a straight line. note that for the  model, previous simulations  <cit>  have already shown that for the special case of ls = lq, the pmf converges for large sequence length indeed to an evd.
+
+note that the gaussian correction for local alignment parameterized by λ <dig> is purely heuristic. looking at the data, the shape in figure 5b looks similar to the one of the tracy-widom distribution  <cit> . interestingly, majumdar and nechaev  <cit>  as well as priezzhev and schütz  <cit>  obtained analytically the tracy-widom distribution as the asymptotic distribution for the model of the longest common subsequences which is closely related to global alignment. also, sardiu, alves and yu  <cit>  observed that the the statistics of the score fluctuations of global alignment in the large probability region is compatible with the tracy-widom distribution. there could be a connection to our results, because in the rare-event tail, alignment lengths are of the order of the sequence lengths, hence the alignment is effectively global. nevertheless all our results are obtained for finite sequence lengths. in contrast, distributions like gumbel or tracy-widom are obtained in the asymptotic limit of infinite sizes of the underlying systems. since finite-size corrections are hard to obtain, or even unknown, we do not attempt to determine the "true" shape of the distribution and are satisfied by our heuristic formula.
+
+next, we discuss the usefulness of the  statistics in terms of retrieval performance. for this purpose we considered the astral compendium  <cit>  version  <dig>  with less than 40% identity to each other. it contains a set of reference proteins classified hierarchically based on their tertiary structure. it is a subset of the scop database with removed redundancy. the main hierarchy levels in the scop classification scheme are class, fold, superfamily, family. proteins in the same class share the same type of secondary structure, whereas the fold level describes more specific the arrangement of the secondary structure. as the position specific scoring scheme is designed to be more sensitive to discriminate transmembrane proteins against others, its performance can be measured by searching a collection of transmembrane proteins from the astral set against the complete set. from the  <dig> sequences in the database we have chosen  <dig> sequences which are classified as membrane and cell surface proteins and peptides. for this collection we predicted the membrane regions using tmhmm. each of those queries were searched against the complete set and ranked according to the p-value on the basis of the  statistics. the p-value threshold under which we regard a hit as significant controls the so called receiver operating characteristic , i.e. the relationship between sensitivity vs. specificity. a transmembrane protein that appears below an p-value threshold is referred as a true positive observation. accordingly, proteins of all other scop classes below that value are false positives. the roc space can be explored by changing the p-value threshold. a small threshold produces less false positives but we may miss some hits. a larger value leads to more false positives. the roc is usually illustrated by plotting the true positive rate , or the sensitivity, against the false positive rate , 1- specificity. the result for the search characteristics for  is shown in figure  <dig>  we did the same experiment for a blast search. in this case all observations are located in left bottom corner in the roc space. this can be explained by the fact that we have only considered the highest ranked results below the e-value threshold of  <dig> and many positives were beyond that value. this can also be seen in the inset of figure  <dig> where we show the average number of membrane proteins found so far as a function of the rank in the result set. the line of slope  <dig> for  at the begin of the result list means that virtually all hits are found in the correct scop class. in contrast, blast ranks transmembrane proteins at a high positions only randomly. hence, the  clearly outperforms the  statistics.
+
+the roc curve in figure  <dig> show the usefulness of the  statistics for retrieval performance, but the extreme small p-values where the the modification factor λ <dig> plays a role are not essential for this purpose. the modified gumbel statistics however affect a possible ranking of database search results, especially for sequences of different lengths. to illustrate this, we used blast to retrieve homologs of our four example proteins from the current swissprot database. the scores were recomputed via the position specific smith-waterman algorithm for . we computed the corresponding p-values from our simulation data and ranked the result set by the p-value based on
+
+ <dig>  the gumbel distribution  and
+
+ <dig>  the accurate distribution .
+
+for subject sequence lengths that are not directly governed by our simulation directly we used interpolated fit parameters. in table  <dig> we illustrate that the there are subjects whose relative order in the result set is switched when using the more accurate  score distribution in contrast to the blast e-value. this result might be important for applications of protein classification where the specific ranking of high scoring proteins is particularly important. however, on a global level the order of the hits persists, signaled by kendall's rank correlation  <cit> . when comparing the order obtained between the cases λ <dig> =  <dig> and λ <dig> ≠  <dig> we measured a rank correlation τ^ =  <dig>  for the query p <dig>  a τ of exactly  <dig> means identical,  <dig> unrelated, and, - <dig> exactly the reverse ranking. the rank correlation between the original blast ranking and the one based on the accurate p-values is τ^ =  <dig> .
+
+examples of blast hits for the four proteins used for fqps. the original result sets have been re-ranked according the the fqps statistics. left column: gumbel assumption . right column: modified gumbel distribution .
+
+to investigate the impact of dissimilar query and subject lengths lq and ls on the parameters of the modified gumbel distribution, we vary ls and consider the parameters λ and λ <dig> as functions of the ratio ls/lq . the large gap between the values of λ for the two different models reflects the qualitative difference of the shape in the high probability regime. we see that in the  model, λ is virtually independent of the query and the sequence length. however, in the model , λ varies with each individual query, as expected. for λ <dig> one has to distinguish between ls <lq and ls >lq. in the first case, λ <dig> decreases, which is not surprising, since the correction term describes a finite-size effect and should vanish for increasing sequence lengths.
+
+once the subject length exceeds the query length, the search space is still growing, but the finite length of the query enforces subject size independent edge effects.
+
+for the , we approximate the score distribution within each class . the shape of the distributions clearly agrees with the curvature for  and , and the modified gumbel distribution could be fitted  when the number of helices was not too small. this is indicated by a large reduced χ <dig> value for distributions with a small number of helices. also a visual inspection of the fit to the data supports this argument.
+
+the rare-event tail shows clear differences between the different sub-classes of the model over several orders of magnitude. in figure  <dig> the dependency of the fit parameters on the respective subclass of the model  as well as the dependency on the ratio ls/lq  is shown. note that for distributions that are not well described via eq. , we only fitted the data in the high probability region. those data points are left out in the plot for λ <dig> in figure 9b and are connected by dotted lines in figure 9a.
+
+in analogy to  and , the curvature remains constant when ls >lq. regarding the dependence on the number of helices, the curvature decays with increasing number of transmembrane regions and then approaches an approximate constant value. numerical values are provided in the appendix for reference.
+
+discussion and 
+CONCLUSIONS
+we have presented a simple universal numerical method to accurately sample the far right tail of the score distribution of various sequence comparison algorithms. it appears to be the first method that is applicable to all classical local alignment statistics, query-specific and position-dependent score statistics, hmm calibration, statistics of normalized alignments, and many more. to sample the distribution using computer simulations, we use markov-chain monte carlo simulations, in particular the wang-landau approach is connection with the metropolis-haistings algorithm. apriori, the wang-landau approach does not require any assumption on the shape of the distribution . the parameters can be estimated a posteriori by fitting the simulated distribution to an appropriate parametric form like eq. . here, we observed that for the  model, the gumbel distribution should be replaced by a more negatively curved one.
+
+the method has a disadvantage: because of the high number of samples required for non-parametric estimation of the distribution, it can presently not be used in on-line database search web services, such as a blast server. for example, generating the  <dig> , <dig> samples for figure  <dig>  took approximately  <dig> hours on an intel pentium  <dig> with  <dig> ghz.
+
+this is not as bad as it seems, though: both the implementation and the design of the markov chain have much room for improvement, e.g. we can choose different neighborhoods n and optimize the weights in the generalized ensemble  <cit> .
+
+while this still prohibits interactive use, we see a lot of potential for our method to provide an improved version of the hmmcalibrate tool  <cit>  and to explore the statistics of normalized sequence alignment  <cit> .
+
+during the preparation of this manuscript we came aware of a new related importance sampling method which is suitable for efficient p-value computations for alignment statistics  <cit> . it makes use of simultaneous backward sampling of alignments and sequences. so far this method was applied to i.i.d. sequences but it should be possible to extend it to more complex model as well. we have tested it for the  model as well. for the joint distribution of score and number of helices one would have to sample simultaneous the alignments, sequences and the hidden state sequence of the tmhmm.
+
+authors' contributions
+sw developed the simulation program for  and hmm based on an earlier version  <cit> , ran the simulations and performed data analysis. sr and akh designed the project. ih and sw developed the details for the tmhmm. all authors contributed to the manuscript and approved the final manuscript.
+
+appendix: modified gumbel parameters
+fit parameters λ, λ <dig> and k of the modified gumbel distribution for  and .
+
+the table shows the fit parameters of the score distribution prob for  <dig> ≤ n ≤  <dig> for lq =  <dig> and different subject lengths. for entries, where λ <dig> is left out, a suitable fit  to the modified gumbel distribution eq.  was not possible and only the gumbel parameters of the high probability region are shown.
+

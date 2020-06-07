@@ -1,0 +1,119 @@
+BACKGROUND
+constraint-based reconstruction and analysis  methods enable systems level computation of cellular functions using genome-scale biochemical reaction networks, including metabolism  <cit> . metabolic network reconstructions are used to compute reaction fluxes at pseudo steady-state by solving the linear program, 
+ maxvctvs.t.sv= <dig> vl≤v≤vu, 
+
+where v is the vector of fluxes, vl and vu are lower and upper flux bounds, s is the stoichiometric matrix, and c is the vector of objective coefficients . we refer to  <cit>  for details on cobra for metabolic networks.
+
+recently, lerman et al.  <cit>  developed the first integrated genome-scale reconstruction of metabolism and macromolecular expression  for the microorganism thermotoga maritima. this me model described the transcription and translation machinery associated with  <dig> genes and the metabolic network catalyzed by the enzymes synthesized in the model. thereafter, thiele et al.  <cit>  developed the first me model for escherichia coli, which was followed by additional me models for e. coli by  <cit>  and  <cit> . the latest me models for e. coli account for  <dig> % of the proteome by mass  <cit> , enable computation of proteome allocation shifts between conditions  <cit> , and predict the macromolecular composition of the cell  <cit> .
+
+while me models are a significant advancement for cobra modeling, they pose challenging mathematical optimization problems because of their size and multiscale nature. in particular, the vastly different magnitudes of metabolic and expression machinery fluxes lead to ill-conditioned problems that cause difficulties for standard optimization solvers: feasible problems can be reported as infeasible, or solutions may contain numerical errors. methods have been developed to enable off-the-shelf linear programming  solvers to be used for solving me models  <cit> . additionally, quad-precision lp solvers have been recently applied to me models  <cit> . they present an attractive balance between reliability and speed for practical solution of me models.
+
+the growth rate maximization problem for me models is actually a nonlinear program  but it becomes an lp when the growth rate μ is fixed. so far, the nlp has been solved using binary search on μ  <cit> , with high-precision lp solvers  <cit>  solving a sequence of lp subproblems. thus, a remaining question has been whether nlp solvers could solve the nlp more expediently. the solution of nlps in quad-precision has only recently become possible due to the development of quad-precision minos   <cit> . however, the nlp capabilities of quad minos have not yet been tested for multiscale me models . we thus report the first study for solving the nonlinear growth maximization problem for me models using nlp methods in quad precision. with a suitable initial estimate of μ, the quad-precision nlp approach proves to be both fast and numerically reliable.
+
+RESULTS
+we developed several solution methods for solving linear and nonlinear programs involving me models. these methods are listed in table  <dig>  and are discussed in detail in subsequent sections.
+
+
+nlp formulation and its global optimum
+the growth rate maximization problem in a me model is typically a nonlinear program because macromolecule dilution is modeled using the product of growth rate with a continuous reaction flux  <cit> . specifically, the me problem of maximizing growth rate is formulated as follows: 
+ maxμ,vμs.t.sv= <dig> vl≤v≤vuvdilution,ribo≥∑i∈peptidelp,icriboκτμ+r0κτ·vtranslation,ivdilution,rnap≥∑i∈tultu,i3criboκτμ+r0κτ·vtranscription,ivdilution,j≥1κτctrna,jμ+κτr0vcharging,j,∀j∈trnavdilution,j≥μ∑i1kijeffvusage,i,∀j∈enzymeadditionalμ-dependent constraints,  where μ is the growth rate and v is the vector of all fluxes; lp,i is the length of peptide i and ltu,i is the length of transcription unit i; cribo, κτ, r <dig>  kijeff, cmrna,j, ctrna,j are constants; and peptide, tu, trna, enzyme are index sets of v representing peptides, transcription units, trna, and enzymes, respectively.
+
+collecting all linear and nonlinear constraints, we formulate the nonlinear me problem in the following generalized form : 
+  <dig> maxμ,vμs.t.μav+bv=0sv= <dig> vl≤v≤vu, 
+
+where the constraints μav+bv= <dig> are quasiconvex .
+
+an optimal solution μ∗ can be found using binary search  as in  <cit> . dattorro  <cit>  proves that μ∗ is a global optimum. with a<μ∗<b and initial estimate μ0∈, bisection converges to specified accuracy ε in log2/ε) iterations. we implemented bisection as algorithm bisectme using the simplex method in quad precision .
+
+faster convergence to the global optimum is possible with an appropriate nlp solver. specifically, quad minos is a quad-precision implementation of minos  <cit> . for problem eq. , minos solves a sequence of linearly constrained subproblems defined by linearizing the constraints at a sequence of approximate solutions {μk, k= <dig> , <dig> … }.  if minos converges, it will be to a global optimum μ∗. furthermore, the subproblems converge quadratically when μk is close enough to μ∗ .
+
+we tested the effect of μ <dig> and the minos scaling option on the computation time and final solution. empirical tests showed that μ0= <dig>  should be avoided, as should μ0>μ∗ .
+fig.  <dig> effect of initial solution and scaling. shading represents  <dig> % confidence intervals for a loess fit of the data points computed using ggplot <dig> in r. when scaling was used, this solver option was set to a value of  <dig> 
+
+
+
+the latter is understandable in terms of the algorithm used by minos to handle nonlinear constraints  <cit> . by definition, the constraints are infeasible when μ>μ∗. hence, if the constraints are linearized at μ0>μ∗, they will be infeasible. the minos algorithm is not well-defined in this circumstance. as expected, the solution time was generally shorter when μ <dig> was closer to μ∗.
+
+solveme: combined solution procedure for growth maximization nlp
+because quad minos converges faster when μ <dig> is closer to the optimum, we developed a combined solution procedure that uses a coarse bisection via bisectme to identify μ0<μ∗, then provides the corresponding basis to warm-start quad minos on the nlp. this procedure is described in algorithm  <dig> 
+
+
+
+for the bisectme phase, we implemented golden section search   <cit>  for improved efficiency . specifically, we found that for 3-decimal precision in growth rate, gss required  <dig> seconds, while binary search required  <dig> seconds, representing a  <dig> % speedup. whether using golden section or binary, bisectme produces a basis compatible with the nlp solver, enabling warm-start of the nlp. hence we used gss to find a low-precision estimate μ <dig> for the nlp. the resulting basis and approximate μ were used to warm-start eq.  reliably and efficiently at a μ0<μ∗.
+
+the combined solveme procedure took  <dig> to  <dig> s , depending on the accuracy requested in bisectme. empirically, zero decimals led to the longest solve time, while the fastest solve was achieved when one decimal was requested  . for more decimals, the time spent in bisectme offset the advantages of starting the nlp closer to the optimum.
+fig.  <dig> performance of the combined solveme procedure. colored bands represent the range of solution times  for the binary or golden section search methods with growth rate convergence to  <dig> or  <dig> decimal points. points show solution time for the combined solveme procedure  for varying decimal points required at the bisectme phase. the protein-per-rna ratio  in the me model was either constant  or growth-rate dependent as in  <cit>  . uptake rates were free in both cases, such that proteome limitation eventually constrained uptake rates
+
+
+
+compared to the combined solveme, bisectme  took an average of  <dig> and  <dig> s for  <dig> and  <dig> decimal points respectively, while binary search  required an average of  <dig> and  <dig> s for 3- and 6-digit precision in growth rate. all runs were performed in quad-precision using quad minos.
+
+in summary, the combined solveme was up to  <dig> and  <dig> % faster than golden section search, or  <dig> and  <dig> % faster than binary search, for 3- and 6-digit accuracy in growth rate. another advantage of the combined solveme over bisection methods was that the growth rate was always returned to about  <dig> digits because of the tolerances set for quad minos; therefore solution time was not a function of final solution precision. to reach the same precision, bisection would require about  <dig> iterations, or over  <dig> s. furthermore, double-precision solvers would have difficulty achieving even  <dig> or  <dig> digits.
+
+in particular, commercial double-precision solvers such as cplex and gurobi handle feasibility and optimality tolerances as small as 10− <dig> but are not certain to achieve them. using quad-precision, we achieved feasibility and optimality tolerances below 10− <dig>  and often less than 10− <dig> 
+
+varyme: quad-precision me variability analysis
+in addition to growth rate maximization, we developed quad-precision flux variability analysis   <cit>  for me models, referred to as varyme. as with the fastfva method  <cit>  for metabolic reconstructions, we decreased the computation time by warm-starting quad minos using the basis from previous lp solutions.
+
+improved solution reliability via quad-precision
+empirical tests demonstrated the importance of quad-precision when fva is applied to me models. specifically, without quad-precision, errors such as maximum flux being less than the minimum flux were observed . another example is the varyme result for translation of b <dig> and b <dig>  encoding for leuc and leud, respectively. leuc and leud are the two subunits for the isopropylmalate isomerase complex. the formation of this complex is the only sink for the two translation products, other than dilution; therefore, fva should return equal values for the two translation fluxes. indeed, quad minos correctly determined equivalent fva solutions for b <dig> and b <dig>  while double-precision runs using cplex led to different fva solutions . additionally, at maximum growth rate, the me model showed essentially zero variability in the translation rates because of the tendency of me models to choose only the most efficient proteins. this phenomenon was accurately captured in quad-precision but not in double-precision .
+note that the flux units are in nanomoles/gdw/h
+
+
+
+when varyme was performed at growth rates below the maximum, non-zero flux variability was observed . again, double-precision ran into numerical difficulties. for example, at lower growth rates, the flux variability of most reactions should be wider, as correctly predicted by quad minos; however, double-precision  runs sporadically predicted narrower ranges at lower growth rates, presumably due to the numerical difficulties associated with the multiscale me model. collectively, these results emphasize the importance and practical utility of quad-precision for me models.
+fig.  <dig> comparison of fva in quad- and double-precision. growth rates were varied from  <dig> to  <dig> % of the maximum). lines span the minimum and maximum fluxes, while points show the mid-point between these ranges. the y-axis is in log-scale
+
+
+
+finally, we tested the speedup of flux variability analysis when each lp was warm-started  using the basis of the previous lp instead of “cold-starting” every lp. we observed 60× and 25× speedup for the e. coli and t. maritima me models, respectively . this result confirmed the effectiveness of warm-starting lps as observed by  <cit>  and is the default mode for varyme.
+
+
+
+
+case study: proteome-accounting for growth-coupled biochemical overproduction
+me models have imminent utility for systems metabolic engineering. in particular, biochemical overproduction strain design often involves gene knockouts and modulating the expression of production pathways. these genetic manipulations impact host fitness in part by forcing reallocation of the host proteome away from growth and stress response functions. me models now allow genome-wide accounting of proteome reallocation for engineered strains.
+
+to demonstrate, we analyzed the overproduction of succinate using growth-coupled designs that had been found using a metabolic reconstruction  <cit> . in particular, the designs involved succinate dehyrogenase  knockout, together with overexpression of fumarate reductase , isocitrate lyase , or both.
+
+to delete sdhcdab, we set zero upper bounds for the translation reactions of the four sdhcdab subunit genes. overexpression of frdabcd and acea was performed in three steps. first, we determined the maximum growth rate with sdhcdab deleted. we then used varyme to determine the feasible flux ranges for the complex formation fluxes of the overexpressed enzymes with growth rate fixed to a small fraction  of the maximum. we then set the lower bound of complex formation fluxes to linearly spaced fractions of the maximum expression flux, from  <dig>  to  <dig> . since we were investigating two production pathways, we sampled a grid of  <dig> by  <dig> samples for a total of  <dig> combinations of pathway expression levels. for each expression combination, we solved eq.  for maximum growth rate. because the strain designs were growth-coupled, we observed varying amounts of succinate production .
+fig.  <dig> growth-coupled succinate production performance predicted by solveme. a mass fraction of proteome sectors as a function of product yield. b product yield vs. maximum growth rate. c product yield vs. product flux. colors in  and  are proportional to the frd fraction, which is the mole fraction of translation flux to frd vs. total flux to succinate production pathways 
+
+
+
+the me model revealed trends in proteome re-allocation with increasing product yield. specifically, we traced the relative mass fraction of five proteome sectors, by summing the product of translation rate  with the protein molecular weight  over all proteins in each sector. the core proteome and glucose-niche proteome sector definitions were based on  <cit> . the core proteome mass fraction, which is critical for cell growth under all conditions, decreased steadily with increasing product yield . the niche proteome, which is required for growth on specific environmental niches , showed more variation with increasing product yield. the two production pathway protein sectors  increased with product yield, as expected. interestingly, the remaining  proteome increased in mass fraction up to four-fold, from  <dig>  to  <dig>  %, as product yield increased. therefore, production pathway overexpression entailed a significant proteomic cost.
+
+at lower product yields, the molar ratio of frdabcd vs. acea translation rates varied strongly, such that only one pathway was expressed at varying expression levels. however, higher succinate yields were achieved when both pathways were expressed simultaneously at a relatively constant ratio . this prediction is consistent with experiments showing that simultaneous expression of these two pathways  led to higher yields  <cit> . this me prediction is also distinct from metabolic reconstructions, which predict the highest yields from utilizing only the most metabolically efficient pathway   <cit> . the me model also predicted that product yield experiences diminishing returns with increased product flux, and with decreasing growth rate . therefore, the me model suggests that simultaneous expression of multiple pathways may improve yield over a single metabolically efficient pathway when we account for pathway expression and proteome reallocation requirements.
+
+simulation of growth on diverse media and gene deletions
+our solution methods were tested on additional case studies involving large numbers of simulations. first, we performed growth simulations for  <dig> single gene knockouts on glucose minimal medium. these essentiality predictions were  <dig>  % accurate  , similar to the reference model  accuracy  <cit> . as with varyme, we tested the speedup of warm-starting the lps for single gene deletion analysis over cold-starting every lp. we observed 19× and 12× speedup for e. coli and t. maritima me models, respectively .
+
+
+
+aonly the  <dig> genes coding for proteins forming functional complexes were tested for essentiality
+
+
+
+we also predicted relative growth rates across carbon sources accurately. in particular, using a growth rate-dependent protein-per-rna  ratio  <cit>  led to the highest accuracy: spearman rank correlation of  <dig>  , and pearson correlation of  <dig>   . using a constant p/r ratio without hard uptake rate constraints, or artificially constraining uptake rates, led to lower accuracy . we also observed that the growth rate on l-proline was predicted better when proteome limitation became the active constraint, rather than arbitrary uptake rate constraints. additionally, biomass yield  was predicted accurately across eight carbon sources  .
+fig.  <dig> accuracy of quantitative growth rate predictions. each panel corresponds to whether a constant or growth rate-dependent p/r ratio was used, and whether uptake rates were left unconstrained  or constrained to − <dig> mmol/gdw/h. the lines correspond to perfect agreement between measured and simulated growth rates. colored shadings represent  <dig> % confidence intervals for a linear model fit of the data points computed using ggplot <dig> in r
+
+
+
+we also simulated growth on  <dig> different media, each differing in a carbon, nitrogen, phosphorus, or sulfur source as in  <cit> . we then compared the predicted emass fractions of the  <dig> proteins common between our simulations and similar simulations performed on the iol <dig> me model in  <cit> . overall, we observed pearson correlation of  <dig>   and spearman rank correlation of  <dig>  . when considering only the core proteome  <cit> , we observed higher correlation between the two models: pearson correlation of  <dig>   and spearman rank correlation of  <dig>   . these results re-confirmed that me models  accurately represent the core proteome  <cit> , which is critical for host cell fitness in natural and engineered contexts.
+fig.  <dig> proteome mass fraction comparision with iol <dig> from  <cit> . the pearson  and spearman  correlation coefficients are shown for core and non-core proteome sectors, as defined in  <cit> . growth maximization simulations were performed for  <dig> media conditions, each with a different c, n, p, or s source. protein mass fractions from the reference model  were obtained from  <cit> 
+
+
+
+finally, throughout these simulations we found that me fluxes could span  <dig> orders of magnitude  and possibly more depending on the growth condition, emphasizing the need for quad-precision.
+
+
+discussion
+genome-scale models of metabolism and macromolecular expression   <cit>  have significantly expanded the biological scope and predictive capabilities of constraint-based modeling  <cit> . while predicting microbial growth using genome-scale metabolic reconstructions is now a computationally mature procedure  <cit> , growth maximization for me models is a more difficult nonlinear program. furthermore, me models are inherently multiscale, as metabolic and protein expression processes operate at rates differing by  <dig> orders of magnitude. thus, a major obstacle to the widespread adoption of me models has been the complexity, speed and numerical reliability of simulation  <cit> . in this paper, we developed a quad-precision nonlinear programming -based solution method exhibiting significant improvements in computational speed and numerical reliability. the quad-precision lp/nlp solver quad minos  <cit>  was used for this purpose. in addition, we developed quad-precision flux variability analysis  <cit>  for me models  using computationally efficient solver warm-start techniques  <cit> . we also showed that our solution methods were applicable to large-scale studies, including growth simulation on over  <dig> different media, and over  <dig> gene deletion simulations.
+
+with advances in me solution methods enabling rapid prototyping, we anticipate the acceleration of me model development for additional organisms, such as phototrophs  <cit> . development may be further facilitated by possible extension of model reduction techniques  <cit>  to me models. additionally, me models will become more accessible to metabolic engineers and systems biologists, who have already stated the importance of proteome-accounting for improving strain design and optimization  <cit> .
+
+to demonstrate possible application of our solution methodology in an engineering context, we analyzed growth-coupled succinate overproduction by e. coli. unlike metabolic reconstructions that predict maximal product yield when the most metabolically efficient production pathway is used, the me model predicted that simultaneous expression of multiple pathways led to the highest yields when proteome reallocation requirements were considered. these predictions were consistent with literature, where simultaneous expression of two succinate-producing pathways led to increased yield  <cit> . as shown here, me models now enable genome-wide proteome-accounting for the simulation and design of microbes. moving forward, it will be of interest to extend the theory and algorithms developed for metabolic models  to me models.
+
+CONCLUSIONS
+we developed an efficient methodology for solving nonlinear, multiscale models of metabolism and macromolecule expression . in particular, we showed that the growth rate maximization problem for me models is a quasiconcave maximization problem in general and quasilinear for special cases as demonstrated here. in both cases, the global optimum is found efficiently using the projected lagrangian method. using the quad-precision lp/nlp solver quad minos, we obtained up to  <dig> % speedup over conventional bisection. currently, a phylogeny of in silico methods has emerged around metabolic reconstructions  <cit> . our new insights into the quasiconvexity of nonlinear constraints in me models and the reliability gained with quad-precision nlp solvers should help accelerate similar expansion of algorithms and applications using me models in the near future.
+

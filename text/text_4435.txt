@@ -1,0 +1,178 @@
+BACKGROUND
+metagenomics is the study of microbes by analyzing the entire genomic contents extracted directly from an environmental sample. its growth has been greatly encouraged by the rapid advances in next generation sequencing  technologies, which deliver massive volumes of sequence data at relatively low cost and fast turnaround time . an essential prerequisite for metagenomic analysis is to unriddle the taxonomic composition of the microbial community in a given sample. it is generally accomplished by aligning sequencing reads against databases of known genomes or of phylogenetic marker genes  <cit> , which is known as the homology-based approach. a challenge is that many microbes in an environmental sample share the similarity in the genomic sequence, and this intrinsic complexity of metagenomic samples makes it extremely difficult, if not impossible, to accurately estimate the taxonomic composition, especially at low ranks of taxonomy tree, such as the species/strain level.
+
+one early approach to estimate taxonomic composition of metagenomic samples is to use the lowest common ancestor  method implemented in megan  <cit> , in which a sequencing read matching with multiple genomes is assigned to their lowest common ancestor, lowering the false positive rate at the cost of the specificity of assignment. in order to improve the specificity, various approaches have been developed .
+
+one recent homology-based approach, gasic  <cit>  utilizes the similarity in the genomic sequence to estimate taxonomic composition at the species level. to this end, it estimates the similarity between genomes by simulating a set of reads from each genome in a given sample and aligning it to the every genome in the sample individually. with the estimated similarity in the genomic sequence, it corrects the species abundance parsed from the result of an alignment tool such as bowtie <dig>  <cit>  using a non-negative lasso approach  <cit> . however, this approach requires prior information about genomes in a given sample in order to construct a matrix of the similarity among the genomes so that it can estimate the relative abundance of the genomes. therefore, it is not very suitable for metagenomic samples whose contents are usually unknown, yet need to be identified.
+
+another recent homology-based approach, tamer  <cit>  proposed a mixture model to estimate the proportion of sequence reads assigned to each genome while accommodating information of sequencing alignments. the parameters of the mixture model estimated by the em algorithm  <cit>  are used to assign each read to the most probable genome. the output of tamer is at the species/strain level. however, estimated abundance is not accurate for highly similar genomes  because of their high correlation, which cannot be captured by the mixture model.in this paper, we propose a new homology-based approach, taxonomical analysis by elimination and correction . this approach consists of two main stages: the elimination stage and the correction stage. in the elimination stage, we remove genomes whose presence is most likely due to the presence of similar genomes in a sample. in the correction stage, we correct the abundance of each genome remaining after the elimination stage by utilizing the similarity among the genomes in a system of linear equations. the overall workflow of taec is shown in figure  <dig> figure  <dig> 
+flow chart of taec’s workflow. the light yellow colored blocks are implemented by a user and the light blue colored blocks are internally implemented by taec. note: the bacteria database could be replaced with virus or other types of databases if needed.
+
+
+
+taec is similar to gasic in that both methods use the similarity in the genomic sequence among genomes to correct the abundance estimation. however, taec is quite different from gasic in that it utilizes the uniqueness of genome to remove possible false genomes before the correction of abundance. tamer is fundamentally different from the two methods: it does not consider the similarity between genomes in the assignment of reads. it only depends on the estimated post probability. in other words, when a read is mapped to multiple genomes in a blast output, it will be generally assigned to the most abundant genome  regardless of similarity between genomes.
+
+we tested taec on various simulated datasets and compared its performance with that of the aforementioned two methods, which were already demonstrated to outperform many other methods  <cit> . taec showed consistent performance regardless of complexity of metagenomic samples, even on a sample containing highly similar genomes, where the other methods showed poor performance. we also applied taec to two real metagenomic samples collected from human mouth  <cit>  and human gut  <cit>  and obtained their taxonomic compositions at the species/strain level, providing an interesting insight into the samples.
+
+methods
+input data and reference database
+as other homology-based methods, dna sequences or reads in a sample are compared against databases of known genomes using a sequence alignment tool such as blast in the preliminary stage. taec is then used to estimate the taxonomic composition of the sample by utilizing the similarity in the genomic sequence. in this research, we performed sequence alignments against the ncbi bacteria database using blastn to estimate the similarity among genomes. thus, the input data should be an alignment result from blastn against the ncbi bacteria database  <cit>  for the current version of taec. however, our approach is not restricted to blastn nor the ncbi bacteria database. it can be used with any alignment tools and reference databases.
+
+similarity estimation
+for a reference database that contains n <dig> genomes, the method described below is used to estimate the similarity in the genomic sequence between any two genomes in the database. a set of k <dig> random reads for each genome gj is generated and aligned against the reference database, where j =  <dig> ⋯,n <dig>  the reads are then assigned to genomes based on the alignment score. in cases where a read ri is aligned to multiple genomes, ri is assigned to the genomes whose alignment scores are greater than or equal to α · maxj , where α ∈  <cit>  and sij is the alignment score of gj for ri, i =  <dig> ⋯,k <dig>  how to determine the value of α depends on the length of reads and the complexity of sample data: shorter reads and more complex datasets require higher value of α to distinguish highly similar genomes. the ratio  between the numbers of reads assigned to gj and  can present the probability that reads originating from gj can be assigned to , or , where nj denotes the number of reads assigned to gj. this ratio is used as the similarity in the genomic sequence between genomes to build a similarity matrix w for all genomes in a reference database.
+
+elimination stage
+many genomes share more or less similarity in the genomic sequence but each genome has its unique regions, which differentiate it from other genomes. therefore, if a genome is truly present in a sample, there must be some reads uniquely assigned to it as long as the depth of coverage is high enough. we utilize this fact of uniqueness to identify genomes whose presence in the result of an alignment tool is most likely due to the similarity in the genomic sequence to the true genomes in a sample.
+
+to this end, each read is assigned to genome with the highest alignment score, and a binary k×n matrix a is created with its entry aij=  <dig> if ri is assigned to gj and aij=  <dig> otherwise, where k is the number of reads and n is the number of genomes present in the result of an alignment tool. for example, the below is the blast output for a small set of six reads:
+  
+
+let {aj} be the columns of a, and a be the column with maxj ≤ l ≤ n||al|| <dig>  where ||al|| <dig> is l1-norm of al, which corresponds to the total number of reads assigned to the genome gl. to identify the genomes to which no reads are uniquely assigned, with a <dig> = a we inductively solve the following equation  works and an equivalent iterative algorithm are provided in additional file 1):
+
+  <dig>  
+
+until we get the column j <dig> which satisfies , where + is a matrix with entries equal to max, pj a permutation matrix that permutes the column a with the column aj, and sj a matrix that subtracts the column a from each of the columns al for l > j. now, the genomes represented by the columns aj for j ≥ j <dig> can be removed since no reads is uniquely assigned to them, which implies that their presence is mainly due to the similarity in the genomic sequence to the true genomes in a sample. thus, for the example above aj becomes as below, i.e., only g <dig> and g <dig> are possible true genomes.
+  
+
+in practice, reads can be assigned to some random genomes due to sequencing and alignment errors so the stopping criterion for eq.  can be relaxed such that , where c is a user defined minimum number of reads for a genome to be included in the subsequent analysis. the whole elimination procedure can be iterated using non-parametric bootstrap  <cit> . in the bootstrap, the number of occurrences of  is used as a criterion to decide whether the genome gj is a false genome: if it exceeds a user defined number, gj is considered as a false genome and removed.
+
+correction stage
+in the elimination stage, the uniqueness of genomes is utilized to remove false genomes, disregarding accuracy in the number of reads assigned to each genome. in the example data genomes of g <dig> and g <dig> are removed. in the correction stage, the number of reads assigned to each genome remaining after the elimination stage  is corrected using the similarity matrix w in a system of linear equations.
+
+in this stage, to be consistent with the estimation of the similarity, we use α× maxj as a minimum alignment score to reassign a read to the remaining genomes, where sij is the alignment score of a genome gj for a read ri. that is, ri is assigned to the genomes whose alignment scores are greater than or equal to α× maxj. let bj denote the number of reads assigned to the genome gj in this way, and tj be the number of reads assigned to gj only due to its own presence, which we want to find. suppose the number of remaining genomes after the elimination stage is m. then, the number of reads assigned to each genome can be given by the following equations:
+  <dig>  
+
+where  is the similarity between gj and , that is, the  entry of the similarity matrix w. since no genome has the perfect similarity to other genomes, or  for all j≠j′, the inverse of wt exists. thus, the corrected abundance for each genome can be obtained by solving
+  <dig>  
+
+where wt is the transpose of w, t = t and b = t. if tj<  <dig> for some j, eq.  is repeated after removing the genomes gj until tj>  <dig> for all j since the number of reads cannot be negative.
+
+implementation of methods used in taec
+for the genomes excluding plasmids in the ncbi bacteria database, we created  <dig> similarity matrices, one for each of the most common read lengths:  <dig> bp,  <dig> bp,  <dig> bp and  <dig> bp. we used  <dig>  reads for each genome to estimate the similarity in the genomic sequence among genomes, that is k0=  <dig> , and set  <dig>  as a threshold for the similarity between genomes . the detailed information about the selection of k <dig> and a threshold for the similarity is provided in additional file  <dig> 
+
+in the selection of an optimal value for α, we simulated  <dig> different samples, in each of which we used  <dig>  reads of  <dig> bp originating from  <dig>   <dig> or  <dig> randomly selected genomes at various relative abundance ratios, which were randomly selected such that the ratio between the least and the most abundant genomes can be up to 1: <dig>  we then computed the relative root mean squared error  eq. , defined in the result section, for each sample at different values of α. as shown in figure  <dig>  any value α≥ <dig>  could be chosen since there is no statistically significant difference in the mean of rrmse at the 95% confidence level. we selected α= <dig>  since the smallest mean and variance of rrmse occurs at this value. the value of α also depends on the length of reads but not as much as on the complexity of a sample so the gain of accuracy by choosing a different value of α for a different read length is marginal . thus, we used the same value of α for all the similarity matrices.figure  <dig> 
+rrmse vs.
+α
+for read length of  <dig> bp. the mean of rrmse for  <dig> samples at different α. the error bars represents 95% confidence interval. the smallest mean and variance of rrmse occurs at α =  <dig> .
+
+
+
+since we set  <dig>  as the similarity threshold, we could not determine whether the presence of a genome in the elimination stage is due to its true presence or its undetectable similarity to the most abundant genome if its relative abundance is less than  <dig> % of the most abundant genome. however, the most abundant genome in the elimination stage is overestimated unless its similarity to other genomes in a sample is zero. thus, we used  <dig> % instead of  <dig> % as a cut-off in the decision of which genomes are falsely present in order to minimize false elimination of true low abundant genomes. in the bootstrap, any genome whose abundance is less than  <dig> % of the most abundant genome in more than 5% of the bootstrap samples was eliminated. the method developed for the elimination stage is implemented in c as an extension to r to minimize the computation time, and the method for the correction stage is implemented in r. the single run time for an input data of  <dig>  gb takes about  <dig> minute on a laptop with dual core  <dig>  ghz cpu and  <dig> gb of memory, and each additional run time for the bootstrap takes about 35% of the single run time. the taec package is available for download at http://cals.arizona.edu/~anling/software.htm.
+
+RESULTS
+we first tested taec on three simulated datasets to evaluate estimation accuracy and to compare with the other methods. we then applied it on two real metagenomic samples to analyze the taxonomic composition of each sample. in the comparison, we used three commonly used error measures  <cit> : relative root mean squared error , average relative error  and maximum relative error , which are given by
+  <dig>    <dig>    <dig>  
+
+where n is the number of the true genomes in a sample, ti the estimated number of reads assigned to genome i and τi the true number of reads originating from genome i. for each of the following studies, we used  <dig> bootstrap samples in the elimination stage.
+
+simulation study i - fames datasets
+the fames datasets  <cit>  consist of three artificial metagenomic datasets containing shotgun sequencing reads from  <dig> genomes. these datasets are named ‘simlc’, ‘simmc’ and ‘simhc’ based on abundance complexity: the simlc dataset contains one dominant genome with many low abundant genomes, the simmc dataset contains a few dominant genomes with many low abundant genomes and the simhc dataset contains no dominant genomes. these datasets were used in the gasic paper  <cit> . among  <dig> genomes in the fames datasets, we used  <dig> genomes that are contained in the ncbi bacteria database and compared the performance of taec on these datasets with gasic and tamer.in the comparison with gasic, we ignored the p-value that gasic uses to determine whether a genome is truly present in a sample because only  <dig> genomes have the p-value less than  <dig>  for the simlc and the simmc datasets and  <dig> for the simhc dataset. the comparisons of estimation accuracy are shown in figure  <dig>  taec yields the lowest errors for all the datasets. in particular, it performs very well on the simhc dataset in which the depth of coverage for each genome is sufficiently high. gasic, which also uses the similarity between genomes, shows significant improvement on the simhc dataset as well. however, tamer does not benefit from the increase in the depth of coverage.figure  <dig> 
+estimation accuracy comparison on fames datasets. the performance of three methods on the fames datasets is compared by the three error measures: rrmse, avgre and maxre.
+
+
+
+simulation study ii - metasim datasets
+the metasim datasets  <cit>  also consist of three metagenomic datasets named ‘simlc’, ‘simmc’ and ‘simhc’. however, reads in each dataset are simulated by a sequencing simulator, metasim, and the name of each dataset is based on the number of genomes in the dataset: the simlc dataset contains  <dig> genomes, the simmc dataset contains  <dig> genomes and the simhc dataset contains  <dig> genomes. these datasets, each of which contains  <dig>  reads of length  <dig> bp, were reproduced using the same parameters used in the metasim and the tamer papers  <cit>  to compare estimation accuracy.
+
+all approaches, as shown in figure  <dig>  perform well on the simlc and the simhc datasets in which all the genomes are very different from each other or the similarity between all genomes is very small. even maxres for all approaches are less than 5% on these datasets. however, for the simmc dataset that contains two relatively similar genomes, escherichia coli str. k- <dig> substr. mg <dig> and shigella dysenteriae sd <dig>  the performance of all approaches deteriorate, but taec by the least degree.figure  <dig> 
+estimation accuracy comparison on metasim datasets. the performance of three methods on the metasim datasets is compared by the three error measures: rrmse, avgre and maxre.
+
+
+
+as shown in figure  <dig>  which presents the absolute difference between the true and the estimated relative abundance of each genome in percentage, the common sources of high errors for all three methods are shigella dysenteriae and e. coli. it is due to the very different relative abundance for the similar genomes . for both gasic and taec a small fluctuation in the similarity can cause significant impact on the number of reads for the less abundant genome. the performance of taec is less sensitive to difference in relative abundance for similar genomes because of the optimum value of α: the similarity between shigella dysenteriae and e. coli estimated by taec is much lower than that estimated by gasic, reducing the effect of fluctuation in the similarity. this may be the same reason that gasic shows large errors on the estimation of pseudomonas entomophila and pseudomonas fluorescens.figure  <dig> 
+details of accuracy on simmc dataset. the performance of three methods on the metasim mc dataset is compared by the absolute difference of relative abundance in percentage between the true and the estimated composition.
+
+
+
+simulation study iii
+the last simulation study is motivated by the findings in the preceding simulation study where genomes in a sample are highly similar. the first sub-study was conducted to show the necessity of the similarity information to estimate the taxonomic composition accurately and to show the capacity of taec to perform at the species/strain level. two artificially simulated datasets using metasim contain three strains of escherichia coli: escherichia coli str. k- <dig> substr. mg <dig>  escherichia coli 0103:h <dig> str.  <dig> and escherichia coli b str. rel <dig>  each of the two datasets contains  <dig>  reads of  <dig> bp from the three strains, but one at the same relative abundance ratio  and the other at different relative abundance ratios .
+
+as gasic needs to create a reference database we consider three types of database for gasic: 1) only  <dig> true genomes 2) additional false genome escherichia coli dh <dig> and 3) adding another false genome escherichia coli dh10b. even though tamer and taec use the ncbi bacteria database, we just display the performance results of three methods in the same plot, figure  <dig>  the rrmses for tamer are very high, showing its limitations on the sample that contains very similar genomes; the rrmse by gasic dramatically increases when more false  genomes are included in the database but it performs well when only the true genomes are included in the reference database. taec outperforms these two methods in this study, showing its consistent performance regardless of the complexity of a sample. these results are at the strain level and can be summarized to a higher level, e.g., species level. at the species level  the performances of taec and tamer are comparable, and both of them outperform gasic when false genomes are contained in the reference database.figure  <dig> 
+estimation accuracy comparison on
+e. coli
+dataset of  <dig> strains. the performance of the three methods on the two samples that contain three e. coli strains, one at the same relative abundance ratio and the other at different relative abundance ratios, is compared by rrmse as the number of false genomes in a reference database for gasic increases. for tamer and taec the reference database is kept same, i.e., ncbi bacteria database.
+
+
+
+the second sub-study is about the effect of depth of coverage on the accuracy of estimation. we simulated samples containing the same three e. coli strains at different sample sizes  to analyze the effect of depth of coverage on the accuracy of estimation. for tamer and taec, the entire ncbi bacteria database was used for alignment while for gasic just five e. coli strains, the three true and two false ones , were used in the reference database. as shown in figure  <dig> and additional file 4: figure s <dig> and additional file 5: figure s <dig>  tamer and gasic show very large rrmse and do not benefit from the increase in the sample size. on the contrary, taec shows small rrmse and benefits from the increase in the sample size.figure  <dig> 
+rrmse vs. number of reads: three
+e. coli
+strains at the relative abundance in the ratio of 1:5: <dig> 
+
+
+
+
+oral metagenomic datasets
+the microbial communities in the human mouth are comprised of many different bacterial species. most of them are commensal and essential to keep equilibrium in the mouth ecosystem. at the same time, some of them are directly involved in the development of oral diseases, such as cavities and periodontal disease  <cit> . thus, the accurate taxonomical composition of these species in health and disease will help us identify possible pathogenic species.
+
+we downloaded  <dig> sets of raw reads from the mg-rast server: two healthy control sets and two cavity sets, which contain  <dig> pyrosequencing reads of  <dig> bp on average. the stages of cavity development for the two cavity sets are different: one at an intermediate stage and the other at an advanced stage  <cit> . the estimated relative abundance by taec for each genome whose relative abundance is greater than 1% is shown in figure  <dig> figure  <dig> 
+taxonomic composition of human oral microbiota. the estimated relative abundance of genomes whose relative abundance is greater than 1% in at least one of four oral samples is shown in the bar plot, and the taxonomic tree structure of the detected genomes is attached accordingly. the four samples consists of two healthy control sets and two cavity sets. the cavity set labeled “cavity1” is at an intermediate stage of cavity development, and the other “cavity2” at an advanced stage.
+
+
+
+bacilli, betaproteobacteria, and gammaproteobacteria are abundant in the healthy samples, while actinobacteria, bacteroidia, and negativicutes are abundant in the diseased sample. this agrees with the previous findings  <cit> . generally, the detected members of the actinobacteria class are abundant in the diseased group, especially for the second cavity sample which is at the advanced stage of disease. this finding is consistent with the conclusion of the paper  <cit> . an interesting observation is that rothia dentocariosa is plenty in the healthy samples as well as in the advanced cavity sample. according to  <cit> , r. dentocariosa is a largely benign gram positive microbe residing in human mouth but does very rarely cause disease, e.g., rothia periodontal disease. thus, it requires a further study with more samples to make a confirmative conclusion.
+
+it also shows that all the detected members in the class bacteroidia are abundant in the disease samples, including tannerella forsythia atcc  <dig> and  <dig> strains of porphyromonas gingivalis, and  <dig> species of prevotella. this is consistent with the previous findings  <cit> , and it is well known that prevotella denticola is a bacterial species found in the human mouth that causes infections of the oral cavity and adjacent structures  <cit> . we also noticed that the species leptotrichia buccalis in the class of fusobacteria is more abundant in the cavity samples than in the healthy controls, which is not surprised since it is the first species in the genus leptotrichia found in human dental plaque  <cit> . the both detected species selenomonas sputigena and veillonella parvula in the class of negativicutes are ample in the diseased samples. the fact that veillonella parvula is gram-negative and normally occurs as a harmless parasite in the mouth cavities explains why we observe a large amount of v. parvula in both healthy and cavity samples  <cit> . although it is considered non-pathogenic, v. parvula has been linked with rare cases of periodontal disease  <cit> . in addition, s. sputigena is the most frequently detected bacterial species in the genus of selenomonas in the cavity/periodontal sample  <cit> . the species treponema denticola which belong to the class of spriochaetia has been identified from the oral cavity of humans  <cit> .
+
+in figure  <dig> it shows that two strains, aggregatibacter aphrophilus nj <dig> and haemophilus parainfluenzae t3t <dig>  and the members of neisseria are depleted in the cavity samples and the members of streptococcus are less common in the cavity samples, which belong to gammaproteobacteria, betaproteobacteria and bacilli, respectively. as for the strains in betaproteobacteria their abundance could be due to biological variation or bias from sample collection since only one healthy control sample shows this pattern. for the streptococcus strains in bacilli and two species of aggregatibacter aphrophilus and haemophilus parainfluenzae, they are greatly bountiful in healthy oral samples. actually they have been used as antagonistic microorganisms to control/reduce the adhesion of periodontal pathogens  <cit> .
+
+of particular interest is the difference in relative abundance between the two cavity samples. the species of prevotella have very high relative abundance for the intermediate stage cavity sample, which is labeled as “cavity1” in figure  <dig>  compared to the healthy control samples and even to the other cavity sample. their active role in the early development of cavities is confirmed by the fact of they are oxygen tolerant  <cit> . similarly, the abundance of prophyromansa gingivalis and treponema denticola in the advanced cavity sample can be explained by their anaerobic characteristic  <cit> .
+
+human gut datasets
+the human gut is inhabited by a large number of bacterial species , and it is widely accepted that crohn’s disease  is associated with changes in microbial communities of human gut  <cit> . we downloaded  <dig> sets of raw reads - seven healthy control sets and four cd sets - from the ncbi to estimate the difference in taxonomic composition between two groups  <cit> . the whole genome reads were produced by the illumina, and the average length is  <dig> bp. the average estimated relative abundance by taec for genomes whose relative abundance is greater than  <dig>  is shown in figure  <dig> figure  <dig> 
+taxonomic composition of human gut microbiota. the average relative abundance for the genomes  is plotted with the corresponding standard error in the bar plot, and the taxonomic tree structure of the detected genomes is attached accordingly.
+
+
+
+it shows that the four major bacterial phyla in healthy people are firmicutes, bacteroidetes, proteobacteria, and actinobacteia, which agrees with the previous findings  <cit> . interestingly, we detected another phylum - verrucomicrobia - which is represented by a species akkermansia muciniphila with relatively high abundance in both diseased and healthy samples. actually, verrucomicrobia can be occasionally observed in human gut  <cit> .
+
+the species eggerthella lenta in the phylum actinobacteia shows higher value in the cd patients than in the healthy controls, which is confirmed by the finding in a study of bacteremia for a cd patient  <cit> . generally, the phylum firmicutes depletes in the cd patients than in the healthy controls, largely due to the depletion of clostridiales
+ <cit> . however, the genus steptococcus shows a clear pattern that it is over represented in the cd patients, which concurs with the antigens findings in cd  <cit> . meanwhile, the increase of veillonella parvula in the cd patients can be confirmed by a metagenomic study of cd  <cit> . for the phylum proteobacteria its increases in the cd patients is mainly due to the high relative abundance of three strains of e. coli
+ <cit> . regarding the phylum bacteroidetes the findings on the cd patients are inconsistent  <cit> . most studies showed that it is more prevalent in cd patients compared with healthy controls  <cit> . by contrast, frank et al. found that bacteroidetes are significantly depleted in cd patients  <cit>  by using q-pcr. our analysis results are consistent with the later.
+
+discussion
+many genomes share similarity in the genomic sequence, which is difficult to be captured from analyzing short sequence data alone. currently, it is still very challenging to accurately estimate the taxonomic composition of a metagnomic sample containing similar species, without utilizing the genomic similarity. taec employs the similarity in the genomic sequence in addition to the quality of alignment to estimate the relative abundance, enabling accurate estimation of taxonomic composition at the species level in the taxonomy tree and even lower level if the depth of coverage is high enough.in addition to its accuracy, taec could provide a way to check the reliability of outputs: the estimated relative abundance along with the similarity between genomes allows us to identify which genomes are susceptible to high errors. for instance, if a genome shares very low similarity with other genomes in a sample, the accuracy of its estimated relative abundance is not affected by the relative abundance of the others. on the other hand, if a genome shares high similarity with other genomes, the accuracy of its estimated relative abundance is dependent on the relative abundance of the others and the depth of coverage as shown in figure  <dig> and additional file 4: figure s <dig> and additional file 5: figure s <dig>  thus, with the information of relative abundance along with the similarity between genomes, we can narrow down which estimation of relative abundance is more reliable without any extra steps, like bootstrap suggested in tamer.
+
+taec has two limitations: 1) genomes that are not in a reference database cannot be correctly detected even if their true abundance is very high, and 2) very low abundant genomes, specifically their relative abundance is less than  <dig> % of the genome with most abundance, cannot be detected regardless of their genomic similarities to the most abundant genome. the first limitation is common to all homology-based approaches, and generally the second limitation pose no problems since we usually are interested in genomes whose relative abundance is greater than 1%.
+
+the length of reads in a real metagenomic sample varies, and this variation can change the number of reads assigned to a genome. however, the change mostly occurs on false genomes since the probability that a read originating from a genome can be assigned to the true genome is barely affected by the change in read length. therefore, small variation in read length does not cause significant errors in the estimated relative abundance of possibly true genomes. however, a proper similarity matrix should be used for the accurate estimation. for instance, if the averaged length of reads is  <dig> bp, a similarity matrix created with the read length close to  <dig> bp should be used. it could cause significantly high errors, otherwise.
+
+CONCLUSIONS
+taec is developed as a new homology-based approach to improve the estimation of taxonomic composition of metagenomic samples. its performance is very consistent as demonstrated in various simulation studies. particularly, it outperforms other existing methods when there exist closely related genomes in a sample. moreover, it is also reliable in a sense that it could provide a way to check the reliability of outputs, which is critical in the analysis of many metagenomic projects, especially related to human health.
+
+electronic supplementary material
+additional file 1:
+supplementary notes: an example of the elimination algorithm. an equivalent elimination algorithm in while loops. the selection of a similarity threshold and k
+ <dig>  
+
+ additional file 2:
+the choice of
+α
+value on various length of reads in terms of rrmse.
+
+
+ additional file 3:
+estimation accuracy comparison for three methods on the dataset with three
+e. coli
+strains at the species level. the performance of the three methods on the two samples that contain three e. coli strains, one at the same relative abundance ratio and the other at different relative abundance ratios, is compared by rrmse as the number of false genomes in a reference database for gasic increases. for tamer and taec the reference database is kept same, i.e., ncbi bacteria database. 
+
+ additional file 4:
+estimation accuracy comparison for three methods on the dataset of three
+e. coli
+strains, with relative abundance in the ratio of 1:10: <dig> 
+
+
+ additional file 5:
+estimation accuracy comparison for three methods on the dataset of three
+e. coli
+strains, with the same relative abundance ratio.
+
+
+ competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+conceived and designed the experiments: ms and la. performed the experiments: ms and np. analyzed and interpreted the data: ms, la, ql; drafted the manuscript: ms and la. all authors read and approved the final version of the manuscript.
+

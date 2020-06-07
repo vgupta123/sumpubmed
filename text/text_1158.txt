@@ -1,0 +1,116 @@
+BACKGROUND
+with rapidly decreasing costs of sequencing, next-generation sequencing assays are increasingly being used for molecular measurements  <cit> . these techniques generate millions of short reads and massive data sets, making it computationally challenging to properly analyze the data. one such assay, called chip-seq , is used to determine dna binding sites of a protein . in chip-seq, protein is first cross-linked to dna and the fragments subsequently sheared. following a size selection step that enriches for fragments of specified lengths, the fragments ends are sequenced, and the resulting reads are aligned to the genome. reads pile up at bound regions referred to as "peaks", but due to mapping challenges and biases in various aspects of existing protocols, identifying peaks is not a straightforward task.
+
+while there are many current algorithms for analyzing chip-seq data , there is still room for improvement as most rely on adhoc heuristics including coverage thresholds and poorly motivated filters. in particular, while existing methods rely on depth of coverage to determine likely binding sites using statistical methods, the determination of regions of binding, i.e. peak boundaries, is frequently based on heuristics.
+
+we present a novel approach for calling peaks that is based on evaluating the significance of a robust test statistic that measures the extent of pile-up of reads. specifically, we use define and evaluate the "shape" of putative peaks to differentiate between random and nonrandom fragment placement on the genome. we compare our predictions to two state-of-the-art methods  using two published data sets and demonstrate improved performance.
+
+RESULTS
+algorithm
+overview of the algorithm
+the input to our algorithm consists of the aligned reads for both the sample and input control. we create a 'coverage function'--a map f from the genomic coordinates to the non-negative integers-- by extending each of the aligned sample reads to the average fragment length l. the 'height' f at a nucleotide t is the number of such extended reads that contain t. this piecewise constant function is the data that we analyze.
+
+we will flag peaks in the coverage function that are, in a suitable sense, 'anomalous' as being likely protein binding sites. in order to turn this some-what vague idea into a well-founded statistical inference procedure we require two basic ingredients. firstly, we need a numerical test statistic that measures some feature of a peak such that peaks which result in extreme values of the test statistic might reasonably be expected to be binding sites. secondly, in order to calibrate whether a value of the test statistic is so large that it is difficult to explain as simply being the consequence of random fluctuations  we need a stochastic model of the coverage function for the 'null' situation when we are in a region of the genome that doesn't contain a binding site.
+
+a tree shape statistic ℳ to measure "peakness"
+the most obvious test statistic is simply the height of a peak. however, such a statistic reflects the depth of coverage at a single site, and ignores valuable information in the form of the coverage depth in the neighboring region. motivated by current work in topological data analysis   <cit> , we propose the following more synoptic measure of a peak's shape that incorporates information in the neighborhood of each site and therefore allows for defining binding regions, and not just sites.
+
+suppose we have an interval  of the genome that corresponds to an excursion of the coverage function above some height h. that is,
+
+ f=f=h, andf>h for a<t <b 
+
+let a = t <dig> <t <dig> < ... <tn = b be the locations at which the coverage function changes value. it will typically be the case that the jump f - f at the location tk is either + <dig>  or - <dig> . the sequence of integers {f, f, ..., f} is then a lattice path that begins and ends at the level h and exceeds h else-where. as illustrated in figure  <dig> and discussed more formally in  <cit> , there is bijection between lattice path excursions  and rooted trees with root at height h. the tree captures in compact form the important features of the excursion of the coverage function.
+
+we need to further summarize this tree using an appropriate numerical statistic. in order to motivate our choice, consider the extreme cases of the trees that could arise. figure  <dig> depicts the lattice paths and corresponding rooted trees for, respectively, a perfect peak and perfect noise. for a tree with n vertices, we look for a statistic that attains its greatest and least values, respectively, on the path pn and the star sn. a matching of a tree t is a subset m of the edges of t with the property that no two edges in m share a common vertex of t. a matching m is maximal if it contains at least as many edges as any other matching. we define ℳ to be the number of edges in a maximal matching for the tree t. note that ℳ≤⌊n2⌋=ℳ and ℳ ≥  <dig> = ℳ for any tree t with n vertices. in general, excursions of the coverage function that correspond to sharp peaks result in tall, spindly trees with large values of ℳ, whereas broad, spreadout peaks result in low, bushy trees with small values of ℳ. in our implementation, we calculate the tree shape statistic ℳ using the algorithm in  <cit> .
+
+a null stochastic model of the coverage function
+following  <cit> , we model the 'null' or 'background' placement of read starting locations in some region of the genome as a homogeneous poisson process with rate ρ. that is, we replace the discrete set of nucleotide positions by a continuous interval and suppose that the distances between the starts of successive reads are independent random variables that each have an exponential distribution with mean 1ρ. the value of the coverage function at some position t is then just the number of points of the poisson process that happen to fall in the interval . this random variable has a poisson distribution with mean θ = ρl; that is, the mean height of the coverage function at any fixed location is θ.
+
+even in the absence of binding, some genomic regions systematically receive a large number of fragments while others receive very few  <cit> . hence, it would be inappropriate to use the same rate ρ for the entire genome and it is necessary to first divide the genome into regions across each of which we expect the background to be homogeneous and assign an individual rate to each one. we describe our procedure for determining these regions and estimating the local rates later.
+
+the following consequences of this poisson null model are established in  <cit> .
+
+firstly, the random lattice path produced by recording the successive values of the coverage function at locations where it changes values  is approximately a stationary discrete time markov chain with transition probabilities
+
+  p={ <dig> if i= <dig>  j= <dig> p,if i≥ <dig>  j=i+ <dig> −p,if i≥ <dig>  j=i− <dig> ,otherwise, 
+
+where
+
+ p=k!k−jj!θk−j+k−1e−θθk), 
+
+for k ≥  <dig>  the quantity p is just the conditional probability that, for any fixed location t, a new read starts somewhere after t before any of the extended reads covering t end, given that there are k such extended reads.
+
+secondly, the random tree t constructed from an excursion of the coverage function above the level h is a galton-watson tree with generation-dependent geometric offspring distributions: the root is at height h, the probability a vertex at height k >h has n offspring  is pn), n ≥  <dig>  and these family sizes are independent. we could use this observation to simulate independent copies of t and to obtain a monte-carlo approximation of the distribution of the null distribution of ℳ. instead, we simulate independent copies of the appropriate random lattice path and construct copies of t from them; that is, to construct a copy of the random lattice path we start at height h, we move to height h +  <dig> at the first step, at succeeding steps we move up or down with respective probabilities p and  <dig> - p when we are at height k, and we stop when we return to height h.
+
+lastly, the expected number of vertices in such a tree is the expected length of an excursion above height h of a markov chain with the transition probabilities . denoting this quantity by s, we have s=1π, where π is the stationary distribution of the markov chain with state space {h, h+ <dig>  ... } that is obtained by taking the chain with the transition probabilities  and reflecting it at height h: intuitively, if an excursion above h has expected length s, then the long term proportion of steps the reflected chain will be in state h is 1s. thus,π is the unique solution of the standard system of equilibrium equations
+
+ π=πp+πp, 
+
+for i >h with
+
+ π=πp 
+
+subject to the normalization ∑iπ= <dig> .
+
+subdividing the genome into regions
+as we remarked above, it is inappropriate to use the same rate ρ , perhaps estimated by # of reads mappedlength of genome, for the entire genome. instead, we subdivide the genome into homogeneous regions based on the input control and perform our analysis on each region separately. given the input, we calculate a local rate function
+
+ ς=# of input tags starting in it <dig>  
+
+where it is the interval of length  <dig> centered at t. we then discretize ζ into a step function as follows. for each chromosome, we begin with the interval i = , where k is a user specified integer, and find the average of ζ over i. we extend i, adding nucleotides k + <dig>  k + <dig>  ..., t <dig> until ζ  differs from the computed average ζ by more than a fixed user specified value d. the next interval begins as , and it is extended until jumps away from its average by more than d. for the human genome, we use k =  <dig>   <dig>  but one could use a smaller k for shorter genomes. additionally, we use d =  <dig>  once all the intervals are determined for all chromosomes, we round each average ζ to the nearest integer and define  regions rj based on the intervals whose average ζ rounds to j. we calculate the local rate
+
+ pj=# of tags in data originating in rj∑∐i=rjlength 
+
+for the data along rj.
+
+initial filtering of possible peaks
+for each region r, we fix a height hr and obtain a collection of trees/possible peaks from the segments in the set
+
+ s={t ∈r|f≥hr} 
+
+. care must be used when selecting hr. if hr is too low, then we will pick up trees that are so broad that it is impractical to approximate the null distribution of our test statistic using monte-carlo methods. additionally, our called peaks will be very wide. on the other hand, if hr is too high, then we may not catch genuine peaks. we choose
+
+ hr:=max ≤c}), 
+
+where θ is the estimated expected height of the coverage function on r and c is a user-specified parameter. note that hr increases as c decreases. we use c =  <dig> in our analysis.
+
+identifying peaks and correcting for multiple hypotheses
+for a homogeneous region r, consider a random variable obtained by evaluating our statistic ℳ on a tree built from an excursion of the coverage function above the level hr under the null model. let gr be the probability that such a random variable exceeds m. in order to approximate gr, we simulate  <dig>  random trees with root at height hr via the method described above of simulating the associated lattice path.
+
+we find the segments in the observed coverage function that correspond to excursions above hr that are at least  <dig> base pairs long. we build the lattice path and tree associated with each such excursion. we then compute the value ℳ of our statistic ℳ for each such tree t and assign the 'p-value' gr) to t.
+
+with α =  <dig>  as the significance level, we use a benjamini-hochberg correction  <cit>  for multiple hypothesis testing as follows. we first take the 'p-values' for the n trees found on the entire genome, and order these probabilities from least to greatest p ≤ p ≤ ... ≤ p. let j be the largest j such that p≤jαn. a tree t in a region r is a called as a peak provided gr)≤jαn. we merge two called peaks in bordering regions provided the gap between them is less than l. figure  <dig> gives a pictorial sketch of our method.
+
+testing
+we tested t-pic by predicting binding sites for publicly available data sets. rather than comparing t-pic to every possible peak caller, we identified peakseq  <cit>  and macs  <cit>  based on previous studies  <cit>  as being the best current programs, and restricted our comparisons to them.
+
+binding site prediction using published data sets
+with our algorithm, we predicted binding sites for four transcription factors  for drosophila melanogaster. we used published data from the eisen lab  <cit>  . additionally, we predicted binding sites for the human genome for stat <dig> using data from the gerstein lab  and for foxa <dig> using data from the liu lab . table  <dig> gives information on each sample used in our analysis. we compared our method to peakseq  <cit>  and macs  <cit>  on each data set, and peaks were called with macs and peakseq using the default parameters. table  <dig> gives a summary of the peaks called by t-pic, macs, and peakseq.
+
+the samples used in the testing section are listed along with their references. additionally, the numbers of mapped reads for the sample and for the input are given.
+
+a summary of predictions for bicoid , caudal , giant , hunchback antibody  <dig> , hunchback antibody  <dig> , knirps , kruppel antibody  <dig> , and kruppel antibody  <dig>  is given.
+
+validation of called peaks
+to show that examples such as those above were significant and reproducible, we tested the peaks called by t-pic, macs, and peakseq for binding motif enrichment for each protein analyzed. we assigned an enrichment score to each set of called peaks using fold enrichment as follows: for each protein and peak caller, we created random intervals from the genome by selecting the same number of intervals with the same lengths from each chromosome as in the called peaks but with random starting locations. we then counted the number of occurrences of the binding motif in the called peaks and in the random intervals. the enrichment score is the ratio of the number of occurrences in the called peaks divided by the number of occurrences in the random intervals. by using random sequences of the same lengths, we accounted for increased binding motif counts that would occur by chance in longer sequences. we could therefore compare the enrichment scores between different peak callers. table  <dig> shows the motif enrichment scores for each protein and peak caller. overall, t-pic performed favorably as measured by motif enrichment. the average enrichment score for t-pic is  <dig> , while macs averages  <dig>  and peakseq averages  <dig> . moreover, for  <dig> of the  <dig> samples, t-pic outperformed both macs and peakseq as measured by motif enrichment.
+
+the motif enrichment score is fold enrichment over random sequences. this score is listed for each protein and peak caller. the random sequences used have the same number and lengths as a given set of peaks, but the start site is randomly chosen from the chromosome. references containing the binding motifs are  <cit>  ,  <cit>  , and  <cit>  .
+
+we then compared the called peaks to the results of independent qpcr experiments for stat <dig> and foxa <dig> proteins. for foxa <dig>  we used  <dig> true positives and  <dig> true negatives found in  <cit> . for stat <dig>  we used  <dig> true positive regions and  <dig> true negative regions found in  <cit> . t-pic found  <dig> of  <dig> positives for foxa <dig> and  <dig> of  <dig> positive regions for stat <dig>  macs finds  <dig> of  <dig> positives for foxa <dig> and  <dig> of  <dig> positive regions for stat <dig>  peakseq finds  <dig> of  <dig> positives for foxa <dig> and  <dig> of  <dig> positive regions for stat <dig>  in terms of true negatives, t-pic found  <dig> of  <dig> negatives for foxa <dig> and  <dig> of  <dig> negative regions for stat <dig>  peakseq found  <dig> of  <dig> negatives for foxa <dig> and  <dig> of  <dig> negative regions for stat <dig>  and macs found  <dig> or  <dig> negatives for foxa <dig> and  <dig> of  <dig> negative regions for stat <dig>  these results indicate that t-pic has high sensitivity, finding more true positives than peakseq for both stat <dig> and foxa <dig> while finding more true positives than macs for foxa <dig>  while our specificity results on this experiment underperformed peakseq and macs by analysis of prediction on true negatives, our results on the drosophila experiment summarized in table  <dig> show that we frequently call fewer peaks than peakseq. moreover, both of the foxa <dig> true negatives and  <dig> of the  <dig> stat <dig> true negatives found by t-pic pass peakseq's first pass of scoring. this means that they are potential peaks based on their height being extreme . in general, accurate estimation of specificity in peak calling is difficult because it is hard to rule out the validity of individual predicted peaks.
+
+robustness
+to test for robustness against replicates, we used the two data sets for hunchback  and kruppel . for each antibody, we calculated the percentage of peaks that overlapped at least one peak from the other antibody for the same protein. the average percentage for t-pic was  <dig> , while macs averaged  <dig>  and peakseq averaged  <dig> . we additionally analyzed the chip-seq data for two sample lanes of the stat <dig> data  <cit> . these two lanes came from replicate  <dig> and had a total of  <dig> , <dig> mapped reads. we compared the predictions to those obtained using the full data set . all three programs found fewer peaks with the smaller data set-- t-pic predicted  <dig>  peaks , macs predicted  <dig>  peaks , and peakseq found  <dig>  peaks . of the peaks found using replicate  <dig>   <dig> % of t-pic's called peaks overlapped peaks found using t-pic and the entire data set. this compared favorably to both macs  and peakseq . and suggests that t-pic is as robust as other peak calling methods in terms of biological replicates.
+
+next, we tested for robustness against the input parameter l as during the size selection step, a researcher may not know the true average fragment length. using the stat <dig> data , we ran t-pic with the additional l values:  <dig>   <dig>   <dig>  and  <dig>  on average, the peaks found using different l values overlapped  <dig> % of the peaks called using l =  <dig>  the lower values of l  resulted in more peaks than for l ≥  <dig> and we found a higher percentage of the l =  <dig> peaks than the higher values of l . in comparison, peakseq also used the input parameter l. on average  <dig> % of the peakseq's peaks were found by the different l values. although the true average fragment length for single end sequenced data may not be known, one could determine l if doing paired end sequencing. our results suggest that this is a good idea regardless of which peak caller is used.
+
+implementation
+t-pic is implemented in r  <cit>  and calls a perl script that subdivides the genome into regions based on the input control. our code is available at http://bio.math.berkeley.edu/tpic/, or upon request. table  <dig> lists all parameters involved in our method, along with the parameter choices used in the testing section.
+
+the parameters involved in the t-pic algorithm are presented as well as the values used in the testing section. further details on each parameter may be found in the algorithm section.
+
+CONCLUSIONS
+we have developed a novel approach to the analysis of chip-seq data, that aims to discover bound regions of dna by topological analysis of read coverage functions. our method-t-pic-is fast and freely available, making it suitable for general use. the approach compares favorably to two popular peak callers: peakseq and macs. we find the majority of their called peaks while detecting additional sites of binding. although we have focused on chip-seq in this paper, the approach we describe to call peaks could also be of use in the analysis of other sequence based assays like for instance clip-seq for protein-rna interactions.
+
+authors' contributions
+lp proposed the problem of using the shape of a putative peak to determine binding sites in chip-seq. sne developed the probability theory. vh explored ideas from topological data analysis, implemented the algorithm, and analyzed the chip-seq data. vh, sne and lp worked together to develop the peak calling algorithm, and all contributed to writing the manuscript. all authors read and approved the final manuscript.
+

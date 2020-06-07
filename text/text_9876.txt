@@ -1,0 +1,218 @@
+BACKGROUND
+the conservation and utilization of plant genetic diversity is regularly cited as a critical strategy in meeting the growing global food demand  <cit> . for the handful of truly global crops that provide the vast majority of the world’s caloric and protein intake   <cit> , extensive resources exist to facilitate such ongoing improvement, including well-characterized gene/seed banks, international communities of researchers, and vast collections of genetic and genomic resources. rightly, the call for ongoing investment in such resources continues  <cit> . for more minor agricultural plant species, however, particularly those of unique or limited relevance to developing countries, relatively fewer resources exist, leading to the designation of such species as underutilized, neglected, or orphan crops  <cit> . in west africa alone, examples of such species abound and include cereal grains , leafy vegetables and seed crops , legumes , tuber crops , corm crops , fruit trees , oil nut trees , and herbs . though historically under-researched, orphan crops are now recognized as germane to the issue of future global food security due to their potential to diversify the food supply  <cit> , enhance the micronutrient content of people’s daily diets  <cit> , perform favorably under local and often extreme environmental conditions  <cit> , and improve the overall environmental sustainability of smallholder agricultural systems  <cit> .
+
+increasingly rapid and inexpensive genome-wide genotyping methods, enabled by ever improving next generation sequencing  platforms, have revolutionized trait development, breeding, and germplasm curation in the global crops  <cit> ; and the potential for such genome-enabled improvement of orphan crops is clear. by virtue of its simple library preparation and robust approach to genome reduction, genotyping-by-sequencing   <cit>  in particular has emerged as a cost-effective strategy for genome-wide snp discovery and population genotyping. the objective of gbs is not merely to discover snps for use in a fixed downstream assay  but rather to simultaneously discover such polymorphisms and use them to genotype a population of interest. by combining the power of multiplexed ngs with enzyme-based genome complexity reduction, gbs is able to genotype large populations of individuals for many thousands of snps for well under $ <dig>  per datapoint  <cit> . shown to be robust and flexible across a range of species and populations, gbs has become an important tool for genomic studies in plants, yielding molecular markers for genetic mapping  <cit> , genomic selection  <cit> , genetic diversity studies  <cit> , germplasm characterization , cultivar identification , and conservation biology and evolutionary ecology studies  <cit> .
+
+to date, relatively little effort has been devoted to developing high-performing gbs pipelines in the absence of a reference genome  <cit> , perhaps in part due to the assumption that a low-quality reference of any plant species is now affordable enough to be within the reach of interested programs  <cit> . for severely under-resourced curation, research, and breeding programs for orphan crops, however, such an assumption may not hold. although great effort is underway to muster the resources necessary to develop foundational genomics resources like annotated reference genomes for some orphan crop species   <cit> , such efforts are necessarily targeted and narrow in scope relative to the estimated  <dig>  edible plant species around the world, of varying relevance to local diets . for many orphan crop species, therefore, a reference-free gbs pipeline could be of great value, enabling access to the per-genotype cost-effectiveness of gbs without the up-front and often prohibitive cost of a reference genome.
+
+here, we describe an efficient pipeline for snp discovery and genotyping using paired-end  gbs data of arbitrary read lengths to facilitate genetic characterization, whether or not a reference genome is available. executed via a sequence of perl scripts, this gbs snp-calling reference optional pipeline  integrates custom parsing and filtering procedures with well-known, vetted bioinformatic tools, giving users full access to all intermediate files.
+
+RESULTS
+in this section, we explain the gbs-snp-crop workflow in detail and discuss its strategies for maximizing data usage and distinguishing high-confidence snps from both sequencing and pcr errors. finally, we present data on its favorable performance relative to the reference-based tassel-gbs  <cit>  and network-based  tassel-uneak  <cit>  pipelines for a sample dataset consisting of 150 bp pe gbs reads for a library of  <dig> diverse accessions of cold-hardy kiwiberry , an underutilized tetraploid horticultural species.
+
+the gbs-snp-crop workflow
+the gbs-snp-crop workflow can be divided conceptually into four main stages:  process the raw gbs data;  build the mock reference, if a reference genome is unavailable;  map the processed reads and generate standardized alignment files; and  call snps and genotypes . in this section, we explain how these stages are accomplished within gbs-snp-crop, with particular emphasis on the rationale throughout. while the relevant perl scripts are referenced in this discussion, please refer to the gbs-snp-crop user manual for the details of pipeline execution .table  <dig> outline of the gbs-snp-crop workflow, featuring inputs and outputs of all seven steps 
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+a the computation times presented here are specific to the particular dataset in this study
+
+
+b the time to build the mock reference using only the single most read-abundant genotype . using the five most read abundant genotypes and using all  <dig> genotypes, the required computation time for this step increases to 0: <dig> and 4: <dig>  respectively 
+
+fig.  <dig> schematic of the four stages of the snp-gbs-crop workflow
+
+
+
+stage  <dig>  process the raw gbs data
+as written, the code associated with step  <dig>  is compatible with illumina <dig> + sequencing data, where the input files are assumed to be casava-processed, paired-end , and compressed fastq files . as per the protocol developed by poland et al.  <cit> , these fastq files are assumed to contain multiplexed reads from a barcoded library of genotypes, where the r <dig> read begins with a 6–10 bp barcode followed by the restriction site of the less-frequent cutter ; and the r <dig> read begins with the restriction site of the more-frequent cutter . to execute this stage of the pipeline, an auxiliary text file is required that associates each barcode with its corresponding genotype id .
+
+the script for step  <dig> processes the raw reads in a relatively standard manner, beginning by searching the r <dig> read for a high-confidence barcode sequence  immediately preceding the expected cut site remnant of the less frequent cutter. if both barcode and cut site are found, they are trimmed from the read, the barcode is appended to the headers of both the r <dig> and r <dig> reads, and the pair is retained for further processing. this first parsing script then searches for the 3′-ends of each gbs fragment, indicated by the in-line presence of the illumina common adapter coupled with the appropriate cut site residue. if found, the reads are truncated appropriately. finally, all reads consisting of a majority of uncalled bases  are discarded.
+
+further read trimming based on user-specified minimums for both phred quality score and read length is done in step  <dig>  using the bioinformatics tool trimmomatic  <cit> . finally, in step  <dig>  all parsed and quality-filtered reads are processed according to their barcodes; and genotype-specific fastq files are produced for all genotypes. the final output of stage  <dig> is a pair  of fastq files for each genotype, containing all parsed and quality-filtered reads for downstream analysis.
+
+stage  <dig>  build the mock reference
+if a suitable reference genome is available for the target population, one may move directly to stage  <dig> of the pipeline. if such a reference is unavailable, however, the parsed and quality-filtered reads from stage  <dig> are used to build a gbs-specific, reduced-representation reference  to enable gbs read mapping and facilitate snp discovery. this stage of the pipeline relies upon a similarity-based clustering strategy to group the gbs reads, first within- and subsequently  across-genotypes, in order to generate representative reference sequences for the full set of gbs fragments.
+
+to begin, the pipeline calls upon the pear software package  <cit>  to merge the processed paired-end reads into single reads spanning the complete gbs fragment lengths, wherever sequence overlap for a pair is sufficient  to justify merging. for each genotype selected to contribute to the mock reference , this step generates three different fastq files: an “assembled” file, containing successfully merged reads, and two “unassembled” files , comprised of sequentially-paired r <dig> and r <dig> reads that could not be merged, due in part to a lack of sufficient overlap because of long gbs fragment lengths. next, the pipeline stitches together all unmerged reads by joining pairs of sufficiently long “unassembled” r <dig> and r <dig> sequences together with an intermediate run of  <dig> high-quality a’s, thus producing a fastq file of “stitched” r <dig> + r <dig> reads. representing the reduced genomic space targeted by the gbs restriction protocol, these pear-assembled and manually-stitched reads are then concatenated into a single fastq file per genotype for use in building the mock reference.
+
+next, gbs-snp-crop calls upon the usearch software package  <cit>  to cluster these “assembled” and “stitched” reads based on a user-specified similarity threshold, thereby producing a reduced list of non-redundant consensus sequences  that span the gbs fragment space. to accomplish this, the usearch clustering procedure is executed first within each selected genotype  and subsequently, if more than one genotype is selected to build the mock reference, across all selected genotypes . representing the sampled gbs data space for the population, it is this resultant set of non-redundant consensus sequences that comprises the mock reference genome for subsequent mapping. depending on the intended use of the resultant genotypic data , the similarity threshold specified for usearch may be adjusted to collapse homologous regions or maximize their discrimination, an issue of particular relevance in polyploid species.
+
+in the end, stage  <dig> produces two different mock reference fasta files. the first  consists of a single, long fasta read comprised of all the centroids identified above, linked together into one contiguous sequence. the second  contains the same centroids in the same order, but in this case the centroid boundaries are preserved because each centroid exists as a separate fasta entry. while the former file is used as the mock reference for read alignment , the latter is useful for optional downstream snp filtering and analysis.
+
+stage  <dig>  map the processed reads and generate standardized alignment files
+to align the processed reads from stage  <dig> to the reference, whether a true reference genome or a mock reference built in stage  <dig>  gbs-snp-crop again relies upon familiar bioinformatics tools, in this case bwa  <cit>  for alignment and samtools  <cit>  for manipulating and processing the alignment output. specifically, the bwa-mem algorithm is used to align the processed reads, genotype-by-genotype, to the reference. samtools is then called upon to accomplish the following steps: 1) filter the mapped reads via samtools flags, retaining only those which map appropriately as pairs without potentially confounding secondary or supplementary alignments ; 2) convert the filtered sam files to bam files; 3) index and sort the bam files; 4) index the fasta reference sequence; and 5) produce a base call alignment summary  for each genotype. these six steps  are carried out individually for each genotype, with the step  <dig> script automating the process.
+
+in step  <dig>  the genotype-specific mpileup files are distilled into “count” text files containing four essential tab-delimited columns:  reference genome/chromosome identifier;  base position;  reference base at that position; and  a comma-delimited string containing aggregated alignment information at that position . each count file is then parsed, with only those rows containing reads polymorphic to the reference sequence kept, thereby generating liberal genotype-specific lists of potential snp positions, with full read depth information retained. it is during this mpileup parsing that all putative indels are rigorously detected and excluded from downstream variant calling, thus making gbs-snp-crop a snp-exclusive pipeline.
+
+once the mpileup parsing is completed for each genotype separately, step  <dig> proceeds by mining the full set of resultant genotype-specific count files to generate a single, non-redundant master list of all potential snp positions throughout the target population. alignment information is then extracted from the original count files for each genotype for all potential snp positions in the master list and the data organized into a snp discovery “master matrix” for the entire population. by capturing both genotype-specific  and population-level  alignment data in one table, the master matrix is a powerful and streamlined summary of the gbs data that contains the essential information to not only distinguish high-confidence snps from likely sequencing and pcr errors but also to make subsequent genotype calls using stringent depth criteria, as explained in the next section.
+
+stage  <dig>  call snps and genotypes
+once generated, the master matrix is systematically pared down via a series of snp-culling filters to arrive at a final “snp genotyping matrix” containing only high-confidence snps and genotypes. to begin, the master list of potential snps is parsed based upon a flat criteria of independence, namely that a snp is retained for further consideration if and only if there exist independent instances of the putative secondary allele, at a specified minimum depth , across at least three genotypes. this simple requirement for independent occurrences of the less-frequent allele is an essential strategy for minimizing false snp declarations due to random sequencing and pcr errors, including strand bias errors  <cit> .
+
+next, gbs-snp-crop advances only potential bi-allelic snps  by imposing a population-level allele frequency filter via a user-defined alternative allele strength parameter . for each potential snp position, this parameter considers the total read depth, across the whole population, of all four bases, from primary  to quaternary . a potential snp is retained for further downstream analysis if and only if it is strongly bi-allelic, that is if: 2°alleledepth2°depth+3°depth+4°depth>altstrength 
+
+for a tetraploid species, we suggest a minimum value of  <dig>  for this parameter, though higher values may be imposed in the interest of stricter error control .
+
+after these initial basic population-level culling procedures, genotypic states  are assigned for all remaining snp-accession combinations. to call a heterozygote, a given genotype must have a user-specified minimum read depth for each allele ; and the read depth ratio of the lower-coverage to higher-coverage allele must exceed a user-specified, ploidy-appropriate threshold . if the ratio falls below this minimum threshold, gbs-snp-crop refrains from making a genotypic assignment . the gbs-snp-crop genotyping criterion for homozygotes is more stringent, requiring a relatively high, user-specified minimum depth  in an effort to reduce the rate of erroneous calls . finally, in an effort to retain only broadly informative snps, the matrix is further reduced such that all snps  are discarded for which more than some user-specified maximum of genotypes are without genotypic calls, either because read depth =  <dig> or genotypic states were unassignable due to the criteria discussed above.
+
+to facilitate the downstream characterization of the high-confidence snps that pass all the above filters, the final snp genotyping matrix contains both summary statistics as well as complete genotype-specific alignment data for each retained snp. as shown in fig.  <dig>  the first ten columns of the matrix feature the following information: 1) genome/chromosome identifier; 2) snp position; 3) reference base; 4) average read depth at that snp position across the population; 5) primary allele ; 6) secondary allele ; 7) percentage of individuals from the population genotyped for that snp; 8) total number of homozygotes for the primary allele; 9) total number of heterozygotes; and 10) total number of homozygotes for the secondary allele. columns  <dig> and higher contain the complete alignment data for each individual genotype for all possible snp positions. the ability of gbs-snp-crop to consider both genotype-specific and population-level alignment data simultaneously through the master matrix during the processes of snp filtering and genotyping is an essential feature of the pipeline and motivates its disuse of minor allele frequency , a problematic filtering parameter when attempting to characterize broadly diverse germplasm collections, as opposed to more closely-related breeding populations.fig.  <dig> structure of the final snp genotyping matrix. as shown here, the gbs-snp-crop final genotyping matrix contains summary statistics as well as complete genotype-specific alignment data for each snp called. the cells in red represent instances in which a genotypic state could not be assigned, either due to insufficient read depth  or a read depth ratio outside of the user-specified acceptable range 
+
+
+
+other downstream tools
+in addition to the scripts associated with the core gbs-snp-crop workflow described above, one additional script  is provided to facilitate downstream management of the final snp genotyping matrix by enabling users to convert the matrix into formats compatible with the familiar statistical analysis software packages r  <cit> , tassel gui  <cit> , and plink  <cit> . specifically, the script produces a genotype matrix appropriate for diversity analyses within r  by replacing primary homozygotes with  <dig>  heterozygotes with  <dig> , secondary homozygotes with  <dig>  and unassigned genotypes with “na”. it can also transform the final snp genotyping matrix into a hapmap file for use as input into tassel gui, allowing users to easily access the functionality of that software package for forward analysis, or create the transposed . ped file required by the whole genome association analysis toolset plink.
+
+avoiding false snp calls
+one well-recognized challenge posed by ngs data is the rate of erroneous base calls produced, rates which vary across both platforms and base position within reads. for instance, the error rate of current illumina sequencing platforms ranges from  <dig> to  <dig> bases per kilobase sequenced, with errors concentrated in the beginnings and ends of reads   <cit> . with typical sequencing runs producing billions of base calls , there is real potential for millions of errors that can confound analysis  <cit> . del fabbro et al.  <cit>  discuss the importance of quality trimming to increase the reliability of downstream analysis, with simultaneous gains in terms of both computational resources and time. while other authors assert that quality scores may not be perfectly reliable indicators of true nucleotide quality  <cit> , gbs-snp-crop begins with a stringent recognition of barcodes  and cut sites , followed by trimming based on phred score.
+
+in addition to this basic quality filtering of the raw reads, the pipeline seeks to minimize false snp calls through its approach to snp discovery and filtering. first, only those reads that map as paired-ends without secondary or supplementary alignments to the reference are retained. additional parameters are called upon within the samtools mpileup algorithm to avoid false snps due to misalignment and excessive mismatches . snps that pass the above filters must then also satisfy the aforementioned requirement of independence, assessable by virtue of the unique format of the gbs-snp-crop master matrix. by leveraging both genotype-specific and population-level depth information, this requirement effectively reduces the probability of calling false snps due to both sequencing and pcr errors, including strand bias errors, since the exact same errors must arise independently, at depth, across multiple genotypes. gbs-snp-crop also makes use of stringent genotyping criteria to further reduce the probability of calling false snps and assigning incorrect genotypic states. such genotyping criteria are based on relatively high depth requirements, information again accessible for evaluation via the master matrix.
+
+through its strict initial parsing and filtering of the raw reads as well as its rigorous approach to alignment, snp filtering, and genotyping, gbs-snp-crop takes a very conservative approach to snp calling. nevertheless, as shown in the next section, the number of identified snps compares favorably to more permissive pipelines, in part because of gbs-snp-crop’s ability to make use of all available data, regardless of read length.
+
+finally, in addition to the embedded strategies for minimizing false snp calls discussed here, users can easily impose additional desired filters due to the fact that the output from all gbs-snp-crop steps, like the master matrix, are human-readable text files. for example, for the purpose of mapping studies as opposed to diversity analyses, which are the primary focus here, the elimination of markers in particularly snp-dense regions may be an important quality control, as such high snp density may be an artifact of promiscuous alignment, particularly in polyploids. in a reference-based approach, such culling is straightforward given the set of unique snp coordinates across the linkage groups. in a reference-independent pipeline, a similar filter can be applied; but users will need to consider snp densities within each cluster  used to build the mock reference. to accomplish this, centroid boundaries must be located within the mock reference, which is one reason why the second mock reference  file is generated by the pipeline, to enable such projection.
+
+gbs-snp-crop performance
+we assessed the performance of gbs-snp-crop in genotyping a population of  <dig> diverse accessions of the perennial dioecious tetraploid actinidia arguta. specifically, its performance using both a reference from a related diploid species  and a mock reference was compared to that of tassel-gbs  <cit> , a widely-used reference-based pipeline, and tassel-uneak  <cit> , its reference-independent version.
+
+sampling strategy to build a mock reference
+three different gbs-snp-crop mock reference assembly strategies were investigated, differing only in the numbers of genotypes from the target population used to construct the mock reference. contrary to our original expectations, we found that the number of genotypes used to build the mock reference is inversely related to the number of mapped reads retained by the pipeline and thus the number of snps called . for example, using all reads from the full set of  <dig> unique genotypes, the pipeline called  <dig>  snps  that passed all population-level filters. because more than 4 h were needed to assemble the mock reference in this case , we investigated the relative performance of the pipeline under scenarios where fewer genotypes were used to construct the mock reference, first using only the top five genotypes  and then again using only the top genotype. using the five genotypes with the highest numbers of parsed reads, the pipeline assembled the mock reference in less than an hour and identified  <dig>  potential snps . using only the single most read-abundant genotype, the pipeline assembled the mock reference in 14 min and called  <dig>  snps . based on these results, all subsequent pipeline evaluation was conducted using the results from gbs-snp-crop-mr <dig> . the pipeline itself is flexible, however, able to integrate centroids from multiple genotypes into a mock reference, a feature of potential use for genotyping particularly diverse populations .table  <dig> performance of gbs-snp-crop under three different sampling strategies for building the mock reference: using all  <dig> individuals in the population , using only the  <dig> individuals with the highest number of parsed reads , and using only the single most read-abundant genotype 
+
+
+a total number of non-redundant consensus sequences  identified via clustering to represent the gbs fragment space. this is also the number of fasta entries in the “mockref_clusters.fasta” file
+
+
+b number of reads retained by the pipeline after mapping procedures and thus used for snp calling
+
+
+c total number of snps called, given all snp calling filters and genotyping criteria described in the text
+
+
+d average read depth for all snps across the entire population
+
+
+e percentage of heterozygous genotype calls
+
+
+f percentage of homozygous genotype calls
+
+
+g percentage of missing cells  in the final snp genotype matrix
+
+
+h the total computation time required for all pipeline analysis when executed on a unix workstation with 16 gb ram and a  <dig>  ghz dual intel processor
+
+
+
+data usage
+one of the most noteworthy differences between the gbs-snp-crop and tassel pipelines is the ability of gbs-snp-crop to access and make use of a greater amount of sequence data . in the tassel-gbs pipeline, due to its tag-based alignment strategy, a uniform tag length  must be specified that effectively limits the number of reads used for analysis. according to the tassel  <dig> . <dig> manual, “the mxtagl value must be chosen such that the longest barcode + mxtagl < read length”  <cit> ; thus all reads that violate this statement are discarded. further, all reads that meet this requirement are subsequently truncated to a uniform length based on this parameter; thus not only short reads but also the full lengths of long reads are culled. while this tag length requirement is adjustable within tassel-gbs , it is fixed at 64 bp for tassel-uneak. in contrast, aside from a user-specified minimum read length, gbs-snp-crop imposes no requirement for read length uniformity, even within read pairs.table  <dig> comparative data usage and computation times for five different analyses of 150 bp paired-end gbs data from  <dig> accessions of actinidia arguta
+
+
+
+reference-based
+
+reference-independent
+
+a gbs-snp-crop utilizes the entire r <dig> and r <dig> paired-end sequences of all parsed and quality trimmed reads longer than a user-specified  minimum length, in this case 32 bp. the tassel-gbs pipelines utilize a uniform user-specified portion  from the beginning of acceptable r <dig>  reads that exceed a minimum length  before barcode and cut site trimming. tassel-uneak utilizes up to 64 bp from the beginning of acceptable r <dig>  reads that exceed a minimum length of 32 bp after barcode and cut site trimming
+
+
+b the maximum length of sequences utilized by gbs-snp-crop is set by the sequencing platform . in tassel-gbs, the user specifies a maximum tag length, thereby effectively setting a uniform tag length. the maximum usable sequence length in tassel-uneak is 64 bp, with all shorter reads greater than 32 bp padded with poly-a’s to a uniform 64 bp tag length
+
+
+c the number of r <dig>  reads ultimately used by each pipeline, after filtering based on quality and read length requirements. the r <dig>  counts are shown here to facilitate comparison across pipelines. because gbs-snp-crop utilizes paired-end reads, the total number of actual reads used  is twice this number
+
+
+d the total number of nucleotides of sequence data used in each analysis
+
+
+e the total computation time required for each analysis when executed on a unix workstation with 16 gb ram and a  <dig>  ghz dual intel processor
+
+
+
+following initial parsing and quality trimming , a total of  <dig>  gb of sequence data was found to be usable for analysis  within gbs-snp-crop . in contrast, due mainly to tag length requirements and the usability of only r <dig>  reads, a much reduced  <dig>  gb,  <dig>  gb and  <dig>  gb were used, respectively, by the tassel-gbs , tassel-gbs  and tassel-uneak pipelines. in terms of data usage, therefore, gbs-snp-crop performs quite favorably, with approximately  <dig> – <dig>  times more high-quality sequence data available to it for snp discovery.
+
+in theory, one should be able to make more reads available to tassel-gbs by reducing the mxtagl threshold. such a reduction  leads, however, to a significant reduction in overall data usage  and a concomitant reduction in identified snps . for tassel-gbs, therefore, it may be advantageous to set a larger mxtagl value, thereby discarding a larger number of reads that fail to meet that requirement, than to use a higher number of shorter reads permitted by a lower mxtagl value.table  <dig> comparative pipeline performances before  and after  depth-based genotyping criteria and population-level snp calling filters for 150 bp paired-end gbs data from  <dig> accessions of actinidia arguta
+
+
+4a. no snp calling or genotyping filters appliedg
+4b. depth-based genotyping criteria and population-level snp calling filters appliedh
+
+a total number of snps called within each pipeline, under the indicated snp calling filters and genotyping criteria
+
+
+b average read depth for all snps across the entire population
+
+
+c percentage of called snps with an average read depth of at least 20
+
+
+d percentage of heterozygous genotype calls
+
+
+e percentage of homozygous genotype calls
+
+
+f percentage of missing cells 
+
+
+g liberal pipeline results in the absence of subsequent snp calling or genotyping filters
+
+
+h pipeline results after culling snps with less than 75 % scored genotypes, with d ≤  <dig> , or d ≥  <dig> . further reduction is due to imposing stringent depth-based genotyping criteria, including a minimum read depth of  <dig> for homozygotes when the secondary allele count is zero, a minimum depth of  <dig> for homozygotes when the secondary allele count is one, a minimum depth of  <dig> for each allele for heterozygotes, and a read-depth ratio of the lower- to higher-depth allele greater than  <dig> 
+
+
+
+the low average proportion  of shared snps discovered by tassel-gbs under both the  <dig> and 64 bp mxtagl scenarios  indicates that essentially different datasets are made available to the tassel-gbs pipeline, depending on the chosen value of this one parameter. such a comparison suggests that the requirement within the tassel pipelines for uniform read lengths  is fundamentally limiting, in terms of data usage. by taking a read-based rather than a tag-based approach to alignment and snp discovery, gbs-snp-crop leverages all available data in a single analysis, thereby avoiding undue fractionation of the dataset.fig.  <dig> bar plot showing the extent of marker overlap among the five evaluated pipelines. the sets of snps called by the five pipelines are largely orthogonal to one another, as shown by the fact that both the reference-based and reference-independent pipelines call high proportions of snps called by no other pipeline . shared snps among pipelines are indicated by color-coordinated bars. whereas only  <dig>  and  <dig>  % of the  <dig>  and  <dig>  snps called by tassel-gbs- <dig> and tassel- <dig>  respectively, were identified by tassel-uneak,  <dig>  % of the snps called by gbs-snp-crop-rg were called by gbs-snp-crop-mr01
+
+
+
+numbers of snps
+analyses by the different pipelines lead to widely varying numbers of identified snps . using only the single most read-abundant genotype to build the mock reference, gbs-snp-crop called  <dig>  potential snps , of which  <dig>  were retained after applying all snp calling and genotyping filters , a reduction of  <dig>  %. in comparison, the reference-free tassel-uneak pipeline called  <dig>  potential snps , of which only  <dig>  snps passed these same filters, a striking reduction of  <dig>  %.
+
+using the published a. chinensis diploid genome as a reference and a liberal pipeline , gbs-snp-crop-rg called  <dig>  potential snps , of which  <dig>  were retained after filtering, a reduction of  <dig>  %. in comparison, the  <dig> and 64 bp reference-based tassel-gbs analyses called  <dig>  and  <dig>  potential snps , of which  <dig>   and  <dig>   passed the imposed filters . unlike the reference-independent analyses, therefore, tassel-gbs was found to outperform the reference-based gbs-snp-crop in terms of numbers of identified snps.
+
+using only those snps that passed the stringent genotyping criteria and population-level filters described earlier, we compared the set of snps called by gbs-snp-crop  with those called by the tassel-gbs analyses . there is strikingly little congruence among these analyses, with many unshared markers  between them . interestingly, a high proportion of unshared markers  also exists between the two different tassel-gbs analyses themselves, even though they differ only in their specified mxtagl thresholds. because the initial dataset is the same for both tassel analyses, we expected roughly half of the snps called under mxtagl =  <dig> to also be called under mxtagl =  <dig> ; but such is not the case .
+
+one stated reason for tassel’s approach to snp calling based on tags is decreased computational time spent for pipeline execution, with the added rationale that sequencing errors increase after the first 64 bp of a read  <cit> . while this may be the case, tassel’s snp discovery method appears to be highly sensitive to this tag length parameter, a result that suggests there may be some benefit in aggregating the results  of multiple tassel-gbs analyses under various mxtagl values. similarly, the largely non-overlapping results of the reference-based gbs-snp-crop analysis may also have value as a complement to the tassel-gbs approach.
+
+to investigate the overlap among the sets of snps called between the reference-based and reference-independent pipelines, we mapped all snps discovered using both gbs-snp-crop  and tassel-uneak  to the a. chinensis reference. in so doing, we found that  <dig>  % of the snps called by the reference-based gbs-snp-crop  were also called by the reference-independent gbs-snp-crop . in contrast, only  <dig>  and  <dig>  % of the snps called by tassel-gbs  were identified by the reference-independent tassel-uneak pipeline .
+
+average depth
+one of the most efficient means of distinguishing sequencing error from true nucleotide polymorphism is to increase read depth thresholds because polymorphisms called on the basis of more reads mapped to the same locus can be declared with greater reliability that those based on fewer reads  <cit> . nielsen et al.  <cit>  discussed many studies using ngs data with medium-to-low coverage  and showed that genotype calls based on such data exhibit statistical uncertainty. according to the authors, there are two reasons for this:  in heterozygotes, both alleles may not be sampled, thus leading to incorrect homozygote calls; and  in the case of high sequencing error technologies, a significant number of homozygotes may be incorrectly declared heterozygotes if genotype calling is based simply on the allelic presence/absence. according to illumina’s technical notes  <cit> , the probability of making a correct genotyping call is roughly 95 % for 20× coverage. while  <dig>  % of the  <dig>  snps identified by the gbs-snp-crop mock reference pipeline have an average read depth higher than 20×, this is true of only  <dig>  % of the  <dig>  snps called by tassel-uneak . in comparison,  <dig>  % of the  <dig>  snps  and  <dig>  % of the  <dig>  snps  called by the reference-based tassel-gbs pipelines have an average read depth higher than 20×, compared to  <dig>  % of the  <dig>  snps called by the reference-based gbs-snp-crop. in terms of average read-depth, therefore, gbs-snp-crop performs favorably compared to both tassel-gbs and tassel-uneak .
+
+recognizing biological replicates
+the primary motivation for developing gbs-snp-crop was the need for a tool to accurately characterize the genetic diversity of understudied germplasm collections, including identifying redundant accessions as a means of boosting the resource efficiency of curation efforts. given this goal, a relevant performance criterion is the ability of the pipeline to identify biological replicates in a population, as indicated by the observed genetic distance between those replicates. to quantify such distance, we employed a modified gower’s coefficient of similarity  <cit> , ranging from  <dig> to  <dig>  to quantify identity-by-state based on bi-allelic snps: sgowerxy=∑i=1msiwi∑i=1mwi 
+
+where si =  <dig> if the genotypes are the same,  <dig>  if the genotypes differ by one allele , and  <dig> if the genotypes differ by both alleles ; and wi =  <dig> if both replicates are genotyped for the snp in question and  <dig> if either replicate lacks an assigned genotypic state.
+
+using the snps called by the gbs-snp-crop-mr <dig> analysis , the gower genetic similarity calculated between two biological replicates of a. arguta accession ‘opitz male’ was found to be  <dig> , with a pearson correlation of  <dig> , results similar to those obtained with the reference-based gbs-snp-crop pipeline . in comparison, the reference-based tassel-gbs-32 bp and -64 bp analyses yielded lower gower genetic similarities of  <dig> , as well as reduced pearson correlations . these same replicates of ’opitz male’ were found to be only  <dig>  similar by tassel-uneak, indicating a genotyping error rate of more than  <dig> times that of gbs-snp-crop , despite calling  <dig> times fewer snps . this same basic pattern of results was found when analyzing biological replicates of a. arguta accession ‘dumbarton oaks’ , suggesting that genotyping via gbs-snp-crop is relatively robust, prone to fewer genotyping errors while maintaining high numbers of snps, whether or not a reference is available.table  <dig> comparative pipeline performances, in terms of consistency in genotyping biological replicates
+
+
+a the total number of snps used in this analysis refers to numbers from table 4b
+
+
+
+b a modified gower’s general coefficient of similarity  <cit> , ranging from  <dig> to  <dig>  to quantify identity-by-state based on bi-allelic snps
+
+
+c pearson correlation calculated using r  <cit> ; for all correlations in the table, p-value <  <dig> 
+
+
+d the percentage of snps with exact genotype matches for the two biological replicates. all loci with missing data for either replicate were discarded
+
+
+
+computation time
+compared to tassel-uneak, the gbs-snp-crop mock reference workflow processed over twice as much data, generated over  <dig> times more snps, the snps it called had higher average depth , and as a set they were better able to detect similarity between biological replicates; but this improved performance comes at the price of approximately  <dig> times longer computation time. using a dedicated unix workstation with a  <dig>  ghz dual intel processor and 16 gb ram, the computational time required to run the mock reference gbs-snp-crop pipeline using only the most read-abundant genotype to assemble the mock reference was approximately 11 h for this dataset, compared to only 27 min for the tassel-uneak analysis . similarly, due to its consideration of 3– <dig> times the amount of sequence data and its strategy of mapping reads rather than tags, the reference-based gbs-snp-crop analysis  also requires significantly more computational time than either of the tassel-gbs analyses . table  <dig> presents the computational times required for each of the steps within the reference-free gbs-snp-crop-mr <dig> workflow.
+
+CONCLUSIONS
+gbs-snp-crop is a complete bioinformatics pipeline developed to support curation, research, and breeding programs wishing to utilize gbs for the cost-effective genome-wide characterization of plant genetic resources in the absence of a reference genome. although the pipeline was created primarily with orphan crop characterization in mind, its underlying strategy is sufficiently general to suggest its potential utility in any situation  where reduced-representation genomic data  is analyzed for snps, such as studies in population genetics, evolutionary ecology, conservation biology, and genetic linkage analysis.
+
+as indicated by the example analysis presented here, the pipeline performs quite favorably compared to tassel-uneak, not only in terms of a significantly higher number of identified snps but also in terms of an increased average read depth and a greatly reduced genotyping error rate. remarkably, the reference-independent version of gbs-snp-crop was also shown to outperform the reference-based tassel-gbs pipeline in terms of these same metrics. in contrast, the reference-based version of gbs-snp-crop appears outperformed by tassel-gbs in terms of the number of called snps, though again its genotyping error rate is lower. given the low proportion of shared snps among these reference-based analyses, however, gbs-snp-crop may be useful even in this case, able to detect large numbers of additional high-quality snps missed by the tag-based and read length-restricted approach of tassel-gbs. indeed, with the capacity to make full use of variable length, paired-end gbs data for high-density snp genotyping of plant populations, whether or not a reference genome is available, gbs-snp-crop is a flexible and easily modifiable tool worthy of consideration by interested programs.
+

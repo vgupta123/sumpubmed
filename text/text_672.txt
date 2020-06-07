@@ -1,0 +1,178 @@
+BACKGROUND
+next-generation sequencing  has been widely used in biological studies. rna sequencing  is the most commonly used ngs technologies to investigate the aberration of mrna expression in disease and normal condition comparison. unlike microarray technology, which uses a short section of a gene as a probe to determine the gene's expression, rna-seq provides measurement across entire exonic region, enabling accurate expression quantification and discovery of novel isoforms and splicing junctions. with rna-seq technology, thousands of novel coding and non-coding genes, alternative splice forms of known genes have been discovered.
+
+differential expression  analysis using rna-seq is commonly employed to interrogate changes between different experimental conditions. while enormously successful, de analysis also suffers from systematic noise and sequencing biases, such as sequence quality bias, wrong base calls, variability in sequence depth across the transcriptome, and the coverage depth differences of replicate samples  <cit> . there are already many statistical testing methods for rna-seq differential expression analysis. one is to normalize the read counts of target transcripts, converting them into reads per kilobase per million mapped reads  and then perform linear modeling methods that are used in microarray experiments  <cit> . however, the method designed for microarray measurement may not fit the characteristics of sequencing data properly. in past years, algorithms have been developed specifically for rna-seq data analysis. among them, two popular software packages implemented the negative binomial  model that account for genome-wide read counts and moderate dispersion estimates with different statistical methods  <cit> . edger  <cit>  uses a trended-by-mean estimate to moderate dispersion estimates, whereas deseq  <cit>  takes account of the maximum of a fitted dispersion mean or the feature-wise dispersion estimate, as reviewed in  <cit> . however, neither of these methods considered the misaligned reads existing in the sequencing data, which may play a significant role in detecting the significance of target transcripts.
+
+here we propose a novel de analysis algorithm - xbseq, which is derived from deseq, where we take the non-exonic reads of rna-seq data into consideration. in conventional rna-seq analysis, reads mapped to the exons are counted as the expression of a gene, whereas reads aligned to the intronic and inter-genic regions are generally ignored. those non-exonic hits exist because of: sequencing error, mapping error, contamination by genomic dna, unannotated genes, and nascent transcription and co-transcriptional splicing  <cit> . our model treats these sequence reads as sequencing noises that exist across the entire genome, both exonic and non-exonic regions. therefore, the observed read counts can be decomposed into two components: true signals that are directly derived from transcripts expression, and the others from the random noises. we model true expression signals by a negative binomial distribution and assume sequencing background noises possess a poisson distribution. with non-exonic read counts, we can estimate the parameter λi of the poisson distribution of each gene. afterwards, we remove sequencing noise effect from observed signals and retrieve the background-corrected mean and variance parameters for the nb model of true expression signals.
+
+to study the robustness of the algorithm, we have built a simulation framework that generates rna-seq data by combining the true signals in nb distribution with different levels of non-exonic reads from poisson distribution. we demonstrate our method by applying it to the simulated data and examine how it performs comparing with other common de analysis algorithms.
+
+methods
+non-exonic sequence read count
+for a typical transcriptome profiling by rna-seq, we detect read count of each gene by using htseq algorithm  <cit> . given exons' locations of every gene, htseq counts sequence reads aligned to the genic regions. in order to capture the reads in non-exonic regions, we preserved the structure information of each gene  by shifting start and end positions of each exon to a nearby intronic or inter-genic region . we have defined non-exonic regions for each species by the following steps:
+
+1) download refflat table from ucsc database  and create the preliminary list of gene-free regions,
+
+2) download tables of  all_mrna;  ensgene;  pseudoyale60gene;  vegagene;, xenomrna, and  xenorefgene from ucsc database and remove regions appear in any of them from the gene-free regions,
+
+3) to guarantee gene-free regions are far enough from exonic regions, trim  <dig> bps from both sides of intronic regions and  <dig>  bps from both sides of inter-genic regions,
+
+4) shift each exon of a gene to the right nearest gene-free region. most of the shifted genes remain the same as the original structures of the genes,
+
+5) if the nearby gene-free region is too short, we may only preserve the exon size features but not the whole gene structure. the priority of shifting a region is: i) nearest right gene-free region, 2) nearest left gene-free region; 3) the second right nearest gene-free region and so on until the shift region of the original exon fits, and
+
+6) at last, we considered the shifted regions as the non-exonic regions for each gene and a final .gtf file was created.
+
+to extract non-exonic read counts, htseq was performed second time to generate an equivalent read count for each gene over an exactly same length of non-exonic region. by doing so we guarantee an equivalent read count from non-exonic region for each gene.
+
+the histogram of a rna-seq data in rpkm unit was plotted in figure 1b. the blue histogram was derived from the observed read counts genome-wide, while the red one was derived from the non-exonic read counts after shifting the exons' position. as illustrated in the figure, the hump of the red histogram overlaps with the left tail of the blue histogram, indicating the existence of sequencing noises in commonly reported gene expression levels, particularly when gene expression level is low. based on this observation, we hypothesize that the read count of ith gene , defined as xi, is composed of true signal si  and background noise bi .
+
+poisson-negative binomial model
+we assume that read count of ith gene can be decomposed into two components: true signal si that directly derived from transcript expression, and background noise bi due to sequencing error or misalignment. therefore, the observed signal xi is
+
+  xi=si+bisi~nbri,pibi~poissonλi 
+
+where ri, pi are parameters  of nb distribution and λi is the rate parameter of poisson distribution. we further assume that the true expression signal si and background noise b are independent. given the observed signal xi to be the sum of a nb and a poisson, the probability distribution of xi is governed by a delaporte distribution, which is the convolution of a nb distribution with a poisson distribution  <cit> . when there is no background noise , the observed signal is simply governed by a nb distribution,
+
+estimation of distribution parameters
+the two nb parameters ri and pi can be estimated by the background corrected mean and variance of gene i; and with the non-exonic read counts, the poisson parameter λi can be determined easily. we further assume that genes are independent to each other, acknowledging that some genes are dependent within pathways or other reasons. hence, the objective is to estimate all parameters of each gene in order to obtain the nb model fitted to the true expression signals.
+
+the estimation of poisson parameter λ is relative simple, we assume that the read count derived from the non-exonic regions representing the background component b and independent of s. therefore, we can obtain λ of each gene, being the average of total non-exonic read counts across all m replicates.
+
+  λi=1m ∑j=1mbij 
+
+where bij is the non-exonic read count of ith gene from jth sample. after the estimation of poisson parameter, we can calculate the true expression signals' mean μsi and variance σsi <dig> of each gene as follows,
+
+  μsi=e=exi-e 
+
+  σsi2=σxi2+σbi2-2ρσxiσbi, 
+
+where σbi2=λi. note that observable x and background b are not independent. as we mentioned earlier, observed read count x follows a delaporte distribution, which has no closed form  <cit> . the parameters of delaporte distribution, d, however, is known as μ=λ+αβ, and σ2=λ+αβ1+β, where  λ can be considered as the parameter of poisson distribution. when λ= <dig>  the delaporte reduces to nb distribution, similar to what we have in eqs.  and . the same variance correction method in deseq is subsequently used to adjust σsi <dig> in order to get precise estimate of the variance when the number of replicates is small  <cit> . after obtaining the adjusted true expression signal mean and variance, μs and σsi′ <dig>  from eqs.  and , the two nb parameters ri and pi are further estimated by,
+
+  ri=μsi2/σsi′2-μsi 
+
+  pi=μsi/σsi′ <dig> 
+
+testing for differential expression
+after estimating the nb parameters in both experimental conditions, differential expression analysis between the two conditions can be tested. designed similarly to deseq method, we use a fisher's exact test approach to estimate the p value of each gene  <cit> . in short, suppose we have x and y reads of a gene in each condition, we compute every possible p, where the sum of the variables a and b equal to ktotal . by assuming the independence of two test conditions, we have p = pr pr, where pr and pr are the probabilities in nb distribution that we have estimated for each condition. therefore, the p value is the proportion of the sum of possible probabilities less than the probability of actual read counts among the sum of all probabilities as follows,
+
+ p=∑pa,b≤pp∑allp 
+
+equation  <dig> is evaluated gene-wise, and for simplicity, we omitted subscript i.
+
+simulation
+in order to evaluate the performance of different rna-seq algorithms, we generated a set of simulated data where we could control the differential expression status for a given set of genes, as well as noise level for all genes. in this study, true signal s and background signal b were simulated based on a negative binomial distribution and a poisson distribution, respectively, with parameters estimated from real rna-seq data.
+
+we followed a similar simulation framework used by edger-robust  <cit> . firstly, genes from real rna-seq data were filtered based on the expression intensity across all replicates. the genes with top 10% dispersion were discarded. then  <dig>  genes were randomly selected with replacement among the filtered genes. based on the mean and dispersion estimated from real rna-seq data, the true signal s was simulated for each gene from the negative binomial distribution. different proportions of genes  were randomly selected as differentially expressed genes with various fold changes . to simulate baseline background signal bbaseline, firstly, the mean value was calculated using the non-exonic mapped reads of its corresponding gene. then bbaseline was generated from a poisson distribution with parameter λ equals to the calculated mean value from the non-exonic read counts. observed signal xbaseline was then generated as the addition of s and bbaseline.
+
+to simulate background signal binc with increased non-exonic mapped reads, we first calculated mean read count for each selected gene based on the non-exonic mapped reads from real rna-seq data. then binc was simulated by a hybrid model,
+
+ binc~m*norm 
+
+where  μ is from a poisson distribution μ~poisson, nf is the noise factor, which we set to be  <dig> ,  <dig>  and  <dig> . λ equals to the mean of the non-exonic mapped reads of a given gene, and we set σ =  <dig> and multiply m =  <dig> for our simulation. finally, we set the observed signal xinc to be the addition of s and binc. for noise models different from poisson, we simply replaced poisson with binomial, uniform or other distributions in eq.  <dig>  simulations were performed  <dig> times in order to evaluate and plot the receiver operating characteristic  curves and other statistics.
+
+rna-seq data set for testing
+a mouse rna-seq dataset were obtained from gene expression omnibus   <cit> . for this testing purpose, we selected  <dig> replicates of wild type mouse liver tissues  and  <dig> replicates of myc transgenic mouse liver tissues  for differential expression analysis to determine differential expressed genes due to the activation of myc. out of the six samples selected, on average,  <dig>   genes have at least one non-exonic reads, and  <dig>  genes have at least one exonic reads.
+
+comparison of other rna-seq algorithms
+we also compared xbseq with other differential expression analysis methods, including deseq   <cit> , latest version of deseq   <cit> , edger  <cit> , latest version of edger   <cit> , bayseq   <cit> , limma   <cit> , and ebseq   <cit> . all these evaluation were performed under r version  <dig> . <dig> and bioconductor version  <dig> . detailed workflow of xbseq and simulation is illustrated in figure  <dig> 
+
+RESULTS
+implementation of xbseq algorithm
+xbseq requires two inputs, the observed measurement from exonic regions and the background noise from non-exonic regions. both read counts can be obtained by submitting mapped sequence reads to htseq twice with coding gene annotation  and shifted gene annotation  as discussed in methods section . as the first step, the true signal for each gene is estimated by using eq.  <dig>  the read counts of genes with negative true signals will be automatically assigned to  <dig>  we apply a similar method as deseq to normalize the true signal based on size factors calculated from each sample, and we then estimate the variance of the true signal for each gene by using eq.  <dig>  a similar framework for variance correction and the differential expression significance testing as deseq  is applied to generate p-values for each gene. the output of xbseq contains p value, adjusted p value for multiple test correction, log <dig> fold change and other statistical merits for each gene.
+
+to optimize the performance of xbseq, we applied variance correction procedure either at observed signal level or at estimated true signal level. after examining the performance of these two choices based on simulated datasets, we concluded that variance correction at estimated true signal level yields the best performance with larger area under the roc curve. we also investigated the performance of lowess as well as locfit r package for fitting variance-mean relationship. locfit was proven to generate more robust variance-mean relationship based on simulated datasets. therefore, we selected locfit package to estimate variance-mean relationship and carry out variance correction procedure at estimated true signal level in the current xbseq implementation.
+
+discrimination between de and non-de genes
+to compare the performance of xbseq with other statistical methods, including deseq, we generated synthetic data where the variability and fold change of differential expression genes could be controlled. to simulate rna-seq data with baseline background noise, we generated signal and background read counts  with distribution parameters  estimated from a set of real rna-seq data. after removing not expressed genes, we randomly selected  <dig>  genes and the number of differentially expressed  genes were set to be  <dig>   <dig>  with  <dig>  fold,  <dig> fold,  <dig> fold or  <dig> fold changes. to compare xbseq and deseq under circumstances with increased non-exonic mapped reads, we carried out the simulation to generate low, intermediate, and high levels of non-exonic mapped reads . we select deseq algorithm to compare due to the similarity of statistical evaluation of differential expression levels.
+
+the ability to discriminate between de and non-de genes was evaluated by area under the receiver operating characteristic  curve . as shown in figure 3a and table  <dig>  when the non-exonic mapped reads are at baseline level, the performance of xbseq is indistinguishable with deseq in terms of auc. specifically, when the fold change was set to  <dig>  with  <dig> de genes, both xbseq and deseq have equivalent performance with either  <dig>  or  <dig> replicates . as shown in table  <dig>  the number of differentially expressed genes had little effect over the performance of xbseq and deseq, and both xbseq and deseq performed equivalently at different fold changes. when fold change is set to  <dig> or  <dig>  both methods had no difficulty in detecting virtually all de genes, with auc almost equals to  <dig> . overall, under baseline level, the performance of xbseq and deseq is comparable.
+
+with increased background noise, as shown table  <dig>  as we expected, more replicates per test group performed better in terms of auc, but the performance decreased as with the increase of the background noise level, but overall, xbseq has a larger auc comparing with deseq in various conditions . for instance, with  <dig> replicates per test condition, xbseq achieved auc of  <dig>  with lower background , while aucdeseq was only  <dig> . figures 3b depicts the roc under  <dig> different background level and with  <dig> replicates per test group, and xbseq evidently outperformed deseq as we expected when xbseq utilized additional non-exonic read count information to estimate the true signal. further examination under highly expressed   and lowly expressed genes   condition revealed that among highly expressed genes xbseq performs only slightly better than deseq, while xbseq has much better auc than deseq among lowly expressed genes , indicating the importance of background estimation for true signal estimation. we also compared the performance of xbseq with deseq , edger and edger , bayseq, limma and ebseq  under high background . as demonstrated in figure 3e  and 3f , xbseq outperformed all the other methods . overall, xbseq and deseq performs comparable at baseline level. when the background noise increases, xbseq is more robust than deseq and some other differential expression analysis methods, especially when expression level of the gene is low.
+
+overall, xbseq outperforms deseq, on average in terms of auc, by  <dig>  and  <dig>  for  <dig> and  <dig> replicates per group, respectively.
+
+control of the false discoveries
+we examined the number of false discoveries encountered among the top-ranked genes based on p values of different statistical methods. under baseline level, xbseq performs comparable with deseq with similar number of false discoveries . under the scenarios of increased background noise, xbseq has much less false discoveries compared with deseq . taking the similar approach, we examined the performance of xbseq and deseq among highly expressed   and lowly expressed genes   with  <dig> replicates per test group. even through that deseq picks up similar number of false discoveries among highly expressed genes compared with xbseq, it has more false discoveries among lowly expressed genes. comparisons with some other differential expression methods under high background noise level showed that xbseq is more robust against false discoveries . at the pre-selected threshold , xbseq has a false discovery around  <dig>  which is much less than other statistical methods . overall, xbseq is more robust against false discoveries compared to other statistical methods especially for lowly expressed genes.
+
+statistical power in detecting de genes
+we compared the performance of xbseq and deseq as well as other statistical methods in terms of statistical power at pre-selected threshold  in detecting de genes . at baseline level, xbseq and deseq perform comparable  . with the increase of the background noise, both methods have decreased statistical power . even so, xbseq still has better statistical power at low, intermediate or high background noises. however, different from the result of auc and false discovery, the statistical power difference between xbseq and deseq algorithms among highly expressed genes  and lowly expressed genes  are relatively same: both methods perform relatively well , and both methods have difficulty in detecting lowly expressed de genes . when comparing with some other statistical methods, xbseq is one of the best methods in terms of statistical power along with algorithms such as edger-robust and deseq <dig> . however, with more samples per test group, deseq <dig>  edger and edger-robust outperformed xbseq, due to their robust  dispersion estimation. overall, xbseq remains one of the best algorithms in terms of statistical power in detecting de genes compared to other statistical methods.
+
+application to differential expression analysis for myc induced gene expression in mouse liver tissues
+we have applied a real mouse rna-seq dataset to different algorithms to test the performance of xbseq  <cit> . the mouse rna-seq dataset includes  <dig> replicates of wild type mouse  and  <dig> replicates of myc transgenic mouse . figure  <dig> shows a venn diagram of overlapping and total number of genes detected using xbseq, deseq, deseq <dig>  edger, and edger_robust with the criterion of p-value less than  <dig> . xbseq and deseq detected similar number of de genes , even if a  <dig>  fold change cutoff was added. this is reasonable since the two algorithms share similar differential expression significant test statistics, other than non-exonic read count incorporated into xbseq. in order to see the different results of xbseq comparing with others, we listed the exonic and non-exonic read counts in table  <dig> and  <dig>  which show genes exclusively found by xbseq  and genes that are not detected by xbseq but by other algorithms . the venn diagram with  <dig>  fold change cutoff added is shown in fig. s <dig> and the numbers of overlapped de genes between xbseq and other methods are listed in table s <dig> 
+
+p
+2
+predicted
+p
+2
+predicted
+1) fc denotes the fold-change of myc vs wt, and 2) is the p-value from deseq  and xbseq .
+
+p
+2
+predicted
+p
+2
+predicted
+1) fc denotes the fold-change of myc vs wt, and 2) is the p-value from edger-robust  and xbseq . calcr was detected by all other four methods and adh <dig> was detected by three methods except deseq .
+
+specifically, in table  <dig>  from only exonic mapped reads, there are no significant difference between wt and myc samples for genes nat <dig> and brca <dig> . after subtracting the non-exonic mapped reads, the predicted true signals was significantly differentially expressed between myc and wt for the two genes  with fold change increased to  <dig>  and  <dig>  for nat <dig> and brca <dig>  respectively, along with shrunken standard deviation. from brca <dig>  we can even see that the high dispersion in wt samples are possibly caused by sequencing noises, the gene is barely expressed in wt group as predicted by xbseq.
+
+on the other hand, with the information in non-exonic regions, xbseq avoided picking genes that are potentially falsely identified as de genes because of the background noises. the estimate of the true signal, after considering the non-exonic read counts, may decreased the differential expression and diminish the significance probability. in table  <dig>  the two genes, calcr and adh <dig>  were detected by all other four methods, except deseq for adh <dig> , whereas xbseq tested on the true expression signals and considered them as insignificant changes .
+
+discussion
+sources of non-exonic mapped reads
+previous studies have shown that non-exonic mapped reads account for about 4~6% of all uniquely mapped reads in mammals  <cit> . sequence reads that mapped outside of exonic regions might be originated from different rna sources depending on the rna-seq experimental protocol selected for sequencing library preparation. in addition, these non-exonic reads might be derived from experimental artifacts, like genomic dna contamination, sequencing errors, or unprocessed rnas, like pre-mrnas  <cit> , or even non-coding rnas  <cit> . van baker, et al  <cit>  has also demonstrated that most of the non-exon mapped reads are associated with the nearby known genes, which suggests that non-exon mapped reads are contextually specific to the corresponding gene. besides, hebenstreit, et al  <cit>  has shown that all genes from rna-seq can be classified into two distinct groups, and one of them is the the lower expressed group that consists of putative non-functional mrnas. all these suggested the biological relevance of incorporating information from non-exonic regions. we have carefully evaluated the aforementioned biological relevance of rna species in non-exonic regions, and thus necessary steps have been taken for identifying non-exonic regions as discussed in the methods section. as we showed in figure 1b in one of our real rna-seq data set, the non-exonic read counts for all genes are mostly less than  <dig> , indicating little or no influence from high-expression. we also examined the correlation between the reads mapped to exonic regions and the reads mapped to non-exonic regions in a real rna-seq experiment. the average correlation is  <dig>  which potentially indicates that the non-exonic reads are not 'functional' reads which can be used to represent the background noise. by measuring the reads mapped to the non-exonic regions of its corresponding gene but carefully avoid those functional relevant regions, we are able to gain a more reliable estimation of true expression level by eliminating the impact of background noise.
+
+compare of xbseq and deseq at baseline level
+our simulation at baseline level suggests that xbseq and deseq's performance are virtually indistinguishable in terms of auc, number of false discoveries and statistical power at baseline level. not surprisingly, comparison with  <dig> replicates per test group performed better than  <dig> replicates per test group even with low level of fold change . also at baseline background level, the number of truly differentially expressed genes has little effect on the performance of xbseq and deseq except with the number of false discoveries. as expected, simulation of  <dig> percent of true de genes is more likely to generate false positives than those of 10% true de genes. however, this effect is dampened with increased number of replicates per test group for differential expression analysis .
+
+comparison of statistical methods with increased non-exonic mapped reads
+to further demonstrate the robustness of xbseq at different background levels, we simulated genes with low, intermediate or high levels of non-exonic mapped reads. xbseq outperform deseq with larger auc , and with better controlling of false discoveries . while we achieved excellent true positive detection, we also examined the false negative rate for xbseq and deseq, or the statistical power. as shown in figures 4b-4d, xbseq outperform deseq's statistical power in detecting de genes in all three increased background levels. all these suggest that xbseq is more robust in detecting de genes in noisy ngs-seq samples.
+
+we also compared performance of xbseq with some other rna-seq algorithms, including deseq <dig> and edger-robust. xbseq excelled in overall performance  and false discovery control . xbseq is also one of the best algorithms in terms of statistical power , indicating a modest trade-off in false negative while maintaining overall performance in de detection. moreover, xbseq performed better with higher non-exonic mapped reads . further examination of algorithms performance among higher  or lower expressed genes  revealed that false positive genes were mostly generated among lower expressed genes. among lower expressed genes, xbseq outperformed than deseq with better auc and false discovery. however, both xbseq and deseq performed poorly among low-expression genes.
+
+simulations were carried out with the assumption of nb model for gene expression and poisson model for background noise , which is the model xbseq is built on. while we demonstrated the validity of the assumption in one of our rna-seq data set , we also tested the xbseq under the uniform or normal model for background read counts while keeping the same nb model for gene expression. as shown in fig. s2a, for all  <dig> background distributions , xbseq performed better than deseq, indicating the robustness even when underlying assumption is deviated from poisson distribution. another way to examine model bias is by examining the distribution of p value under null hypothesis . as shown in fig s <dig>  the p values generated by most differential expression analysis algorithms are close to uniform distribution from  <dig> to  <dig> , with the exception of ebseq.
+
+execution time of xbseq algorithm
+xbseq algorithm complexity is similar to deseq. however, xbseq will not only take read counts from each gene, but also read counts from non-exonic read counts for each gene, and then perform true signal prediction before evaluating differential expression significance. we benchmarked a set of differential analysis algorithms for their computational times with different number of samples in each condition . bayseq algorithm requires the most computational time, followed by deseq and xbseq.
+
+CONCLUSIONS
+we have developed an approach to take into consideration of non-exonic mapped reads as sequencing noise for precise differential expression analysis. when there is no or very low background noise, the performance of xbseq is similar to deseq. however, xbseq excels when background noise  are higher due to the model estimation of true signal by removing the noise impact. overall, xbseq algorithm is shown to be more robust than existing differential expression analysis methods particularly when sequencing noise is a concern.
+
+availability of supporting data
+the r package of xbseq, the shift-gene gtf files as well as reproducible scripts for simulation are available from github, https://github.com/liuy12/xbseq.
+
+list of abbreviations
+auc: area under the curve
+
+de: differential expression
+
+nb: negative binomial 
+
+ngs: next generation sequencing
+
+roc: receiver operating characteristic
+
+rpkm: reads per kilobase of transcript per million reads mapped
+
+competing interests
+authors declare no competing interest in preparing the paper and developing the software associated to this paper.
+
+authors' contributions
+all authors contribute to the manuscript. hhc, yl, yh and yc conceived and designed the study. hhc and yc implemented the algorithm in matlab and yl migrated it to r. yl carried out the simulation procedure. yz designed non-exonic regions for human and mouse, ds contributed biological samples and zl and yc performed sequencing and basic bioinformatics analysis. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplementary figures and tables to provide additional analysis results.
+
+click here for file
+
+ acknowledgements
+this research was supported in part by the genome sequencing facility of the greehey children's cancer research institute, uthscsa, which provided rna-seq service. fundings for this research were provided partially by the cancer prevention and research institute of texas  yc, national institutes of health cancer center shared resources  to yc, nigms  to yh and yc, and the national science foundation .
+
+declaration
+the publication costs for this article were funded by the aforementioned cprit grants to yc.
+
+this article has been published as part of bmc genomics volume  <dig> supplement  <dig>  2015: selected articles from the international conference on intelligent biology and medicine  2014: genomics. the full contents of the supplement are available online at http://www.biomedcentral.com/bmcgenomics/supplements/16/s <dig> 

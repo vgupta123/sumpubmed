@@ -1,0 +1,305 @@
+BACKGROUND
+next-generation sequencing  technologies are causing an unprecedented revolution in biological sciences. the ability to obtain the genome sequence of a species quickly and at a relatively low cost has tremendous biological applications to cancer research, genetic disorders, disease control, neurological research, personalized medicine, etc. ngs technologies such as illumina,  <dig>  apg, helicos, pacific biosciences, and ion torrent  <cit>  produce huge outputs at ever decreasing costs, enabling ambitious projects such as the genome  <dig> k project,  <cit>   whose goal is to obtain the genomes of  <dig>  vertebrate species, the  <dig> genomes project,  <cit>   that proposes to obtain the genomes of  <dig> genetically varying humans, or the human microbiome project,  <cit>   whose aim is to characterize the microbial communities found at several different sites on the human body.
+
+ngs machines produce short pieces of dna, called reads, that often need to be assembled together into longer sequences. the ability to de novo assemble genomic data is crucial for the success of many applications including gene expression analysis, structural variation detection, and metagenomics,  <cit> . there is increased demand in both computing power and algorithmic ideas in order to cope with the increasingly popular ngs data. great work has been done on creating improved assembly programs, e.g., , as well as surveying various techniques,  <cit> , or critically and thoroughly evaluating the existing assemblers  <cit> ; we refer the reader to the latter three papers for references to other genome assembly programs or related work. in spite of considerable advances, much improvement is still needed in the current state-of-the-art technology for de novo genome assembly  <cit> .
+
+reads that overlap significantly offer a good indication that they may come from the same region of the genome. two main approaches are used in building assemblies. both use overlaps between the reads but in different ways. in the string-overlap graph approach  <cit>  sufficiently long overlaps between reads are used as edges to connect vertices that represent reads. in the de bruijn graph approach  <cit>  reads are broken into k-mers that are used as vertices connected by edges representing overlaps of length k− <dig>  however, regardless of the model, the problems underlying both approaches can be shown to be np-hard  <cit> . the de bruijn graph approach seems counterintuitive, as it breaks the reads into shorter k-mers, which appears contrary to the technological efforts to produce longer reads. nevertheless, most of the top assemblers to date use the de bruijn graph approach.
+
+we propose a new assembler, sage , that is string-overlap graph based. sage includes innovations in almost every aspect of the assembly process: error correction of input reads, string-overlap graph construction, read copy counts estimation, overlap graph analysis and reduction, contig extraction, and scaffolding. we have tested sage on short and medium-size genomes against several of the very best assemblers, abyss  <cit> , sga  <cit> , soapdenovo <dig>  <cit> , and spades  <cit>  and showed that it performs very well.
+
+implementation
+the algorithms used in sage are described here. some of the existing ideas are included as well in order to give a complete description.
+
+error correction
+all ngs datasets contain errors that make any usage of such data, and genome assembly in particular, very difficult. we have used a new program, racer  <cit> , that consistently exceeds the error correcting performance of existing programs. all datasets have been corrected with racer before being assembled with sage.
+
+bidirected graph
+assume a dataset of n input reads of length ℓ each, sequenced from a genome of length l. the string-overlap graph  <cit>  has the reads as vertices. there is an edge between two vertices if there is an overlap between the sequences of the reads in the vertices  of length higher than a given threshold, m, the minimum overlap size. in order to avoid the complication due to double strandedness of dna,  <cit>  introduced the bidirected overlap graph, where a read and its reverse complement are represented by the same vertex and an edge has an orientation at each end point, depending on whether the read or its reverse complement is used in producing the overlap defining the edge. three possible types of edges are thus obtained. each edge has a string associated with it, obtained from the strings of the reads according to their overlaps. for instance, two strings xy and yz  produce the string xyz for the edge. assuming no errors in the reads, a consistent path through the graph  spells a substring of the genome. that is also the way of associating a string with a path in the graph.
+
+string-overlap graph construction
+in order to efficiently find all overlaps of length at least m between reads, we make the following observation. whenever two reads share an overlap of length m or more bases, there exists a prefix or suffix of length at least m in one of the reads that occurs as a substring of the other read. therefore, we build a hash table with all prefixes and suffixes of all reads  of length min{ <dig> m}. a fast computation of these is enabled by a 2-bit representation of the dna bases and computation of the prefixes and suffixes as 64-bit integers by fast bit operations.
+
+after the hash table is built, a search is performed for all substrings of length min{ <dig> m} of all reads. this is done in one pass through all reads with expected constant time search per substring and fast computation of the next substring, again using efficient bit operations. each successful search is followed by a fast check for a valid overlap. whenever an overlap is found, the corresponding edge is inserted in the graph.
+
+space-efficient transitive reduction
+the string-overlap graph can be very large and a transitive reduction is performed to significantly decrease its size. an edge e= is transitive if there is a read r <dig> and edges e1=,e2= such that the string of the edge e is the same as the one of the path . noticing that the overlaps producing the edges e <dig> and e <dig> are longer, and thus more reliable, than the one producing e, the transitive edge e can be eliminated.
+
+myers  <cit>  gave a linear expected time algorithm for transitive reduction. while myers’ algorithm is very efficient, the graph has to be built before being reduced, thus creating a space bottleneck. we have modified myers’ algorithm to reduce the graph as it is being built. myers’ essential observation is that the edges adjacent to a vertex have to be considered in increasing order of their lengths. we maintain this order and in addition attempt to reduce the graph as locally as possible. that is, we build only the part of the graph necessary to determine the transitively reducible edges for a given vertex v. these edges are marked for elimination but not yet removed. once all vertices whose transitive reduction can be influenced by the edges incident with v have been investigated, the edges of v marked for elimination can be removed, thus reducing the space during construction. the running time for building the transitively reduced graph remains the same as if the complete string-overlap graph is first constructed and then transitive edges are removed, however the space decreases very much. this is essential for the entire sage algorithm since graph construction is the most space consuming step.
+
+graph simplification
+the next step is further simplifying the graph. first, any path consisting exclusively of vertices of indegree and outdegree one is compressed to a single edge, subsequently called composite edge; edges that are not composite are called simple. the string spelled by the composite path is stored with the new edge along with the information concerning the reads corresponding to the collapsed vertices.
+
+our error correction procedure is very effective, however, errors remain in the corrected dataset. the correcting step does not remove any reads in order to avoid breaks in coverage. overlaps between a correct read and one containing errors most likely result in short “dead-end” paths in the graph. composite path compression might produce dead-end paths consisting of single edges. whenever the number of reads in one such edge is lower than an experimentally determined threshold, the edge is removed.
+
+sometimes such erroneous paths can connect back into the graph, resulting in “bubbles”. a bubble is the event of two disjoint single paths between two vertices such that their strings are highly similar but their number of reads is very different. in such a case, if one of the two paths has much lower coverage, then it is removed.
+
+egde multiplicity
+assuming complete coverage and no errors, the genome would be represented as the string corresponding to a path in the graph. the number of times an edge is traversed by this path equals the number of times the string associated with the edge occurs in the genome. myers  <cit>  introduced the a-statistics to identify unique, or single-copy, edges. we generalize these statistics in order to be able to obtain accurate estimates of the number of occurrences of the string associated with each edge in the genome.
+
+given an edge e containing k reads such and whose associated string has length d, assuming the reads are sampled uniformly from the genome the probability that e has multiplicity m, that is, its string occurs m times in the genome, is given in .
+  <dig>  
+
+in order to estimate the actual number of copies e has in the genome, we define the logarithm of the ratio between the probability of e having m or m+ <dig> copies; see .
+  <dig>  
+
+for m= <dig>  this log-odds ratio gives the a-statistics of myers  <cit> .
+
+genome and insert size estimation
+when defining the edge multiplicity probability and log-odds ratios, the genome length l is necessary but unknown. the values r are used to estimate l using the bootstrap algorithm of myers  <cit> . the arrival rate for a unique edge of length d and k reads is expected to be close to that of the entire genome, which gives the estimate: . edges of length  <dig> or more are initially assumed unique. subsequent estimates of l are used for computing the r ratios and only those edges with r≥ <dig> are kept as unique in future iterations. this bootstrap procedure is repeated until the set of unique edges does not change. in practice this happened in five iterations or less and a good estimate for l was obtained; see table  <dig> table  <dig> 
+estimated genome sizes for the datasets in table
+3
+
+
+
+
+often the dataset does not include information concerning the insert size, that is, the distance between the two reads of the same mate pair. the mean, μ, and standard deviation, σ, of the insert size distribution are estimated by considering only those mate pairs that belong to the same edge in the string-overlap graph where the distance between the reads in the edge is known.
+
+maximum likelihood assembly
+assembling a genome as the shortest string that contains the given reads suffers from an important drawback, that of overcompressing the genome or overcollapsing the repeats. this was already noticed by myers  <cit> , where the maximum likelihood reconstruction of the genome was proposed, that is, instead of the shortest genome, the one that is most likely to have produced the genome is searched for. medvedev and brudno  <cit>  considered a very interesting approach to maximum likelihood assembly that is suitable for our purpose.
+
+our goal is to produce good estimates for the read copy counts, that is, for each read, the number of times its sequence appears in the genome. for a read ri, assume its copy count is ci. the ci values are unknown. what is known are their observed values, say xi, and the likelihood, , that needs to be maximized, shown in .
+  <dig>  
+
+maximizing  is the same as minimizing its negative logarithm, see .
+  <dig>  
+
+where c is a constant independent of the ci’s.
+
+for each i, the path in the graph spelling the genome sequence traverses the edge containing the read ri exactly ci times. since  is separable convex, maximizing the likelihood is reduced to a convex min-cost bidirected flow problem in a network build on the string-overlap graph. first, each convex cost function is given a three-piece linear approximation. then the bidirected flow problem is reduced to a directed flow problem that is solved using the cs <dig> algorithm  <cit>  downloaded from http://www.igsystems.com/cs <dig>  we refer to  <cit>  for details.
+
+read copy counts estimation
+as explained in the previous section, the solution to the bidirected flow problem gives an estimation of the copy counts ci’s of the reads. crucial are the bounds we set on the capacities of the edges. for vertices, we must set a lower bound of  <dig> since the reads in vertices must be included in the assembly. for edges, we use the r statistics that we introduced previously. we consider only long edges  for which the statistics should work well. for one such edge e, if r≥t, for some threshold t , then we set the lower and upper bounds on the capacity of the edge as l=u= <dig>  if r< <dig>  then we find the smallest m such that r≤−t and r≥t and set the lower bound l=m and the upper bound to some large value, u=∞. in case the above procedure fails to assign lower bounds, we set l= <dig> and u=∞. for the composite edges shorter than  <dig> bp but containing at least  <dig> reads, we assign l= <dig> and u=∞. the remaining edges receive the trivial l= <dig>  u=∞.
+
+the estimation of the copy counts obtained using the above procedure is very good. table  <dig> gives the comparison between our procedure and the one of  <cit> . the latter one works well for synthetic datasets, as reported in  <cit> , but not for real data.table  <dig> 
+predicted read copy count comparison for the datasets in table
+3
+
+
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+predicted read copy count comparison between the algorithm of  <cit> , denoted mb <dig>  and the procedure used by sage. the values given are the percentages of correctly predicted copy counts. the mb <dig> algorithm could not process the last  <dig> datasets from table  <dig> 
+
+
+
+further graph simplification
+based on the flow computed above, several further simplifications are performed to the graph. for a vertex, r, with only one incoming edge,  and outgoing edges ,1≤i≤k, we remove the vertex r and its adjacent edges and add edges , 1≤i≤k. the flow on the edge  is the same as it was on the edge . a similar modification is done for vertices with only one outgoing edge.
+
+for a vertex r that has a self loop  and only two adjacent edges,  and , we remove the vertex r and its edges and replace them with . note that the flow on  is the same as it was on either  or .
+
+mate pair support
+a vertex having more than one incoming edge and more than one outgoing edge is “ambiguous”. mate pairs are used in connection with the flow to solve some of these ambiguities. for a vertex r, an incoming edge  and an outgoing edge , we say that a mate pair  supports the path  through r if all paths of length within the range μ±3σ from r <dig> to r <dig> include the path . note that this is significantly more general than simply having r <dig> on the edge  and r <dig> on the edge . there may be many paths of length μ±3σ between r <dig> and r <dig> 
+
+the support required in sage for merging a pair of adjacent edges is at least  <dig>  when edges  and  are merged, an edge  is added with flow equal to the minimum flow on  and . the edge with lower flow out of  and  is then deleted and the other has its flow decreased by the minimum of the two. if both have the same flow, then both are deleted. often, r has only four adjacent edges and so it is completely resolved by this procedure.
+
+in order to save space, we compute the paths of length up to μ+3σ from each node and then consider the reads on all edges incident to that node.
+
+due to lack of coverage in some regions or errors in the reads, some mate pairs may have no path to connect them in the graph. we can still use their support in such cases as follows. consider a mate pair  such that r <dig> belongs to the edge e <dig> and r <dig> belongs to the edge e <dig>  if the sum of the distances from r <dig> to the end of the edge e <dig> and from the corresponding end of e <dig> to r <dig> is less than μ+3σ, then  supports the edges  merging. this type of support from mate pairs is less reliable and we strengthen it by considering only edges with non-zero flow or having sufficiently long associated paths .
+
+assuming sufficient support is accumulated to merge the edges e <dig> and e <dig>  the distance between their ends is estimated based on μ. if they overlap, there will be no gap, otherwise the gap is filled with n’s.
+
+finally, the set of output contigs consists of the strings of minimum required length  that are associated with edges of non-zero flow.
+
+sage overview
+we present here a brief overview of the main stages of sage using all the procedures presented above.
+  
+
+RESULTS
+assemblers
+we have chosen for comparison several leading de novo assembly programs, according to their ranking by the assemblathon  <dig> competition  <cit>  and the gage survey  <cit>  which rank allpaths  <cit>  and soapdenovo  <cit> , both de bruijn graph based, at the top. we have tested against the improved soapdenovo <dig>  <cit> , but we could not use allpaths since it is unable to assemble single-library real datasets. we have also included abyss  <cit>  as one of the most widely used and frequently updated programs and spades  <cit>  as one of the best new assemblers for bacterial genomes  <cit> , both de bruijn graph based. our comparison is by no means exhaustive. the main point is to show that sage is competitive.
+
+the most notable exception from the domination of the de bruijn graph-based assemblers is the recent sga program  <cit> , which is string-overlap graph based. sga uses compressed data structures to keep the memory requirements low, with the main aim of being able to run on low-end computing clusters. nevertheless, sga is a successful assembler, ranked third in the assemblathon  <dig> competition  <cit> . our efforts are complementary to those of  <cit>  in the attempt of producing better assemblers that are string-overlap graph based.
+
+datasets
+we compare the assemblers on real datasets only. we have downloaded a number of datasets from the ncbi web site , with varied read length and genome size, together with a c.elegans dataset, from http://www.wormbase.org, that has been previously used by  <cit> . as noticed by  <cit> , the genome of c.elegans is an example of an excellent test case for assembly algorithms due to its long  and accurate reference sequence, free of snps and structural variants. the accession numbers for all datasets and their reference genomes are given in table  <dig>  together with all their parameters.table  <dig> 
+the datasets used for evaluation
+
+
+bacillus subtilis
+chlamydia trachomatis
+streptococcus pseudopneumoniae
+francisella tularensis
+leptospira interrogans
+porphyromonas gingivalis
+escherichia coli
+clostridium thermocellum
+caenorhabditis elegans
+the datasets are sorted increasingly by the total number of base pairs. all datasets and reference genome sequences are obtained from the ncbi, except c.elegans that is from http://www.wormbase.org.
+
+
+
+evaluation method
+the most recent version of each assembler has been used and each program was run for all possible k-mers or minimum overlap sizes on each dataset. the k-mer or minimum overlap size producing the highest scaffold n <dig> value is reported. n <dig> is representative for the quality of the assembly, however producing high values of n <dig> is not sufficient by itself, as it says nothing of the quality of the contigs. in particular, misassembled contigs can artificially increase n <dig>  therefore, we have used the quast comprehensive evaluation tool  <cit>  to compare the quality of the assemblies.
+
+the most relevant parameter is nga <dig>  which is computed by aligning the contigs to the reference genome, splitting them at misassembly breakpoints, eliminating unaligned parts, and then computing the n <dig> of the obtained contigs with respect to the length of the reference genome.
+
+we present also the nga <dig>  the length of the largest alignment, the fraction of genome covered, the number of unaligned contigs, the average number of indels and mismatches for each  <dig> kbp, and the number of  misassemblies as the most important parameters computed by quast. all the information given by quast is included in the additional file  <dig>  details on how each program was run and its output was evaluated by quast, including the precise commands used, are also given in the additional file  <dig> 
+
+comparison
+the best assemblies produced by all the assemblers considered are compared and presented in tables  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>  whenever meaningful, we present also the average of the results. sage has the best nga <dig>  nga <dig>  and length of the longest aligned contig for most datasets. for nga <dig>  the average of sage is 50% better than the second one, from spades. for genome coverage, sage and abyss are tied for the first place. abyss has the lowest number of unaligned contigs for the bacterial datasets but the highest for c.elegans for which sage performed the best. sga produces the fewest misassemblies, followed closely by soapdenovo <dig>  for local misassemblies, sga is the best. overall, sga produces the fewest errors but also the lowest nga <dig>  nga <dig>  and longest contig values. concerning the average number of indels and mismatches per  <dig> kbp, significant differences are seen between datasets, with  <dig>   <dig>   <dig> having many more errors than the other ones. all assemblers produce similar values with abyss, sga and sage at the top, with almost the same number of errors.table  <dig> 
+nga <dig> comparison; best results in bold
+
+
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+
+
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+
+
+ <dig> ,023
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+
+
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+
+
+0
+0
+10
+10
+3
+0
+0
+0
+0
+0
+0
+0
+0
+1
+1
+0
+267
+
+
+0
+0
+1
+1
+1
+1
+1
+108
+26
+2
+5
+4
+1
+144
+
+
+0
+0
+5
+78
+46
+46
+46
+28
+10
+1
+0
+839
+
+
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+
+
+the time and space comparison is presented in table  <dig>  in order to facilitate comparison we present the time  and space  per input mega base pairs. this way we can also compute averages. abyss uses the least amount of space and soapdenovo <dig> is the fastest, with sage coming closely in second place for both time and space. actual time and space values are presented in the additional file  <dig> table  <dig> 
+time and space comparison
+
+
+ <dig>  /  <dig> 
+the results are presented in the format “time/space” with the time in seconds and space in megabytes, both per input mega base pairs. the best results are shown in bold. the last row gives the average values.
+
+
+
+CONCLUSIONS
+myers  <cit>  suggests that string-overlap graph based assemblers should perform better than those based on the de bruijn graph and our work aims at supporting his prediction.
+
+sage builds upon great existing work and brings several new ideas, such as the efficient computation of the transitive reduction of the string overlap graph, the use of  edge multiplicity statistics for improved estimation of copy counts, and the improved use of mate pairs and flow for supporting edge merging.
+
+we believe that our work shows that the potential of string-overlap graph-based assemblers is higher than previously thought. sage is currently able to successfully handle short and medium-size genomes but future versions will handle mammalian genomes as well. also, we plan to work on reducing the number of misassemblies produced by sage.
+
+we hope that some of the ideas presented will be used also by others in order to boost the development of this type of assemblers and further improve the current state-of-the-art. as read length is going to grow, we expect that string-overlap graph-based assemblers will have a better chance to improve.
+
+data access
+all datasets are available from the ncbi, except c.elegans which is from http://www.wormbase.org. the genome assemblers are available as follows: abyss at http://www.bcgsc.ca/platform/bioinfo/software/abyss, sga at github.com/jts/ sga, soapdenovo <dig> at soapdenovo <dig> sourceforge.net/, and spades at bioinf.spbau.ru/spades. the cs <dig> program is available at http://www.igsystems.com/cs <dig> 
+
+availability and requirements
+project name: sageproject home page:http://www.csd.uwo.ca/~ilie/sage/
+
+operating system: platform independent
+
+programming language: c++
+
+other requirements: none
+
+license: gnu
+
+any restrictions to use by non-academics: none
+
+electronic supplementary material
+additional file 1:
+the supplementary material includes all the details on how each program was run and its output was evaluated by quast, including the precise commands used. all details for evaluating the assemblies, as given by quast, are also included, as well as the actual time and space values. 
+
+ competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+li proposed the string-overlap graph approach, the generalized edge multiplicity statistics, and the efficient transitive reduction, bh implemented the sage algorithm, and rs-o proposed various algorithmic improvements. li, bh, and rs-o met regularly and discussed various ideas that were implemented and tested by bh. mm installed the competing programs and the evaluation software, performed all final tests and comparisons, and wrote the sage manual. li wrote the manuscript that was read and approved by all authors.
+

@@ -1,0 +1,188 @@
+BACKGROUND
+automatic assessment of protein features from amino acid sequence is a fundamental problem in bioinformatics. reliable methods for inferring features such as secondary structure, functional residues, subcellular localization, among others, are a first step towards elucidating the function of newly sequenced proteins, and provide a complement and a reasonable alternative to difficult, expensive and time-consuming experiments. a wealth of predictors have been developed in the last thirty years for inferring many diverse types of features, see e.g. juncker et al. <cit>  for a review.
+
+a key observation, often used to improve the prediction performance, is that several protein features are strongly correlated, i.e., they impose constraints on each other. for instance, information about solvent accessibility of a residue can help to establish whether the residue has a functional role in binding other proteins or substrates  <cit> , whether it affects the structural stability of the chain  <cit> , whether it is susceptible to mutations conferring resistance to drugs  <cit> , whether it occurs within a flexible or disordered segment  <cit> , etc. there are several other examples in the literature.
+
+researchers have often exploited this observation by developing predictors that accept correlated features as additional inputs. this way, the output is conditioned on the known value of the input features, thus reducing the possible inconsistencies. it is often the case that the additional input features are themselves predicted. highly complex prediction tasks like 3d protein structure prediction from sequence are typically addressed by splitting the problem into simpler subproblems , whose predictions are integrated to produce the final output. following this practice, multiple heterogeneous predictors have been integrated into suites  providing predictions for a large set of protein features, from subcellular localization to secondary and tertiary structure to intrinsic disorder.
+
+however, existing prediction architectures  are limited in that the output feature can’t influence a possibly mis-predicted input feature. in other words, while feature relations establish a set of mutual constraints, all of which should simultaneously hold, current predictors are inherently one-way.
+
+motivated by this observation, we propose a novel framework for dealing with the integration and mutual improvement of correlated predicted features. the idea is to explicitly leverage all constraints, while accounting for the fact that both the inputs, i.e., the raw predictions, and the constraints themselves are not necessarily correct. the refinement is carried out by a probabilistic-logical consistency layer, which takes the raw predictions as inputs and a set of weighted rules encoding the biological constraints relating the features. to implement the refiner, we use markov logic networks   <cit> , a statistical-relational learning method able to perform statistical inference on first-order logic objects. markov logic allows to easily define complex, rich first-order constraints, while the embedded probabilistic inference engine is able to seamlessly deal with potentially erroneous data and soft rules. we rely on an adaptation of mln allowing to include grounding-specific weights   <cit> , i.e. weights attached to specific instances of rules, corresponding in our setting to the raw predictions. the resulting refining layer is able to improve the raw predictions by removing inconsistencies and constraint violations.
+
+our method is very general. it is designed to be applicable, in principle, to any heterogeneous set of predictors, abstracting away from their differences , without requiring any changes to the predictors themselves. the sole requirement is that the predictions be assigned a confidence or reliability score to drive the refinement process.
+
+as an example application, we show how to apply our approach to the joint refinement of three highly related features predicted by the predictprotein suite  <cit> . the target features are subcellular localization, generated with loctree  <cit> ; disulfide bonding state, with disulfind  <cit> ; and metal bonding state, with metaldetector  <cit> .
+
+we propose a few simple, easy to interpret rules, which represent biologically motivated constraints expressing the expected interactions between subcellular localization, disulfide and metal bonds.
+
+the target features play a fundamental role in studying protein structure and function, and are correlated in a non-trivial manner. most biological processes can only occur in predetermined compartments or organelles within the cell, making subcellular localization predictions an important factor for determining the biological function of uncharacterized proteins  <cit> ; furthermore, co-localization is a necessary prerequisite for the occurrence of physical interactions between binding partners  <cit> , to the point that lack thereof is a common mean to identify and remove spurious links from experimentally determined protein-protein interaction networks. disulfide bridges are the result of a post-translational modification consisting in the formation of a covalent bond between distinct cysteines either in the same or in different chains  <cit> . the geometry of disulfide bonds is fundamental for the stabilization of the folding process and the final three-dimensional structure by fixing the configuration of local clusters of hydrophobic residues; incorrect bond formation can lead to misfolding  <cit> . furthermore, specific cleavage of disulfide bonds directly controls the function of certain soluble and cell-membrane proteins  <cit> . finally, metal ions provide key catalytic, regulatory or structural features of proteins; about 50% of all proteins are estimated to be metalloproteins  <cit> , intervening in many aspects of of the cell life.
+
+subcellular localization and disulfide bonding state are strongly correlated: a reducing subcellular environment makes it less likely for the protein to form disulfide bridges  <cit> . at the two extremes we find the cytosol, which is clearly reducing, and the extra-cellular environment for secreted proteins, which is oxydizing and does not hinder disulfide bonds, with the other compartments  exhibiting milder behaviors. similarly, due to physicochemical and packing constraints, it is unlikely for a cysteine to link both another cysteine  and a ligand; with few exceptions, cysteines are involved in at most one of these bonds  <cit> .
+
+this is the kind of prior knowledge we will use to carry out the refinement procedure. we note that all these constraints are not hard: they hold for a majority of proteins, but there are exceptions  <cit> . in the following, we will show that that different predictors offer complementary advantages, and how our method is able to integrate them using non-trivial constraints, resulting in an overall improvement of prediction accuracy and consistency.
+
+overview of the proposed method
+in this paper we propose a framework to jointly refine existing predictions according to known biological constraints. the goal is to produce novel, refined predictions from the existing ones, so as to minimize the inconsistencies, in a way that requires minimal training and no changes to the underlying predictors. the proposed system takes the raw predictions, which are assumed to be associated with a confidence score, and passes them through a probabilistic-logical consistency layer. the latter is composed of two parts: a knowledge base  of biological constraints relating the features to be refined, encoded as weighted first-order logic formulae, which acts as an input to the second part of the method; and a probabilistic-logical inference engine, implemented by a grounding-specific markov logic network   <cit> . for a graphical depiction of the proposed method see figure  <dig> 
+
+an example will help to elucidate the refinement pipeline. for simplicity, let’s assume that we are interested in refining only two features: subcellular localization and disulfide bonding state. the first step is to employ two arbitrary predictors to generate the raw predictions for a given protein p. note that disulfide bonding state is a per-cysteine binary prediction, while subcellular localization is a per-protein n-ary prediction; both have an associated reliability score, which can be any real number. for a complete list of predicates used in this paper, see table  <dig> 
+
+let’s assume that the predictions are as follows:
+
+predloc, predloc!predloc, predloc!preddispreddispreddis
+
+where ! stands for logical negation. the first four predicates encode the fact that protein p is predicted to reside in the nucleus with confidence  <dig> , in the cytosol with confidence  <dig> , etc. the remaining three predicates encode the predicted bonding state of three cysteines at positions  <dig>   <dig> and 26: the first cysteine is free with confidence  <dig> , the remaining two are bound with confidence  <dig>  and  <dig> , respectively. in this particular example, the protein is assigned conflicting predictions, as the cytosolic environment is known to hinder the formation of disulfide bridges. we expect one of them to be wrong.
+
+given the above logical description, our goal is to infer a new set of refined predictions, encoded as the predicates isloc and isdis. to perform the refinement, we establish a set of logical rules describing the constraints we want to be enforced, and feed it to the inference engine. for a list of rules, see table  <dig> 
+
+first of all, we need to express the fact that the raw predictions should act as the primary source of information for the refined predictions. we accomplish this task using the input rules i <dig> and i <dig>  these rules encode how the refined prediction predicates isdis and isloc depend primarily on the raw predicates preddis and predloc. the weight w is computed from the estimated reliability output by the predictor, and  determines how likely the refined predictions will resemble the raw ones.
+
+next we need to express the fact that a protein must belong to at least one cellular compartment, using rule l <dig>  and, as normally assumed when performing subcellular localization prediction, that it can not belong to more than one, using rule l <dig>  in this example, and in the rest of the paper, we will restrict the possible localizations to the nucleus, the cytosol, the mitochondrion, and the extracellular space. the two above rules are assigned an infinite weight, meaning that they will hold with certainty in the refined predictions.
+
+the last two rules used in this example are dl <dig> and dl <dig>  which express the fact that the cytosol, mitochondrion and nucleus tend to hinder the formation of disulfide bridges, while the extracellular space does not. in this case, the weights associated to the rules are inferred from the training set, and reflect how much the rules hold in the data itself.
+
+once we specify the raw predictions and knowledge base, we feed them to the gs-mln. the gs-mln is then used to infer the set of refined predictions, that is, the isloc and isdis predicates. the gs-mln allows to query for the set of predictions that is both most similar to the raw predictions, and at the same time violates the constraints the least, taking in account the confidences over the raw predictions and the constraints themselves. see the methods section for details on how the computation is performed. in this example, the result of the computation is the following: isloc, isdis, isdis, isdis. the protein is assigned to the second most likely subcellular localization, “extracellular”, and the cysteine which was predicted as free with a low confidence is changed to disulfide bonded.
+
+it is easy to see that this framework allows to express very complicated rules between an arbitrary number of features, without particular restrictions on their type  and at different levels of detail . furthermore, this approach minimizes the impact of overfitting: there is only one learned weight for each rule, and very few rules. to assess the performance of our refiner, we experiment with improving subcellular localization together with disulfide bonding state and metal bonding state. the knowledge base used for localization and disulfide bridges was introduced in this section. as for metals, the information is input using rule i <dig>  and we model the interaction with disulfide bonds through rule dm, which states that the two types of bonds are mutually exclusive.
+
+related work
+there is a vast body of work dedicated to the issue of information integration, and in particular to the exploitation of correlated protein features. in many cases, the proposed methods are limited to augmenting the inputs using correlated features  as additional hints to the predictors. in this setting, a work closely related to ours is  <cit> , in which savojardo and colleagues propose a prediction method for disulfide bridges that explicitly leverages predicted subcellular localization  <cit> . as in the other cases, the authors implement a one-way approach, in which a predicted feature  is employed to improve a related one . the protein prediction suites briefly mentioned above  provide another clear example of one-way architectures. prediction suites are built by stacking multiple predictors on top of each other, with each layer making use of the predictions computed by the lower parts of the stack. in this case, the main goal is the computation of higher-level features from simpler ones. note however that the issue of two-way consistency is ignored: these architecture do not back-propagate the outputs of the upper layers to the bottom ones. on the other hand, our approach allows to jointly improve all predictions by enforcing consistency in the refined outputs.
+
+another popular way to carry out the prediction of correlated features is multi-task learning. in this setting, one models each prediction task as a separate problem and trains all the predictors jointly. the main benefit comes from allowing information to be shared between the predictors during the training and inference stages. these methods can be grouped in two categories: iterative and collective.
+
+iterative methods exploit correlated predictions by re-using them as inputs to the algorithm, and iterating the training procedure until a stopping criterion is met. this approach can be found in, e.g. yip et al. <cit> , which proposes a method to jointly predict protein-, domain-, and residue-level interactions between distinct proteins. their proposal involves modeling the propensity of each protein, domain and residue to interact with other objects at the same level as a distinct regression task. after each iteration of the training/inference procedure, the most confident predictions at one level are propagated as additional training samples at the following level. this simple mechanism allows for information to bi-directionally flow between different tasks and levels. another very relevant work is  <cit> , in which maes et al. jointly predict the state of five sequential protein features: secondary structure , solvent accessibility, disorder and structural alphabet. also in this case, distinct predictors are run iteratively using the outputs at the previous time slice as additional inputs. collective methods instead focus on building combinations of classifiers, e.g., neural network ensembles, using shared information in a single training iteration. as an example,  <cit>  describes how to maximize the diversity between distinct neural networks with the aim of improving the overall accuracy. however most applications in biology focus on building ensembles of predictors for the same task, as is the case in pollastri et al. <cit>  for secondary structure.
+
+the main differences with our method are the following:  there exist a number of independently developed predictors for a plethora of correlated features. it would be clearly beneficial to refine their predictions in some way. our goal is to be able to integrate them without requiring any change to the predictors themselves. the latter operation may be, in practice, infeasible, either because the source is unavailable, or because the cost of retraining after every change is unacceptably high. all of the methods presented here are designed for computing predictions from the ground up; our method is instead designed for this specific scenario.  our method allows one to control the refinement process by including prior knowledge about the biological relationships affecting the features of interest; furthermore the language used to encode the knowledge base, first-order logic, is well defined and flexible. the other methods are more limited: any prior knowledge must be embedded implicitly in the learning algorithm itself.  the weights used by our algorithm are few, simple statistics of the data, and do not require any complex training. on the other hand, all the methods presented here rely on a training procedure, and have a higher risk of incurring in overfitting issues.
+
+RESULTS
+data preparation
+we assessed the performance of our framework on a representative subset of the protein data bank  <cit> , the 2010/06/ <dig> release of pdbselect  <cit> . the full dataset includes  <dig>  unique protein chains with less than 25% mutual sequence similarity.
+
+focusing only on proteins containing cysteines, we extracted the true disulfide bonding state using the dssp software  <cit> , and the true metal bonding state from the pdb structures using a contact distance threshold of  <dig> Å.
+
+metals considered in this experiment are the same used for training metaldetector, a total of  <dig> unique metal atoms and  <dig> molecular metals. see passerini et al. <cit>  for more details.
+
+subcellular localization was recovered using the annotations in dbsubloc  <cit>  and uniprot  <cit> ; we translated between pdb and uniprot ids using the chain-level mapping described by martin  <cit> , dropping all proteins that could not be mapped. to increase the dataset coverage, we kept all those proteins whose true localization did not belong to any of the classes predicted by loctree , was ambiguous or missing, and marked their localization annotation as “missing”. loctree is also able to predict proteins in a fifth, composite class, termed “organelle”, which includes the endoplasmic reticulum, golgi apparatus, peroxysome, lysosome, and vacuole. the chemical environment within these organelles can be vastly different, so we opted for removing them from the dataset, for simplicity.
+
+subcellular localization prediction requires different prediction methods for each kingdom. the preprocessing resulted in a total of  <dig> animal proteins, and a statistically insignificant amount of plant and bacterial proteins; we discarded the latter two. of the remaining proteins,  <dig> are annotated with a valid subcellular localization . the data includes  <dig> cysteines, of which  <dig>  are half cysteines  and  <dig>  bind metal atoms.
+
+we also have two half cysteines that bind a metal ; we include them in the dataset as-is.
+
+evaluation procedure
+each experiment was evaluated using a standard 10-fold cross-validation procedure. for each fold, we computed the rule weights over the training set, and refined the remaining protein chains using those weights. the rule weights are defined as the log-odds of the probability that a given rule holds in the data, that is, if the estimated prediction reliability output by the predictor is r, the weight is defined as w = log). given the weights, we refine all the raw features of proteins in the test set. if the subcellular localization for a certain protein is marked as “missing”, we use the predicted localization to perform the refinement. in this case, the refined localization is not used for computing the localization performance, and only the disulfide and metal bond refinements contribute to the fold results, in a semi-supervised fashion.
+
+for binary classification  let us denote by t
+p
+, t
+n
+, f
+p 
+and f
+n 
+the number of true positives, true negatives, false positives, and false negatives, respectively, and n the total number of instances . we evaluate the performance of our refiner with the following standard measures: 
+
+  q=tp+tnn 
+
+  p=tptp+fp 
+
+  r=tptp+fn 
+
+  f1=2·p·rp+r 
+
+the accuracy q, precision p and recall r are standard performance metrics. the f <dig> score is the harmonic mean of precision and recall, and is useful as an estimate balancing the contribution of the two complementary measures. we report the average and standard deviation of all above measures taken over all folds of the cross-validation.
+
+for multi-class classification  we compute the confusion matrix m over all classes, where each element m
+ij 
+counts the number of instances whose true class is i and were predicted in class j. the more instances lie on the diagonal of the confusion matrix, the better the predictor.
+
+we note that, in general, it is difficult to guarantee that our test set does not overlap with the training set of the individual raw predictors. this may result in an artificial overestimate of the performance of the raw predictors. however, training in our model consists in estimating the rule weights from the raw predictions themselves. as a consequence, the results of our refiner may be underestimated when compared with the inflated baseline performance. we also note that, since our model requires estimating very few parameters, i.e., one weight per rule, it is less susceptible to overfitting than methods having many parameters which rely on a full-blown training procedure.
+
+raw predictions
+we generate the predictions for subcellular localization, disulfide bridges, metal bonds and solvent accessibility using the respective predictors. all predictors were installed locally, using the packages available from the predictprotein debian package repository  <cit> , and configured to use the default parameters. for all protein chains predicted in the “organelle” class, we marked the prediction as “missing”, for the reasons mentioned above.
+
+for disulfind and metaldetector, we converted the per-cysteine weighted binary predictions into two binary predicates for each cysteine, preddis/ <dig> and predmet/ <dig>  using as prediction confidence w the svm margin.
+
+for loctree, we output four predloc/ <dig> predicates for each protein, one for each possible subcellular localization, and computed the confidence by using a continuous version of the loctree-provided output-to-confidence mapping. the raw predictor performance can be found alongside with the refiner performance in tables  <dig>   <dig>   <dig>   <dig> 
+
+q
+p
+r
+f
+
+1
+q
+p
+r
+f
+
+1
+q
+p
+r
+f
+
+1
+q
+p
+r
+f
+
+1
+alternative refinement pipelines
+in order to assess the performance of our method, we carried out comparative experiments using two alternative refinement architectures. both architectures are based on state-of-the-art sequential prediction methods, namely hidden markov support vector machines   <cit>  and bidirectional recurrent neural networks   <cit> . both methods can naturally perform classification over sequences, and have been successfully applied to several biological prediction tasks.
+
+the alternative architectures are framed as follows. the predictors are trained to learn a mapping between raw predictions and the ground truth, using the same kind of pre-processing as the mln refiner. cysteines belonging to a protein chain form a single example, and all cysteines in an example are refined concurrently. the input consists of all three raw predictions in both cases.
+
+the two methods were chosen as to validate the behavior of more standard refinement pipelines relying on both hard and soft constraints. in the case of hmsvms, the model outputs a single label for each residue: a cysteine can be either free, bound to another cysteine, or bound to a metal. this encoding acts as a hard constraint on the mutual exclusivity between the two labels. in the case of brnns, each cysteine is modeled by two independent outputs, so that all four configurations  are possible. the brnn is given the freedom to learn the  mutual exclusivity constraint between the two features from the data itself.
+
+pure sequential prediction methods, like hmsvms, are at the same specialized for, and limited to, refining sequential features, in our case disulfide and metal bonding state. therefore, we can’t use the hmsvm pipeline for localization refinement. as a result, the alternative pipeline is faced with a reduced, and easier, computational task. while brnn are also restricted to sequential features, more general recursive neural networks  <cit>  can in principle model arbitrary network topologies. however, they cannot explicitly incorporate constraints between the outputs, which is crucial in order to gain mutual improvement between subcellular localization and bonding state predictions. as experimental results will show, these alternative approaches already fail to jointly improve sequential labeling tasks.
+
+we performed a 10-fold inner cross-validation to estimate the model hyperparameters , using the same fold splits as the main experiment. the results can be found in table  <dig> through  <dig> 
+
+true subcellular localization
+as a first experiment, we evaluate the effects of using the true subcellular localization to refine the remaining predictions, i.e., we supply the refiner with the correct isloc directly, while querying the isdis and ismet predicates. the experiment represents the ideal case of a perfect subcellular localization predictor, and we can afford to unconditionally trust its output.
+
+the experiment is split in four parts of increasing complexity. 
+
+• in the ‘dis. + met.’ case we refine both isdis and ismet from the respective raw predictions, using only the dm rule  to coordinate disulfide and metal bonding states; the localization in this case is ignored. the experiment is designed to evaluate wheter combining only disulfide and metal predictions is actually useful in our dataset.
+
+• in the ‘dis. + loc.’ case we refine isdis from the raw disulfide predictions and the true localization, using the dl <dig> and dl <dig> rules.
+
+• in the ‘dis. + met. + loc.’ case we refine isdis and ismet making the refined disulfide bonding state interact with metals , solvent accessibility , and subcellular localization 
+
+the results can be found in table  <dig> 
+
+three trends are apparent in the results. first of all, we find subcellular localization to have a very strong influence on disulfide bonding state, as expected. in particular, in the ‘dis. + loc.’ case, which includes no metal predictions, the accuracy and f <dig> measure improves from  <dig>  and  <dig>   to  <dig>  and  <dig>  , respectively. the change comes mainly from an increase in precision: the true subcellular localization helps reducing the number of false positives.
+
+the interaction between metals and disulfide bonds is not as clear cut: in the ‘dis. + met.’ case, which includes no subcellular localization, the refined disulfide predictions slightly improve, in terms of f <dig> measure, while the metal predictions slightly worsen. the latter case is mainly due to the drop in recall, from  <dig>  to  <dig> . this is to be expected, as the natural scarcity of metal residues makes the metal prediction task harder . as a consequence the confidence output by metaldetector is lower than the confidence output by disulfind. in other words, in the case of conflicting raw predictions, the disulfide predictions usually dominate the metal predictions.
+
+finally, in ‘dis. + met. + loc.’ case, both disulfide and metal bonds improve using the true subcellular localization compared to the above settings. in particular, metal ligand prediction, while still slightly worse than the baseline  sees a clear gain in recall . this is an effect of using localization: removing false disulfide positives leads to less spurious conflicts with the metals.
+
+the two alternative pipelines behave similarly. they both manage to beat the markov logic network on the easier of the two tasks, disulfide refinement, while performing worse on the metals. we note that the hmsvm and brnn, contrary to our method, both have a chance to rebalance the raw metal predictions with respect to the disulfide predictions during the training stage, learning a distinct bias/weight for the inputs. nevertheless, they still fail to improve upon our refined metals.
+
+predicted subcellular localization
+this experiment is identical to the previous one, except we use predicted subcellular localization in place of the true one. similarly to the previous section, we consider three sub-cases. in the ‘dis. + loc.’ case, we refine localization and disulfide bonding state, while in the ‘dis. + met. + loc.’ case we refine all three predicted features together. the results can be found in table  <dig>  the ‘dis. + met.’ case is reported as well for ease of comparison.
+
+here we can see how our architecture can really help with the mutual integration of protein features. in general, we notice that refined disulfide bonds are enhanced by the integration of localization, even if less so than in the previous experiment. at the same time, localization also benefits by the interaction with disulfide bonds, as can be seen in the ‘dis. + loc.’ case. the biggest gain is obtained for the extracellular and nucleus classes, which are also the most numerous classes in the dataset: several protein chains are moved back to their correct class. the introduction of metals improves directly disulfide bonds and indirectly localization, even though its effect is relatively minor.
+
+on the downside, refined metal predictions worsen in all cases. this is due, again, to the unbalance of the small number of metal binding residues found in the data, and to the difference between the confidences output by disulfind and metaldetector.
+
+surprisingly, the alternative pipelines are not as affected by the worsening of the localization information: their performance is on par as with the true localization. this is in part explained by the simpler task the alternative methods carry out, as it does not involve refinement of the raw localization itself. it turns out that using predicted localization itself, the alternative methods manage to perform better than us also for metal refinement. in the following, we will show an improvement to our pipeline to address this issue.
+
+predicted subcellular localization with predictor reliability
+the previous experiment shows that our refiner performs suboptimally on the metal refinement task due to class unbalance. a common way to alleviate this issue is to re-weight the classes according to some criterion. in our case, the positive metal residues are dominated by the negative ones, making the overall accuracy of metaldetector higher than that of disulfind. our method naturally supports the re-weighting of predictors with different accuracy: the weight assigned to a pred predicate can be strengthened or weakened depending on our estimate of the predictor accuracy.
+
+to implement this strategy, we add an intermediate proxy predicate, weighted according to the actual predictor performance over the training set. the proxy predicate mediates the interaction between the raw prediction  and the refined prediction . the actual proxy predicates are proxyloc, proxydis and proxymet, used by rules i1p to i3p, and px <dig> to px <dig>  see tables  <dig> and  <dig> for the details. the results can be found in table  <dig>  for completeness, we also include the proxy results for true subcellular localization in table  <dig> 
+
+the proxy helps the mln refiner: the refined metal predictions are on-par with the raw ones, while at the same time improving the disulfide bonds. the effects are especially clear when comparing the ‘dis. + met.’ cases of tables  <dig>  and  <dig> , with f <dig> scores changing from  <dig>  and  <dig>  for bridges and metals, respectively, to  <dig>  and  <dig> . we note that our method is the only one able to recover the same performance as metaldetector while also improving the other two refined features. on the contrary, the alternative pipelines tend to favor one task  over the other, and fail in all cases to replicate the baseline performance.
+
+the down-side is that localization refinement is slightly worse: the raw nucleus predictions are less accurate than the cytosol ones, leading to the cytosol being assigned a higher proxy weight. since both compartments prevent disulfide bonds, the mln refiner tends to assign chains with no half cysteines to the latter.
+
+CONCLUSIONS
+in this paper we introduced a novel framework for the joint integration and refinement of multiple related protein features. the method works by resolving conflicts with respect to a set of user-provided, biologically motivated constraints relating the various features. the underlying inference engine, implemented as a grounding-specific markov logic network  <cit> , allows to perform probabilistic reasoning over rich first-order logic rules. the designer has complete control over the refinement procedure, while the inference engine accounts for potential data noise and rule fallacy.
+
+as an example, we demonstrate the usefulness of our framework on three distinct predicted features: subcellular localization, disulfide bonding state, metal bonding state. our refiner is able to improve the predictions by removing violations to the constraints, leading to more consistent results. in particular, we found that subcellular localization plays a central role in determining the state of potential disulfide bridges, confirming the observations of savojardo et al. <cit> . our method however also allows to improve subcellular localization in the process, helping to discriminate between chains residing in reducing and oxydizing cellular compartments, especially nuclear and secreted chains. we also found that disulfide predictions benefit from metal bonding information, although to a lesser extent, especially when used in conjunction with localization predictions. on the other hand metals, which are in direct competition with the more abundant disulfide bonds, are harder to refine. we presented a simple and natural re-weighting strategy to alleviate this issue. the task would be further helped by better localization predictions, which tend to improve the distribution of disulfide bridges, as shown by the experiments with true subcellular localization.
+
+we compared our refinement pipeline with two alternatives based on state-of-the-art sequential prediction methods, hidden markov support vector machines and bidirectional recursive neural networks. these methods have two fundamental advantages: they are run through a full-blown training procedure, and are only asked to refine the two sequential features, a task for which they are highly specialized. however, the results show that they tend to favor the easier task  over the other, struggling to achieve the same results of the baseline on the harder task . on the contrary, our method is more general, and does not favor one task at the expense of the others.
+
+our framework is designed to be very general, with the goal of refining arbitrary sets of existing predictors for correlated features, such as distill  <cit>  and predictprotein  <cit> , for which re-training is difficult or infeasible. as a consequence, our framework does not require any change to the underlying predictors themselves, only requiring that they provide an estimated reliability for their predictions.
+

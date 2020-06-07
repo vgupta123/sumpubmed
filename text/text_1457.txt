@@ -1,0 +1,424 @@
+BACKGROUND
+models of biochemical networks are being constructed on increasingly large scales  <cit> . automatic procedures have been suggested to derive draft networks from annotated genomes, such as the model seed  <cit> . these models promise to serve as in silico experimentation platforms to probe complex biological systems. the reconstruction of genome-scale networks is a highly laborious long-term effort, which requires intensive curation  <cit> . however, when building kinetic models, the determination of the underlying network structure is just the first step  <cit> . for each reaction within the network, a specific kinetic equation, or rate law, needs to be derived. these rate laws typically contain parameters such as michaelis constants that must be defined  <cit> .
+
+a large number of software suites exist that allow users to specify rate laws for kinetic modeling. programs, such as copasi  <cit> , celldesigner  <cit> , the mass toolbox <dig>  and cellerator  <cit> , provide pre-defined lists of kinetic equations and also allow the user to modify these rate laws or to even create customized equations. celldesigner  <dig>  provides a dialog that assists the user to obtain rate laws from the kinetics database system for the analysis of biochemical pathways reaction kinetics   <cit> . the mass-toolbox focuses on the creation of elementary rate laws and automatically derives pseudo-elementary rate constants with their units. inference programs, such as netgenerator  <cit> , estimate a topology and generate specific rate laws for gene-regulatory processes. odefy  <cit>  converts discrete boolean networks into quantitative differential equation systems by applying hill-type rate laws  <cit>  to each transition.
+
+however, existing software tools are not designed to quickly construct rate laws for large models. manually deriving both kinetic equations and all units brings several problems with it, because it is a) highly error-prone, and b) time-consuming, and thus is undesirable in large-scale or automated approaches. for these reasons, automatic procedures are highly desirable for the assembly of rate laws. furthermore, standard data formats would be useful for encoding of networks and provide a formalization of concepts and data structures that enable cross-platform use of created models  <cit> .
+
+we introduce sbmlsqueezer  <dig>  a software package designed for rapid, consistent prototyping of large-scale biochemical kinetic models. sbmlsqueezer  <dig> aids the user in the model construction process by applying several criteria to automatically suggest appropriate equations for each reaction. the user can influence these criteria and choose which rate law to apply. the aims of this approach are a) to ensure that only applicable rate laws can be selected and thus ensure the consistency of the model, and b) to reduce the required manual labor and error checking to a minimum.
+
+sbmlsqueezer  <dig> is intended to be useful for modeling not only metabolic networks but also signal transduction processes and gene-regulatory mechanisms.
+
+this article describes the details of a method that we call context-sensitive rate law assignment. we explain the implementation of this approach in the software sbmlsqueezer  <dig> and discuss possible use-case scenarios.
+
+implementation
+software architecture
+sbmlsqueezer has been planned and implemented as a modular program that follows established software design patterns, such as the model-view-controller pattern, and hence strictly discriminates between its  user interface, its data model, algorithms, etc. a schematic of the program’s design can be seen in fig.  <dig> 
+fig.  <dig> architecture of sbmlsqueezer  <dig>  an important design principle of the program is to be compatible with various frameworks. to this end, the program is modularized in three layers. the first layer is the user interface. this layer allows users to utilize the program in multiple ways, including a stand alone version with an own gui that can also be launched from garuda’s dashboard  <cit> , a fully featured command-line interface, as a plugin of celldesigner  <cit> , or as an online program in galaxy  <cit> . the web version of the program enables users to easily build complex workflows with other programs in the galaxy framework. similar pipelines can be achieved when using sbmlsqueezer as a garuda gadget. no matter how the program is launched, each mode has access to the identical algorithms and program infrastructure in the second layer. the only exception is that the sabio-rk  <cit>  has been deactivated in the celldesigner plugin because celldesigner provides its own module for this purpose  <cit> . for software developers, this second layer can be accessed directly through its api. hence, the algorithms can be embedded in more complex processes and be used as a module in third-party programs. the third layer contains the data structures. sbmlsqueezer highly relies on the library jsbml  <cit>  for model representation. when being used as a plugin from celldesigner or with libsbml  <cit>  as model parsing and writing engine, an additional synchronization step is required: in both cases all data structures that the program receives from either celldesigner or libsbml are mapped to a corresponding jsbml representation. all changes made by the program must then be reported to the original source
+
+
+
+sbmlsqueezer contains a core package that provides a general infrastructure for the program. the core deals with user preferences and command-line arguments , and searches for online updates. furthermore, the core is responsible to launch the program. this can be done in diverse ways, e.g., in command line mode, as a plugin of celldesigner, as a gadget in garuda, etc.
+
+a graphical user interface can be launched from the core and has then control over all functions of the program. for details about which functions are available and how to use the user interface, see additional file  <dig> 
+
+all implemented rate laws are gathered in the kinetics package and are grouped by twelve interfaces that are described in the next section. for version  <dig>  a new sabio-rk package has been implemented that obtains kinetic equations from the rate law database sabio-rk  <cit> . a mathematics package contains an implementation of the gaussian rank calculation, which is required for convenience rate laws  <cit> .
+
+data structures and dependencies
+sbmlsqueezer  <dig> is based on the data format systems biology markup language   <cit> . the internal data structure of the program is provided by jsbml  <cit> . converters can read and write input sbml documents through libsbml  <cit>  or celldesigner’s application programming interface   <cit> , or jsbml can directly parse these files. in this way, jsbml acts as an abstraction layer between diverse forms of input and synchronizes all changes made by the program back to the original source. in case that jsbml is being directly used, the synchronization step can be omitted. it is entirely implemented in java™ and runs on every platform for which a java™ is available. reading and writing of sbml files is done with jsbml  <cit> , which also acts as the internal data structure. sbmlsqueezer  <dig> can also be launched using a libsbml  <cit>  back-end. the online program version is based on the command-line interface of the stand-alone tool, which is wrapped in a galaxy  <cit>  framework. for writing model reports, sbmlsqueezer  <dig> contains a development release of sbmllatex  <cit> . the garuda gadget  <cit>  is implemented based on the back-end api for java™. the celldesigner plugin uses the communication interface between celldesigner’s plugin api and jsbml. changes made by sbmlsqueezer  <dig> are synchronized with celldesigner through a change listener interface. sbmlsqueezer  <dig> determines the type of reaction by interpreting systems biology ontology  and minimal information required in the annotation of models  annotations  <cit>  of all components as well as the number and kind of reaction participants. access to sabio-rk  <cit>  requires an active internet connection and uses the representational state transfer  api provided by sabio-rk through a java™ uniform resource locator  connection.
+
+it should be noted that for some levels and versions of sbml numbers cannot be associated with units and that some rate laws can under certain conditions not be evaluated to reaction extend per time units.
+
+when being used as a celldesigner plugin, the following special cases apply: a sbo terms are inferred from the celldesigner-specific annotations of modifiers and further elements. b a special observer class synchronizes all changes from the submodel to the data model of celldesigner.
+
+preprocessing
+the de novo rate law selection algorithm performs several preprocessing steps, iterating through all reactions within the submodel m′   <cit>  identifiers  for species whose contribution to rate laws should be neglected, species with such terms in their miriam annotation  <cit>  are removed. table  <dig> shows the predefined list of those entities.
+c00001
+zn2+
+c00038
+cu2+
+c00070
+ca2+
+c00076
+h+
+c00080
+co2+
+c00175
+k+
+c00238
+h2
+c00282
+ni2+
+c00291
+cl−
+c00698
+c01327
+c01528
+fe2+
+c14818
+fe3+
+c14819
+
+
+the stoichiometry of each reaction participant is analyzed in order to obtain the accumulated stoichiometry of reactants and products and to check if all values are integers. in this step the algorithm also analyzes the sbo term  <cit>  attribute of each reaction participant. further top-level sbo terms with relevance to the algorithm can be found in table  <dig>  the aim of this step is to get hints if the reaction represents a transcription or translation:
+ if a reactant represents a gene or gene-coding region, the reaction could be a transcription.
+sbo:0000013
+sbo:0000291
+sbo:0000460
+sbo:0000243
+sbo:0000335
+sbo:0000252
+sbo:0000169
+sbo:0000020
+sbo:0000278
+sbo:0000171
+sbo:0000297
+sbo:0000250
+sbo:0000170
+sbo:0000021
+sbo:0000459
+sbo:0000020
+sbo:0000459
+sbo:0000461
+sbo:0000184
+sbo:0000183
+
+
+ if the reaction involves a reactant that stands for a ribonucleic acid  or messenger rna  molecule it could be a translation.
+
+ if at least one modifier represents a gene or rna molecule, the reaction could represent a translation.
+
+
+fig.  <dig> examples for general reaction categories. this figure displays example reactions in sbgn for each of the twelve categories that are used to determine applicable rate equations. a) reaction with a non-enzyme catalyst. the ion i <dig> catalyzes this association reaction, which can therefore not be considered enzyme catalyzed. in addition, this reaction is also modulated in a feedback inhibition loop, has an integer stoichiometry, and two reactants. b) gene-regulatory processes. reaction re2a assembles an mrna molecule from a source of bases , enabled by the a specific gene. this mrna in turn  enables the assembly of a protein from a source of amino acids . in a feedback inhibition loop, the protein interferes with the transcription of its own gene. c) uni-uni enzyme reaction. this schematic conforms the classical michaelis-menten mechanism. d) bi-uni enzyme reaction. this association reaction has an integer stoichiometry. e) bi-bi enzyme reaction. in this example, two molecules of identical type act as reactants and also as products, respectively. f) arbitrary enzyme reaction. this reversible reaction involves a feedback inhibition and a complex stoichiometry, in which an ion and two identical molecules are created from two distinct reactants. g) integer stoichiometry. this reversible, enzyme-catalyzed reaction has two identical reactants and one product. h) irreversible reaction. this reaction has no explicit catalyst assigned to it. depending on user-settings, the algorithm can still consider this an enzyme-catalyzed reaction, assuming that the omission of the catalyst is for the sake of simplicity. i) modulated reaction. both, a stimulator and an inhibitor interfere with this reaction. j) reversible reaction. this dissociation reaction can also be seen as an association when the equilibrium shifts to the reverse reaction. k) zeroth reactant order reaction. the two product molecules lower the velocity of their own creation. l) zeroth product order reaction. the reactant stimulates its own degradation
+
+
+
+based on their sbo term  <cit>  attribute all modifiers of the reaction are grouped into the following sets: a) enzymes; b) activators; c) inhibitors; and d) non-enzyme catalysts.
+
+since it is not always clear if a catalyst of a reaction is an enzymatic catalyst, the user can define which kinds of species may be considered enzymes in the specific context.  <dig> presents a list of all kinds of species that the algorithm can potentially accept as enzymes of a reaction. the algorithm checks if any modifier of the reaction corresponds to a species with one of the sbo terms in this list. if the modifier is annotated as catalyst  and its corresponding species belongs to the list of potential enzymes, the algorithm assigns the sbo term enzymatic catalyst  to the modifier. based on the user’s selection the algorithm hence solves contradictions between the sbo term of a modifier and the corresponding species. see table  <dig> 
+sbo:0000317
+sbo:0000253
+sbo:0000252
+sbo:0000245
+sbo:0000244
+sbo:0000250
+sbo:0000247
+sbo:0000248
+sbo:0000285
+
+
+in order to ensure that the algorithm can process each reaction within submodel m′, it checks the following semantic rules:
+ if a reaction involves a gene or gene-coding region as reactant or its set of reactants is empty and all products are rna molecules, the reaction is recognized as transcription.
+
+ if the substrate species of a reaction are rna molecules or the reaction does not have any reactants and all products are forms of protein or poly-peptide chains, the reaction is recognized as translation.
+
+ if the stoichiometry of reactants and products is unity, the reaction can only be categorized as transcription if the only reactant is a gene or gene-coding region and it is only a valid translation if the only reactant is an rna molecule.
+
+
+
+
+
+more formally, a reaction is recognized as a transcription if
+  rallgenes∧∧∨∧pallrna 
+
+and the reaction will be considered a translation if
+  rallrna∧∧∨∧pallpolypeptides. 
+
+here, the boolean variables rallgenes and rallrna are true if all reactants represent genes or rna, respectively, and the values rstoichiometry and pstoichiometry denote the accumulated stoichiometry of all reactants or products, respectively, in sets of reactants rr and products pr of reaction r. the boolean variables pallrna and pallpolypeptides are true if the reaction produces rna or polypeptide molecules, respectively. a set of reactants or products is said to be empty if either a) no such set exists in reaction r; b) no element has been assigned to this set; c) the stoichiometry of each element within the list is zero; or d) if each element in the list is annotated with an sbo term derived from the term for empty set .
+
+depending on user preferences, the algorithm can set the boundary condition for each gene as part of this step.
+
+rate law selection
+after having reaction preprocessing and semantic checking completed, the algorithm assigns a list of applicable categories to each reaction within the submodel m′. algorithm  <dig> in additional file  <dig> depicts this procedure in detail. thereby the algorithm distinguishes between twelve such categories that are defined in table  <dig>  figure  <dig> displays examples for each category. these categories are not necessarily exclusive.
+
+no̲
+
+
+all kinetic equations are also assigned to one or multiple of these categories. the algorithm may now either collect all appropriate rate laws for the obtained reaction categories  or just the one rate law with highest priority. while the first method allows users to interactively select rate laws of choice, the latter option is important for the automatic selection of the most appropriate equation. see table  <dig>  the selection of one or multiple appropriate categories and in turn suitable kinetic equations for a reaction is based on a set of defined rules, which are here summarized and simplified for the sake of better comprehensiveness. the algorithm distinguishes the following three basic cases, which are not necessarily exclusive:
+the list of reactants is empty or the reaction is reversible and the list of products is empty. if the reaction does neither involve genes, gene-coding regions, nor rna molecules, then the algorithm can assign it to the zeroth reactant order reactions if also the list of reactants is empty, and to the zeroth product order reactions if it is reversible with an empty list of products. if it does involve genetic components, it can be assigned to the gene-regulatory reactions depending on its directionality. more formally, this category is selected if
+  ¬rallgenes∧rallrna∧pallrna∨isreversible∧ 
+
+and the category for zeroth reactant order rate laws will be assigned if rr=∅, otherwise with pr=∅ the category for zeroth product order rate laws will be assigned.
+
+the reaction has at least one reactant and if it is reversible also at least one product. if the reaction does neither have any enzymatic catalyst nor any non-enzymatic catalyst, it is assigned to the category of non-enzyme reactions with respect to its directionality. in case of unity stoichiometry on both sides of the reaction, and if the reaction follows the pattern of transcription or translation reactions, it is added to the category of gene-regulatory reactions. the pattern is satisfied if the reactant is a genetic element or an empty set and the product is an rna molecule or protein. more formally, the algorithm first evaluates the condition
+  ∧¬isreversible∨isreversible∧. 
+
+if then ∧∧¬e the reaction can be assigned to the non-enzyme reaction, where e is the user preference that decides if reactions without explicit enzyme can be considered enzyme catalyzed. otherwise, if rstoichiometry=1∧pstoichiometry=1∧ the reaction will be considered a gene-regulatory reaction.
+
+the preprocessing has revealed that the reaction is catalyzed by an enzyme. depending on user preferences, a reaction can also be recognized as enzyme-catalyzed process if no catalytic modifier is assigned to it. if the reaction is reversible with at least one product, the category of arbitrary enzyme reactions is assigned. next, the stoichiometry and directionality of the reaction are taken into account in order to determine if the reaction also belongs to the uni-uni, bi-uni, or bi-bi reactions. formally, this condition can be described as
+  ∨e∨isreversible∧pstoichiometry≥ <dig>  
+
+
+
+each reaction category is represented with one interface that can be implemented by rate laws that are applicable for this category. since one rate law can be useful for multiple categories, rate laws can also implement several of these interfaces. for all categories that can be applied to a reaction, the algorithm then compiles a list of concrete kinetic equations.
+
+the list of applicable kinetic equations is hence generated on the fly and only based on the general reaction categories. in this way, the program can easily be extended, because additional kinetic equations only need to declare the categories to which they can be applied and will automatically be available when the program is executed.
+
+additional rules apply when the algorithm compiles the list of rate laws based on reaction categories, because some rate laws can only be applied to certain combinations of categories. for instance, the enzymatic rate law for irreversible non-modulated non-interacting uni-reactant enzymes  can only be applied to irreversible reactions with integer but arbitrary stoichiometry, but does neither allow any stimulators nor inhibitors. thus, some categories exclude certain rate laws from being assigned to a reaction.
+
+the user can select one default rate law for almost all categories. no specific default rate law can be selected for the categories irreversible or reversible reactions, modulated reactions, or integer stoichiometry, because these cases mainly refine the other categories. instead, the selection of default rate laws is split into three major groups: a) gene-regulatory reactions ; b) reversible reactions; and c) irreversible reactions.
+
+this is necessary because some rate laws can only be applied to reversible reactions, others only to irreversible reactions.
+
+prioritization
+the identification of the category with highest priority works very similarly. for reactions with empty list of reactants a gene-regulatory reaction has higher priority than the zeroth reactant order . similarly, the algorithm first tries to assign a reaction to the gene-regulation category if it is reversible with an empty list of products, before assigning it to the zeroth product order reactions. non-enzymatic reactions have higher priority than any enzymatic reaction. if the reaction is enzyme-catalyzed, the algorithm tries to first assign the most detailed category before it chooses an arbitrary enzyme reaction category. hence, the algorithm determines one category for each reaction and applies the default rate law from this category to the reaction. in case of conflicts there are two final fall-back rate laws that can be applied if no other rate law can be selected: a for non-enzyme reactions, the generalized mass-action rate law  <cit> ; and b the convenience rate law  <cit>  for any kind of enzyme-catalyzed reaction.
+
+both rate laws can be applied to reversible and irreversible reactions with arbitrary stoichiometry and can be combined with pre-factors for modification  as needed. when creating rate laws for individual reactions, a complete list of all applicable rate laws for the reaction of interest is compiled.
+
+when convenience rate laws are used, the algorithm prefers the simple form and applies the thermodynamically independent form only if the system does not have full column rank. to this end, the program calculates the rank of the stoichiometric matrix using the gaussian algorithm. this rank check is performed only once for the given model and only executed if at least one reaction exists, for which a convenience rate law is selected. note that the algorithm calculates the rank for the full stoichiometric matrix and not just for the current submodel. this is crucial, because in many cases submodels would only contain one reaction, and thus the rank would be full.
+
+rate law creation
+applying a rate law to the reaction means that the algorithm has to construct an abstract syntax tree, which symbolically represents the kinetic equation for the reaction. to this end, the reaction needs to be analyzed again and all of its components need to be taken into account as relevant for the selected rate law . an example for such a syntax tree can be seen in fig.  <dig>  which has been created for the phosphoglucomutase  reaction
+  d-glucose 1-phosphate⇌phosphoglucomutased-glucose 6-phosphate, fig.  <dig> reaction context dialog of sbmlsqueezer  <dig>  when using sbmlsqueezer as a stand-alone program, this dialog pops up upon right-clicking on a reaction in the model data structure. all available kinetic equations that can be potentially applied to the selected reaction are listed and can be selected via radio buttons. a tool-tip displays detailed information about each rate law and an equation renderer displays a preview of the equation. furthermore, this dialog also provides a few particularly important settings: a) it allows users to choose whether newly generated parameters should be created as local parameters within the kinetic law or global model parameters, b) if the reaction’s directionality should be changed, and c) if the reaction should be considered an enzyme-catalyzed reaction. in situations where a catalyst is assigned to the reaction that is recognized as an enzyme  or as a non-enzyme this option will not be accessible. the model used in this example is described in  <cit> 
+
+
+
+whose schematic corresponds to the diagram displayed in fig.  <dig> c. this tree represents a rate law for non-modulated enzymes in reactions with only one substrate molecule, which reads
+  vpgmx→,t,s,w,p→=vm+km1·g1p−vm−km2·g6p1+km1+km <dig>  
+
+in order to ensure unit consistency of the equation, it can be necessary to multiply or divide reactive species with/by their surrounding compartment. user preferences and the units of the species determine if and which of those operations is required, because in sbml, each reaction should yield units of extent per time. two cases need to be distinguished:
+if a species has only substance units and the user decides to bring all species to concentration units, the species must be divided by its surrounding compartment.
+
+if a species is given in concentration units and the user wants to bring all species to substance units, then a multiplication of the species with its surrounding compartment is required.
+
+
+
+depending on the type of rate law that is being created and the structural composition of the reaction, a certain number of parameters needs to be constructed. this can include forward or backward rate constants, limiting velocity rates, inhibition or stimulation constants, thermodynamic properties, and many more. these parameters can be incorporated as local or global parameters. to this end, the algorithm first collects all parameters in a separate list and transfers them to the submodel only when a rate law is to be applied. just as for species, parameter objects need to be equipped with appropriate units. the units of many parameters also depend on the structure of the reaction, for instance, the number and units of all reactants. because of this connection, it can be necessary to also take the units of compartments into account when deriving the units of parameters in order to obtain extend by time units for the overall rate law. the algorithm equips each newly created parameter with a meaningful name and identifier as well as an appropriate sbo term.
+
+if during this step additional units or unit definitions need to be added to the submodel, these are simplified as much as possible, annotated with a miriam identifier pointing to the units ontology, and equipped with meaningful names and identifiers as appropriate. the algorithm avoids creating duplicate unit definitions by checking the model for identical existing unit definitions before adding a new one. if possible, the newly created kinetic equation is also annotated with a corresponding sbo term. due to the large number of sbo terms that can be created by the algorithm, a comprehensive list of all cases is omitted in this document.
+
+whenever a kinetic equation that involves stoichiometry values is created for models in sbml level  <dig>  <cit> , the algorithm inserts the id of the corresponding species reference rather than the actual numerical value of the stoichiometry into the rate law. this gives the advantage that model changes can be directly reflected in the rate law, hence increasing the consistency of models. at the same time, it avoids the problem that units and meaning of single numerical values might not always be clear.
+
+model merging
+finally, all relevant changes in the submodel are synchronized to the original model. this includes all newly created units and unit definitions, local and global parameters, annotations, mathematical equations, reversibility flags, and boundary condition flags. if species have been deleted from reactions, because their miriam annotation was on the ignore list, this change is skipped and not synchronized, so that the structure of the model will remain identical. in the graphical user interface, the user can also disregard the changes.
+
+details of extraction of rate laws from sabio-rk
+the algorithm first generates a url that is used to query the sabio-rk database. this url comprises the search terms and the respective kegg reaction id. the url begins with the prefix http://sabio.h-its.org/sabiorestwebservices/searchkineticlaws/sbml?q=. each search term and its given value extend this base url with keyword:value. if a search term is associated with a range , the url is extended with keyword:. the keywords for the terms are presented here: http://sabio.h-its.org/layouts/content/docurestfulweb/searchkeyvoc.gsp. the operator ␣and␣ connects multiple keyword-value pairs in the query.
+
+the url for querying points to an extended markup language  document for download. in the case of success, the xml document will be an sbml document with all kinetic laws found for the query. otherwise, sabio-rk returns an xml document with an error message and the algorithm terminates with a user message.
+
+since this algorithm mainly operates on models obtained from sabio-rk it is not necessary to create a submodel copy of the local model beforehand . changes are only applied upon user agreement or in batch mode. this is done by merging required components from the downloaded model into the local model. for this reason, the local model does not change, before rate laws are applied.
+
+RESULTS
+in this section we will describe: a the rate law selection algorithm implemented by sbmlsqueezer  <dig>  b the process implemented for extraction of rate laws from sabio-rk  <cit> , and c the new features of the sbmlsqueezer  <dig> stand-alone software over the previously published sbmlsqueezer plugin for celldesigner.
+
+the approaches described in this article are based on the model definition in sbml format  <cit> , but similar approaches would also be possible for other modeling formats that support kinetic equations.
+
+both the rate law construction and extraction algorithms assume that the structure of the systems biology model m is known and encoded in the two matrices s and w, whose interplay can be described by the following equation  <cit> :
+  dx→dt=s·v→x→,t,s,w,p→, 
+
+where t denotes the time, x→ the reactive species, s the stoichiometric matrix, and v→ the vector of kinetic equations that are to be generated. the modulation matrix w  <cit>  and the parameters p→ influence the mathematical structure of the equations in v→. the algorithm also assumes that the user has defined a set r of reactions for which rate laws are to be created or extracted from sabio-rk. r may comprise all reactions in m, or a selection of particularly interesting reactions. an overview of these two methods to build kinetic equations for m can be seen in algorithm  <dig> in additional file  <dig> for the de novo construction and in algorithm  <dig> in additional file  <dig> for the sabio-rk extraction. we now take a closer look at both methods and their algorithmic details.
+
+de novo rate law generation
+the main idea of the algorithm for de novo rate law creation is that the vast majority of biochemical reactions can be grouped into a limited number of categories . the rate law selection algorithm takes several features of the reaction into account in order to discriminate these categories. the most important sources of information in determining these categories are miriam  and sbo annotations  <cit>  of model components, although models can also be evaluated if no such information is given. for each category, the algorithm either determines all kinds of principally applicable rate laws, or automatically selects the most suitable rate law. this decision process is performed by a prioritization function , the algorithm creates a submodel m′ that only comprises those reactions in the set r for which rate laws are to be created. all relevant model components, such as species, compartments, units, etc. are copied into this submodel. operating on this trimmed copy of the full model has the advantage that changes of the algorithm do not affect the original data structure and can be easily disregarded. when creating this submodel, the algorithm also checks if fall-back units are defined for all components. this is crucial in order to avoid problems in later steps. depending on which units are missing, it generates units for area, reaction extent, length, substance, time, and volume just as the default units in sbml level  <dig> version  <dig>  <cit>  would be defined. all subsequent steps can hence assume that every model component has a defined unit.
+
+the algorithm then iterates through all reactions within the submodel m′ and performs several preprocessing steps, before an appropriate type of rate law can be selected and created. the preprocessing steps . thereby, the algorithm avoids recreating already existing units. when the algorithm has processed all reactions, the modifications in submodel m′ need to be merged back into the original model m.
+
+extraction of rate laws from sabio-rk
+the extraction of rate laws from the database sabio-rk requires a model m  and query terms q as input. all possible values for the query terms can be found in additional file  <dig>  just like for the de novo creation of rate laws the algorithm can either process all reactions within the model or one particular reaction. to this end, the algorithm creates one query url for each reaction, for which a rate law should be extracted from sabio-rk. after obtaining a model m′ in form of an sbml document from sabio-rk, the algorithm extracts all kinetic laws from m′ and tries to match all elements contained in a kinetic law to elements in the input model m. this matching is based on the miriam annotations of model components and involves the search for one corresponding
+species in the local model for each species that participates in the kinetic law.
+
+compartment in the local model for each compartment addressed in the kinetic law .
+
+reaction in the local model for each reaction in the kinetic law.
+
+species reference for each species reference in the kinetic law within each such identified local reaction. this species reference needs to refer to a species with an annotation similar to that of the species referenced by the species reference in the found rate law.
+
+
+
+in this context, an annotation of two sbml elements is considered similar and hence these elements are considered a match if both have controlled vocabulary terms in common that are linked through qualifiers has version or is.
+
+in the batch mode, the algorithm always selects the first kinetic law in the query results for which all elements can be matched to respective elements in the model. the algorithm adds this rate law to the reaction in the local model m. this merging involves
+substituting all elements in the found kinetic law with the matched elements in the model; and
+
+adding unit definitions, function definitions, global and local parameters contained in the kinetic law to the model.
+
+
+
+when rate laws are obtained from sabio-rk for individual reactions, the algorithm presents a list of all rate laws found for the given query to the user, who can then select the most appropriate equation. in cases when the selection of the first law with a successful matching does not lead to a satisfying outcome, the single reaction mode might yield better results.
+
+new features in sbmlsqueezer 2
+the original version of sbmlsqueezer was developed as a plugin for celldesigner  <cit> . version  <dig>  was later released with additional features  <cit> . the work presented here describes the expansion of the plugin to a full stand-alone software package alongside numerous algorithmic and technological advances. sbmlsqueezer  <dig> has been significantly refactored and provides a large number of new features, which are described in this section.
+
+the number of supported rate equations has been greatly extended. for example, the program now includes all five modular rate laws described in recent work in kinetic equations for large-scale kinetic modeling  <cit> . additionally, ten specific rate laws for gene-regulatory processes have been added:
+hill-hinze equation  <cit> 
+
+hill-radde equation  <cit> 
+
+linear additive network models   <cit> 
+
+non-linear additive network models 
+
+s-systems  <cit> 
+
+h-systems  <cit> 
+
+
+
+furthermore, sbmlsqueezer  <dig> contains a new module that automatically derives units for all new parameters. this feature is among the most complex capabilities of the program, because numerous aspects of the reaction need to be taken into account in order to ensure unit consistency. this comprises, for instance, the diverse fallback units in the model , if the species involved are declared in concentration or amount units together with size and unit of their compartment, if reaction participants reside in different compartments, etc. the program needs to set units off against each other in order to cancel out terms, which is not trivial. handling these issues manually can become an immensely time-consuming task, and thus automatic unit handling is one of the most valuable features of the package.
+
+the algorithms are now entirely based on sbo- and miriam annotations  <cit>  rather than on celldesigner-specific information. this change was necessary in order to create a stand-alone version of the program. sbmlsqueezer now not only understands annotations, it also annotates created objects  with sbo terms and where possible also with miriam controlled vocabulary terms. this new feature significantly increases quality and reusability of models.
+
+a connection to the rate law database sabio-rk  <cit>  has been added and allows users to directly insert experimentally obtained rate laws from this database in addition of deriving generic equations. in particular, the access to sabio-rk now enables the program to contribute to bottom-up knowledge-based model development as a complementary feature to the extended top-down rate law generation. the dialog for access to sabio-rk is similar to the online database service and uses the annotation of the reaction and its components to identify the best match in sabio-rk. then, rate laws, parameters, units, and annotations are transferred from sabio-rk to the local model. rate law generation and extraction from sabio-rk can be performed for individual reactions  or for the entire model in a single step. algorithms  <dig> and  <dig> in additional file  <dig> show how both methods of the program interact. sbmlsqueezer facilitates the rate law prioritization by presenting an equation preview, which assists the user to make this decision.
+fig.  <dig> abstract syntax tree for an enzymatic rate law for non-modulated unireactant enzymes . this tree has been constructed for the phosphoglucomutasereaction in model ijo <dig>  <cit> , in which \textsc{d}-glucose1-phosphate  is reversibly converted to \textsc{d}-glucose6-phosphate
+. the program internally constructs all equations in form of syntax trees, which can contain references to objects in the sbml document. in this example, the tree contains the parameters v
+m+ and v
+m− for the forward and reverse maximal reaction velocity , k
+m <dig> and k
+m <dig> for the michaelis constants of the reactant and product , the plain numerical value  <dig> , as well as references to the species g1p and g6p . all internal nodes represent mathematical operators
+
+
+
+the celldesigner plugin mode is now only one of many ways to use the program. sbmlsqueezer can now be used as a online program , b stand-alone tool via graphical user interface or command-line, c plugin for celldesigner, d garuda gadget, and e through its api in complex workflows and algorithms.
+
+the comprehensive users’ guide  gives code examples and details how to benefit from all program features in each described environment.
+
+additionally, sbmlsqueezer can now deal with all levels and versions of the sbml format, from level  <dig> version  <dig> through level  <dig> version  <dig>  whereas celldesigner is restricted from sbml level  <dig> version  <dig> up to level  <dig> version  <dig> 
+
+CONCLUSIONS
+sbmlsqueezer  <dig> is a mature and stable application that can be applied in diverse ways. sbmlsqueezer can easily be integrated into versatile model construction workflows. as an example, draft models can be first obtained from the model database bigg  <cit>  or be generated with the program keggtranslator  <cit> . second, sbmlsqueezer can be used to generate kinetic equations for all reactions in the draft models. finally, the program sbmlsimulator  <cit>  can estimate the unknown values of the model parameters by fitting the models to experimental data. we note that while the de novo creation method guarantees that a rate law can always be created, the extraction from sabio-rk depends on existing biochemical data and might therefore not always yield results. a combination of both methods would therefore be recommended to quickly create an initial kinetic model. the users’ guide  explains in detail how to utilize all program functions and provides several sample use-cases.
+
+while sbmlsqueezer  <dig> has made substantial progress in addressing the challenges of automated rate law generation, there are still many possible extensions. for example, in order to support mathematical equations for transition functions in logical models, it would be possible to derive similar methods based on the sbml extension for qualitative models  <cit> . furthermore, as network reconstructions continue to expand beyond metabolism, more detailed rate laws applicable to transcription and translation modeling may continue to be implemented as part of the capabilities of the package. the advantages of sbmlsqueezer lie in the interfaces to established systems biology databases and data standards, features that will remain useful even as the preference in rate laws shift as the field develops.
+
+the software has already been proven to be useful in diverse applications. examples include synthetic biology  <cit> , mechanistic modeling of methicillin-resistance in bacteria  <cit> , explaining dynamic damage response in human fibroblasts after exposing them to γ radiation  <cit> , drug discovery  <cit>  and drug effect modeling  <cit> , and modeling complex signaling cascades  <cit> . endeavors such as the path2models project  <cit>  have additionally demonstrated the usefulness of automated rate law assignment. furthermore, the internal data structure of sbmlsqueezer has become a separate large-scale community effort leading to the development of jsbml  <cit> , which is now a separate project used by numerous other research groups. utilizing sbmlsqueezer  <dig>  rigorous kinetic modeling efforts involving complex try-and-evaluate cycles, for example where the most suitable rate law for a certain reaction needs to be identified in repeated simulation runs  <cit> , become increasingly manageable tasks.
+
+availability and requirements
+program, source code, and documentation can be obtained under the terms of the gpl version  <dig> from the website. project name: sbmlsqueezer project homepage:http://www.cogsys.cs.uni-tuebingen.de/software/sbmlsqueezer/contact:sbmlsqueezer@googlegroups.comoperating systems: platform independent, i.e., for all systems for which a javatm is available. programming language: java™ other requirements java™ runtime environment   <dig>  or above license: gnu general public license  version  <dig> any restrictions to use by non-academics: none
+
+endnotes
+1http://opencobra.github.io/mass-toolbox/
+
+ <dig> up-to-date versions of the users’ guide can be found at the project website.
+
+additional files
+additional file  <dig> 
+users’ guide. this pdf file contains a comprehensive description of the program sbmlsqueezer. it includes details about all of its functions of the gui, command-line options, example use cases, and source code examples for using sbmlsqueezer as an api library. 
+
+
+
+additional file  <dig> 
+algorithms of sbmlsqueezer. this pdf document explains all main algorithms of sbmlsqueezer in detail using pseudocode and additional descriptions. 
+
+
+
+abbreviations
+apiapplication programming interface
+
+asrnaantisense rna
+
+biopaxbiological pathway exchange language
+
+faqfrequently asked questions
+
+gplgnu general public license
+
+guigraphical user interface
+
+htmlhypertext markup language
+
+ididentifier
+
+ideintegrated development environment
+
+jdkjava™
+
+development kit; jrejava™
+
+runtime environment; jvmjava™
+
+virtual machine; jarjava™
+
+archive; lgplgnu lesser general public license
+
+keggkyoto encyclopedia of genes and genomes
+
+miriamminimal information required in the annotation of models
+
+mrnamessenger rna
+
+pdfportable document format
+
+pgmphosphoglucomutase
+
+restfulrepresentational state transfer
+
+rnaribonucleic acid
+
+sbgnsystems biology graphical notation
+
+sbmlsystems biology markup language
+
+sabio-rksystem for the analysis of biochemical pathways –
+
+reaction kinetics; sbosystems biology ontology
+
+urluniform resource locator
+
+xhtmlextended html
+
+xmlextended markup language
+
+aset of activators and stimulators
+
+cset of non-enzyme catalysts
+
+dset of default rate laws for each category
+
+eboolean variable that is true if all reactions should be assumed enzyme-catalyzed
+
+eset of enzymes
+
+iset of inhibitors
+
+kselected rate law for the current reaction
+
+kset of potentially applicable rate laws for a reaction
+
+mmodel
+
+m′trimmed model copy
+
+p→vector of model parameters
+
+pallpolypeptidesboolean variable that is true if all products represent polypeptides
+
+pstoichiometryaccumulated stoichiometry value of all products
+
+prset of products
+
+qset of query terms for sabio-rk
+
+rallgenesboolean variable that is true if all reactants represent genes
+
+rallrnaboolean variable that is true if all reactants represent rna molecules
+
+rstoichiometryaccumulated stoichiometry value of all reactants
+
+rset of all reactions in a model
+
+rfeaturesset of characteristic reaction features
+
+rrset of reactants
+
+sstoichiometric matrix
+
+ttime
+
+v→vector of reaction velocities
+
+wmodulation matrix
+
+xspecies from vector x→
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+ad conceived the project, wrote the majority of the source code, coordinated the contribution of several students in software development projects, drafted this manuscript, and wrote the users’ guide for sbmlsqueezer. rk and mr implemented the sabio-rk access module. je developed the web service infrastructure. az has been involved in study design, drafting the manuscript, and supervised the work of ad, rk, mr, and je. dcz and bop critically revised the manuscript for important intellectual content. all authors read and approved the final manuscript.
+
+authors’ information
+
+not applicable.
+

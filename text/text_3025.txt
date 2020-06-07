@@ -1,0 +1,96 @@
+BACKGROUND
+when two non-essential genes are simultaneously deleted, sometimes a surprising phenotype emerges compared to the phenotype of the deletion mutants of the single genes. when studying the yeast genome, often this can be quantified in terms of the growth rate of the double deletion mutant, compared to the growth rate of its component single deletion mutants, termed epistasis  <cit> . recent sga  <cit> , dslam  <cit>  and e-map  <cit>  technology produces high throughput weighted epistasis values for large collections of double knockouts.
+
+a variety of algorithmic methods have been proposed to infer functionally meaningful relationships between genes based on the structure of their epsistatic genetic interactions  <cit> . in particular, we consider the generalized “between pathway model”  as studied by leiserson et al <cit> . as discussed in  <cit> , this involves finding pairs of sets of genes, where the sum of the epistasis values between genes in different sets, minus the sum of the epistasis values between genes in the same set, is as negative as possible. this is a generalization of an unweighted bpm model studied by ma et al.  <cit>  and brady et al.  <cit> , which was a simplification of the original bpm model introduced by kelley and ideker  <cit> . other versions of bpms, in different settings or criteria, have been studied  <cit> .
+
+leiserson et al.  <cit>  presented a randomized algorithm based on maximal graph cuts to generate these putative generalized bpms from weighted epistasis data. they showed that the bpms produced by their method were biologically enriched when their method was run on several different yeast e-map and sga data sets  <cit> . we now present a full implementation, genecentric, of this algorithm that is fast, easy to use, well documented and open source. in addition, genecentric has an extension that performs go enrichment analysis using funcassociate’s web service api  <cit> .
+
+implementation
+genecentric implements a randomized algorithm to generate putative generalized bpms as described in leiserson et al <cit> .
+
+algorithm
+genecentric takes as input a file with genetic interaction data and outputs a list of pairs of sets of genes corresponding to the putative generalized bpms. the genetic interaction data must be in a tab-delimited format where each row corresponds to a gene pairing and that pairing’s interaction score. specifically, the first column contains the first gene identifier, the second column contains the second gene identifier, and the third column contains the interaction score.
+
+we’ll now brielfy recap the algorithm described in leiserson et al <cit> .  first, the input genetic interaction data is used to create m random bipartitions, where the vertices correspond to genes and an edge between genes corresponds to its interaction score. second, each random bipartition is transformed into a localmaxcut by iteratively modifying it until every vertex in the graph satisfies the following property: the sum of its edges to other vertices in the same partition is greater than the sum of its edges to other vertices in the other partition. third, every unique gene g in the interaction data generates a bipartite subgraph  from this set of m bipartitions. namely, one partition of the bpm includes g and every gene from the m bipartitions that is in the same partition as g at least c% of the time. the other partition of the bpm includes every gene from the m bipartitions that is in the opposing partition as g at least c% of the time. finally, the set of all bpms from all the genes is pruned, either to remove bpms whose partite sets are too small or too large , or to remove substantially overlapping bpms generated from different genes g from the set.
+
+since a couple of the steps in the aforementioned algorithm involve many independent calculations, genecentric parallelizes those computations automatically using the multiprocessing module included in the python standard library. therefore, large data sets can be used to generate bpms in reasonable time. genecentric was able to produce bpms for a data set containing  <dig> , <dig> genetic interactions in a few hours on an amd  <dig> core linux machine with default parameters. on a smaller data set , genecentric produces bpms in under a minute on the same  <dig> core machine.
+
+parameters
+there are several parameters that can be set to customize genecentric. firstly, genecentric can modify the underlying weights on the edges of the genetic interaction data. in particular, leiserson et al.  <cit>  left sga weights unchanged, but squared e-map weights  to speed convergence.
+
+the user may also set m, the number of randomized bipartitions , and c, the proportion of the time a gene must be on the same or opposite side as gene g in order to be included in g’s bpm .  note that because genecentric is a randomized algorithm, the set of bpms produced will not be the same for every run; however, as m increases, the results will converge. leiserson et al.  <cit>  showed that with values of at least  <dig> and  <dig>  for m and c respectively, different runs of the algorithm will produce similar results. m and c can be customized, but making m or c much smaller is not recommended since there could be too much variability between different runs of the randomized algorithm. alternatively, increasing m can further decrease variability, but at a runtime performance cost.
+
+by default, genecentric will prune the bpm set returned to avoid repeating many overlapping, similar sets. but there are also several pruning options that are completely configurable in genecentric. the first is the jaccard index, j , which specifies the similarity threshold of the resulting bpms. namely, every pairing of bpms in the output is guaranteed to have a jaccard index less than j . the final two pruning options, “minimum-size” and “maximum-size” , filter the resulting set of bpms so that no bpm has a module with fewer than “minimum-size” genes and no bpm has a module with more than “maximum-size” genes.
+
+recall that genecentric outputs a tab-delimited file which contains a list of pairs of sets of genes corresponding to its putative generalized bpms. this file can be used as input to genecentricgo which performs go enrichment analysis on the bpms using funcassociate  <cit> . genecentricgo can also be configured with several parameters. of them, the most notable are the p-value cutoff  and the genespace. the p-value cutoff corresponds to the p-value cutoff in funcassociate: only sets of genes whose p-value is less than or equal to this cutoff will be returned in the results. the genespace is by default set to only the genes in the input genetic interaction data, but can be toggled to use all genes recorded for that species by funcassociate. genecentricgo also provides an interface to use different species and namespaces with funcassociate.
+
+finally, genecentricgo by default automatically employs the funcassociate multiple-testing correction by setting the “simulations” parameter to the greater of  <dig> and the number of bpm modules, where  <dig> is the default value set by funcassociate. this value is also capped at  <dig> by funcassociate. 
+
+RESULTS
+we ran genecentric on the same e-map dataset as discussed in the leiserson et al. paper  <cit> , and showed that it produced comparable results . we set out next to show that genecentric with default or nearly default parameters can be run “out of the box” to produce meaningful results that corrolate well with the biological literature on other datasets as well. in particular, a recent study  <cit>  produced an e-map dataset of  <dig> genes involved in various aspects of plasma-membrane biology, including endocytosis, signaling, lipid metabolism and eisome function. we ran genecentric on this e-map dataset using all default parameters except the weights were squared, as leiserson et al.  <cit>  recommends for e-map data, and c was lowered from. <dig> to. <dig> in order to produce more bpms . since default parameters were used, go enrichment was computed by funcassociate with a genespace consisting of only genes from the e-map data set. of these  <dig> bpms,  <dig> exhibited go enrichment in both gene sets, according to the genecentric funcassociate go module, whereas an additional  <dig> exibited go enrichment in one gene set of the bpm. these enrichment rates, while good, are still somewhat below the percentage enrichment reported for the chrombio e-map dataset in  <cit> , perhaps because the component genes in this plasma-membrane e-map data set are not all as well studied, and thus fewer functional annotations are yet known.
+
+of the  <dig> bpms that exhibit enrichment in both gene sets,  <dig> have one set that contains the genes coding for proteins cog  <dig>   <dig>   <dig>  and  <dig>  and there is some additional overlap in some of the genes in these bpms . table  <dig> shows a list of these bpms and corresponding go enrichment terms. figure  <dig> depicts one of these bpms by showing edges for physical and genetic interactions between each pair of genes.
+
+this table lists several bpms generated where one module contains genes in the cog complex. selected enriched go terms are included, and bolded genes have been enriched for at least one of the go terms listed. for complete go enrichment results, please see the additional file  <dig> 
+
+ the proteins encoded by cog  <dig>   <dig>   <dig> and  <dig> constitute a structural component known of the conserved oligomeric golgi  complex, an important peripheral golgi apparatus protein structure that has been most significantly implicated in retrograde trafficking  <cit>  and has additional roles in supporting golgi apparatus structure  <cit>  and glycosylation  <cit> . it is a hetero-octamer consisting of two lobes, a and b, that are both comprised of four proteins, cog 1- <dig> for lobe a and cog 5- <dig> for lobe b. recent studies have also identified cog  <dig> as the linking unit between the two lobes of the complex  <cit> . four out of the eight cog proteins have significant homology with other organisms, including mammals, and studies have shown that mutation of cog proteins in humans can lead to a group of serious conditions known as congenital disorders of glycosylation  <cit> . deletions in cog 1- <dig>  in saccharomyces cerevisiae cause severe growth defects, but cog 5- <dig> have been shown to be non-essential  <cit> . additionally, the mutations that cause these severe growth defects are phenotypically distinct, indicating different roles for the different subunits of the cog complex  <cit> . other genes that occur multiple times in the same set as the cog proteins in the bpms include pib <dig>  a protein that binds phosphatidylinositol 3-phosphate, involved in vesicle-mediated transport. phosphatidylinositol-3-phosphate, together with small gtpases, is also an important factor for sorting in the endocytic pathway  <cit> . other proteins were ccz <dig>  a protein involved in vaculolar transport and vesicle docking, arf <dig>  arf <dig> and gcs <dig>  where arfs are gtpases of the ras superfamily that regulate the formation of coated vesicles in intracellular trafficking  <cit>  are regulated by the gtpase activating protein gcs <dig>  <cit> . ric <dig>  a gtpase invovled in localization of trans-golgi membrane proteins  <cit>  and mrp <dig>  whose function is not known, also appear. 
+
+on the opposite module of the bpms containing cog proteins, frequently occuring genes include vps <dig> and pep <dig>  components of the retromer complex needed for retrograde transport, as well as vps <dig>  a protein associated with proper vesicle formation. additionally, the protein got <dig>  which plays a role in secretory transport  <cit>  was found, which further hints at the variable function of the cog complex and its subunits. the second module also contained the genes encoding for the arl <dig>  sys <dig>  and arl <dig> proteins—which are involved in vesicle tethering at the golgi apparatus  <cit> . it is interesting that, different from the datasets discussed in the leiserson et al paper  <cit> , a large percentage of the enriched bpms contain the same cog complex. we don’t know if the popularity of the cog complex in our results is simply because of what annotation is known, something about the interaction of the algorithm with the distribution of the e-map weights, or multiple roles for the cog complex that make it especially able to compensate for multiple different biological processes.
+
+in addition to the bpms containing the cog complex, there are two dually enriched and seven singly enriched bpms . we note that some of the bpm modules—that do not show up as go enriched—support functional coherence when we dig more deeply into the literature. for example, a module in one of our bpms, rtg <dig> alp <dig> pep <dig> xrn <dig> bch <dig> rtg <dig> siw <dig>  is not flagged as go-enriched by funcassociate, but we found that rtg <dig> and rtg <dig> are known to be involved in the retrograde signalling pathway. pep <dig> is a multifunctional yeast syntaxin that controls entry of biosynthetic, endocytic and retrograde traffic into the prevacuolar compartment  <cit> . bch <dig> is a member of a complex that mediates the export of specific cargo proteins from the golgi to the plama membrane  <cit> .
+
+this table lists bpms which have both modules enriched and do not include all of the cog  <dig>   <dig>   <dig> and  <dig> genes. selected enriched go terms are included, and bolded genes have been enriched for at least one of the go terms listed. for complete go enrichment results, please see the additional file  <dig> 
+
+this table lists enriched modules from bpms which have only one module enriched for go terms. selected enriched go terms are included, and bolded genes have been enriched for at least one of the go terms listed. for complete go enrichment results, please see the additional file  <dig> 
+
+ a full list of genecentric bpms is provided in the additional file  <dig> 
+
+CONCLUSIONS
+we have introduced genecentric, a package that can automatically accept a set of high-throughput genetic interaction data, and output generalized bpms along with their enrichment values. genecentric has several features that make using it both easy and fast: 
+
+• its only dependency is python—no compilation steps or third party libraries are required. any system capable of running python should also be able to run genecentric.
+
+• all of the parameters of the algorithm are easily configurable using genecentric’s command line interface.  the parameters are by default set to those used in  <cit> : m= <dig>  c= <dig>  and j= <dig> .
+
+• genecentric automatically takes advantage of multiple cpus.
+
+• input data can be read directly from genetic interaction data files. the user may specify an additional set of genes to exclude from bpm generation .
+
+• genecentric is species and gene identifier agnostic. 
+
+• code is well documented and could be extended easily.
+
+finally, we provided an extension to genecentric that can perform gene ontology  enrichment on a set of bpms. genecentric uses funcassociate’s web api to achieve this, and parameters like genespace, namespace and p-value are configurable on the command line.
+
+availability and requirements
+project name: genecentric
+
+project home page: http://bcb.cs.tufts.edu/genecentric
+
+operating system: platform independent
+
+programming language: python
+
+other requirements: python  <dig>  or higher
+
+license: gnu general public license version 2
+
+any restrictions to use by non-academics: no
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+conceived and designed the project: ag and bh. algorithmic development: ml, lc and bh. implemented the software: ag. analyzed the data: ag, mk, lc and bh. wrote the paper: ag, lc and bh. all authors read and approved the final manuscript.
+
+funding
+this work was partially funded by the national institutes of health .
+
+supplementary material
+additional file 1
+all bpms generated with go enrichment. a full list of bpms generated by genecentric from e-map data with  <dig> genes involved in various aspects of plasma-membrane biology, including endocytosis, signaling, lipid metabolism and eisome function.
+
+click here for file
+
+ acknowledgements
+thanks to noah daniels for many helpful discussions. we would also like to thank kenny chua and the rest of the funcassociate development team for incredibly quick and helpful responses to our questions. finally, we extend our thanks to the anonymous reviewers who provided feedback that made both our code and paper better.

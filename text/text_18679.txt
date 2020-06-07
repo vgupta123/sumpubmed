@@ -1,0 +1,208 @@
+BACKGROUND
+dna methylation is one of the most important epigenetic mechanisms, deeply affecting chromatin structure and gene expression. this modification consists of the addition of a methyl group to the fifth carbon in cytosine nucleotides, and can be detected to various degrees of resolution by using techniques such as bisulfite sequencing  <cit>  , microarrays  <cit> , or methylated dna immunoprecipitation   <cit>  . bs-seq is, up to date, the gold-standard technique to detect cytosine methylation at single-base resolution. by treating dna with sodium bisulfite, unmethylated cytosines are converted to uracils, while methylated cytosines remain unaffected. after pcr amplification and sequencing, the overall effect is that reads contain thymines in places where the original genome contains unmethylated cytosines. aligning bs-treated reads poses several computational challenges. first of all, reads coming from highly unmethylated genomic regions are characterized by low cytosine contents . this loss of genomic complexity results in a higher number, with respect to more methylated regions, of ambiguous alignments in such regions, thus leading to potential biases. a second problem is the high number of c-to-t  mismatches, which must be efficiently managed during the alignment phase and, most importantly, must not be source of penalization since they can potentially represent bisulfilte conversion rather than sequencing errors or snps. moreover, space is often a concern during both alignment and methylation calling phases: the tools should use light data structures , and the methylation annotations—several data fields for each cytosine on both strands—should be somehow compressed on-the-fly by the caller itself.
+
+these problems have been handled by existing tools to various degrees of efficiency. software such as bismark  <cit> , brat-bw  <cit> , bs-seeker  <dig>  <cit> , and methylcoder  <cit>  adopt the approach of converting both genome and reads files to a reduced alphabet, turning all cs into ts , and calling a standard dna aligner  on the converted files. this technique removes the bias towards poorly methylated regions by leveling mapping efficiency across all regions, and solves the problem of efficiently dealing with the high number of c-to-t mismatches. a different approach—to allow c-to-t mismatches by using wild-card techniques—is adopted by tools such as bsmap  <cit>  and rmap  <cit> . a mixture of the two strategies is also possible: the bs-aligner erne-bs <dig>   <cit>  uses a bisulfite-aware hash function invariant under bisulfite-induced mismaches, thus avoiding the conversion of genome and reads to a reduced alphabet.
+
+as far as primary memory is concerned, the most memory-efficient aligners are those based on the full-text in minute space index   <cit>  data structure . bismark, bs-seeker, and methylcoder run instances of bowtie on the converted files, and use the output alignments to infer methylation status of covered cytosines. erne-bs <dig>  and bsmap, on the other hand, are based on less memory-efficient data strucures  and require up to  <dig> gb to index the human genome. in this paper we will firstly show how we turned the hash index of erne-bs <dig> into a much more space-efficient data structure, the db-hash  <cit> . this is done by using a hash function with three properties: hamming-aware , bisulfite-aware , and de bruijn . the new versions of our tools heavily optimize also ram usage during methylation calling , and i/o disk space usage: fastq files can be provided to erne-bs <dig>  <dig> directly in compressed format, and the methylation caller erne-meth  <dig> can automatically compress methylation annotations .
+
+finally, we will discuss how experimental techniques different than whole-genome bisulfite sequencing  require specialized tools able to exploit additional information provided by the protocol. examples of such techniques are reduced representation bisulfite sequencing  and capture followed by bs-seq, which permit focusing the sequencing effort on a small amount of well-defined targets. as a result, only regions of interest are sequenced  and consequently reliably analysed. a well known example of the latter strategy is agilent’s sureselect human methyl-seq kit, which enriches  for  <dig> million bases  distributed among cpg islands, promoters, and cancer and tissue-specific differentially methylated regions . from the computational point of view, the problem of aligning bs-treated reads coming from a target-enrichment experiment is not much different from the one of aligning wgbs reads: even in the former case the alignment should be performed against the whole genome in order to discard false positive alignments that fall outside target regions . target information can, however, be exploited in the next pipeline stages—quality filtering of bases, methylation calling, dmrs identification—in order to speed-up and enhance the quality of the analysis process . in this paper we will show how we extended the functionalities of erne-meth to include the possibility of exploiting target information  during methylation reconstruction.
+
+methods
+this section is divided in three main parts. first of all, we describe how we solved the problem of combining hashing and  indexing by using hash functions with the property of being homomorphisms on de bruijn graphs. this result has been presented in  <cit> , and here we just report the main ideas in order to be as self-contained as possible. in the same sub-section we also review the definition of hamming-awareness  <cit> , a property guaranteeing fast search of strings under hamming distance. then, we show a hash function satisfying both hamming-aware and de bruijn properties, while at the same time being invariant under c-to-t mismatches. this hash function stands at the core of our new bs-aligner. finally, the last sub-section is devoted to the description of the new version of our methylation caller, which has been extended with target-oriented functionalities and optimized for better space usage.
+
+definitions
+throughout this paper we will work with the alphabet Σdna={a,c,g,t,n,$} . with n, m, and w we will denote the reference’s length, the pattern’s length, and the  bit-size of a computer memory-word , respectively. as hash functions we will use functions of the form h:Σm→{ <dig> }w mapping length-mΣ-strings to length-w bit-strings. if necessary, we will use the symbol wmh instead of h when we need to be clear on h’s domain and codomain sizes. given a string p∈Σm, the value h∈{ <dig> }w will be also dubbed the fingerprint of p . with t∈Σn we will denote the text that we want to index using our data structure. tij will denote t, i.e. the length-j prefix of the i-th suffix of t.
+
+the symbol ⊕ represents the exclusive or  bitwise operator.
+
+dh will denote the hamming distance between x,y∈Σm.
+
+the db-hash data structure
+hash tables are data structures supporting very fast queries, but they require a significant amount of space to be stored and maintained in main memory during alignment. this is due to the fact that such structures must store one pointer for each text position, thus incurring in a Θ-bits overhead in the space usage . an example of a hash-based bs-aligner is the first version of erne-bs <dig>  <cit> , which required  <dig> gb of memory to index the human genome . tools based on the fm index  <cit> , instead, result in extremely lightweight alignment data-structures, being able to index the human genome in as little as  <dig>  gb  <cit> . this space efficiency, however, comes at the price of a slowdown, when inexact alignment queries are performed. this inefficiency comes from the fact that burrows-wheeler transform  based indexes implicitly encode the lexicographic ordering of all text suffixes; this results in different text substrings—even at low hamming distances—potentially very far away in lexicographic ordering. hence, aligners based on bwt must check input reads in their full length against each potential reference match—a step that can be avoided with exact matching, providing a bwt-interval in output. backtracking  and split-read strategies  are two commonly employed techniques used to solve the inexact pattern matching problem while using bwt-indexes. when combined with quality-based heuristics, such techniques are much faster than classic hash-based methods  <cit> .
+
+a careful modification in the ordering of the text suffixes could result in similar text substrings being clustered together, with the important byproduct of a faster approximate-search query processing. this strategy is at the core of the db-hash data structure  <cit> , which, basically, permits collapsing similar patterns into similar  fingerprints while at the same time maintaining prefix equivalences between them. more formally:
+
+definition  <dig> 
+let Σ={ <dig> …,|Σ|−1}. we say that a function h:Σm→{ <dig> }w is a de bruijn hash function if and only if, for every pair of strings p,q∈Σm p1m−1=q0m−1⇒h1w−1=h0w− <dig> 
+
+in  <cit>  is proved that a de bruijn hash function, as defined above, is simply a homomorphism on de bruijn graphs . a global version of definition  <dig> can be given, referring to an entire text by concatenating fingerprints of all its length-m substrings:
+
+definition  <dig> 
+given wmh:Σm→{ <dig> }w de bruijn hash function and n≥m, the hash value of n−m+wnh on t∈Σn, is the unique string n−m+wnh∈{ <dig> }n−m+w such that: 
+ n−m+wnhiw=wmhtim,  for every 0≤i≤n−m.
+
+since wmh univocally determines n−m+wnh and the two functions coincide on the common part Σm of their domain. in what follows we will simply use the symbol h to indicate both. figure  <dig> should give an intuitive idea of the properties—formally introduced in definitions  <dig> and 2—that characterize de bruijn hash functions.
+fig.  <dig> example of a de bruijn function h applied to a short dna fragment. the main property characterizing such functions is that they preserve suffix-prefix overlaps
+
+
+
+as a consequence of the above definitions we have that the hash value h of the text retains enough information to support  pattern matching:
+
+lemma  <dig> 
+if h is a de bruijn hash function, n≥m, and p∈Σm occurs in t∈Σn at position i, then h occurs in h at position i. the opposite implication does not  hold; we will refer to cases of the latter kind as false positives.
+
+lemma  <dig> proves that the text t augmented with a  index over h can be used to perform pattern matching on t.
+
+the second property we want in order to perform fast approximate pattern matching is hamming awareness  <cit> :
+
+definition  <dig> 
+a hash function h is hamming-aware if there exist 
+a set z⊆{ <dig> }w such that |z|∈ockwk, for some constant c, and
+
+a binary operation ϕ:{ <dig> }w×{ <dig> }w→{ <dig> }w computable in o time,
+
+
+
+such that if p∈Σm then the following inclusion holds: 
+  h:p′∈Σm,dh≤k⊆hϕz 
+
+intuitively, a hamming-aware hash function h preserves hamming distance information. this can be done while introducing a  number of false positives, as depicted in fig.  <dig>  the hash function we will use  will satisfy this property. as a result, we can considerably reduce search space by only searching a hamming ball centered around the hash value of the pattern. as shown in  <cit> , given a hash function h satisfying both above introduced properties, we can build an index—called db-hash—supporting approximate search queries in okklogm+·m) time— σ being the alphabet size—while requiring only )n logσ bits of space. in  <cit>  this technique is used to obtain a fast and sensitive short reads aligner. in the next section, we show how we can combine this strategy with the solution described in  <cit>  in order to obtain a fast, sensitive, and lightweight bisulfite-treated reads aligner.
+fig.  <dig> a hamming-aware hash function collapses the k-radius hamming ball centered on the pattern p to a o-radius hamming ball centered on the hash h of p. the latter sphere contains much less elements since |h|≪|p|. in this picture, true positives  are represented as green dots, true negatives  are represented as gray dots, and false positives  are represented as red dots. false negatives are not depicted here since they cannot be introduced by our hashing scheme
+
+
+
+a hamming/bisulfite-aware de bruijn hash function
+a bisulfite-aware hash function satisfies the following property: the hash value h of a pattern p is invariant under c-to-t substitutions. in order to use the same index for the forward and reverse genome, we furthermore require that the same property holds also for g-to-a substitutions. a straightforward way to accomplish this goal is to assign the same numeric encoding to cs/ts and gs/as in the computation of h. this method is used in  <cit> ; here we combine it with the two properties described in the previous section in order to obtain the hash function that will be used in our index.
+
+first of all, we need to define an encoding α:Σdna→ℕ for all letters in Σdna. for simplicity, we assume that reads and reference have been pre-processed so that all n and $ characters have been randomly converted to characters in {a,c,g,t} . we assign the values α=α= <dig> and α=α= <dig>  let us denote with α, p∈{a,c,g,t}∗ the extension of α on strings, i.e. α=∑i=0|p|−1α·2|p|−i− <dig>  the hash function that we use in our work is the following:
+
+definition  <dig> 
+with hbs⊕:{a,c,g,t}m→{ <dig> }w, w≤m we denote the hash function defined as 
+ hbs⊕=⊕i=0⌈m/w⌉−2α⊕αpm−ww 
+fig.  <dig> in the computation of h
+bs⊕, the bit-string α is split in length-w blocks. all blocks except the last are non-overlapping and are taken from the beginning of α. the last block is taken from the end of α and may overlap with the one preceding it. after this subdivision, all blocks are xor-ed together, obtaining the fingerprint of p
+
+
+
+
+using arguments from  <cit> , it can be easily shown that hbs⊕ is a de bruijn and hamming-aware hash function. in particular, if p <dig> p2∈{a,c,g,t}m and dh≤k, then dh,hbs⊕)≤2k, where the value dh,hbs⊕) is the hamming weight of the bit-string hbs⊕⊕hbs⊕. as a result, only fingerprints in the 2k-radius hamming ball of center hbs⊕  must be considered during search. experiments confirm  that this strategy considerably improves query times of state-of-the-art bisulfite aligners based on backtracking.
+
+methylation call
+during the methylation calling phase, the alignments given as output by the bisulfite-aligner are used in order to derive a methylation value for every  cytosine. this can be done by counting the number of cs and ts aligned under every genomic c  and computing the methylation score defined as β=#c/+#t), i being the  genomic position containing the c and #c,#t being the number of cs/ts aligned in position i, respectively =#g/+#a)). despite the apparent simplicity of this task, there are several challenges that a methylation caller must face. first of all, notice that the tool must store two counters for every c and g in the genome. using two simple arrays of, say, 16-bits integers  results in 4n bytes of space usage, which are added to the n bytes of the text itself. this space usage is  <dig> gb for the human genome. the former version of our caller erne-meth   <cit>  used this simple strategy, which resulted in fast methylation calls at the price of high ram consumption. in contrast, bismark’s caller bismark_methylation_extractor performs this step in external memory, using low amounts of ram at the price of speed and disk space usage. here we describe how we improved the data structuring in erne-meth, obtaining a lightweight and fast methylation caller.
+
+first of all we reduce the space used by the structure, by not storing integer counters for as and ts positions. to this end we maintain a succinct bit-vector of n+o bits to mark with a ’1’ cs and gs on the genome. the bit-vector is implemented in such a way to support constant-time rank operations  <cit> . hence, mapping genomic positions to rank-space ), we—implicitly—store counters for cs and gs only. this limits the “waste” of space for as and ts to the ’0’ marked bits in the bit-vector, almost halving space usage with respect to the trivial solution . in order to save further space, we compress the counters to a bit size close to the minimum number of bits required to store each integer value. we divide each of the  <dig> counter arrays in blocks of length bl . we denote as capacity of a block the bit-length of each of its counters. the structure is initialized building all blocks with initial capacity  <dig>  each time a counter exceeds the capacity of its block, we re-build the block with capacity increased by one. notice that, if bl is chosen to be greater than or equal to the read length, this strategy requires time linear in the size of the input  since a counter can be incremented at most once per read . this strategy considerably reduces space usage of the methylation calling phase: in our experiments on human data, the compressed counters required approximately  <dig>  gb of ram . this space is added to that of the text stored in a 3-bits per base format:  <dig>  gb on the human genome. the price to pay for this memory efficiency is a slight slowdown of the analysis—in practice,  <dig> times slower than the trivial solution—, which however is still much faster than bismark’s external memory solution .
+
+a second issue concerns output disk space usage: a bed file with one line for every c and g in the genome can require a multiple of the space of the genome itself. other tools  do not compress these files, and thus require huge amounts of disk space to be run. we solve this problem simply by compressing on-the-fly methylation annotations, reducing their size to, approximately, that of the fasta input genome . erne-meth  <dig> implements both gzip and bzip <dig> compression algorithms.
+
+all the techniques described up to now make the new version of our methylation caller an extremely fast and lightweight tool, being able to exploit modern compression techniques in order to optimize memory requirements  without significantly sacrificing query times. quality of the methylation calling process can, however, be further improved by exploiting additional information provided by the experimental protocol. target-enrichment techniques provide an example of such an application: in these cases, reads are known to come from specific regions of the genome of interest. some protocols, such as sureselect human methyl-seq , provide these regions as a bed file which can be used during methylation calling. in view of such experimental advances, we extended our caller to accept as input also a bed file containing target regions. this information is used to compute various additional statistics including percentage of bases on target, mean coverage on target, and distribution of coverage as a function of the distance from targets . moreover, reads falling outside target regions can be automatically discarded, methylation annotations can be outputted only on target cs , and targets can be side extended to account for tails of coverage. our caller has been tested on data produced with the sureselect human methyl-seq kit at the swedish national center for molecular biosciences, science for life laboratory , stockholm, sweden. the study involved deep bisulfite sequencing of four samples of human tissue, with one sample being sequenced at much higher depth  than the others. the new functionalities of erne-meth  <dig> were useful in the process of assessing the protocol precision  and estimating  the optimal depth of coverage at which additional samples had to be sequenced. to conclude, we added two new annotation formats—epp and bismark’s cov—to our caller. this feature improves the compatibility of our erne-bs <dig> 2/erne-meth  <dig> pipeline with widely-used downstream analysis tools such as rnbeads  <cit> .
+
+RESULTS
+we compared the performances of our tool with two of the most widely used bisulfite aligners: bismark version  <dig> . <dig>  <cit>  combined with both bowtie  <dig>  <cit>  and bowtie  <dig>  <cit> , and bsmap version  <dig>   <cit> . the memory usage of the old version of our aligner and caller is also reported in order to highlight the improvements achieved with the new version. tests on a public bs-seq human library were performed to assess memory usage, speed, and alignment efficiency  of the tools in a real-case scenario. additional tests on a simulated human dataset were performed to compare the precision—in terms of mapping accuracy—of the bisulfite aligners. finally, we ran a test on a simulated high-coverage dataset  in order to demonstrate the correctness of our methylation caller erne-meth  <dig> 
+
+all experiments were performed on a intel core i <dig> machine with  <dig> gb of ram running ubuntu  <dig>  operating system. since bismark executes  <dig> parallel bowtie threads , we executed erne-bs <dig>  <dig> and bsmap enabling multithreading with options –threads  <dig> and -p  <dig>  respectively. in this way, all the tested aligners were allowed  <dig> parallel threads during execution. the choice of running  <dig> threads for each aligner is also motivated by the fact that bismark’s memory usage increases linearly with the number t of parallel processes specified by the user . the memory usage of the other tested tools, on the other hand, is independent of t .
+
+see additional files  <dig> and  <dig> for further details on implementation usage and commands and parameters used for the experiments, respectively.
+
+memory footprint and i/o utilization
+
+the new index of erne-bs <dig>  <dig> significantly improves its former  data structure, reducing the memory footprint from  <dig> to  <dig>  gb on the human genome . this value is close to that of bowtie 1’s and bowtie 2’s fm indexes, which require only  <dig>  and  <dig>  gb to hold their fm indexes in memory, respectively. however, since bismark executes   <dig> parallel instances of bowtie and one instance running the bismark process itself, its overall ram utilization is of  <dig>  gb when using bowtie  <dig> and  <dig>  gb when using bowtie  <dig> , much higher than that of erne-bs <dig>  <dig> 
+
+as far as the methylation calling phase is concerned, bismark’s caller bismark_methylation_extractor requires  <dig> gb of ram on the human genome, as opposed to the  <dig>  gb used by erne-meth  <dig>  this difference is due to the fact that bismark’s caller is an external algorithm, and its ram efficiency is paid in terms of disk space— <dig> gb in our experiments on human—and time—bismark_methylation_extractor was one order of magnitude slower than erne-meth  <dig>  as shown in the next subsections. moreover, bismark’s caller does not compress methylation annotations and, depending on the number of covered cytosines, its output file can easily reach tens of gb in size. in contrast, erne-meth  <dig> does not create intermediate files on disk  and can directly compress methylation annotations, thus being an extremely lightweight tool able to optimize at best ram and disk space usage . bsmap’s methylation caller—methratio.py—has a declared ram consumption of approximately  <dig> gb on the human genome .
+
+we report in fig.  <dig> the ram space required by erne , bismark , and bsmap aligners and callers.
+fig.  <dig> ram requirements of erne  <dig>  erne  <dig> , bismark with bowtie  <dig> , bismark with bowtie  <dig>  , and bsmap . this data has been collected from the real wgbs human dataset experiment discussed in the next section, except for the memory usage of bsmap’s methylation caller . the horizontal green line marks the space of the raw reference fasta file 
+
+
+
+real wgbs dataset
+
+in order to compare the performances of erne-bs <dig>  <dig>  bismark + bowtie  <dig>  bismark + bowtie  <dig>  and bsmap on a real dataset, we performed an experiment  on the human bs-seq library  <cit> . the dataset  contains  <dig> , <dig> pairs of  <dig> bp illumina  reads. first of all, reads were quality-trimmed using erne-filter  <cit> . the resulting  <dig> , <dig> pairs were subsequently aligned with erne-bs <dig>  <dig>  bismark + bowtie  <dig>  bismark + bowtie  <dig>  and bsmap enabling multithreading on  <dig> cores for all the aligners as described at the beginning of this section. in this experiment we used default parameters for all the tools. after the alignment, we used erne-meth  <dig> and bismark_methylation_extractor to call methylation values. bsmap’s methylation caller was excluded from this benchmark due to its high memory requirements .
+
+we report the results in figs.  <dig> and  <dig>  the plot in fig.  <dig> shows throughput of the tools and fraction of reads aligned at unique positions . as expected, erne-bs <dig>  <dig> exhibits the same mapping efficiency of the hash-based aligner bsmap, and a speed which is intermediate between bwt-based  and classic hash-based  aligners.
+fig.  <dig> speed and sensitivity of the tested bisulfite aligners. hash-based aligners  align the highest number of reads in unique positions and are faster than bwt-based aligners . as expected, the hybrid erne’s db-hash data structure is faster than bwt-based indexes and slower than classic hash-based indexes 
+
+fig.  <dig> time of alignment and methylation calling required by erne-bs  <dig> with erne-meth  <dig> and bismark  with bismark_methylation_extractor. the erne  <dig> pipeline is from  <dig>  to  <dig>  times faster than the bismark pipeline . bsmap is not shown here since its methylation caller required too much ram  to be run on our system
+
+
+
+simulated wgbs datasets
+
+real datasets cannot be used to test the accuracy of a bisulfite aligner/caller , since the underlying methylome is usually not known in advance. for this reason, the use of a simulated dataset is often a good choice if one wishes to assess such values. to compare the speed and accuracy of erne-bs <dig>  <dig> with those of the other tested tools, we simulated a human dataset , aligned the reads, and measured speed and number of correctly mapped reads of all tools under different combinations of parameters. finally, we tested the correctness of our caller erne-meth  <dig> by simulating a high-coverage dataset on the arabidopsis thaliana genome and by comparing the predicted methylation values with the simulated ones.
+
+datasets simulation to generate the simulated datasets, we used custom scripts  <cit>  and  <cit>  in conjunction with the simseq reads simulator  <cit>  to generate a directional  <cit>  bs-seq dataset with simulated snps, indels, sequencing errors,  bisulfite conversions, and bisulfite conversion failures . see additional file  <dig> for more details on the simulation procedure used.
+
+mapping accuracy to measure mapping accuracy of the tested tools in terms of fraction of correctly aligned reads, we simulated   <dig> , <dig> read pairs from the build hg <dig> of the human genome and aligned them with bismark + bowtie <dig>  bismark + bowtie <dig>  erne-bs <dig>  <dig>  and bsmap on the reference. we evaluated only uniquely-mapping reads . a unique alignment was considered correct if and only if both chromosome and strand coincided with those outputted by simseq and if the alignment’s position was within  <dig> bases from the position outputted by simseq .
+
+as observed in  <cit> , input data quality and alignment parameters can greatly influence aligner’s performances. in particular, the study reports that low sequencing error rates and trimmed data  improve mapping efficiency, while parameters such as number of mismatches allowed in the seed and number of mismatches allowed in the read are those having a major effect on the aligner’s speed and accuracy. in light of these observations, we decided to perform two types of comparisons. first of all, the tools were compared by using their default parameters . this choice is motivated by the fact that default parameters are chosen by the software’s developers in order to offer a reasonably good trade-off between performances  and mapping accuracy, and therefore represent a good choice when one is interested in optimizing both these features. the default parameters used are: erne-bs <dig> , bismark + bowtie  <dig> , bismark + bowtie  <dig> , bsmap .
+
+the results of this experiment are reported in fig.  <dig>  erne-bs <dig>  <dig>  bismark + bowtie  <dig>  bismark + bowtie  <dig>  and bsmap map uniquely  <dig>   <dig>   <dig> , and  <dig> % of the reads, respectively. all aligners map correctly most of the unique reads . memory usage and alignment speed of the tools were consistent with those reported in figs.  <dig> and  <dig> 
+fig.  <dig> simulated dataset, default parameters. fraction of total mapped , unique, and correctly mapped unique reads. in this experiment we used default parameters for all the tools
+
+
+
+in order to compare the tools on a more common ground, we adopted the strategy of  <cit>  and re-aligned the reads by setting the maximum number of allowed mismatches in the seeds to  <dig> for all the tools. since bismark does not permit to easily control the maximum number of allowed mismatches between the read and the reference, we allowed the tools to insert the maximum supported number of mismatches/indels in the remaining part of the alignment . this is a reasonable choice since seeding is the most critical step of the alignment process; aligners usually implement in the seeding step most of their heuristics—e.g. backtracking  or hashing with mismatches —. in indel-free alignments, mismatches outside the seed are found simply by extension, a step that requires a good seeding strategy in order to be successfully performed.
+
+the used parameters are: erne-bs <dig> , bismark + bowtie  <dig> , bismark + bowtie  <dig> , bsmap .
+
+the results of this experiment are reported in fig.  <dig>  erne-bs <dig>  <dig>  bismark + bowtie  <dig>  bismark + bowtie  <dig>  and bsmap map uniquely  <dig> ,  <dig> ,  <dig> , and  <dig>  % of the reads, respectively. again, all aligners correctly map most of the uniquely mapped reads.
+fig.  <dig> simulated dataset, common parameters. fraction of total mapped , unique, and correctly mapped unique reads. in this experiment we disabled seed errors in all the tools, while tolerating the maximum allowed number of mismatches/indels in the rest of the read
+
+
+
+the first noticeable effect of not allowing seed errors is that bismark + bowtie  <dig> has now very poor performances. this is due to the fact that bowtie  <dig> uses a single-seed strategy and therefore requires seed errors in order to be reasonably efficient. all other tools use multiple seeding, and maintain overall a good alignment efficiency. the experiment shows that, under similar parameter combinations, erne-bs <dig>  <dig> and bismark + bowtie  <dig> give very similar results. despite both allowing  <dig> erros in the seed, in this experiment erne-bs <dig>  <dig> and bsmap align a different number of unique reads. this is due to the fact that bsmap uses a much shorter seed than erne-bs <dig>  <dig> , and is thus capable of aligning reads with more errors. bsmap aligns slightly more reads than in the previous experiment since the only changed parameter is the allowed length of indels . however, allowing gaps in bsmap heavily affects its running time: the tool required  <dig> h and  <dig> min to complete the alignment, for an overall throughput of  <dig>  million reads per hour. erne-bs <dig> completed the alignment in  <dig> hour and  <dig> min , bismark + bowtie  <dig> in  <dig> h and  <dig> min , and bismark + bowtie  <dig> in only  <dig> min .
+
+methylation calling accuracy finally, we evaluated the accuracy of our methylation caller by simulating a high-coverage dataset on a medium-sized genome  and by comparing the results of erne-meth 2’s methylation calls to the simulated ground truth.
+
+by using the protocol described at the beginning of this section, we generated a  <dig> x coverage dataset on the arabidopsis genome . firstly, we aligned the reads with erne-bs <dig>  <dig>  after the alignment phase, we ran erne-meth  <dig> on the resulting bam file to generate the methylation profile. for the evaluation, we considered only cs that had a coverage of at least  <dig>  and we treated a c as methylated if its  methylation value was strictly greater than  <dig> .
+
+the whole pipeline took only  <dig> min to complete .  <dig> % of the reads were aligned uniquely by erne-bs <dig>  and  <dig>  % of all cytosines  were covered by at least  <dig> reads. erne-meth  <dig> correctly called  <dig>  % of all covered cytosines’ methylation values.
+
+discussion
+in this paper, we described how to efficiently apply recent advances in succinct indexing techniques  <cit>  to the bisulfite-alignment problem. to reach this goal, we employed a hash function with three properties: the first, de bruijn, reduces space for the hash index from o to )nlogσ bits; experiments confirm that in practice this strategy reduces the size of the structure by one order of magnitude. the second property, hamming-awareness, results in a considerable reduction in search space, thus speeding up  the alignment process. finally, the bisulfite-awareness property enables efficient alignment of bisulfite-treated reads without significant penalization in query times with respect to standard dna alignment . we implemented the bisulfite db-hash data structure in the aligner erne-bs <dig>  <dig>  and showed that in practice it is competitive with state-of-the-art bisulfite aligners in terms of memory and speed, with comparable accuracy. on simulated reads, the hash-based aligner bsmap was able to align reads more efficiently than erne-bs <dig>  <dig> and bismark, even though erne-bs <dig>  <dig> was as efficient as bsmap  on real data. overall, erne-bs <dig>  <dig> and erne-meth  <dig> showed to be extremely lightweight tools , offering a good tradeoff between memory, speed, and accuracy.
+
+CONCLUSIONS
+the use of compressed data structures is fundamental in tasks where huge amounts of data need to be processed. by implementing recent theoretical results in this field of research, our tools are able to efficiently carry out in ram both alignment and methylation calling processes using slightly more ram space than the reference itself. in particular, our methylation caller erne-meth  <dig> is one order of magnitude faster than external memory algorithms performing the same task , while at the same time using a relatively low amount of main memory. other tools that perform this task completely in ram  require up to  <dig> times the space used by erne-meth  <dig> 
+
+finally, the new target-oriented functionalities of erne-meth  <dig> make it a useful tool in target enrichment experiments.
+
+availability
+erne  is a short string alignment package whose goal is to provide an all-inclusive set of tools to handle short reads. erne comprises: erne-map, erne-dmap, erne-filter, erne-visual, erne-bs <dig>  and erne-meth. erne is free software and distributed with an open source license  and can be downloaded at: http://erne.sourceforge.net.
+
+additional files
+additional file  <dig> 
+implementation usage. 
+
+
+
+additional file  <dig> 
+commands used to perform the experiments. 
+
+
+
+abbreviations
+bsbisulfite
+
+bwtburrows-wheeler transform
+
+db-hashde bruijn hash
+
+eppepigenome processing pipeline applied at the broad institute
+
+erneextended randomized numerical aligner
+
+fm indexfull text in minute space index
+
+ngsnext-generation sequencing
+
+pcrpolimerase chain reaction
+
+rrbsreduced representation bisulfite sequencing
+
+snpsingle nucleotide polimorphism
+
+wgbswhole genome bisulfite sequencing
+
+
+from nettab  <dig>  from structural bioinformatics to integrative systems biology torino, italy. 15- <dig> october 2014
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+np and ap developed the algorithmic ideas and wrote the paper. np developed the tools and designed the experiments. fv and mk reviewed the paper, provided the target-enrichment dataset, and supervised its analysis. all authors read and approved the final manuscript.
+
+declarations
+
+the publication costs for this article were supported by the italian epigen flagship project. this article has been published as part of bmc bioinformatics volume  <dig> supplement  <dig>   <dig>  selected works from the 14th international workshop on network tools and applications in biology . the full contents of the supplement are available online at <https://bmcbioinformatics.biomedcentral.com/articles/supplements/volume-17-supplement-4>.

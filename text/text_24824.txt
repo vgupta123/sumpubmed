@@ -1,0 +1,100 @@
+BACKGROUND
+advanced, high-throughput sequencing technologies allow for fast, single-base resolution scans of entire epigenome. large-scale sequencing projects are producing these datasets for cancer research, and these epigenetic marks provide important information about cellular phenotypes in normal and diseased tissues  <cit> . dna methylation pattern changes are pivotal marks needed in cells' differentiation during tissue and lineage specification, and, as such, contribute to the complexity of organisms' cellular sub-types  <cit> . furthermore, aberrant dna methylation not only defines malignant subtypes of disease  <cit> , but also contributes to malignant disease pathophysiology and can be used in clinical outcome predictions  <cit> .
+
+bisulfite sequencing of genomic dna is a widely applied method for methylation measurement. whole-genome bisulfite sequencing is a genome-wide technique for the measurement of dna methylation  <cit> . however, other enrichment dna methylation sequencing methods have been developed to achieve cost-effective coverage of variable regions of dna methylation. these methods often utilize reduced representation of bisulfite sequencing by focusing on restriction sites, including methods such as reduced representation bisulfite sequencing   <cit> , enhanced rrbs   <cit> , multiplexed rrbs  <cit> , methylation-sensitive restriction enzyme sequencing  <cit> , as well as other enrichment approaches, including methylated dna immunoprecipitation sequencing  <cit>  and methylated dna binding domain sequencing  <cit> .
+
+previously, epigenome analysis tools such as methylkit  <cit>  have focused on comprehensive dna methylation analysis of single base sites, in order to find differentially methylated cytosines . however, biological regulation by methylation can be mediated by a single cpg or by a group of cpgs in close proximity to each other. therefore, a combination of baseresolution analysis and regional analysis of dna methylation may offer a more comprehensive and systematic view of bisulfate sequencing data. this increasing demand for tools to find differentially methylated regions  increases as more data emerge from both large-scale epigenomics consortiums and from individual labs. to address this need, we have created edmr, which exists as stand-alone code for use with other tools and packages. it can also be used as an expansion of the methylkit r package for comprehensive dmr analysis. edmr can directly take objects from methylkit or data frames with differential methylation information, or any dmc result in bed file format, and perform regional optimization calling and dmr statistical analysis and filtering. furthermore, edmr offers annotation functions that map dmrs to gene body features , and 3'utr), cpg island and shore locations, as well as the use of any other user-supplied coordinate files for annotation. here, we describe an example of using edmr with dna methylation data from the errbs protocol.
+
+methods
+data source
+ten acute myeloid leukemia  de-identified patient samples enriched for myeloblast cells and five normal bone marrow  samples  were used in the experiments. institutional review board approval was obtained at weill cornell medical center and at the royal adelaide hospital and this study was performed in accordance with the helsinki protocols. dna was extracted using standard techniques and errbs library preparations were performed as previously described  <cit> . libraries were sequenced on a hiseq <dig> illumina machine using  <dig> bp single-end reads to an average depth of 79x per covered cpg. a previously published dataset of two aml subtypes  and two cd34+ normal bone marrow controls  <cit>   was also used in the analysis.
+
+computational tools
+r version  <dig> . <dig>  <cit>  and methylkit  <dig> . <dig>  <cit>  were used for the analysis. edmr depends on bioconductor packages  <cit> , including methylkit  <dig> . <dig>  <cit> , genomicranges  <dig> . <dig>  data.table  <dig> . <dig>  mixtools  <cit> , domc  <dig> . <dig>  ggplot <dig>  <dig> . <dig>  <cit> .
+
+data preprocessing
+we performed bisulfite treated read alignment to hg <dig> genome and methylation calls as previously described  <cit> . five nbm samples served as controls for the aml samples. the total coverage for each cpg in the controls is the sum coverage from  <dig> nbm samples. the methylation level for each cpg in the control is the mean of all nbm samples. we required the coverage of each cpg site be equal or greater than 10x in at least  <dig> nbm samples for control. for aml samples, the coverage for each cpg site for each sample is 10x. we used fisher exact test from methylkit  <cit>  to compare aml samples with control.
+
+edmr algorithm
+our edmr algorithm contains five distinct components, which are described below . our definition of a dna methylated region is a cluster of cpgs in close spatial proximity. if two adjacent cpgs are separated by more than a certain  genomic distance, we define them as coming from different methylated regions. if two cpgs are within a specified genomic distance from each other, then we define them to be within the same region. the edmr algorithm aims to optimize the threshold for determining dna methylation regions and to perform statistical significance testing.
+
+ <dig>  empirical regions boundary determination
+we used a bimodal normal distribution to identify the optimum cutoff for calling a gap between two dmrs. first, we examined the distribution of the distance between adjacent cpgs  across the genome from sample  <dig> of our aml dataset. after a log <dig> transformation, we observed a bimodal distribution with a spike at log <dig> distance =  <dig> . this spike represents the reverse complement of cpgs  on the other strand, which has a distance of  <dig> bp  = 0). disregarding the strand of cpgs, the base pair distance is counted as  <dig> bp  = 0). because we expect the threshold of gap between adjacent methylated regions will be much greater than  <dig> bp, the frequency for this portion does not contribute to our decision process for dmr determination. after removing the first spike at  <dig> log <dig> distance, we then used this dataset with the application of the expectation maximization  algorithm to fit to a bimodal normal distribution  <cit> .
+
+ f= ∑i=12λipi 
+
+where x is the log <dig> distance of two nearest cpgs, f is the probability density function  for the mixed normal distribution to which we are trying to fit, and we have i = { <dig> } as the first/second normal distribution from the bimodal distribution for regional/boundary cpgs. here ∑i=12λi= <dig>  stands for the two mixing proportions of the two populations.
+
+we then sought to determine the best separation point between the two normal distributions, which will help determine the cutoff of log <dig> distances between the nearest two cpgs at dmr boundaries. since the distributions overlap in errbs data, we risked mislabeling components from one population to another. however, errbs is an enrichment assay, and, as such, the detected cpgs were not evenly distributed along the genome. instead, the cpgs formed in clusters. this contributed to the imbalance of the two populations . to account for this difference, we used a weighted, combined probability function c to evaluate and characterize the cumulative cost of any given separation point x.
+
+ c=λ1p1+λ2p <dig> 
+
+in order to minimize the error rate from both populations, we used this weighted combined probability function c to evaluate and optimize the separation of the two populations . because the majority of the distances fell into the first normal distribution for regional cpgs , the weighted model imposed a greater penalty for the probability of mislabeling the cpgs from the first distribution, thus ensuring that we evenly penalized the number of mislabeled cpgs from both distributions, using:
+
+
+ x ^=argminx{λ1p1+λ2p2} 
+
+where p <dig> is the fitted p.d.f. of the first normal distribution for regional cpgs, and p <dig> is the fitted p.d.f. of the second normal distribution for boundary cpgs, where ∑i=12λi= <dig>  stands for the mixing proportions for the two populations. we then used the successive parabolic interpolation from r stats package to search the interval from the lowest log <dig> distance to the maximum log <dig> distance to obtain the minimum of the weighted sum of the cost function c . the corresponding log <dig> distance was used for raw region determination.
+
+ <dig>  empirical regions filtering and characterization
+once the regional boundaries for cpg distances  were determined from the cost function, we examined all distances of the nearest cpgs along the same chromosome. if any distance was greater than d, then we called the two cpgs associated with this distance as the boundaries of two regions. we then further refined our distance based on the following independent  filters to increase the power of dmr detection:
+
+1) at least  <dig> dmc in the region, as determined using, for example, methylkit  <cit> 
+
+2) at least  <dig> cpgs included in the region, and
+
+3) absolute mean methylation difference greater than 20%.
+
+ <dig>  statistical significance calculation for dmrs
+in order to perform a dependency adjusted significance test, we first examined the spatial auto correlation of methylation data. we created an adjustable spatial parameter  that binned the data into segments and then calculated the auto correlation based on both the methylation changes and the p-values for each bin  <cit> . based on the refined regions, we calculated the significance of the regions by combining the p-values of dmcs within that region. we used the dependence adjustment of the stouffer-liptak test to combine p-values  <cit> . unlike the adjustment for the fisher's combined probability test, the stouffer-liptak joint p-value does not depend on the assumption that the p-values are normally distributed, and thus can be applied for nonparametric data. a fdr  correction was also applied to correct for multiple hypothesis testing for the combined p-values  <cit> .
+
+ <dig>  whole methylome dmr characterization: descriptive statistics and sample clustering
+while raw output from filtered dmrs are useful, algorithms that contextualize and categorize changes from genomics assays help subsequent analysis. to aid in such global examinations, we also provide convenient functions to examine the dmrs for a given dataset, including data about the distribution of the length of dmrs, overall methylation difference distribution, and the number of dmcs in each dmr for all the samples. these tools give users an easy means to examine broad questions about genome biology and dmr localization for a given set of samples, or to find outlier samples from experimental datasets.
+
+ <dig>  dmr annotation with gene models and cpg island
+lastly, we provide a comprehensive gene annotation set which can be used with the coordinates of the dmrs to provide information about gene models, but also characterize dmr changes for different parts of the gene body, separated into: coding sequence, introns, promoters, 5' utr and 3' utr. we also allow users to compare to cpg islands, shores, and other user supplied epigenetic loci, such as encode enhancers.
+
+RESULTS
+edmr definition
+to determine dmrs, we sought to determine the optimal parameters for regional analysis. errbs and other enriched bisulfate conversion sequencing techniques are designed to cover cytosines in cpg-enriched regions, such as cpg islands and regions surrounding digestion sites from restriction enzymes. to accurately define the distinct genomic regions of dna methylation, we first examined the distribution of the genomic distance between adjacent cpgs covered in the errbs data . since errbs uses the mspi restriction enzyme to fragment dna, we detected cpgs clustered in cpg-rich regions, which were in close proximity to each other.
+
+these cpg distances established a range of cpgs in close spatial proximity, and the distance cutoff was next determined by edmr. if two cpgs were far away from each other, then we defined them as coming from different methylated regions ; on the other hand, if two cpgs were close to each other, then we defined them as coming from the same region . the edmr algorithm optimized the threshold for calling methylated regions and performed statistical tests on the methylated regions. a nonparametric density plot of the distribution of the log <dig> distance of the nearest cpgs showed compelling evidence for a bimodal distribution . we assumed that the first mode was composed of regional cpgs and that the second mode was composed of boundary cpgs, for the following reasons:  the mean of the first mode was less than the mean of the second mode, and  the first mode of the bimodal distribution had a larger mixing proportion than the second mode .
+
+to determine the optimum cutoff of two adjacent cpgs for calling a dmr boundary, we then sought to determine the best separation point between the two normal distributions. we used this weighted combined probability function c to evaluate and optimize the separation of the two populations . we then determined the minimum of the weighted sum of the cost function at the red line in figure 2b.
+
+this information was used in our edmr algorithm to identify the optimum cutoff for calling a gap between two dmrs. this approach was tested on an additional set of  <dig> errbs samples  and  <dig> normal bone marrow controls), which revealed similar bimodal distributions . the mean optimum distance cutoff for all  <dig> comparisons is  <dig>  with standard error of the mean  <dig>  . after determining the statistically significant dmrs between two samples or groups, the regions were filtered further based on the number of dmcs  and cpgs  within the area, as well as the mean methylation difference . edmr can utilize data from methylkit and other dna methylation pipeline outputs for analysis as well as usersupplied coordinate files for annotation .
+
+edmrs can accurately discern leukemia tumor sub-types
+we next used a set of previously published leukemia errbs data  <cit>  that demonstrated distinct epigenetic tumor sub-types when examined at the level of dmcs. the cpg genomic distribution in these samples also had a bimodal distribution . we used edmr to calculate the number of dmrs between the two tumor sub-types  and the normal controls. similar to previous findings using dmcs alone, unique patterns of dmrs were detected in the two leukemia sample subtypes . specifically, idh amls had more hypermethylated dmrs while mll amls had more hypomethylated dmrs. notably, edmr revealed that the two tumor sub-types also showed differing dmr lengths , which showed that our method can replicate previous results and also provide further insight into the epigenomic landscape of these two aml subtypes.
+
+we then examined the spatial changes of the dmrs relative to other genome features. it has been reported that dna methylation of different parts of the gene body may exert alternate effects on gene expression. indeed, methylation on promoter regions of the gene tends to have inverse association with gene expression, while genic methylation changes have a more positive correlation  <cit> . thus, we sought to curate dmrs with a detailed annotation map, and edmr functions were created to accomplish this task. we annotated the dmrs identified in the aml samples using refseq gene models, separated into coding sequence, introns, promoters, 5' utr and 3' utr . we also annotated dmrs with cpg islands and shores . these separate gene and genomic geographies allow a more granular examination of the underlying methylation changes in a dataset that may have a regulatory impact on gene transcription.
+
+CONCLUSIONS
+profiling dna methylation changes is a broadly studied topic for basic research across many laboratories. these data are being generated in several large-scale projects, including the encyclopedia of dna elements  consortium , epigenomics roadmap , and the eu's blueprint project . all of these projects provide an abundance of dna methylation and epigenetic data using dna methylation sequencing methods like errbs, as well as other per-base epigenetic information. having the ability to dissect the patterns of dna methylation changes from a regional perspective, rather than at a per-base level, is important for researchers to more completely understand the effects dna methylation changes have in normal and diseased samples.
+
+here, we described edmr - a set of convenient tools for regional analysis of methylation with optimization algorithms. these independent tools can also be utilized in concert with an existing, open-source r-package that automates other aspects of errbs analysis  such as data processing and dmc analysis. as such, these methods are suitable for any base-level dataset of reduced representation or other base-level dna modification data sets. these methods are efficient with existing datasets, recapitulate the characterized tumor-subtypes from a positive control data set, and find new aspects of the tumor biology that can only be discovered using a regional analysis. also, we note that we have used these tools on  <dig> samples and found the methods to be robust on errbs data from both different sample types and at a variety of sequencing depths. all together, these results support the utility of edmr as a broadly relevant method for dmr characterization, which can be used to further discoveries of epigenetic and regulatory changes and help discern the relevance of dmrs to disease biology in conjunction with other molecular profiling data types.
+
+list of abbreviations used
+aml: acute myeloid leukemia; dmc: differentially methylated cytosine; dmr: differentially methylated region; edmr: empirically-based differentially methylated regions; errbs: enhanced reduced representation bisulfite sequencing; fdr: false discovery rate; rrbs: reduced representation bisulfite sequencing; p.d.f: probability density function; utr: untranslated region.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+sl designed the software, processed the data, and performed the analysis. cem and sl conceived of the algorithm and wrote the manuscript. aa, cem, feg-b, and pz participated in the design of the software. feg-b performed the rrbs experiments. am, cem, feg-b, rl, and sl contributed to the patient data sets and analysis ideas. ab, bk, ll, and rd contributed materials. all authors critically reviewed and edited the manuscript prior to submission.
+
+supplementary material
+additional file 1
+figure s <dig>  histogram of the log <dig> distance of the nearest cpgs in sample  <dig>  a spike at zero log <dig> base pairs distance represents the reverse complement of cpgs  on the other strand.
+
+figure s <dig>  consistent distribution shapes across samples. samples 2- <dig> are shown from different sequencing depths and samples.  red line: first model for regional cpgs; green line: fitted second model for boundary cpgs; dashed line: density plot of the log <dig> distances of the nearest cpgs.
+
+click here for file
+
+ acknowledgements
+we thank caroline sheridan and jennifer ishii for nucleic acid extractions, library preparations and sequencing of the aml samples. we thank the weill cornell medical college epigenomics core and pbtech for computational support and services.
+
+declarations
+publication of this article was supported by nih grants r01hg <dig>  r01ns <dig>  and r44hg <dig>  feg-b was supported by sass foundation judah folkman fellowship and nih grant k08ca <dig> 
+
+this article has been published as part of bmc bioinformatics volume  <dig> supplement  <dig>  2013: proceedings of the third annual recomb satellite workshop on massively parallel sequencing . the full contents of the supplement are available online at http://www.biomedcentral.com/bmcbioinformatics/supplements/14/s <dig> 

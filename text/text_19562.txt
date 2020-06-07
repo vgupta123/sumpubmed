@@ -1,0 +1,205 @@
+BACKGROUND
+forward-time population genetic simulators are critical research tools in evolutionary biology, as demonstrated by both the growing number of available simulators and the collection of high-impact studies that employ them  <cit> . these simulators allow for in-silico generation and testing of evolutionary hypotheses that would otherwise be intractable to generate or test in a laboratory setting due in large part to the nature of the process. evolution “is a loose and complex process, the result of a number of interacting, individually weak forces with many alternative outcomes”  <cit> . consequently, forward-time simulators are ideal for tinkering with these weak forces—changing the ones that are modeled and their relative strengths or rates—in order to observe the many alternative evolutionary outcomes. unlike backward, or coalescent, approaches to evolutionary analysis, forward-time simulators can handle the growing bevy of known evolutionary processes and environments  <cit> .
+
+but forward-time simulations have their limitations: a critical design pivot exists around execution speed, memory usage, and flexibility  <cit> . available simulators necessitate a trade-off between flexibility and speed for realistic simulations to be feasible, and often require the user to adjust the evolutionary scenario to fit the capability of a certain simulator using scaling factors. this results in a large collection of simulators that require a decision flowchart to choose an appropriate simulator  <cit> . for example, methods were recently developed to increase the execution speed of simulations; however, these gains in speed come at the expense of reduced flexibility  <cit> . because forward-time simulations track complete ancestral information, including all alleles which arose but were lost, the imposed computational burden limits the potential scope of the problem  <cit> . even leveraging rescaling techniques that they employ, such as altering the input parameters to diminish the population size and number of generations, to improve computational efficiency does not evade this critical issue of computation time and memory usage. simulating large sequences on the order of  <dig> mb “tends to make forward simulators crash due to memory usage”  <cit> , which is compounded by the stochastic and unpredictable nature of these simulations. further, more complex genotypes, such as protein and rna structures, regulatory pathways, and epigenetic mechanisms, are studied using forward time simulators  <cit> . although current simulators exist for efficiently simulating large genomic regions — fregene, simupop, or genomepop — the memory management techniques do not extend to arbitrary genotype representations like pathways or metabolic networks or other mutation types like insertions or rearrangements  <cit> . for instance, simupop provides a compression module which efficiently encodes long sequence regions with rare mutant variants  <cit> . in addition, general lossless data compression algorithms cannot scale to forward-time simulator scenarios where very large  data strings must be compressed and decompressed thousands of times per generation for thousands or millions of generations. compression and decompression that require on the scale of minutes — as is the case for general lossless compression algorithms — is completely infeasible as a general solution. ultimately, the constraint on memory is a major roadblock to the application of forward-time simulators to both complex biological structures and processes and large problem scopes.
+
+in this work, we develop novel methods for addressing the memory issue inherent in forward time simulations by compressing, in real-time, active and ancestral genotypes. we propose algorithms which can be implemented in any current simulator and are independent of the evolutionary model . specifically, our contributions are two-fold: the operation graph, a compression data structure for forward-time simulators, and greedy-load, an algorithm for improving the decompression performance of the operation graph by managing a strategic cache. the algorithms we present work equally to compress the whole ancestral information or just the active alleles of a simulation. compressing the ancestral information of extant genotypes retains important information that would otherwise be lost without our compression algorithm.
+
+computer simulations have long played a central role in deriving and testing hypotheses in evolutionary biology and population genetics. thus far, population genetic simulations have for the most part employed either abstract genotype constructs or very short sequences. as biology ushered in the post-genomic era, and more specifically the systems biology era, understanding whole systems and organisms has leaped to the forefront of research. the availability of data from different species, and even different individuals in a population, has led to efforts to incorporate evolutionary analyses in systems biology  <cit>  and synthetic biology  <cit> . to scale population genetic simulators to this new era, where genotypes can encompass an entire genome, interactome, or organism, it is imperative to address the computational requirements of existing simulators so as to enable handling such large-scale genotypes and flexible genotype representations. our work offers a significant step in this direction. further, our methods are generic so as to allow integration with other existing, popular population genetic simulators.
+
+methods
+in this work, we propose a real-time compression algorithm for reducing the memory footprint of a forward-time population genetic simulation, composed of two components: the compression technique  and the decompression accelerator . the operation graph represents each genotype by the sequence of evolutionary events that gave rise to it, and greedy-load maintains a “small” set of explicit genotypes that accelerates the decompression of compressed genotypes in the operation graph. whenever the simulation or analysis requires access to the genotype information, genotypes can be retrieved on-the-fly by applying the evolutionary events to an explicitly represented genotype. we now describe the algorithm and data structure we use in detail, including the decision on which genotypes to represent explicitly, how to decompress a genotype, and how to build/augment the compression data structure. we begin with the compression technique, which we call the operation graph.
+
+the operation graph
+as evolutionary operations — such as mutation or recombination — occur in the population genetic simulation, the dependency of each operation on the previous genetic history is encoded in the operation graph . operations are stored as nodes in the og, a directed acyclic graph  structure, where operations with one incoming edge correspond to mutations and with two incoming edges correspond to recombinations. each operation that arises over the course of the simulation is encoded as a distinct node in the og, along with the genetic material produced by the operation.
+
+let f denote the set of evolutionary operations allowable in a simulation, and let g denote the set of genotypes that arise during a simulation. for mutational evolutionary events, each element op∈f is a function op:g×Φ→g, where op=c denotes that genotype c is the result of applying evolutionary event op to genotype a with parameters ϕ. however, for recombination, op∈f is a function op:g×g×Φ→g, where op=c denotes that c is the result of a recombination event involving genotypes a and b, with parameters ϕ.
+
+for example, if we take ϕ=〈base-pair- mutation, <dig> t 〉 and apply it to genotype a=accaaat, we obtain genotype c=actaaat, since the operation applied to a is a base-pair mutation that substitutes nucleotide t in the third position. since different evolutionary events have different types of parameters, in addition to the “input” genotypes a and b, we abuse notation, for the sake of simplicity, and use op as a function from g to g for mutation and g×g to g for recombination—additional parameters ϕ for applying op should be clear from the context.
+
+the operation graph  is a rooted, labeled, weighted dag og=, where 
+
+ <dig>  v is the set of nodes;
+
+ <dig>  e⊆v×v is the set of edges;
+
+ <dig>  ℓ:v→ is the genotype labeling function with the constraint that {v∈v:ℓ≠nil}≠∅;
+
+ <dig>  f:v→f is the operation labeling function;
+
+ <dig>  w:v→ℝ is the weight function such that w, for node v∈v, is the frequency of the genotype ℓ; and
+
+ <dig>  c:v→ℝ is the cost function such that c, for node v∈v, is the non-negative computational cost of applying the operation f.
+
+a node v is called explicit if ℓ≠nil. that is, an explicit node corresponds to a genotype that is not compressed.
+
+for a node x∈v, we denote by anc⊆v the set of all lowest explicit nodes betweenx and the root of og, where a node y is lowest if no explicit node z  resides on a path between y and x. in particular, if x is explicit, then anc={x}. the set of active nodes in an og, denoted by a, is all nodes whose corresponding genotypes have non-zero frequency; that is, a={v∈v:w≠0}.
+
+novelty of the operation graph
+the og is a compression technique similar to lz <dig> with edit operations and uses a structure similar to the ancestral recombination graph , a phylogenetic structure that describes the evolutionary history of a set of genetic samples  <cit> . the lz <dig> algorithms replace repeated occurrences of data with references to a single copy of that data existing earlier in the input data stream. in our case, instead of repeated occurrences, we replace “evolutionary related occurrences”, such that we keep track of homologous, rather than identical, genotypes. for instance, if “accct” evolved from “accgt”, only one instance is explicitly saved. further, the operation graph is implicitly produced by forward time population genetic simulators, whether or not it is explicitly stored; whereas for lz <dig>  the identification of previous, similar strings is the bulk of the computational work in its implementation. lastly, while lz <dig> is a general compression scheme, the operation graph is biologically motivated, and in general, applies to scenarios where data evolves in a population, so that occurrences of data can be related to each other through evolution and this relatedness is used in the compression. for instance, it is not clear how lz <dig> would handle the forking replacement dependencies incurred through processes like recombination.
+
+while both the og and arg employ a dag, the similarity between the two almost ends there. an arg provides an explicit model of the evolution of a set of genetic sequences, mainly under point mutations and recombination  <cit> . the mutational model is often assumed to be the infinite sites, but more recent work has considered finite-site models as well  <cit> . on the contrary, the og is an implicit representation of a set of related genetic information, where mutations and recombinations can be general . further, while args model the evolution of genetic sequences in a population setting, the og is defined for arbitrary genotypes. a case in point is our recent population-level analysis of regulatory networks in e. coli, where the og was defined over genotypes consisting of regulatory networks  <cit> .
+
+updating the operation graph
+whenever a new genotype c arises from existing genotypes a and b through a recombination operation op, the operation graph is updated by  adding a new node u to v,  adding new edges e1= and e2= to e, where x and y are the nodes that correspond to genotypes a and b, respectively, and  setting f=op. in terms of ℓ, it can be set to nil or to the new genotype c; we discuss below the choice we make in our algorithm. if the operation is a mutation, then only a single new edge is added in step . the cost of op, or c, can be set based on the type of operation  or the input to the operation ϕ. in the case of recombination, the ordering of the two parents is handled at the implementation level.
+
+whenever a genotype a is lost from the population, the operation graph is updated only when when the node x that corresponds to genotype a is a leaf node in og. in this case, the algorithm identifies the set y where each node y∈y is the lowest node on a path from the root to x that is either active, of out-degree  <dig>  or the root of og. once node set y is identified, allnodes on the path from y∈y to x, excluding y, and all edges on that path, are deleted from og. if x is not a leaf node, no update is done, since some active genotypes may be “under” it.
+
+measures of the operation graph quality
+given the graph og, the genotype in every node can be decompressed; that is, for every node x with ℓ=nil, the explicit value of ℓ can be computed by traversing the path, or paths, from x to nodes in anc and applying the corresponding operations. the decompression cost for a given node x, denoted by cost, is
+
+ cost=∑vc, 
+
+where the sum is taken over all nodes that resides on paths between nodes in anc and x. for a pair of nodes x and y, where y is on the path from a node in anc to x, we define the cost of decompressing node x by using information on the way from y to it, as cost=∑vc, where v ranges over all nodes on the path from y to x = <dig> if y is not on any path from a node in anc to x).
+
+further, the load of a node x  is given by 
+
+ load=∑y∈uw·cost, 
+
+where u denotes the set of all nodes in og that are under node x and require node x for decompression. notice that for two operation graphs og <dig> and og <dig> whose underlying graphs are isomorphic and node labelings are identical, it may be the case that cost based on og <dig> is different from cost based on og <dig> 
+
+if we denote by c={v∈v:ℓ≠nil}, which is the set of uncompressed genotypes, then no compression is achieved when c=v, and maximum compression is achieved when c={r} for the root node r of graph og. the time it takes to access the explicit genotypes is effectively the time it takes to decompress all the compressed genotypes.
+
+compression algorithms
+the set c of an operation graph og is at the core of the space-time trade-off here: the larger c, the more space is consumed and the less time is required to access the explicit genotypes, and the smaller c, the less space is consumed and the more time is required to access the explicit genotypes. therefore, a central task here is to determine the set c that would minimize the load of an operation graph. here, we describe several compression algorithms for this task, one which is the main contribution of this paper — greedy load — and the others which are used for performance comparison.
+
+greedy-load
+in greedy-load, the inputs, in addition to the operation graph og, are k, which is a pre-specified bound on the desirable size of c, and t, which is the number of generations elapsed between updates of the set c. this algorithm assumes that load for all x∈v is implicitly calculated and updated whenever the membership of c changes.
+
+in a nutshell, greedy-load seeks to advance the set c towards the leaves and active alleles of the og by greedily caching genotypes with high levels of load. we define the utility function advance which maximally “advances” the decompression from x towards the leaves of the og: 
+
+ <dig>  let node y∈u∪{x} be the highest node that is either: 
+
+ a leaf,
+
+ has non-zero weight , or
+
+ has at least two children each of which has non-zero load and is not in c;
+
+ <dig>  decompress the genotype corresponding to node y and set ℓ=nil.
+
+the greedy-load algorithm applies the following two steps on a given operation graph og every t generations in the simulation ={r}). in the first step, nodes that are no longer needed for decompression — load= <dig> — are compressed, otherwise the decompression is advanced towards the leaves of the og. in the second step, nodes are added to c by decompressing the max-load child of the max-load cached node. 
+
+ <dig>  for each node x∈c: 
+
+ if load= <dig> and |c|> <dig>  set ℓ=nil, or
+
+ if load> <dig>  perform advance.
+
+ <dig>  add nodes to c until |c|=k or no other nodes may be added. let node x∈c have maximum load in c and node y be the max-load child of x, at each iteration 
+
+ decompress the genotype corresponding to node y, and
+
+ perform advance and advance.
+
+example execution
+assume an og as illustrated in figure  <dig>  composed of  <dig> operations labeled a to l connected by  <dig> edges. node a is the root and nodes j,k,h,e, and l are leaves. all nodes are mutation operations except for d, which is a recombination operation with inputs b and c.
+
+panel  <dig> in figure  <dig> depicts the og prior to the execution of greedy-load. all leaves correspond to genotypes that are active in the population in addition to the internal node i. this example walks through the application of greedy load with k= <dig> 
+
+in panel  <dig>  the first step of greedy-load ‘advances’ the decompression from a towards the leaves. in this case, node d has two children, g and h, each of which has non-zero load and is compressed. because node c does not require a for decompression, it is not in the set of nodes considered in advance. because node c has two compressed children with non-zero load, it is not possible to advance the decompression from c towards the leaves, so nothing is done.
+
+in panel  <dig>  assume load>load and load>load, so f is decompressed and advance is performed, which results in decompressing i. because i corresponds to a genotype that is active in the population, i may generate decompression requests, and so decompression cannot progress down the og. in addition to advance, advance is also performed, which results in the decompression of e because c has only one child with non-zero load.
+
+in panel  <dig>  because c< <dig> and load>load, node g is decompressed and advance and advance are performed. because g has two compressed children with non-zero load, decompression cannot be advanced further down the og; however, because d only has one compressed child with non-zero load , then d is compressed and h is decompressed. at this point, c={e,g,h,i} and the application of greedy-load is complete.
+
+in more realistic simulation scenarios, the og is both much wider and taller than presented in this simple example execution, so we visualized the execution of greedy-load on more complicated og topologies . in this animation, the evolution of the og is visualized along with the set c for scenarios with low and high recombination rates.
+
+other compression algorithms
+in order to measure the performance of greedy-load, we defined two additional compression policies that make fast, but potentially poor , explicit representation decisions. unlike greedy-load, these simple comparison compression algorithms or policies do not require knowledge of the entire operation graph to select the explicitly stored genotypes. current simulators store active genotypes that arise during the course of a simulation; we refer to this policy as store-active. the alternative is to store only the root genotype in the operation graph, which we call store-root. more formally, for an operation graph og=, we have: 
+
+•store-active: set c=a.
+
+•store-root: set c={r:r is a root node in og}.
+
+implementation
+we implemented a population genetic simulator and the compression algorithms in c++, which can be used as a development library or a command line tool. it is important to note that we used explicit memory management, rather than garbage collection, for genotype data structures, so memory usage metrics are honest measurements of allocated memory. the emphasis in this work is on the compression algorithm rather than the implementation of a memory-bounded forward-time population genetic simulator. we did not find any existing simulator with a software architecture that allows for integrating  a memory management policy, such as the ones we propose here: hence, our choice to implement our algorithms independently of existing simulators. however, we still provide a command line tool which, in addition to taking flexible input parameters, provides an example for how the compression techniques in this paper may be integrated into a pre-existing simulator.
+
+to improve the performance of the population genetic simulation with a memory-managed genotype heap, we implemented both partial and batch decompression. in partial decompression, rather than uncompressing a  <dig>  bp sequence to access only  <dig> bp, we implemented intelligent decompression which could retrieve randomly accessed locations without decompressing the entire sequence. because each operation in the og stores meta-data associated with its application , we implemented operations such that they can be applied on the entire sequence or on a given index. in batch decompression, we implemented the population genetic simulator such that it reduces the data requests of a particular genotype. for instance, during a mutation event involving multiple base-pair changes, the genotype is uncompressed once and used repeatedly rather than uncompressed with each base pair change.
+
+because calculating load on the og may be a costly exponential calculation, we tracked the number of data requests per operation as a proxy for load. for all operations in the og, the number of data requests are set initially to zero and increment during the population genetic simulation. the number of data requests increments by one when the population genetic simulator requires the decompression of its corresponding genotype, which may occur during the calculation of a mutation event, recombination event, or fitness value. data requests on compressed genotypes propagate up the og to the most recent uncompressed operations. consequently, genotypes with higher frequencies in the population will tend to generate more data requests than low frequency genotypes, and so we can use the number of data requests as a proxy for load. however, there may be operations with non-zero load but no data requests: for instance if during time period t an active genotype is not mutated or if partial decompression does not propagate to both parents of a recombination event. therefore, we maintain a boolean flag that indicates if a particular operation is required for the decompression of some active genotype, which we use in place of ‘non-zero load’. it is important to note that the calculation of this boolean flag requires o, where n is the number of nodes which are required for the decompression of some active genotypes. lastly, during the execution of greedy-load, the number of data requests for an operation may be reset  or decremented , accordingly.
+
+to demonstrate that our approach is generally applicable to various choices of genotypes, we implemented two very different genotype models: a dna sequence  and a regulatory pathway model. in terms of memory allocation, a dna sequence of length l occupies l bytes and a pathway of k genes occupies roughly k <dig> bytes. for the dna model, we implemented four evolutionary events : point mutations , sequence insertions , sequence deletions , and sequence crossover . consequently, over the course of a simulation, the actual length of a dna sequence may change due to insertions and deletions. to our knowledge no other snp-based compression techniques  handl length variation.
+
+for the pathway model, we implemented binding site loss  and gain , similar to the model employed in  <cit> . more information regarding implementation details and software can be found in the additional file  <dig> 
+
+we verified the execution of the simulator using the dna sequence genotype by comparing the input mutation and recombination rates to the estimated mutation and recombination rates inferred by the output sequences. in addition, we verified the measured sequence polymorphism and diversity using the input population, sequence length, and mutation rate. all simulations were run on a macpro with two  <dig>  ghz quad-core intel xeon processors and  <dig> gb  <dig> mhz ddr <dig> memory.
+
+RESULTS
+to evaluate the performance of our compression algorithms—greedy-load and store-root—against the current memory management technique, store-active, we ran population genetic simulations under a variety of scenarios. these scenarios were chosen to test the memory and time performance of each algorithm, measured in terms of mega bytes  and seconds per generation, respectively. except for the time scaling experiments below, the time and memory usage of each simulation were recorded after an initial burn-in period, which is a standard technique employed to remove start-condition biases. we also used scaled population, generation, mutation, and recombination parameters to increase the time efficiency of the simulations  <cit> . the data compression ratio for a simulation is calculated as compressed sizeuncompressed size=kn, reported as a ratio, and the space savings is 1−kn, reported as a percentage. thus, a greedy-load representation that compresses a simulation from  <dig> mb to 5mb has a compression ratio of 1: <dig>  and space savings of 95%.
+
+time scaling
+the goal of this work is to constrain the memory footprint of a population-genetic simulation such that as simulation time increases, memory usage remains constant, which can be trivially achieved by swapping unconstrained memory and constant time for unconstrained time and constant memory. indeed, if decompression decisions are poor, then the latter may be the case. we measured the scaling of time  as a function of simulation time over  <dig> generations; results are shown in figure  <dig> 
+
+for both the sequence and pathway genotypes, store-root exhibited log-linear  scaling with respect to simulation time, whereas greedy-load showed constant execution time throughout the simulation. the sawtooth pattern of greedy-load results from the repetitive application  of the algorithm.
+
+parameterizing k, t in greedy-load
+greedy-load requires two parameters: k, the maximum number of explicitly represented genotypes ), and t, the number of elapsed generations between applications of greedy-load on the operation graph. although k constrains the memory footprint used by the simulation, both k and t can have a combined effect on its speed, which calls for careful choice of their values. we ran multiple simulations across a dual parameter sweep of k and t under both mutation and recombination scenarios and recorded the average seconds per generation; results are shown in figure  <dig> 
+
+under a mutation-only simulation, the speed performance of greedy-load improves by increasing k and/or decreasing t. except for low  compression ratios, greedy-load is ‘robust’ to k and t values in that performance does not significantly degrade across the parameter space. in contrast, under simulations which employed both recombination and mutation, a linear tradeoff exists between k and t: as k increases t should increase as well. because recombination introduces significant complexity to the og topology — in fact, under mutation the og is a tree — compression levels achieved by performant recombination simulations are near an order of magnitude less than the compression levels for mutation scenarios.
+
+space/time performance of policies
+in this experiment, we measure the performance of each compression algorithm in terms of both time, reported as the average seconds per generation, and space, reported in mb used by the genotype heap. the memory footprint is dominated by the explicitly represented genotypes, but also counts the operations stored in the operation graph, which account for less than  <dig> % of the total reported memory for all policies except store-root.
+
+time and space values were averaged over multiple simulations for both sequence and pathway genotype models. the results for both sequence and genotype models are shown in figure  <dig>  and depict similar performance patterns despite drastically different underlying representations.
+
+ we compared the performance of greedy-load to uncompressed  and maximum compression  bounds for varying genotype sizes. as the size of the genotype increases, the space used by the simulation increases as well; however, this quantity is dependent on the level of compression. in the case of the upper bound, no compression is imposed . the lower bound has maximum compression — only storing one genotype, at a compression rate of 1:n or 1: <dig>  . greedy-load provides a ‘performance knob’ between these two bounds, allowing for high levels of lossless compression without imposing significant time penalties. for the upper and lower bounds on compression, certain genotype sizes failed to complete for either space  or time  limitations. sequences ranging logarithmically in size from  <dig> to  <dig> bp were simulated at 95% compression. pathways ranging in size from  <dig> to  <dig>  genes were simulated at 90% compression. 
+
+for both genotype representations, greedy-load performed at competitive levels of space and time in comparison to the upper and lower bounds and completed simulations otherwise intractable to store-active and store-root.
+
+greedy-load performance in high recombination rate simulations
+recombination introduces multiple inheritance to the operation graph and so presents a unique challenge beyond a mutation-only model. further, the rate of recombination directly relates to the amount of genotypes with multiple inheritance — or complexity of the operation graph topology. consequently, the performance of greedy-load may be sensitive to the rate of recombination in a simulation.
+
+in this experiment, we measure the performance of greedy-load across a range of compression rates with respect to c/u, the ratio of per-base pair recombination over the mutation rate, by running a logarithmic parameter sweep of c/u from 10− <dig> to  <dig> . the mutation rate u is held constant at 10− <dig> and c is determined from the sweep parameter. the population size is  <dig> and the sequence length is  <dig> 
+
+because the complexity of the operation graph increases with respect to recombination rate — moving right on the x-axis in figure  <dig> — higher recombination rates require higher compression ratios . in fact, a phase shift exists in terms of execution time between sufficient and insufficient explicit genotypes  for a given recombination rate. this decision boundary imposes limitations on the level of compression supported by greedy-load for high levels of recombination . although greedy-load performs correctly at any compression rate, execution time is potentially sacrificed for memory-savings.
+
+imposing a memory ceiling using greedy-load
+imposing a memory ceiling constrains memory potentially at the cost of time. to investigate this tradeoff, we measured the ability of  <dig> mb memory-constrained simulations to handle genotypes of growing size. sequences were scaled logarithmically from  <dig> to  <dig> nucleotides, where it is possible to calculate the maximum number of explicit genotypes with k=⌊100/⌋, with  being roughly l/ <dig> for sequences. the execution speed for simulations under  <dig> mb memory constraints are shown in figure  <dig>  along with the maximum number of explicit genotypes, k, for each genotype size.
+
+the execution time scales log-linearly with respect to the size of the data, showing that even for low k values, greedy-load performs consistently with the size of the genotype representation and does not perform arbitrarily poorly when k is low or genotypes are large. although  <dig> mb is a threshold chosen primarily for demonstrative purposes, this experiment highlights the ability of greedy-load to threshold memory usage and prevent unexpected program crashes due to memory limitations.
+
+simulating big data
+we simulated a population of  <dig> individuals each with  <dig> mb dna sequence using base pair mutation , sequence insertion and deletion for  <dig> generations. these parameters leveraged a scaling factor of  <dig>  so, in effect, we equivalently simulated a population of  <dig> for  <dig> generations with a base pair mutation rate of 10− <dig>  the greedy-load algorithm with parameters k= <dig>  and t= <dig> managed the compression. this simulation completed successfully, using around  <dig>  gb of memory and on average  <dig> sec/gen .
+
+according to recent reviews, no forward-time population genetic simulator can handle this computationally demanding, yet biologically reasonable, parameter set  <cit> .
+
+discussion
+the operation graph  defined in this work presents a general and efficient data structure for lossless compression of genotypes in real-time, for the main purpose of constraining the memory footprint of forward-time population genetic simulations. by itself, the og is capableof decreasing the memory footprint by several orders of magnitude, making possible large-scale simulations that would otherwise crash the system. however, without explicitly representing a subset of the genotypes in the og, the time cost of decompression grows with simulation time; this amounts to trading “simulations that crash” for “simulations that never end”. therefore, the constant-time scaling of greedy-load with respect to simulation time is crucial for the viability of the operation graph as a general solution. further, the og and greedy-load leverage only inheritance topology to perform compression, which means our approach is general not only to genotype representation but also to implementation details of evolutionary operations.
+
+recombination is an important evolutionary operation but introduces significant complexity to the operation graph: because recombination requires two parents to generate novel recombinants, decompression decisions become more complicated. for example, the path of operations used to decompress explicit genotypes become an exponentially growing dependency graph; however, greedy-load can successfully compress genotypes arising from recombination, although at much lower data savings in comparison to those arising from mutation-only simulations. in order to adequately handle recombination, we recorded data requests for each operation in the og over a generation as a proxy for load, and did not calculate load explicitly. further details on this implementation can be found in the additional file  <dig> 
+
+the performance of the greedy-load algorithm is robust to t, the frequency of its execution, and k, the maximum number of explicit genotypes. when k is low, , there was a significant drop in the time performance of greedy-load; otherwise, k and t had little effect on the execution time of the algorithm. in contrast, recombination benefitted from increasing k and t together. we recommend fine-tuning k and t using shorter simulations to determine which parameters to use for longer simulations.
+
+it is important to note that although we invoke the greedy-load algorithm every t generations, other triggers may be used. for instance, the algorithm could be applied whenever |c|<k/ <dig>  which may provide better performance when the simulator uses overlapping, instead of non-overlapping, generations. because greedy-load performs accurately regardless of the value of t, any trigger is valid; however, the amount of topological change that the og undergoes between applications influences the running time of the algorithm.
+
+because greedy-load diminishes the strain on the memory system while still efficiently minimizing the decompression cost of active genotypes, greedy-load consistently performed on-par and with less memory than store-active in all of our experiments. reducing the amount of memory that is allocated and freed has a significant impact on the efficiency of the memory hierarchy. for example, reducing the overall memory overhead reduces cache misses and page faults, which, over time, has a significant impact on the speed of a simulation. so, not only does greedy-load constrain the memory footprint, it can do so without sacrificing speed.
+
+setting the maximum number of explicit genotypes reduces – not thresholds – the memory footprint of a simulation because storage of the operations is unconstrained; however, their footprint is inconsequential in comparison to explicit genotype representations. for instance, it would take  <dig> point mutations  to equal one uncompressed sequence of length  <dig>  even in this extreme case, assuming k≥ <dig>  the total memory usage of the simulation would be at most a tenth more than the amount constrained by k. in this regard, greedy-load can “impose” a memory ceiling on the genotype heap.
+
+although constraining the memory footprint of a simulation can increase the execution time, providing a performance knob that tunes between space savings/time cost and space cost/time savings is not only a useful tradeoff but crucial for simulations with large genotypes or large populations. for example, constraining the memory footprint enables more parallel, independent simulations to run on the same node. in a recent review of forward-time simulators, sequences of length  <dig> mb caused many simulators to crash  <cit> ; in contrast, we showed that greedy-load could handle a population of  <dig> sequences of length  <dig> mb while constraining the genotype heap to  <dig> mb. and these benefits are not just for sequences; our compression technique also facilitated the simulation of  <dig> -gene pathways while still constraining the memory to under  <dig> gb.
+
+we demonstrated that our approach could be used to simulate sequences with unprecedented size; however, larger memory footprints may also manifest as more complex data structures. for instance, not only the sequence, but also its annotated features like genes or regulatory elements could be simulated as one complex system, facilitating evolutionary questions which investigate the coevolution of these integrated systems. for instance, we leveraged our compression algorithm in a recent study which investigated the neutral evolutionary trends of the e. coli regulatory network by simulating, at scale, the entire regulome and its underlying sequence  over long evolutionary time scales  <cit> . these simulations resulted in a null distribution of system, sub-system, and operon level regulatory properties, allowing for rigorous statistical testing of neutral topological patterns. we found that the majority of e. coli regulatory topology — including patterns previously associated with adaptive evolution like feed-forward loops and scale free distribution — followed neutral trends.
+
+CONCLUSIONS
+we believe our algorithm not only provides a significant advance in the computing power of population genetic simulations but also in other evolutionary simulators. these other applications may include genetic algorithms or digital genetics, which leverages complex digital organisms  to understand evolution  <cit> .
+
+competing interests
+both authors declare that they have no competing interests.
+
+authors’ contributions
+tr conceived of the study, designed and implemented the algorithm, performed the simulations, and drafted the manuscript. ln conceived of the study, and participated in its design and coordination and helped to draft the manuscript. both authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+animation of greedy-load. visualization of greedy-load on ogs corresponding to high and low recombination scenarios
+
+click here for file
+
+ additionalfile 2
+supplementary information. additional implementation and software details.
+
+click here for file
+
+ acknowledgements
+this work was supported in part by a doe/krell csgf to tr under grant number de-fg02-97er <dig>  and an nsf grant ccf- <dig> and an alfred p. sloan research fellowship to ln the contents are solely the responsibility of the authors and do not necessarily represent the official views of the nsf, doe, or the alfred p. sloan foundation.

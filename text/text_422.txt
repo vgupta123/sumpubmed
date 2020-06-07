@@ -1,0 +1,180 @@
+BACKGROUND
+reactome  is a free, open-source, curated and peer-reviewed knowledge-base of biomolecular pathways. it aims to provide bioinformatics tools for visualisation, interpretation and analysis of pathway knowledge to support basic research, genome analysis, modelling, systems biology and education.
+
+nowadays, pathway analysis methods have a broad range of applications in physiological and biomedical research. on the one hand, based on a given dataset, these methods help researchers to discover which areas of biology, and biomolecules, are crucial to understand the phenomena under study. on the other hand, pathway analysis methods should never be taken as black boxes from where experimental data goes in, and true statements come out, but perhaps more as metal detectors in haystacks helping researchers to find biologically meaningful needles  <cit> .
+
+pathway analysis methods are mainly used to analyse omics data obtained from high-throughput technologies. since the size of the data samples is constantly increasing  <cit> , reactome offers a set of pathway analysis tools which aim to deal with this scenario and yet provide reliable and accurate results with interactive  response time for genome-wide datasets.
+
+here, we are discussing the high performance reactome implementation of the well established over-representation analysis  method  <cit> , focussing on the computer science aspect, elaborating on the different data structures and design patterns used to optimise the execution time and reduce the server load.
+
+initially the focus is on the strengths and weaknesses of keeping the data directly in a relational database and its usage to perform in-database analyses. then we continue with a detailed explanation of the new pathway analysis approach, and conclude with the presentation of the results and the discussion.
+
+the relational databases approach
+relational databases are widely used in pathway knowledge-bases for data management; either during curation, the release process or in the final production phase. it is also very common to store the information in third normal form due to its convenience for data integrity assurance .
+
+relational databases in their third normal form can be efficient in computational terms. for the above mentioned use cases, however, this approach greatly slows the execution of analysis algorithms, due to the size of the temporary tables for the queries and later projections. for this reason database-based analysis approaches use denormalised versions of the databases instead  <cit> . the denormalisation process replicates a lot of data to speed up the queries but it may penalise analysis execution time as the original database content grows bigger.
+
+focusing on the computational side of the problem, the query containment problem is undecidable for relational algebra and sql, but is decidable and np-complete for conjunctive queries. in fact, the query containment problem for conjunctive queries is exactly the same problem as the query evaluation problem  <cit> . when queries tend to be small, np-completeness is usually considered acceptable but its performance falls when queries tend to be big. in addition, it is also worth considering that creating intermediate tables in memory after executing a “join” statement is one of the heaviest operations for a database engine.
+
+reactome’s previous implementation of the pathway analysis was based on a denormalised version of the reactome relational database. among its limitations were that it provided results only of the higher-level pathways in reactome, and the lack of programmatic access. in addition, the previous implementation suffered from poor performance mainly due to the fact that, on every analysis request, it connected to the relational database, rather than querying an intermediate in-memory data structure. thus, the response time of the previous reactome analysis could reach 5 min, as soon as the user sample included a few hundreds of gene identifiers, causing a high server load that, combined with a number of concurrent analysis requests, affected the stability of the reactome website and often resulted in outages.
+
+in resources like reactome, analyses use not only curated data but also extra information and cross-references to other resources that are included in the final version of the database, for example to allow usage of identifiers from other resources than the main ones used by the curators to identify proteins, genes, micrornas or chemicals. each major resource uses its own conventions when assigning identifiers, so the problem of mapping the various, potentially unstable, identifiers that refer to identical entities, commonly known as identifiers mapping, constitutes a major challenge. there is a number of resources that aim to provide a solution to this problem, most notably, the protein identifier cross-reference   <cit> , bridgedb  <cit>  and uniprot  <cit> . however, reactome addresses this problem during each release process by cross-referencing every curated entity to other resources. in particular, based on the uniprot or chebi identifiers of the curated entities, filled in during curation, reactome queries orphanet, protein ontology , intact, rhea, dockblaster, flybase, the human metabolome database , zinc, kegg, uniprot, ensembl, brenda and intenz to get their cross-references for entities annotated in reactome. both, curated and cross-referenced identifiers are included in the analysis lookup table, as explained in the implementation section.
+
+as the amount of curated data in reactome grows and the number of cross-references increases due to the inclusion of new resources, the database-based approach does not scale well, so there is a need to implement a new approach to provide fast, accurate and reliable analysis tools to the final users. this new approach is based on the concatenation of different steps, each one resolved via the appropriate data structure, as explained in the next section.
+
+implementation
+identifying a convenient data structure to solve a given problem is one of the main factors to achieve a high performance final product. as skiena explains in  <cit> , picking the wrong data structure for the job can be disastrous in terms of performance but identifying the very best data structure is usually not as critical, because there can be several choices that perform similarly.
+
+based on the divide and conquer rule, the first step is breaking down the analysis problem into different sub-problems simple enough to be solved in polynomial time by identifying a convenient data structure. here, the analysis algorithm can be split into four parts:  checking whether the user’s protein/chemical identifiers are present in reactome,  for the present ones, finding whether these are parts of complexes and/or sets as well as the species projection,  aggregating the found identifiers in the pathways  where these are present and finally  performing the statistical testing to calculate the likelihood that the association between the sample identifiers and the found pathway is due to random chance.
+
+further on in this section each part is discussed in detail to determine its peculiarities; to expose the chosen data structure and the mechanisms adopted for its improvement; and to show how to connect each step to the following one to come up with the final improved analysis algorithm. another point of emphasis for optimisation will be the memory usage of each step, so that the filled data structures can be kept in memory to improve the performance of the data traversing algorithms implemented on top of them.
+
+user sample identifiers search in reactome
+annotated physical entities  in reactome can be either single entities or complexes. single entities include proteins, small molecules, rna, dna, carbohydrates, or lipids, whilst complexes consist of a combination of any of the single entities, or polymers synthesized from the single entities. however, apart from these two main categories, curators in reactome can group related entities into sets. pes are the building blocks that later on will be used as inputs, outputs, catalysts or regulators in reactions.
+
+identifiers or accession numbers are used to unequivocally refer to a single entity, but pes have different slots to hold the main identifier, secondary identifier, cross-references, synonyms and other identifiers. the main identifier slot is always manually annotated by the experts who curate data in reactome , and the other slots can either be manually filled during curation or automatically populated during the release process. this strategy allows storing identifiers for a wide range of resources: uniprot, chebi, ensembl, mirbase, genbank/embl/ddbj, refpep, refseq, entrezgene, omim, interpro, affymetrix, agilent, kegg compound, illumina, etc.
+
+therefore, in the first part of the analysis, the main requirement is to improve the process of finding out whether each identifier in the user’s sample corresponds to one or many pes in reactome. an identifier corresponds to a pe if it matches with any of the identifiers stored in the different slots mentioned afore. in fact, the best way to solve this problem is by following the reverse approach; creating a lookup table with all the corresponding pes per each identifier cross-referenced in reactome. as a consequence, another important requirement is to minimise the memory usage so the data can be kept in memory to improve the query time.
+
+the selection of a good data structure is then determined by requirements both to implement a fast lookup table and to keep memory usage low. a trie is an ordered tree data structure that is used to store a dynamic set or associative array where the keys are usually strings  <cit> . a radix tree is a space-optimized trie data structure where each node with only one child is merged with its parent  <cit> .
+
+on the one hand, a radix tree has relatively low memory usage for the lookup table because the common prefixes are shared avoiding data duplication . on the other hand, the cost of comparing a search key for equality with a key from the data structure can be a dominant cost which cannot be neglected. the radix tree string lookup algorithm fits the analysis algorithm’s original purpose because iterating over tree nodes keeps the identifier seeking time restricted to each identifier’s length and existence in the reactome target set. as a consequence of this, in case the searched identifier is not contained in the data structure, there is no need to read all of it as happens in the hashing methods where the hash value of the string has to be calculated in every case by reading it entirely.fig.  <dig> radix tree representation for the identifiers p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  pten
+
+
+
+
+in summary, once a tree node is reached following the radix tree lookup algorithm for a given identifier, the presence or absence of references to pes indicates whether the associated identifier is present or not in the database. actually, the mentioned “references to pe” are indeed pointers to nodes in the data structure chosen for the next part of the analysis.
+
+reactome uses unique primary identifiers for the pes it references, in particular uniprot for proteins and chebi for chemical entities. thus, if users submit datasets using these reference systems, the mapping to pes is straightforward. however, following frequent user requests, we also accept input data with non-unique identifiers, in particular gene names. these are then potentially mapped to multiple pes. thus, each target node in the tree could contain more than one pointer to the next data structure.
+
+traversing complexes/sets composition and species projection
+reaching the associated single entity for a given identifier is the beginning of the second step in the analysis. when these single entities are part of a complex, they are also a target in this step of the analysis. besides the single entities and complexes, there is another type of pe called sets which, along with complexes, are also to be considered. a set is an abstract representation of a group of two or more entities which are not interacting with each other but are functionally equivalent in the situation where the set is used, for example multiple members of a family of enzymes that could each potentially catalyse a reaction. furthermore, complexes and sets can also contain other complexes and sets in order to represent much more elaborate structures causing the problem’s intricacy to grow.
+
+another specific requirement is the possibility of performing species projection to collect the results for homo sapiens independently of the species for which the identifiers are provided, to benefit from the more complete reactome annotation for human. to do so, the species orthologs annotated in reactome have to be taken into account. orthologs are entities in different species that evolved from a common ancestor by speciation.
+
+the last requirement in this step is to keep track of the identifiers mapping between the submitted identifiers and those used in reactome to curate the single entities: uniprot accessions for proteins, ensembl identifier for genes, chebi identifiers for small molecules and mirbase for micrornas. although an important part of this mapping started by including the known cross-references as identifiers in the radix tree in the previous step, the mapping itself has to be implemented in this step.
+
+summarising the exposed requirements for this step of the analysis, the chosen data structure has to model the entities composition problem, the species orthologs projection and the entities mapping. a directed graph is a graph, or set of nodes connected by edges, where the edges have a direction associated with them. for a given graph g with several nodes , if g has an arrow from a to b and another arrow from b to c, then the composed graph g
+ <dig> has an arrow from a to c. if g has an arrow from a to b, another arrow from b to c and yet another from c to d, then the composed graph g
+ <dig> has an arrow from a to d.
+
+building one graph per species  and interconnecting all of them linking all the ortholog nodes  creates a bigger graph where the projection requirement is then satisfied. due to the node uniqueness in the final graph, for those cases where a node is part of one or more structured entities, it contains as many edges pointing to other graph nodes as structures in which it is contained, so structured entities are easily modelled. finally, if each node of the graph contains its associated entity main identifier , when it is reached from a radix tree node representing an identifier other than the main one, this association is stored in order to be offered as part of the result as the required mapping once the analysis is finished.fig.  <dig> graph representation where p are proteins; c are complexes, s are sets and prime nodes are the same but for other species. a one species graph. b relation between two species. c base node content
+
+
+
+
+the graph in fig. 2a shows three proteins , two complexes , and two sets . by following the edge from node to node, s <dig> could be either p <dig> or p <dig>  formally represented as . c <dig> is a complex which, due to its edge from s <dig>  is then potentially two complexes: {p <dig> p2} or {p <dig> p3}, represented as . following this deconstruction, s <dig> is then  and finally c <dig> is .
+
+for instance, when an identifier matching with p <dig> is processed and its corresponding node in the graph is reached from the radix tree, it takes miniscule processing time to traverse the graph and reach the nodes s <dig>  c <dig>  s <dig> and c <dig>  likewise, if the target protein is p <dig>  the reachable nodes following the graph edges are c <dig>  s <dig> and c <dig>  in both examples each target protein is part of the complexes and sets represented by the traversed nodes.
+
+employing a graph improves the analysis algorithm cost and, important in building an in-memory analysis, the memory usage is kept low because there is no data duplication as the node for a given main identifier is only in memory once. in addition, the final number of node iterations of the algorithm is limited by the related entities for a given identifier, avoiding queries against a large amount of data and intermediate results merging, as done in the database based approach.
+
+as for the radix tree described above, the graph also requires a strategy to allow the algorithm to move on to the next analysis step. in this case, each graph node representing an entity directly associated to one or several pathways will contain as many links to the following data structure as different locations where it is present. although in the current analysis step each entity associated with the target identifier is found, for the final result and the statistics calculation, there is still one more data structure to be used, as explained in the following sub-section.
+
+results aggregation into the pathways organisation
+every pe that was directly or indirectly hit in the previous step is associated to one or more pathways. to calculate the significance of each pathway, for a given user sample, it is essential to determine the number of entities found per pathway. due to the parent-child organisation of the reactome pathways in an ontology-like hierarchy, when an entity is present in a certain pathway it is also present in its super-pathways in a recursive manner until a top-level pathway is reached .
+
+taking into account the requirements previously discussed, a good data structure to model this step is a double-linked tree, where each node represents a pathway and contains links to its parent and children . when a node in the tree is hit, the action can be recursively propagated all the way up to the root. to reduce the memory footprint only identifiers, names and placeholders for results calculation are kept in each node.fig.  <dig> double-linked tree to represent the event hierarchy in reactome. the root node defines the species and its children represent the different pathways and sub-pathways in reactome. each node contains the pathway identifier, name, the total curated entities and the number of entities found in the user’s sample
+
+
+
+
+apart from being a convenient data structure to speed up collection of results and a good holder for the statistics results, once the analysis is finished, this data structure can also be serialised to a file to persist the result. in addition, associating the file to a token provides an easy way to create finer grained methods that allow filtering of the result on the server side to help speeding up light-weight clients. in this scenario, the clients can keep the token once the initial analysis is finished and depending on the user’s needs, perform several requests to the server referencing the associated token.
+
+analysis result statistics calculation
+the basic hypothesis in an over-representation analysis is that relevant pathways can be detected if the proportion of differentially expressed genes, within a given pathway, exceeds the proportion of genes that could be randomly expected  <cit> . consequently, the fourth and last step in the analysis method involves the statistics calculation. this step does not require any extra data structure because the double-linked tree fits perfectly to the purpose.
+
+the p-value shows the statistical significance of each hit pathway for a given sample and the background for which the analysis has been performed. in reactome the method used to calculate the statistical significance is the binomial test. together with the p-value, the false discovery rate  helps estimating the false positives and it is calculated using the benjamini-hochberg approach  <cit> . as mentioned afore, we have focussed on optimising the performance of the reactome pathway analysis, while maintaining the basic algorithm as previously published  <cit> .
+
+RESULTS
+this paper shows how splitting the pathway analysis method in four steps, in a way that every challenge can be easily addressed in a polynomial time using the appropriate data structures, speeds up the process and minimises the memory usage so the whole data structure can be kept in memory for a high-performance analysis. the result is a new set of analysis tools which vastly improve reactome analysis interface performance and stability.
+
+summarising the steps , for each identifier in the user’s sample, the first action is to find whether it is present in reactome using a previously built radix-tree as a look-up-table. this speeds up the process, keeping a low memory footprint. for those that are present, the radix-tree nodes point to one or many nodes in a graph which is used as the second data structure to keep the curated relations between pes as well as species orthology. traversing this second data structure, applying or not the projection to species, provides pointers to all pathways stored in the final data structure, which is a double-linked tree, that helps aggregating the result and acts as a placeholder for the last step when the analysis statistics are calculated.fig.  <dig> representation of two analysis use cases joining the different data structures. in red an analysis performed using the projection to human. in green an analysis performed without projection
+
+
+
+
+the described method has been developed using java as programming language and can be downloaded from https://github.com/reactome/analysistools. this package contains two main modules; core and service. the improved strategy has been developed in the core, where the analysis is executed. the service module is a spring mvc  layer to create a restful service with a documented api, using openapi, formerly known as swagger v <dig>  , providing programmatic access. hence, there are two ways of accessing the analysis tools;  programmatically via a web service  or  through a graphical user interface directly integrated in reactome’s pathway browser .
+
+the web service is used to integrate the analysis in other system’s scripts, pipelines or to integrate the analysis in third-party applications. more information on how to do so can be found in reactome’s developer zone .
+
+the pathway analysis approach described here is deployed in the reactome production web site, stably handling on average  <dig>  analysis requests from  <dig>  unique users per month in the first half of  <dig>  memory usage for the apache tomcat running this service plus other services in the server side is set to 2gb.
+
+comparison with other resources
+among the plethora of pathway databases  <cit> , there are resources with similar tools that perform over-representation analysis. most notably, gene set enrichment analysis   <cit> , the database for annotation, visualization and integrated discovery   <cit> , the protein analysis through evolutionary relationships   <cit>  and consensuspathdb  <cit>  are using similar statistical algorithms in their implementations and are freely available for academic use. table  <dig> presents a comparison among these resources. for the comparison of processing time, only the first column in the four test sets, containing the gene identifiers, has been used. reactome uses all genes annotated in the knowledge base as the background distribution. to our knowledge, this is also the approach used in the comparator tools, and we have not used options for custom background distributions, as statistics calculation could take longer in this scenario.table  <dig> comparison of resources providing analysis methods and accessibility
+
+hippocampal atrophy -  <dig> genesa
+comparison between different resources and whether they provide analysis methods which are accessible online  and the average response time for a predefined sample. for the comparison of processing time, only the first column in the test sets -the gene identifiers- has been used. datasets are available in
+
+
+a
+https://www.targetvalidation.org/disease/efo_0005039/associations 
+
+
+b
+https://www.targetvalidation.org/disease/efo_0003821/associations 
+
+
+c
+https://www.targetvalidation.org/disease/efo_0002508/associations 
+
+
+d
+https://www.targetvalidation.org/disease/efo_0003885/associations 
+
+
+e
+https://www.targetvalidation.org/disease/efo_0003767/associations 
+
+
+
+
+gsea offers its analysis tool exclusively through a desktop application and therefore requires download and installation before usage, rendering the tool suitable for more experienced users. on the other hand, david, panther and consensuspathdb provide online access to their analysis tools via a web interface, similarly to reactome. thus, users can submit their sample for analysis through their favourite web browser.
+
+furthermore, besides reactome, david and consensuspathdb are also allowing users to access their analysis tools programmatically, through a set of web services. hence, researchers and software developers can integrate the provided analysis tools into their pipelines and applications. however, while david and consensuspathdb rely on the simple object access protocol  and the web service description language  for their web services, reactome analysis web service is based on the representational state transfer . the adoption of rest eliminates the need for complex clients and renders reactome analysis service simpler, more lightweight, more flexible, and, thus, easier to integrate into third party software compared to its soap/wsdl counterparts.
+
+leveraging on the performance gained by the in-memory analysis approach explained above and the use of restful web services, the reactome analysis tool does not impose any limitations on the sample size or the frequency of analysis requests, unlike david. regarding its weaknesses compared to david, reactome analysis tool has a more limited coverage, as it does not integrate as many resources as david does, but it focuses on high quality manually curated pathways that are updated quarterly. in addition, reactome does not allow users to customise the background population of their analysis.
+
+CONCLUSIONS
+through the use of highly optimised, in-memory data structures and algorithms, reactome has achieved a stable, high performance pathway analysis service, enabling the analysis of genome-wide datasets within seconds, allowing interactive exploration and analysis of high throughput data.
+
+availability and requirements
+all data generated or analysed during this study are included in this published article.
+
+source code: https://github.com/reactome/analysistools
+
+
+web service: http://reactome.org/analysisservice/
+
+
+user interface: http://reactome.org/pathwaybrowser/#/tool=at
+
+
+documentation: http://goo.gl/k5ffhu
+
+
+abbreviations
+apiapplication program interface
+
+dnadeoxyribonucleic acid
+
+fdrfalse discovery rate
+
+mvcmodel view controller
+
+npnon-polynomial
+
+oraover-representation analysis
+
+pephysical entities
+
+restrepresentational state transfer
+
+rnaribonucleic acid
+
+soapsimple object access protocol
+
+sqlstructured query language
+
+wsdlweb service description language
+

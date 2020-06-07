@@ -1,0 +1,170 @@
+BACKGROUND
+analysis of hybridized microarrays starts with scanning the fluorescent image. the quality of data scanned from a microarray is affected by a plethora of potential confounders, which may act during printing/manufacturing, hybridization, washing, and reading. for high-density oligonucleotide arrays  such as affymetrix genechip® oligonucleotide  arrays, each chip contains a number of probes specifically designed to assess the overall quality of the biochemistry, whose purpose is, e.g., to indicate problems with the biotinylated b <dig> hybridization. affymetrix software and packages from bioconductor project for r  <cit>  provide for a number of criteria and tools to assess overall chip quality, such as percent present calls, scaling factor, background intensity, raw q, and degradation plots. however, these criteria and tools have little sensitivity to detect localized artifacts, like specks of dust on the face of the chip, which can substantially affect the sensitivity of detecting physiological  differences. in the absence of readily available safeguards to indicate potential physical blemishes, researchers are advised to carefully inspect the chip images visually  <cit> . unfortunately, it is impossible to visually detect any but the starkest artifacts against the background of hundreds of thousands of randomly allocated probes with high variance in affinity.
+
+in  <cit>  a simple method to "harshlight" blemishes in hdonas chips was presented. the method produces an error image  for each chip, which indicates the deviation of this chip's log-intensities from the other chips in the experiment. formally, e is calculated as e = l - median jl where l is the log-intensity matrix of chip i. given that the intensity of each cell is highly determined by the sequence of the probe  <cit> , this deviation should be near zero except for the probes belonging to the probe sets related to genes that are differentially expressed. in earlier affymetrix chips, the probe pairs corresponding to a single probeset were located in adjacent positions on the array, but now probe pairs are randomly distributed on the chip  <cit> , so that no obvious pattern should be discernable in e.
+
+in about 25% of the chips we have seen, the error image shows artifacts with strikingly obvious patterns, which often hint to the physical cause of the blemish. while this makes such blemishes visible to the human eye, manually masking the defects is impractical except for small sets of chips and introduces undesirable subjectivity. thus, we developed an r-package with subroutines in c, to automatically spot suspicious patterns in the error image  using a battery of diagnostic tests based on both image processing and statistical approaches.
+
+for testing and developing purposes, several sets of chips were used, including chips from affymetrix spikein  experiments  <cit>  and from three other experiments undertaken at rockefeller university facilities, for a total of  <dig> chips. these include a variety of experimental sets: hgu133a chips on embryonic stem cell samples  <cit> , two clinical studies on psoriasis  <cit> , undertaken using blood and skin samples , and a study on microglia cells .
+
+implementation
+in  <cit>  two broad categories of common defects were identified in affymetrix genechips: compact and diffuse defects. compact defects are characterized by a small or medium size region where all the probes are blemished, often due to mechanical and optical causes, like a piece of dirt on the face of the chip . diffuse defects are characterized by clouds with a high density of blemished probes presumably due to defects in the hybridization stage or to uneven scanner position, illumination, as those circled in dashed lines in figure 1a. we have found evidence that these defects are probe sequence dependent, suggesting hybridization problems .
+
+in this manuscript we shall also deal with extended defects, usually affecting a large area of the chip, as the one showed in figure 1b. .
+
+we have developed pattern recognition methods specifically tailored to each type of defect. we will describe them and how they are deployed in the next sections.
+
+general structure
+having a batch of chips from a single experiment, the error image e is obtained for each chip as described above. our algorithm detects patterns of outliers in these error images, so it is important to notice that henceforth, unless otherwise noted, we shall refer exclusively to the error images. in a typical experiment, only a small number of genes are expected to be differentially expressed. thus, most pixels in e should be close to zero. since probes belonging to a probe set are randomly distributed over the chip, variance in gene expression should not lead to spatially correlated patterns. therefore any discernable pattern of outliers in e signals a defect. harshlight automatically identifies those patterns and returns the batch of masked chips. the user may choose whether the intensity values of defective probes are to be substituted by missing values or by the median of the intensity values of the other chips .
+
+the program's structure is outlined in figure  <dig>  initially, e is scanned for the presence of an extended defect and if one is found, the chip is discarded; otherwise, the routine continues by searching for compact and diffuse defects, masking them and making sure they do not belong to a diffuse defect thought a contiguity test. once the compact defects are recognized, they are masked and the programs proceeds looking for areas of diffuse defects.
+
+extended defects
+defects covering a large area , can cause substantial variation in the overall intensity from one region of the chip to another, thereby compromising the assumption that most cells have only a small deviation from the median. to quantify such variation, we decomposed the error image e as:
+
+e = be + ηe
+
+where be and ηe represent, respectively, the background and features of the error image e. please note that be is a background in an image analysis sense, and it should not be confused with the optical background of the original chip image that is addressed in background correction procedures; be is not related to the "dark" area of the original image and in fact can have either sign. ssimilarly, the "features" of the error image are its local spatial variations, and also can have either sign. ideally, in an unblemished chip, the features ηe originate in differentially expressed genes, which are expected to be spatially randomly distributed with mean zero and variance σηe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagaeq4tdg2aasbaawqaaiabhweafbqabaaaleaacqaiyagmaaaaaa@3289@. assuming background and features to be uncorrelated, this allows the variance of e to be decomposed as:
+
+σe2=σb2+σηe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagaecyraueabagaegomaidaaogaeyypa0jaeq4wdm3aa0baasqaaiabhkeacbqaaiabikdayaaakiabgucariabeo8aznaadaaaleaacqah3oaadawgaaadbagaemyraueabeaaasqaaiabikdayaaaaaa@3c6d@
+
+to estimate σbe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagaecoqai0aasbaawqaaiabhweafbqabaaaleaacqaiyagmaaaaaa@31ee@, the image is smoothed with a median filter <cit> , a technique commonly used in image processing to eliminate single-pixel noise. the median filtered image e˜
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacuwhfbqrgaacaaaa@2dd2@, created trough a sliding median kernel, is an estimator of the background be as is defined by
+
+e˜i
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacuwhfbqrgaacamaabaaaleaacqwgpbqaaeqaaaaa@2f59@ = median
+
+where Θi are the pixels in the window centered in i. in our case, the mask used is a circular window with a user defined radius . at the edges of the image, the part of the mask that lies outside of the chip borders is filled with the image mirrored at the border.
+
+since the background is locally constant, we have approximately:
+
+σe˜2=σbe2+ση2nδ→δ→∞σbe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacwalas4wdm3aiqjgdaaaleacucoafcyraukbagaaaeacucoamqjgikdayaaakiabg2da9iabeo8aznaadaaaleaacqwhcbgqdawgaaadbagaecyraueabeaaasqaaiabikdayaaakiabgucarmaalaaabagaeq4wdm3aa0baasqaaiabee7aobqaaiabikdayaaaaoqaaiabd6gaunaabaaaleaacqah0oazaeqaaaaakmaaogcaleqabagaeqitdqmaeyokh4qaeyohiukakiaawkziaiabeo8aznaadaaaleaacqwhcbgqdawgaaadbagaecyraueabeaaasqaaiabikdayaaaaaa@5147@
+
+where nδ is the number of pixels in the window, which is equal to 102π ≈  <dig> in the case of a circular window with radius δ =  <dig>  thus, σe˜2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagafcyraukbagaaaeaacqaiyagmaagccaamcsoaaa@3245@ is a good approximation of the background variance.
+
+in an unblemished chip, the variance of the deviations from the median chip, σe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagaecyraueabagaegomaidaaaaa@30a5@, is mainly due to the variance of the features η, and the background be should suffer small variations across the chip, i.e. ση2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqacigacagaaeqabaqabegadaaakeaaiiaacqwfdpwcdaqhaawcbagae83tdggabagae8nmaidaaaaa@3133@ >> σbe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagaecoqai0aasbaawqaaiabhweafbqabaaaleaacqaiyagmaaaaaa@31ee@. however, in an image such that in figure 1b there is a large variation of the background from one region to another. thus, the proportion of variations in e explained by the background, namely σbe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagaecoqai0aasbaawqaaiabhweafbqabaaaleaacqaiyagmaaaaaa@31ee@/σe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagaecyraueabagaegomaidaaaaa@30a5@, quantifies the extent of such defect. if this quantity is bigger than a certain threshold, the chip should be discarded.
+
+this kind of extended defect was rare; we only found three seriously flawed chips among the  <dig> chips we analyzed. the percentage of the estimated variance explained by the background σe˜2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagafcyraukbagaaaeaacqaiyagmaagccaamcsoaaa@3245@/σe2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacqahdpwcdaqhaawcbagaecyraueabagaegomaidaaaaa@30a5@ varied across chip collections; chips handled by our local facility had a median of 3% and always had <9% variations. the spikein experiments had substantially larger ratios, and in the case of spikein <dig>  three outlier chips at 33%, 36% and 60% . no chip in our collection has ratios between 17% and 33%, so any number in that range seems a reasonable threshold given our limited statistics. since typically ση~ <dig>  in log <dig> units, chips with large ratios can be materially distorted; the background of the chip in figure 1b has σb =  <dig> , so the intensities in the bright region are more than double the intensities in the dark area.
+
+we do not have enough data to ascertain what causes extended defects; since the chips are scanned by a laser-scanning system, extended defects are not caused by changes in illumination level or other simple physical causes. we therefore do not currently know what an appropriate remedy would be, so if an extended defect is detected analysis is stopped for this chip, and suggest to the user the chip should be discarded.
+
+compact defects
+if the chip passed the previous test, analysis continues. first the chip is searched for compact defects, defined as small connected clusters of outliers in the error image e. as probe pairs are randomly distributed, differential gene expression leads to spatially uncorrelated variations. in good chips, the outlier pixels of e should not be connected, so connected outlier pixels indicate compact defects.
+
+for each outlier image, the floodfill algorithm <cit>  is then used to detect clusters of connected outliers. for every flagged pixel in the image, the algorithm recursively looks for other flagged pixels in its neighborhood. if any are found, the pixels are assigned to the same cluster number. the process stops when no more connected pixels can be found . the user can choose whether two pixels are considered connected if they share only an edge  or also a corner .
+
+even in a "good" chip, where the outliers are spatially randomly distributed, it is possible to find small clusters by chance. so, to guard against spurious results, the cluster size distribution under the null hypothesis of  randomly distributed outliers is obtained through simulation. since this distribution depends on both chip size and density of outliers, simulations need to be carried out for each combination of those parameters. to reduce the computational burden at the procedure's runtime, we carried out simulations for common chips' designs  and selected proportion of outliers . an example of this distribution is the lower curve in figure  <dig>  by default, if the user's chip dimensions or specified proportion of outliers are not among those tabulated, distribution values are interpolated from the table. however the user may override interpolation and run-time simulations will be executed.
+
+after each cluster is defined, the significance of its size s can be easily computed as 1-f, where f is the cumulative distribution of cluster size under the null hypothesis in a chip of the same dimension and proportion of outliers. if the size significance is bigger than a user-defined threshold , the cluster is discarded and not considered as a blemish . in addition, its size is also compared to the minimum cluster size accepted : again, if the cluster is not large enough it is not considered. the collection of chips we have examined displays a large number of compact defects, many of them quite large.
+
+a histogram of the size distribution of compact defects, contrasted with the null hypothesis distribution derived from simulations, is shown in figure  <dig>  within the range of a few units of area through several hundred probes, the distribution of compact defects can be approximated by a power law  n~a- <dig> , while the null distribution falls off exponentially as n~e- <dig> a. therefore for even moderately small areas the significance of such clusters is extremely high.
+
+areas covered by compact defects are excluded from the chip before continuing with the next step.
+
+diffuse defects
+diffuse defects are defined as areas with densely distributed, although not necessarily connected outliers.
+
+in normal chips, outliers should be spatially uniformly distributed over the image, so proportion of outliers should be similar for different regions. in case of diffuse defects, we are looking for areas in which there are a large number of outliers, when compared to other regions of the image. figure  <dig> shows the algorithm used to detect areas with diffuse defects, which begins with the definition of the outliers image.
+
+the first step involves, as in the case of compact defects, the declaration of outliers. to avoid penalizing chips with small error variance, we declare outliers those pixels whose intensity values are higher  or lower  by a certain percentage than the expected intensity. in terms of the e, this criterion  implies that if pixels with x% of decrease in intensities are considered dark outliers, the dark outlier image can be defined as:
+
+oi={1if ei≤−log⁡20otherwise
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqacigacagaaeqabaqabegadaaakeaacqwgpbwtdawgaawcbagaemyaakgabeaakiabg2da9maaceaabaqbaeaabigaaaqaaiabigdaxaqaaiabdmgapjabdagamjaaykw7ieqacqwffbqrdawgaawcbagaemyaakgabeaakiabgsmijkabgkhitigbcygasjabc+gavjabcegannaabaaaleaacqaiyagmaeqaaogaeiikagiaegymaejaey4kasiaemieagnaeiykakcabagaegimaadabagaem4ba8maemidaqnaemiaagmaemyzaumaemocainaem4dacnaemyaakmaem4camnaemyzaugaaagaay5eaaaaaa@53c2@
+
+both outlier images , are scanned with a circular sliding window of user-defined radius . the borders are duplicated as described for the extended defects. for every pixel i in the outlier image, the proportion of outliers in the surrounding circular window Θi is computed as:
+
+pi=1nδ∑i∈Θioi
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqaciaacagaaeqabaqabegadaaakeaacaamcsuaemicaa3aasbaasqaaiabdmgapbqabagccqgh9aqpdawcaaqaaiabigdaxaqaaiabd6gaunaabaaaleaacqah0oazaeqaaaaakmaaqafabagaem4ta80aasbaasqaaiabdmgapbqabaaabagaemyaakmaeyici4saeuimde1aasbaawqaaiabdmgapbqabaaaleqaniabgghildgccaamcsoaaa@42b3@
+
+a binomial test is then used to decide whether pi is larger than the overall proportion po of outliers in the image, i.e. to test pi>povs. pi = po.. a new image  is then created as
+
+di={1if pi>b1−α0otherwise
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaach8aky=wiffydh8gipec8eeeu0xxdbba9frfj0=oqffea0dxdd9vqai=hguq8kuc9pgc9s8qqaq=dirpe0xb9q8qilsfr0=vr0=vr0dc8meaabaqacigacagaaeqabaqabegadaaakeaacqwhebardawgaawcbagaemyaakgabeaakiabg2da9maaceaabaqbaeaabigaaaqaaiabigdaxaqaaiabdmgapjabdagamjaaykw7cqwgwbacdawgaawcbagaemyaakgabeaakiabg6da+iabdkgainaabaaaleaacqaixaqmcqghsislcqahxoqyaeqaaogaeiikagiaemicaa3aasbaasqaaiabd+gavbqabagccqggsaalcqwgubgbdawgaawcbagaeqitdqgabeaakiabcmcapaqaaiabicdawaqaaiabd+gavjabdsha0jabdigaojabdwgaljabdkhayjabdeha3jabdmgapjabdohazjabdwgalbaaaiaawuhaaiaaykw6aaa@5781@
+
+where bα is the α-percentile of the binomial distribution. d gives a better representation of the regions with high proportion of outliers, since the disconnected pixels in the outlier image appear now more connected .
+
+the floodfill algorithm is then used to detect connected flagged pixels  as before, and clusters of small size are discarded. the user can set the size limit of the clusters, but the default value is three times the area of the sliding window.
+
+finally, to better outline the area of blemishes, the image undergoes a closing procedure. this is a technique commonly used in image processing to close up breaks in the features of an image . in our case, a circular kernel is centered in each pixel of the image . its centre is flagged if any of the pixels of the kernel is flagged.
+
+this procedure  causes the borders of the defects to grow, eventually filling empty spaces inside the features. however, in order to maintain the original outer borders of the features, another circular kernel is applied to the image. this time, the centre of the window is flagged only if all of the pixels inside the window are flagged. this procedure  reverses any extension beyond the compact hull of the original cluster.
+
+we suggest that all probes in the closed area should be masked, but the user can choose to mask only the outlier probes.
+
+contiguity test
+it can happen that in a region with diffuse defects  some blemished pixels can be clustered together, with sufficiently large size to be detected as compact defects . if they were eliminated in the compact detection step, they could affect the recognition of diffuse regions. to avoid misrecognition of parts of diffuse defects as compact defects, a "contiguity test" is applied after the compact defects are detected. to perform the test, a "closing" procedure is applied to the binary image representing the compact defects .
+
+real compact defects are isolated and highly connected clusters, so that after the closing procedure their area remains substantially the same. on the contrary, probes declared as compact defects that are part of diffuse defects are close to one another, and therefore after the closing procedure the area covered by the resulting cluster is appreciably bigger than the area covered by the compact defects alone. comparing the extension of the areas before and after the procedure gives us an idea of how many compact defects there are in a specific region. the ratio between these two areas  represents the density of compact defects in the region . if this value is smaller than a threshold , the compact defects in the region are probably part of diffuse defects and shall not be eliminated when the compact detection procedure ends.
+
+harshlight package
+the package was implemented in r in compliance with the cran guidelines. computationally intensive routines were implemented in c  through the r interface for better efficiency.
+
+the main harshlight function accepts a bioconductor object from the class affybatch. for each batch of chips analyzed, the program returns two outputs: a file report in postscript format and a new affybatch object. the report shows, for each chip analyzed, the number and type of defects found, the percentage of the area eliminated after the analysis, an image is produced for each kind of defect, showing the areas where the blemishes are found. the output affybatch object is identical to the input, except that the values within defects are declared missing. if some downstream subroutine does not allow for missing data, the user may choose to have missing data be substituted with the median of the other chips' intensity values for the blemished probe; this is a neutral substitution strategy, since it sets the error image values to zero on the blemished probe without affecting any other value. in general, the efficacy of an imputation method depends on what analysis is used downstream of it; because of this, only the median substitution method has been built into harshlight. other imputation methods can be still used, as functions taking an affybatch object with missing values.
+
+other parameters to the function harslight including in the implementation of the algorithm are summarized in table  <dig>  the choice of the default parameter values is based on our experience, but may depend on the individual lab or chip type. still, using a uniform set of parameters for all chips in a given experiment avoids spurious effects that might be caused by manually excluding areas on the chip from analysis. some parameters are robust, in the sense that the results are not affected by small changes. for instance, the kernel radii are robust, and so we selected the smallest value that performs well, so as to minimize running time. other parameters, on the other hand, define the nature of what is being found; the default values we provide work well for our chip collection, and are provided as adjustable to allow for flexibility.
+
+RESULTS
+we have built an algorithm upon a recently-developed methodology to visualize artifacts on hdona microarrays, which automatically masks areas affected by these artifacts; we present an implementation of the algorithm in an r package, called harshlight. the algorithm combines image analysis techniques with statistical approaches to recognize three types of defects frequent in affymetrix microarray chips: extended, compact, and diffuse defects. the algorithm was tested on  <dig> chips, from  <dig> different experiments, including the two affymetrix spikein experiments. output reports for all chips can be found online at <cit> .
+
+that blemishes exist in fair abundance is clear from those output reports as well as from figure  <dig>  we shall now demonstrate that these blemishes affect the gene expression values and that harshlight can restore this damage.
+
+different summarization algorithms are expected to resist blemishes differently, based on their statistical construction. we shall concentrate here on two popular algorithms, mas <dig> and gcrma. mas <dig> is the "official" algorithm supplied by affymetrix and by far the most widespread; gcrma is an open-source method available in the bioconductor suite, based on robust averaging techniques and sequence-dependent affinity corrections  <cit> . the robust averaging employed in gcrma should confer strong immunity to outliers. we shall show below that mas <dig> is strongly affected by blemishes, and that gcrma is affected to a smaller, yet still relevant extent.
+
+we quantified the ability of harshlight to apply "corrective make-up" using two distinct strategies: first, by artificially blemishing a "clean" dataset and verifying how much the values are affected and how well they are restored, and second, by using a case where nominal concentrations are known, the affymetrix spikein experiments.
+
+for the first strategy, we wrote a simple utility we dubbed "affypox", which pockmarks a collection of chips with simulated defects with characteristics similar to those found in the test chips . compact defects were simulated as randomly located circles of radius between  <dig> and  <dig> pixels, each defect having equal probability of being "bright" or "dark". the probes within the circle are linearly compressed into the lower  20% of the intensity range for dark  defects. further information on affypox is available on the program's vignette. for our starting point, we took the most unblemished dataset in our collection, and we then further selected from this dataset the  <dig> chips with the smallest number of blemishes. then we generated  <dig> artificial compact defects per chip as described above, covering less than  <dig> % of the overall surface area. since for both gcrma and mas <dig> the background and normalization process couple all the genes together, all genes' expression values are affected, most of them only by a minute amount, and a few by considerable amounts: there were  <dig> genes' expression values per chip affected by more than twofold in mas <dig>  while  <dig> genes per chip had more than 50% change in gcrma. harshlight detected and excised all  <dig> artificial defects in addition to two "false positive" defects, and reduced the number of genes affected at high fold changes, by a factor of approximately  <dig> in the case of mas <dig>  and about  <dig> in the case of gcrma, as shown in figure 7; gcrma appears to resist blemishes better than mas <dig>  but at the same time the damage appears harder to undo. as with any restoration process, a large number of genes is restored, some are untouched, and a few are changed for the worse, as shown in figure  <dig> 
+
+for the second strategy, we used a well-known comparison suite, affycomp, which was developed to quantify the performance of various summarization algorithms  <cit>  on the affymetrix spikein datasets, where nominal concentrations are given for a number of genes which were "spiked in" in a latin square experimental design. this is now an aggregate comparison, in which all defect types detected by harshlight are excised, and the overall effect on the statistical performance of the summarization algorithm is quantified by means of return operator curves . we performed this analysis for the most recent dataset, spikein <dig>  and again we compared the performance of mas <dig> and gcrma. we modified the mas <dig> implementation in bioconductor so that it accepts missing values, and compared our two substitution strategies, missing values vs. neutral replacement . as gcrma is not as easily modified to allow for missing data, we could only use median substitution with gcrma. figure  <dig> shows the roc curves summarizing the false positive/true positive behavior of the algorithm. in all cases, preprocessing the spikein <dig> dataset with harshlight results in a significant increase of performance of the algorithm, which is actually quite substantial for the case of mas <dig>  where >5% extra true positives are found at large false positive numbers, for both substitution methods.
+
+in earlier chips the probesets were laid contiguously in space, so it was possible to detect localized defects by observing that the probeset had an "outlier" pattern  <cit> . however, the entire probeset would have to be discarded, and the gene expression information would be lost. correlated location in space precludes use of harshlight on those earlier chips . the random allocation of probe pairs in newer generations of chips permits robust methods like gcrma to partly resist damage by blemishes; and, in conjunction with a method like harshlight, to restore the expression values for many affected genes.
+
+while we have developed this method on the basis of our error image detection of outliers, in principle the residuals of any model such as  <cit>  or gcrma could be used to identify individual probes on a chip as outliers. to facilitate the integration of various methods, harshlight accepts error images generated by other programs; if none are provided, then the error images are computed. we have, however, not yet explored the appropriate null hypothesis for these methods.
+
+CONCLUSIONS
+we have presented an r package that provides a way to automatically "harshlight" artifacts on the surface of hdona microarray chips. the algorithm is based on statistical and image processing approaches in order to safely identify blemishes of different nature and correct the intensity values of the batch of chips provided by the user. the corrections made by harshlight improve the reliability of the expression values when the chips are further analyzed with other programs, such as gcrma and mas <dig> 
+
+it has been shown that microarray results are affected if blemished chips enter the pipeline of the analysis; blemished probes may have values differing from the correct value by much more than the typical error, so blemishes are expected to have a particularly strong impact on experiments trying to discriminate subtle differences between samples or in a clinical diagnosis context. we present harshlight in the hope it shall be a useful tool in quality assessment of microarray chips and will help improve microarray analysis.
+
+availability and requirements
+• project name: harshlight
+
+• project home page: 
+
+• operating system: platform independent, tested upon red hat linux and is being under testing on windows xp systems
+
+• programming language: r, c
+
+• other requirements: r  <dig> . <dig> or higher
+
+• license: gnu, gpl
+
+• any restrictions to use by non-academics: license needed
+
+authors' contributions
+msf developed the method, designed and carried out the statistical analysis, and drafted the manuscript. mp wrote and implemented the algorithm, and helped to draft the manuscript. kmw developed the method and participated in the design of the statistical approach. mom conceived and coordinated the study, participated in its design, and helped to draft the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+siprobecomposition. nucleotide composition analysis of unblemished and blemished probes.
+
+click here for file
+
+ additional file 2
+harshlight r package for linux
+
+click here for file
+
+ acknowledgements
+m.s.f. acknowledges a woman in science fellowship from ru. k.m.w. was supported in part by gcrc grant m01-rr <dig> from the national center for research resources at the nih. we would like to thank steffen bohn for helpful comments and discussion.

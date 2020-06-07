@@ -1,0 +1,258 @@
+BACKGROUND
+chromatin immunoprecipitation followed by deep sequencing  is rapidly becoming the main experimental technique in functional genomic and epigenomic studies. chip-seq’s ability to profile genome-wide patterns of transcription factor binding and histone modifications has led to its extensive use by the encode consortium
+ <cit>  in an endeavour to identify and characterise all functional elements encoded in the human genome.
+
+despite the widespread use of chip-seq, data analysis is still a challenging task
+ <cit>  and a typical computational pipeline includes a number of steps, each posing its own difficulties. an initial crucial step is the identification of regions with significant signal enrichment relative to a control sample in a process called peak calling. over the last years, several tools for this task have been suggested and they have recently been compared in
+ <cit> . as a result of peak calling, genome-wide catalogues are obtained, which provide valuable snapshots of protein binding or histone modifications in a given cell or tissue.
+
+however, to understand the dynamics of histone modifications and tf binding and their effects on cell-specific gene regulation it is necessary to quantitatively compare different chip-seq samples. this is a surprisingly difficult task as the statistical assessment of differences is hindered by a number of factors: on the one hand, the data is digital, consisting of counts of dna fragments  mapped onto regions of the genome. this feature, common to all sequencing-based methods, raises the immediate issue of choosing a suitable noise model for both technical and biological noise. on the other hand, in most studies, only a very small number of replicate experiments are performed, making statistical testing an intrinsically difficult task. to compound both of these problems, chip-seq produces spatially distributed patterns of binding or histone modifications localised to specific regions of the genome ; this feature, in particular, renders standard differential testing methods unsuited for the comparison of chip-seq data sets.
+
+currently, two strategies are predominantly followed for the differential analysis of chip-seq data sets: the most naive approach is to identify overlaps in the sets of genomic peak intervals detected in the different samples, e.g.,
+ <cit> . this simplifies the problem to a basic occupancy analysis which is insensitive to changes in the affinity of tf binding or in the prevalence of histone modifications. in addition, the results are strongly dependent on the thresholds which are set heuristically in the peak calling step and differences in the noise background may further confound the outcome of this analysis. an alternative strategy is to compute the total number of reads mapping to each peak in each data set and to test for significant fold-changes across multiple tissues or conditions, e.g.,
+ <cit> . these count-based approaches have mostly advocated the adaptation of methods for rna-seq data analysis to the more structured chip-seq data. for example, the frequently used methods dbchip
+ <cit>  and diffbind
+ <cit>  are based on the rna-seq methods deseq
+ <cit>  and edger
+ <cit> . they employ a negative binomial distribution to model both biological and technical noise in the total counts of expressed genes. to circumvent the problems of low experimental replication, they apply an elegant approach in which information is shared across genes, effectively pooling together genes with similar total counts. an immediate problem arising for count-based methods is finding the right normalisation. initially, data sets were rescaled according to the observed library size, which corresponds to the total number of reads in the whole data set
+ <cit> . however, it has been shown that this strategy is inadequate in most situations, and a number of alternatives have been suggested, including rescaling to the median of the ratios of observed counts
+ <cit> , locally weighted regression 
+ <cit>  and more recently rescaling using common peaks across data sets . all these methods make strong a priori assumptions about the relationship of the data sets that are to be compared. the choice of the normalisation method can therefore greatly influences the results of count-based differential analysis
+ <cit> .
+
+perhaps a more severe limitation of count-based methods is the information loss inherent in representing a peak by a single integer . any higher order information that is conveyed in the peaks is ignored. however, a spatial structure of the chip-seq signal is particularly evident in the case of peaks associated with epigenomic marks. for example, trimethylation of lysine  <dig> on histone h <dig>  is known to form distinct bimodal peaks at transcription start sites , e.g.
+ <cit> . interestingly, at a given genomic location the shape of observed enrichment peaks tend to be highly reproducible across biological replicates and increasing evidence hints towards a functional role of these profile structures
+ <cit> . focusing exclusively on total counts of reads associated with a peak might therefore be insufficient when investigating differences of epigenomic modifications between different samples and higher order features associated with the shape of an enrichment peak should also be taken into account.
+
+in this paper, we introduce mmdiff, a multivariate non-parametric approach to testing significant differences in profile patterns between peaks in different conditions. in contrast to count-based methods, which make their decision by comparing a single number, i.e. counts, mmdiff exploits higher order features in the peak shapes. by focusing on shape differences, mmdiff accounts explicitly for the spatial structure of chip-seq peaks; this also makes it more robust to normalisation effects and independent of the explicit definition of a noise model. the underlying idea is to treat each peak as a distribution over a finite space given by the starting positions of all reads. the problem of testing for differential binding is then reduced to testing whether two samples are generated by the same probability distribution . in this context a sample consists of all the reads mapping to a given peak region in one data set. as there is a large variability of observed peak profiles at different genomic locations - some may weakly resemble a gaussian distribution, however most are strongly skewed and/or multi-modal  - we cannot make any assumption about the type of distribution. we therefore adopt recent advances in machine learning research
+ <cit> , which enable us to include features of any order in the prediction of differential binding without making assumptions of the underlying distributions. mmdiff is specifically designed to detect differences between different chip-seq data sets, however, its main idea can also be used to address the more general problem of detecting differences in other sequencing based experiments, for example in dnase-seq or cage-seq data sets. recently, a similar approach has been employed for the detection of differential rna isoforms from rna-seq data
+ <cit> .
+
+we illustrate and compare our method on a simulation study, and on three independent chip-seq data sets of both transcription factor binding and epigenomic modifications. our results show that mmdiff can capture biologically meaningful changes and is highly complementary to count-based approaches. we propose that mmdiff provides an important new tool for bioinformaticians and biologists interested in epigenomic data analysis, conveniently available as a bioconductor tool.
+
+the rest of the paper is organised as follows: we start with a discription of the statistical foundations of our method and a discussion on how the mmd statistic of
+ <cit>  is modified to account for biological variability. we complete the methods section with a thorough simulation study which compares the results of our method to four different competitors in a controlled environment. this enables us to discuss the strengths and weaknesses of the various methods, and in particular highlights the complementarity of the mmdiff approach w.r.t. count-based methods. we then present results on three different data sets: we start with an in-depth analysis on the h3k4me <dig> data set of
+ <cit> . as this study constitutes our main biological motivation, we present multiple complementary analyses that demonstrate the functional significance of our results. to establish the broad applicability of our method, we also present results on two encode data sets: a comparison of the histone mark h3k27ac across different human cell lines , and a comparison of binding patterns of the transcription factor ctcf across different mouse tissues . we conclude the paper with a broader discussion of the method in the context of ngs data analysis.
+
+methods
+kernel-based statistical tests
+in order to incorporate shape features in a statistical testing procedure, we adopt a kernel-based non-parametric test, which allows us to retain information of any order within the testing procedure
+ <cit> . we briefly review here the mathematical foundations of this procedure.
+
+the statistical testing question we wish to address is the following: suppose for a peak l we are given
+m=nls observations  in data set s,
+xs:= and
+n=nls′ observations in data set s′,
+xs′:=, where xs and
+xs′ are random variables with respective probability measures p and p′, and xs and
+xs′ are independently and identically distributed  from p and p′, respectively. can we decide at a given significance level to reject the null hypothesis p = p′?
+
+in order to decide this question, we will first define a proper test statistic that summarise the observations while at the same time retaining higher order information of the distributions. we will therefore employ kernel methods, and use positive definite kernels to capture non-linearity of the original data through the higher-order moments. as with all kernel-based methods, the starting point for this approach is to define a feature map ϕ which maps the data into a high dimensional reproducing kernel hilbert space . while the dimension of the rkhs is usually very high , all relevant quantities are determined in terms of inner products  between feature vectors, and can be efficiently computed in terms of a finite number of evaluations of the kernel function
+
+ k=〈ϕ,ϕ〉. 
+
+in the rkhs, the mean element of a distribution p contains the information of all higher-order moments and we can compute the empirical estimates  of the mean elements for
+xs,xs′ as
+
+  μ~s=1m∑i=1mϕ, 
+
+and
+μ~s′ respectively. furthermore, we can use the distance between the mean elements of two distributions p,p′,  as test statistics. intuitively, the greater the distance, the more different the two distributions are. for a given peak l, the dissimilarity between data set s and s′ can therefore be expressed in terms of the mmd value:
+
+  mmdls,s′=1m2∑i,j=1mk-2m·n∑i,j=1m,nk+1n2∑i,j=1nk <dig>  
+
+a modelling issue of central importance is the choice of the features and the kernel function k. in our case, we wish to preserve the spatial information contained in the peak profile. we therefore used the estimated mid positions of the mapped reads as observed features and the radial basis function  as kernel k = exp. the -parameter σ controls the length scale of the kernel, i.e. the distance  at which fragment counts decorrelate. in our experiments, we used a heuristic suggested in
+ <cit>  such that
+σ2=1/2·x¯ <dig>  where
+x¯ is the median distance of all observations in xs and
+xs′.
+
+accounting for biological variability
+the bootstrap procedure for computing mmd statistics proposed in
+ <cit>  has strong theoretical guarantees for discriminating between different distributions, given sufficient number of samples . a simulation study shows that the procedure appears to be well calibrated when comparing technical replicates of chip-seq data . however, biological variability implies that the histogram distributions of the same peak in different biological replicates will be more different than expected. this turns out to be true, and the testing procedure of
+ <cit>  rejects the null hypothesis in almost all comparisons between biological replicates .
+
+in order to avoid this problem, we adopt a data-driven method to estimate biological variability from biological replicates. in general, this is a difficult task, as for most experiments only very few replicates are available; for example the encode consortium set a standard of two independent biological replicates per chip-seq measurement
+ <cit> . a reliable estimate of biological variability on a peak by peak basis is therefore rarely possible. to obviate this problem, we pool peaks with similar total counts to generate robust estimates of p-values . specifically, for each peak l we determine the number
+n¯l of reads mapping to it averaged across all considered samples. peaks are then binned into quantiles determined on the averaged counts per peak. to obtain empirical p-values we compute the probability of observing an mmd value between biological replicates in the given bin, which is at least as large as the one observed for a given peak in the comparison between conditions. raw p-values are subsequently corrected for multiple testing using the method of benjamini and hochberg
+ <cit> .
+
+simulation study
+to benchmark the performance of our method in a quantitative manner we initially resort to simulations. while simulations are necessarily limited in their biological realism, we think the availability of a ground truth is important for fair assessments, and the possibility of varying simulation parameters provides an excellent opportunity to explore the method’s strengths and limitations. the strategy we follow to generate an artificial set of chip-seq peaks is illustrated in figure
+2: we consider a control set of  <dig>  simulated peaks. to assign a total count to each peak, we follow the negative binomial  generative model, as suggested elsewhere
+ <cit> . this commonly used hierarchical model effectively assumes that the between-sample variation follows a gamma distribution while the sequencing process leads to a poisson distribution. we start by assigning a true base affinity value to each peak. these 'genomewide’ affinity values are sampled according to the distribution of total counts in an encode ctcf data set
+ <cit> . to simulate biological replicates, we generate sample-specific affinity values for each peak according to a gamma distribution with mean value given by the true base affinity for that peak. the spatial structure of the peaks  is assumed to be bimodal, modelled as a mixture of two gaussians with varying base means, variances and mixing parameters. the 'biological noise’ in the peak profiles is modelled by sampling means, variances and mixing parameters from gaussian distributions with means given by the true base values. to generate a 'treatment’ set, we randomly chose  <dig> peaks and introduce changes in their base affinity values . likewise, we chose  <dig> peaks to change their base profile by varying the base mixing parameter . we again create 'biological replicates’ for the treatment condition. to obtain resulting 'affinity profiles’ for a given peak, we have to multiply the local distributions given by the peak profile with the peak’s affinity value. to simulate the sequencing process, reads mapping to a peak are then sampled according to a poisson distribution. for simplicity, we assume the same library size for each sample and also that the overall enrichment of all peaks relative to the genomic background is identical in all samples. to assess the robustness of the methods’ predictions, we repeated this procedure  <dig> times.
+
+as competitors for our method, we selected three count-based methods, deseq
+ <cit> , dbchip
+ <cit>  and dime
+ <cit> . additionally, we investigate another shape-based method, where we suggest to replace the mmd distance in our method with the generalised mover distance  which was recently suggested as a measure of the distance between histograms
+ <cit> . in table
+ <dig>  we report results on the affinity changes and on the profile changes separately. we summarize performances at false discovery rate  of  <dig> , and also report the area under the receiver operating characteristic  curve . as expected, count-based methods cannot capture shape-based changes, with deseq, dbchip and dime all calling very few peaks essentially at random. on the contrary, mmdiff’s performance is overall very good, with a very low number of false positives. interestingly, gmd is seen to perform globally as well as mmdiff, however its performance at the selected operating point  is considerably worse. when we consider affinity changes all three count-based methods achieve very good results . mmdiff’s performance is considerably worse, while still significantly better than random; in particular, the number of false positives called is very limited . therefore, mmdiff appears to be well calibrated, with good power to capture profile changes and avoiding type i errors when dealing with count changes. in summary, mmdiff proves to be complementary to count-based methods, as expected. for a most exhausted analysis of differential regions that captures both types of changes we therefore suggest to combine mmdiff with a count-based method.
+
+performance summary of five different methods on ten runs of simulated data sets. in the upper panel unchanged sites and sites with profile changes are considered, in the lower panel unchanged sites and sites with affinity changes. fdr threshold:  <dig> ; tp: true positives, fp: false positives, fn: false negatives, tn: true negatives, efdr: empirical fdr ), sn: sensitivity, sp: specificity, auroc: area under roc.
+
+RESULTS
+application 1: h3k4me <dig> data set
+we first used our method mmdiff to examine a chip-seq data set investigating the epigenetic mark h3k4me3
+ <cit> . this study particularly focused on the question of how profiles of this mark are shaped by cfp <dig>  which is known to be a conserved dna-binding subunit of the h3k <dig> histone methyltransferase  set <dig> complex. the experiment presented consists of chip-seq measurements from three different cell lines:  a wild-type mouse es cell line ,  a mutant es line lacking cfp <dig> 
+ <cit> , and  a rescue cell line obtained by stable transfection of a human cfp <dig> cdna into cfp1-/- es cells 
+ <cit> . we expected that h3k4me <dig> is reduced in the cfp1-/- cells. however, as the h3k <dig> specific hmt activity is redundantly encoded in at least six different complexes in mammals, the precise target regions of cfp <dig> were unknown
+ <cit> . in addition, under the assumption that the different enzymes potentially act cooperatively at the same target regions, we expected that this histone modification would not be completely abolished at these regions but rather reduced, potentially leading to altered peak profiles. in
+ <cit> , it was confirmed that cfp <dig> is expressed at near endogenous levels in the rescue cell line and that the h3k4me <dig> levels are comparable to the levels observed in wt. to detect changes that are primarily due to the absence of cfp <dig>  we will thus contrast the variability between wt and resc with the observed changes between wt and cfp1-/-. effectively using the resc sample as a biological replicate for the control group will lead to a potential over-estimation of biological variation resulting in a conservative estimate of differential h3k4me <dig> patterns.
+
+clouaire et al. repeated the complete experiment on biological replicates
+ <cit> . the antibodies used  have slightly different specificities, plausibly resulting in different signal to noise ratios and the two experiments were therefore analysed independently as two repeat experiments. we report results obtained by mmdiff and compare them with results obtained using deseq as it is the most widely used count-based methods.
+
+peak finding
+we started our analysis by identifying genomic regions that are significantly enriched for h3k4me <dig> modifications. we used the software package macs on each of the data sets
+ <cit>  and subsequently created a set of  <dig>  macs consensus peaks from regions overlapping in at least three data sets. we found that only 24% of these peaks overlapped with 4kb windows around tsss. however, around 70% of reads mapping to peaks in wt were found in these promoter proximal peaks. this is in good agreement with the fact that h3k4me <dig> is known to localise around transcription start sites
+ <cit> . we conclude that in addition to the promoter proximal regions, macs calls a large number of narrower, low coverage peaks, which are potentially more likely to be spurious. we therefore complement our analysis by investigating  <dig>  promoter regions defined by known annotated genes. note that in wt about half of these promoters show only small enrichment for h3k4me <dig> 
+
+to ensure comparability of the data sets, we corrected for different sampling depths using the normalisation method suggested in
+ <cit> . for simplicity, we will refer to the normalised number of reads mapping to peak l in sample s as the total counts,
+nls. the full pre-processing pipeline is described in detail in the additional file
+ <dig> which also contains further initial analysis demonstrating that the data sets are only weakly affected by input biases and other biases such as gc content
+ <cit> .
+
+resulting chip-seq signals at three promoter regions are shown in figure
+ <dig>  the shapes of the peaks are remarkably well conserved between wt and resc and also between the two experiments, confirming our motivation to exploit shape conservation between replicates to increase the sensitivity of differential tests. in general, we see a signal decrease in the cfp1-/- cells as compared to wt/resc, as expected. however, these changes often appear to be highly spatially dependent: for example the profiles in figure
+1a and c are only affected downstream of the promoter. interestingly, the profiles in figure
+1b show similar total counts in wt/resc and cfp1-/- es cells, as the massive decrease in the region downstream of the promoter is partially compensated for by an increase in the upstream part of the peak. this highlights the importance of considering shape based features when testing for statistically significant differences as all three promoter regions are consistently called by mmdiff in both experiments, but none is called by deseq in any of the experiments.
+
+differential peak calling
+we used mmdiff to find peaks and promoter regions that are significantly different in the cfp1-/- cell line versus wt and resc. to elucidate the working principles of mmdiff, we show in figure
+ <dig> mmd values versus mean total counts for the  <dig>  promoter regions. in figure
+3a, mmd values between cfp1-/- and wt are shown. for comparison, mmd distances between resc and wt are overlayed in figure
+3b. as expected from equation  <dig>  the mmd value between replicates strongly depends on the coverage of the peak, with high enriched peaks showing smaller mmd values. in contrast, there is a large number of promoters with high coverage that have been assigned a large mmd value in the cfp1-/- vs wt comparison. this leads to a clear separation of a group of differentially modified promoters  with enrichment profiles that are more different between cfp1-/- and wt/resc than can be explained by experimental and biological variation. in figure
+3c  <dig> promoters with a fdr <  <dig>  are marked in red.
+
+the fact that most dmps appear to have large mean total counts may partly be due to the fact that most changes appear at promoters that are strongly enriched in h3k4me <dig> under normal conditions
+ <cit> , and partly because the peaks with low total counts are more dominated by noise and do not exhibit a conserved shape between wt and resc. while total counts are not used as a discriminating feature by mmdiff, it is also interesting to see that most dmps exhibit a change in total counts as is elucidated in an ma-plot , where fold change is plotted versus mean total counts. as expected, the great majority of dmps lose h3k4me <dig> as a consequence of cfp <dig> depletion.
+
+deseq calls  <dig> promoters to be significantly different between cfp1-/- and wt/resc. interestingly, the overlap between dmps called by mmdiff and deseq is small; only  <dig> promoters are called by both methods and the difference between these methods becomes apparent when comparing the respective ma-plots: to call a region differential, deseq requires a large fold change even for promoters with large coverage . on the contrary mmdiff is confident in calling regions differential based on different shapes even when the fold change is small, provided that shapes are conserved between replicates. examples for those promoters are given in figure
+ <dig>  which have all been called by mmdiff but not deseq. on the other hand, deseq calls a number of dmps which have relative low coverage  but relatively high fold change. these promoters are practically bare of h3k4me <dig> in wt and resc, however they appear to gain a small amount of h3k4me <dig> upon cfp <dig> depletion as can be seen in the example in figure
+4a. overall, this analysis demonstrates that mmdiff has a high sensitivity to detect differential modified promoters when a reproducible profile is observed between wt and resc. the low overlap between peaks called by mmdiff and deseq further illustrates on a real data set the complementary nature of mmdiff to count-based methods.
+
+reproducibility
+in the absence of a ground truth it is particularly difficult to evaluate and compare the results obtained from different methods. to approach an answer to the question whether the called dmps are genuine or false positives, we are particularly interested in two aspects: the reproducibility of the differentially called regions, and their biological significance. to test the first aspect, we run independent analyses on the data sets obtained with the two different antibodies, and report the overlap of peaks called between the two experiments. figure
+3f shows bar charts of promoters and macs consensus peaks called by deseq and mmdiff in the two experiments; mmdiff is seen to call more promoters than deseq, and also to have a larger fraction of promoters called consistently in both experiments. in the case of macs consensus peaks, the numbers of regions called consistently in both experiments appear to be relatively low for both methods . however, mmdiff again is more consistent across experiments than deseq.
+
+this analysis demonstrates that the outcome of differential peak calling can vary when experimental data sets obtained with different antibodies are considered. also, uncertainties introduced in the peak calling step can propagate to the differential peak calling procedure. to increase both, sensitivity and specificity, it is highly advisable to increase the number of considered replicates. the analysis also shows that employing shape features as done with mmdiff can lead to improved robustness of the results.
+
+changes of pol ii occupancy at cfp <dig> target genes
+in order to assess the biological significance of the observed changes, we analysed a pol ii chip-seq data set from the same cfp <dig> study
+ <cit> . we now restrict our analysis to the promoter regions, in order to avoid the ambiguous assignment of peaks to genes. using the pipeline described above, we investigated whether there are changes in pol ii binding - and thus gene transcription - associated with the called h3k4me <dig> dmps.
+
+as previously reported, changes in pol ii binding following cfp <dig> deletion appear to be modest
+ <cit>  and only very few promoters are detected to be differentially bound by pol ii . this is surprising given the widely accepted role of h3k4me <dig> as epigenetic mark at active promoters. a possible explanation is that at most promoters residual levels of h3k4me <dig> remain and these basal levels may be sufficient to partially retain pol ii binding, so that changes are difficult to detect . a remarkable exception is shown in figure
+4c where the h3k4me <dig> signal is completely lost at the promoter of jade- <dig> which is accompanied with the complete removal of pol ii binding. we next investigated whether there was a small but systematic shift of pol ii binding associated with other h3k4me <dig> dmps. figure
+4d and e show ma-plots for the pol ii data set, with dmps determined on the h3k4me <dig> set shown in red, and figure
+4f shows the distribution of fold changes in pol ii binding between cfp1-/- and wt/resc. we see a clear down-regulation of genes associated with dmps called by mmdiff . in the case of dmps called by deseq, the distribution also has a mean significantly different from zero, but appears highly non-gaussian. this is consistent with the finding that deseq calls a number of small 'ectopic’ promoters which are bare of h3k4me <dig> in wt but gain h3k4me <dig> in the absence of cfp <dig> which is accompanied with very low levels of pol ii binding in cfp1-/- cells . this analysis demonstrates that differences in h3k4me <dig> detected by mmdiff correlate well and consistently with subtle changes of pol ii binding, lending further evidence to the high quality of mmdiff results. it also shows that the relationship between h3k4me <dig> modifications and pol ii binding is more complex than expected, showing highly non-linear behaviour.
+
+functional annotation of cfp <dig> target genes
+we have observed that cfp <dig> substantially affects the h3k4me <dig> levels at a large number of promoters and we next asked whether it specifically targets genes which share particular functional pathways. we performed an enrichment analysis for gene ontology  terms using the ontologizer package
+ <cit> . as a study set we used a set of  <dig> genes associated with differential promoters detected by mmdiff in both experiments  and which showed a decrease in h3k4me <dig> upon depletion of cfp1-/- and similarly for deseq . these two sets were contrasted with a population set consisting of  <dig>  genes that showed substantial enrichment for h3k4me <dig> in wt and resc in both experiments. interestingly, despite the small overlap between the mmdiff set and the deseq set ,  <dig> out of the  <dig> most enriched go terms are consistent between the two sets: these go terms include 'rna processing’, 'rna binding’, 'ribonucleoprotein complex biogenesis’, 'structural constituents of ribosomes’ and 'ribonucleoprotein complex’, which were all highly enriched in the downregulated dmp sets . in the mmdiff set, genes annotated with 'translation’ are also highly overrepresented. these findings are in very good agreement with the phenotype of cfp <dig> depletion in es cells, where global protein synthesis is strongly affected by a reduced abundance of free ribosomes
+ <cit> . to avoid detection biases, we illustrate the clustering of functionally related genes graphically by annotating genes in the h3k4me <dig> ma-plot . we find that indeed the majority of promoter regions of  <dig> genes associated with rna binding and processing, translation and structural constituents of ribosomes are clustering together showing a substantial decrease of h3k4me <dig> levels. the most drastic changes can be observed in genes which are structural constituents of ribosomes. this trend is also observable in the pol ii ma-plot . in this case, individual fold changes are much smaller, as discussed above, however, a large number of ribosomal rnas or proteins are affected. the cooperative impact of a large number of small effects on genes involved in the same functional mechanisms may well explain the phenotype of reduced protein synthesis in cfp1-/- es cell lines
+ <cit> . we conclude that changes in the h3k4me <dig> level detected by mmdiff are likely to play functionally important biological roles.
+
+co-occurring transcription factor binding sites
+we next examined the sequence composition of promoters with h3k4me <dig> profile changes in order to improve our understanding of the cfp <dig> binding mechanisms. we used the meme suite to find overrepresented sequence motifs in putative cfp <dig> target promoters as detected by mmdiff
+ <cit> . again, we used the subset of  <dig>  promoters with significant h3k4me <dig> enrichment to create a background model . among the top ten discovered motifs we found four binding motifs of the activating e2f family transcription factors, e2f <dig> and e2f <dig>  with p-values < 10- <dig> . this finding is in good agreement with recent data suggesting that the hmts mll <dig> and set <dig> directly associate with e2f transcription factors
+ <cit>  and indirect dna binding of cfp <dig> via e2f tfs might be the explanation to why a dna binding deficient cfp <dig> mutant has been shown to be able to rescue reduced levels of h3k4me <dig> at most affected promoter regions
+ <cit> . we conclude that mmdiff is a powerful tool to promote the identification of transcription factor motifs and potential co-factors which play important roles in targeting hmts to gene promoters.
+
+cluster analysis of peaks
+next, we set out to identify common patterns in h3k4me <dig> profiles and asked whether promoters with similar profiles were also affected in a comparable way by cfp <dig> depletion. this approach is motivated by the idea that different clusters encoding different shapes might reflect different binding mechanisms or different control functions. in addition, we asked if cfp <dig> depletion had a homogeneous effect on all tss sites, or if differences might depend on the shape observed in wt itself. similar to
+ <cit> , we performed a cluster analysis on the peak histograms derived from the wt sample, using a gaussian mixture model  with covariances constrained to be diagonal in order not to overfitb. we ran gmm multiple times for different cluster numbers and used the bayesian information criterion  to determine the appropriate number of clusters. we observed a minimum of bic at k =  <dig> clusters, which proved to be robust against different initialisations of the algorithm, and the same minimum was found both in the wt and resc data sets.
+
+figure
+6a presents a heat map visualisation of the clustering results. average h3k4me <dig> and pol ii profiles for three clusters are shown in figure
+6b and c. remarkably, genes within the same h3k4me <dig> cluster also appear to have distinctive pol ii profiles and wider h3k4me <dig> peaks are reflected in broader binding of pol ii.
+
+we further investigated the relationship between differential histone modification and shape clustering by analysing how the detected dmps are distributed over the clusters, see table
+ <dig>  we find that clusters  <dig>  14- <dig>  and  <dig> are highly significantly  enriched for dmps. in contrast, we detected far fewer differential peaks than expected under the null hypothesis in clusters 1- <dig> and  <dig>  to assess the significance of this clustering, we report the mean fold change in pol ii counts for genes within each cluster. we see that clusters which are enriched for differential h3k4me <dig> patterns systematically have a decrease in pol ii, while clusters which are unaffected by the cfp <dig> deletion seem to have rather stable pol ii levels. again, it can be observed that h3k4me <dig> profile shapes are highly informative and differences in these shapes likely encode different mechanisms for the establishment of this important epigenomic marker.
+
+n
+p
+ooo
+ooo
+ooo
+ooo
+ooo
+ooo
+ooo
+n
+p
+np: number of promoters associated with the given cluster in wt, nΔ: number of dmps called by mmdiff, p-values: significance of enrichment/depletion with dmps by cluster. 
+
+application 2: h3k27ac
+to further explore the broader applicability of mmdiff, we applied it to a h3k27ac encode data set. this epigenomic mark is known to localize around enhancer elements and distinguishes active enhancers from poised ones
+ <cit> . here we compare two human cell lines, k <dig>  an immortalised myelogenous leukemia line, and gm <dig>  a lymphoblastoid cell line. we use two replicates per cell line and analyzed  <dig>  regions derived from the respective encode broadpeak files
+ <cit>  after merging overlapping peaks
+ <cit> . using deseq, 25%  of all peaks appear to be differential between the two cell lines. with mmdiff we only detect  <dig> changes, of which  <dig> are unique to mmdiff. figure
+7a shows a typical example region which was detected by deseq but not mmdiff. it is apparent that, despite a large fold change, the shapes of the peaks are very similar in the two cell lines. in contrast figure
+7b and
+7c show example regions detected by mmdiff and not deseq. in this case the number of reads mapping to the whole region is very similar in the two cell lines. however, there are sharp, well localized peaks in the k <dig> cell line, while broad regions of low enrichment in the gm <dig> cell line. in summary, large fold changes seem to be prevalent in this comparison, however some profile changes are also present which can be picked up by mmdiff.
+
+application 3: ctcf binding
+finally, we tested mmdiff on a chip-seq data set measuring the genome-wide binding of the transcription factor ctcf. ctcf is a transcriptional repressor which also plays a fundamental role in regulating the 3-d structure of chromatin
+ <cit> . as such, it has been widely studied in recent years, with several chip-seq experiments identifying thousands of binding sites across the genome.
+
+here we used an encode ctcf chip-seq data set consisting of two replicates from three mouse tissues; cortex, cerebellum and liver
+ <cit> . the choice of tissues was deliberately heterogeneous to check the ability of mmdiff to identify both subtle changes  and more marked changes between brain tissues and liver. we used the provided broadpeaks files and after merging overlapping peaks we obtained  <dig>  sites for further analysis. once again, we compared the results of mmdiff and deseq across pairwise comparisons between tissue types: cortex vs liver  and cortex vs cerebellum . using a threshold of p <  <dig>  for differential peak calling, mmdiff identified  <dig> differential peaks in cl and  <dig> in cc, with deseq identifying  <dig> in cl and  <dig> in cc respectively. the overlap between peaks called by the two methods is limited, with  <dig> peaks called by both in cl and only  <dig> in cc, further demonstrating the complementarity of the two methods. as expected, fewer differences were called by both methods in cc as opposed to cl; figure
+7d shows an example of a peak detected by deseq in both cl and cc and not called by mmdiff. again, the peak has a very similar profile in all samples while the total counts vary greatly between tissues. in contrast, two example peaks called by mmdiff and not by deseq are shown in figure
+7e and f. in figure
+7e, ctcf seems to be bound at two distinct binding sites in the cortex and liver. however, in the cerebellum, one of these sites appears to be vacant. it is noteworthy, that this change might have been detected by count-based methods if more stringent regions around the two binding sites had been considered. these methods are therefore more depending on the peak calling and peak merging processesc. figure
+7f shows two binding sites which are less than 200bp apart. in this case, ctcf is bound at both sites in cerebellum and liver and occupies only one binding site in the cortex sample. as illustrated by this example, mmdiff is capable of directly detecting changes at homotypic binding events at neighbouring binding sites.
+
+the r package mmdiff
+these applications show that our method is generic enough to be used in the analysis of a wide range of chip-seq data sets which capture other epigenomic marks or  binding patterns of dna-associated proteins. it is now available as a bioconductor r package , with complete documentation and examples. additional updates are also available from the project webpage [
+http://homepages.inf.ed.ac.uk/gschweik/mmdiff.html].
+
+CONCLUSIONS
+chip-seq is one of the most widely employed experimental techniques in functional genomic and epigenomic studies, yet statistical analysis of chip-seq data still poses many challenges. in this paper, we address the problem of statistical testing in chip-seq data sets, and propose a non-parametric methodology which is capable of accounting for the highly structured nature of this type of data. compared with techniques based on total counts, mmdiff can identify localised changes which alter the shape of a peak. the identification of such changes is particularly relevant in the light of recent findings that suggest a functional significance of the shape of histone modifications. for example, an analysis of h3k27me <dig> patterns around ctcf peaks, carried out as part of the encode project, reported that the observed asymmetric shapes of h3k27me <dig> support the role of ctcf sites in delimiting active and polycomb-silenced domains
+ <cit> . furthermore, chromatin signatures have recently been associated with other biologically relevant features such as first exon length
+ <cit> . mmdiff’s ability to capture shape changes in peaks may therefore enable the analysts to capture functionally significant changes in patterns of histone modifications or transcription factor binding which would not be retained by methods which only use total counts for testing. from the practical point of view, focusing on peak shape largely circumvents problems arising from choosing the right normalisation, and mmdiff is also independent of the definition of a suitable noise model.
+
+methodologically, mmdiff belongs to the family of kernel based methods; these have a long history in bioinformatics, and have had a considerable influence in the analysis of high throughput sequencing data. an approach which is related to ours has been recently proposed for the purpose of alternative isoform detection from rna-seq data
+ <cit> . while the methodology proposed in that paper also relies on mmd, the application domain is significantly different, as is the treatment of biological noise.
+
+in the context of chip-seq data, our empirical results, both on simulations and on three independent data sets, demonstrate that our approach is complementary to count-based methods such as deseq. a practically advisable strategy may be to couple the two methods within an analysis pipeline, allowing analysts to detect both peaks that change in shape and peaks that only exhibit changes in total counts of reads, while maintaining the overall shape of the peak. as for all statistical testing methods, it is worthwhile to emphasize that multiple biological replicates are necessary to get a reliable estimate of the biological variance.
+
+to strengthen our claim that our approach can provide a different perspective in the analysis of chip-seq data, and can be an effective tool for hypothesis generation, we have carried out an in-depth analysis of results of using mmdiff on the data presented in
+ <cit> . we demonstrated that mmdiff reproducibly yields biologically meaningful results. we were able to suggest mechanisms that link molecular observations of altered h3k4me <dig> patterns to phenotypes observed in cfp1-/- es cells
+ <cit> . in particular, we find that a large number of genes playing a functional role in protein synthesis are potentially targeted by cfp <dig>  effects on pol ii binding - and thus potentially transcription - at each individual affected gene seem to be very small; however, taking all affected genes together, we find a significant decrease of pol ii binding at these genes which is in agreement with the observation that cfp1-/- es cells show a reduction in translation initiation. furthermore, the mild effect of cfp <dig> deletion on pol ii binding at most promoters is in strong contrast to the observation at the promoter of jade- <dig>  here, the lack of h3k4me <dig> in the cfp <dig> depleted cell leads to a complete abolishment of pol ii binding. in this specific case, h3k4me <dig> seems to act as a switch directly regulating primary transcriptional mechanisms. jade- <dig> is of particular interest as it is a key player in h <dig> acetylation at active genes
+ <cit> . it was earlier shown that in the presence of the human tumour suppressor proteins ing <dig> and ing <dig>  jade- <dig> targets the chromatin through interaction with h3k4me <dig> modifications
+ <cit> . our finding may therefore hint to an epigenomic feed-forward loop based on cross-talk between h <dig> acetylation and h3k <dig> methylation.
+
+our results demonstrate the potential of non-parametric kernel methods to lead to novel biological insights from the analysis of chip-seq data. it is an interesting direction for further research to investigate how the structured nature of ngs data can be exploited in predictive models for more general tasks than statistical testing.
+
+endnotes
+a alternative hypothesis "true location ≠ to 0".
+
+b about half of the tsss were discarded prior to the analysis due to the absence of h3k4me <dig> enrichment. additionally, regions overlapping with more than one tss were excluded resulting in a set of  <dig> promoter regions.
+
+c also note, that the high spatial resolution of the peaks is achieved by showing histograms of the corrected midpoints of the reads as opposed to coverage plots. corresponding ucsc genome browser views are shown in the additional file
+ <dig> 
+
+abbreviations
+chip-seq: chromatin immunoprecipitation followed by massively parallel dna sequencing; es cells: embryonic stem cells; tss: transcription start site; h3k4me3: trimethylation of lysine  <dig> on histone 3; hmt: histone methyltransferase, fdr: false discovery rate; dmp: differentially modified promoters ; gmm: gaussian mixture model; bic: bayesian information criterion; go: gene ontology.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+gsch and gs conceived and performed the research; gsch implemented the algorithms and carried out analyses; bc helped with the implementation of the clustering; tc and ab provided the data, gsch, gs and ab drafted the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplementary information. contains all supplementary notes and supplementary figures.
+
+click here for file
+
+ acknowledgements
+we would like to thank arthur gretton and gunnar rätsch for helpful discussions. shaun webb is thanked for computing support.
+
+funding
+gsch acknowledges support from the wellcome trust, from the university of edinburgh through its idea lab program and from the eu fp <dig> marie curie actions. gs is funded by european research council through grant mlcs <dig>  bc is supported by bbsrc under the sysmo sumo <dig> project.

@@ -1,0 +1,97 @@
+BACKGROUND
+a comprehensive study of the genomic alterations that occur in cancer is vital for understanding this disease. technological advances have made it possible to detect chromosomal regions of amplifications and deletions genome-wide and at high resolution. datasets measuring such aberrations in patient tumors are accumulating at a staggering rate for multiple types of cancer  <cit> 
+
+however, tumors harbor a great number of copy number alterations and it is difficult to distinguish between driver aberrations  and passenger aberrations . thus, the distinction between driver and passenger mutations has become one of the key challenges in cancer genomics. a very successful algorithm to address this is "genomic identification of significant targets in cancer "  <cit> , that identifies aberrant regions more likely to drive cancer pathogenesis. gistic calculates the background rate of random chromosomal aberrations and identifies those regions that are aberrant more often than would be expected by chance, with greater weight given to high amplitude events that are less likely to represent random aberrations. there are other algorithms that tackle this task such as glad  <cit> , rae  <cit>  and stac  <cit> . however, gistic is unique in its ability to combine magnitude and frequency of the alteration into a statistical score. this algorithm has been successfully applied to various datasets  <cit>  and the approach is becoming widespread.
+
+gistic identifies those regions of the genome that are aberrant more often than would be expected by chance. while successful in most scenarios, gistic has trouble identifying the relevant sub-region when a very large region is amplified or deleted. such large chromosomal aberrations frequently occur in cancer and this leaves the user with two less than optimal options - consider only a single peak within the region, or consider an entire chromosomal arm. however, we have observed that in many cases there are other small sub-regions for which the aberration is significantly stronger than in the rest of the large region. moreover, these regions often contain known oncogenes.
+
+to address this issue, we developed jistic, a tool that implements all of gistic's capabilities, with an additional new variant of the algorithm capable of detecting multiple significant sub-regions within large aberrant regions.
+
+implementation
+jistic is based on the gistic algorithm  <cit> . jistic implements the previously published variants of gistic  and can also deal with loh in the same way that the original algorithm does. more detailed information on gistic can be found in the supporting information of  <cit> .
+
+in brief, gistic calculates a statistic  which represents the strength of the aberration for each marker. the g-score for a marker m is the summation of the copy number across all samples. for this summation, the samples in which the copy number is less significant than an empirical aberration threshold  is set to zero. therefore, the g-score in the case of amplifications is:  
+
+where i is the indicator function and cn the copy number for marker m and sample i. the score is defined similarly for deletions, taking into account the change in sign. while standard gistic uses a fixed aberration threshold for each type of aberration, focal gistic uses sample-specific high-level thresholds. this threshold is set for each sample by adding the standard threshold to the maximum  of medians observed for each chromosome arm.
+
+gistic assesses the significance of the g-score for each marker by comparing this score to results expected by chance using genome-wide permutation testing. this significance is then corrected using false discovery rate  using benjamini and hochberg method  <cit> , and a q-value is obtained. all regions with a q-value below a threshold  are deemed significant. for large aberrations, the sub-region with a minimal q-value is identified as a peak driver region.
+
+to identify independent peaks within a region and discard spurious peaks, gistic uses a peel-off algorithm. the algorithm iteratively finds the most significant peak and then, for each sample, if the peak is included in the aberration, it sets to zero all markers consecutive with the peak, thus removing all aberrations overlapping the peak. once a peak has been detected, the peak region is extended by leaving each sample out in turn, and recalculating the peak boundaries.
+
+typical to cancer genomes is the presence of broad copy number aberrations, defined as aberrant regions at least as large as one half of a chromosomal arm  <cit> . peel-off on broad regions using standard gistic usually results in identifying only a single peak. gistic also has a focal variant of the algorithm which can potentially capture more aberrations, but misses many peaks in practice.
+
+the crux of the matter is to distinguish between genuine multiple peaks and a single peak within noisy fluctuations of microarray intensities. focal peel-off is designed to deal with this issue, but since the focal threshold is defined according to the highest broad aberration genome-wide, this variant not only requires the aberration to have a strong focal behavior, but also depends on the strength of other broad aberrations across the genome. in figure  <dig> we demonstrate how different thresholds  can lead to either detection or failure to detect a second peak. in this example, standard gistic only captures a single peak and misses a second peak that seems equally significant, with just a slight difference in g-score. in this type of situations standard gistic is doomed to fail. the detection of the second peak with focal gistic highly depends on the focal threshold. this threshold is set for each sample by the highest broad aberration genome-wide and there are cases, such as c in figure  <dig>  in which the focal events that define the aberration are masked by broad aberrations in other chromosome . in the next section we will see that this problem is prevalent in real datasets.
+
+for jistic, we developed a new variant called limited peel-off, designed to tackle the problem posed in figure  <dig>  while gistic sets to zero any aberration containing the peak, our algorithm "peels off" only part of the aberration. limited peel-off uses the global g-score to determine the extent of "peel-off. given a single aberration, we expect g would decrease as we get further from it until it reaches the noise level. the idea behind limited peel-off is to decompose the g-score for a marker in two parts, one that represents what remains from the peak that we are peeling off ) and another that depicts contribution independent of the peak ). we use a threshold value  to estimate whether gn contains only noise or the aberration is likely due to an independent peak.
+
+denote g as the g-score contribution of sample i in marker m, which can be defined as:  
+
+for each sample i, the algorithm iteratively calculates on both sides of a newly discovered peak the magnitude gr. for the right side of the peak:  
+
+the left side of the peak is the symmetric equation:  
+
+gr represents the amount of aberration that remains from the primary peak in marker m. jistic considers any reduction in the aberration that is consistent for at least a minimal number of markers, s. this parameter was introduced after observing that transient fluctuations in copy number result in a greater number of false positives. for s =  <dig> a total of  <dig> peaks are detected with limited peel-off. however, many of those peaks are located next to each other in the genome and the biological assessment suggested that those were spurious peaks. the number of reported peaks decreases when the parameter s increases, eliminating most of those spurious peaks.
+
+in order to determine whether a new peak exists, we need the complementary component of gr, gn, measuring the component of the aberration that is independent from the primary peak, for each sample:  
+
+the condition that jistic checks in order to abort the peel-off at a marker m is  
+
+the results critically depend on the threshold gthres. if gthres is too high, the algorithm will obtain exactly the same result than the standard variant of gistic. if the value is too low, the algorithm will obtain many spurious peaks. for consistency, we use the g-score value that corresponds to the threshold q-value when running the focal variant, thus using the same threshold both for a peak on baseline copy number and a sub-peak within a broader region.
+
+RESULTS
+we tested jistic on  <dig> glioblastoma samples that had been previously used to test the latest version of gistic  <cit> . this dataset was generated by harvard medical school using agilent  <dig> k arrays.
+
+the parameter s was tuned using the histogram of segments sizes to obtain candidate values and the optimal value was chosen based on the distribution of minimum distance between peaks. in the test dataset, the histogram of segment size showed that the number of segments decreases with the segment size, as it was expected. we observed a stronger decrease in the number of segments for  <dig> different segment sizes ; those sizes were considered as candidate values for s. the distribution of minimum distance between peaks was used to estimate the number of spurious peaks for each of those values. this distribution shows a considerable change when s was increased to  <dig>  as the number of adjacent peaks decreased. the distribution did not show any significant change when s was increased to  <dig> and we adopted a conservative approach by setting s =  <dig>  which corresponds to  <dig>  kb on average. limited peel-off detected  <dig> peaks using s =  <dig> 
+
+for each variant and type of aberration, the number of peak regions and genes contained within them are illustrated. the table also summarizes results for all gistic variants  and novel peak regions reported by limited peel-off. limited peel-off detects  <dig> novel peaks and  <dig> genes.
+
+for each novel peak region of amplification detected by limited peel-off in chromosome  <dig> its location in the genome and suspected driver genes are shown. each driver gene is accompanied by a reference that supports its oncogenic nature. all novel peaks contain at least one candidate driver gene.
+
+for each novel peak region of deletion detected by limited peel-off in chromosome  <dig> its location in the genome and suspected driver genes are shown. each driver gene is accompanied by a reference that supports its behavior as tumor suppressor. all novel peaks contain at least one candidate driver gene.
+
+for a systematic evaluation we designed an automated statistical test to study the limited peel-off's specificity and establish that the increased number of peaks detected by limited peel-off does not increase the false positive rate. our permutation based test estimates the number of candidate cancer driver genes expected in random regions matching in size with the regions detected by jistic. we compiled a list of  <dig> likely driver genes based on two different sources:
+
+• genes listed in the sanger cancer gene census  <cit> .
+
+• genes annotated in go  <cit>  for at least one of the following processes: cell cycle, cell proliferation, cell death and neurogenesis.
+
+we generated  <dig>  random outputs with similar characteristics to the real output. a random output is generated by iterating over all detected peaks and shifting the peak's location to a random position in the genome. for each output, we count the number of regions containing at least one gene in the list of driver candidates above. this provides us with a distribution for the number of potential driver genes expected in the null model.
+
+to compare focal and limited peel-off, we tested three sets of peaks: the peaks that are exclusive to each of the two methods and the peaks that are common to both. note that all the peaks obtained by standard gistic are also obtained by limited peel-off. the results of the  <dig>  iterations for each of the three sets are shown in table  <dig> 
+
+the p-value for the permutation test estimates the probability of detecting as many peaks containing candidate driver genes if random regions of the same size across genome are selected. the table shows results for mutually exclusive peaks between focal gistic and limited peel-off and for overlapping peaks between both variants.
+
+as expected, the p-value obtained for the overlapping peaks is more significant than the p-value for the exclusive peaks for each method.
+
+for the  <dig> peaks obtained exclusively by limited peel-off,  <dig> contained likely driver genes, only 23/ <dig>  permutations reached the value obtained by the true output, giving a p-value of  <dig> . in comparison, for exclusive peaks for the focal variant,  <dig> of the  <dig> peaks contained likely driver genes. in 73/ <dig>  permutations the test obtained as many peaks with likely driver genes, giving a p-value of  <dig> .
+
+CONCLUSIONS
+the analysis performed on limited peel-off against standard and focal gistic demonstrates the superiority of limited peel-off to achieve both better specificity and dramatically increase recall by obtaining a large number of novel peaks.
+
+in conclusion, jistic is a significantly improved algorithm to distinguish between driver and passenger copy number aberrations in cancer genomes. importantly, it detects a significant number of additional driver regions while maintaining a similar false positive rate. we conclude that both limited peel-off and focal gistic should be used together as they provide complementary and significant results.
+
+the tool is implemented in java, has been tested on linux and windows. it can be downloaded from http://www.c2b <dig> columbia.edu/danapeerlab/html/software.html. it does not have dependencies to external libraries and can be downloaded as a single java jar file. the execution time for the glioblastoma dataset on a standard desktop computer  was  <dig> minutes for all variants.
+
+matlab scripts are provided in order to visualize the output and obtain different statistics. the tool can also convert to the format used by the open-source visualization tool igv  <cit> , used to display cancer genomic data using a user-friendly interface, demonstrated in figure  <dig> 
+
+availability and requirements
+• project name: jistic
+
+• project home page: http://www.c2b <dig> columbia.edu/danapeerlab/html/software.html
+
+• operating system: platform independent
+
+• programming language: java
+
+• other requirements: java  <dig>  or higher
+
+• license: lgpl
+
+• any restrictions to use by non-academics: none
+
+conflict of interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+dp, fsg and uda designed research. fsg and uda developed the limited-peel off algorithm em and fsg implemented the java code. fsg and uda analyzed and evaluated the algorithm. fsg and dp wrote the manuscript. all authors read and approved the final manuscript.
+

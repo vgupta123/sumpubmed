@@ -1,0 +1,144 @@
+BACKGROUND
+in the post-genome era, sequence data is the entry point for many studies. often, it is essential to obtain the correct genomic dna sequences of eukaryotic genes because of the information contained in non-coding regions. for example, the intron regions contain important sites for the regulation of gene transcription, like enhancers, repressors, and silencers  <cit> . transcription initiator sequences are located upstream from the target gene  <cit> . the determination of the exon/intron structures of genes is also important in comparative genomic analyses like the identification of ancient exons  <cit> .
+
+today, over  <dig> eukaryotic genome sequencing projects have resulted in genome assemblies  <cit> . for many of these project, genomic sequences of genes are only available by ab-initio gene predictions, if at all. however, it has been shown that automatically annotated sequences are often wrong because of sequencing and assembly errors, and mispredictions of exons and introns  <cit> . correct protein sequences have in many cases been derived from manual annotation of the genes of interest or from full-length cdnas. but experimentally obtained cdna sequences often do not completely correspond to annotated genes, for example because previously undescribed alternative splice forms have been isolated. in many cases, it might also be interesting to look at the genes of evolutionary closely related species. if these species have not been annotated yet, it is, however, very time-consuming to identify and manually annotate the corresponding homologous genes.
+
+currently, a few programs are available for the retrieval of non-coding sequence. the java application retrieval of regulative regions  parses annotation and homology data from ncbi  <cit> . rre requires local installation and local copies of the desired genome and annotation files. the web application of rre only hosts a small number of eukaryotic genomes and annotation data only from ncbi. recently, the non-coding sequences retrieval system  has been published  <cit>  that has  <dig> genomes and annotation data from both ncbi and ensembl  <cit> . in summary, both tools rely on annotation files provided by ncbi and ensembl, with all possible errors, for only a few organisms. in addition, ensembl and the ucsc browser  <cit>  allow to search for genes and to recover any part of the gene of interest. when searching with descriptive terms, accession numbers, or other search terms the output is mainly based on results of gene prediction programs, often supported by evidence from cdna or manual curation. both web-interfaces also allow searching the genomes with any protein query with either blast or blat. however, the quality of the resulting gene structure is limited by these programs. there are also further species-specific genome pages that offer retrieving the genomic dna corresponding to search terms. but there is no service offering the retrieval of the gene structures corresponding to protein queries of almost all sequenced and assembled eukaryotic genomes.
+
+if transcript or protein sequences are available, the task of automatic identification of gene-related sequences can be accomplished by spliced alignment tools much more accurately and faster than, for example, by ab initio gene prediction. splign  <cit>  is a program that aligns a cdna query determining the exact location of splice sites. genewise  <cit>  uses protein queries. the most notable tools that can do both are exonerate  <cit> , partly based on the algorithm used in genewise, and blat  <cit> . the suitable variants of blast  <cit>   are probably still the most widely used tools for the task, though they are more useful for detecting weak homology and yield separate contiguous hits rather than a single complete spliced alignment. all approaches have in common a tradeoff between high speed that can only be reached using heuristics, and optimal accuracy that can only be achieved by exact algorithms that are prohibitively slow for many applications. exonerate is very flexible as it implements a variety of models to choose from in a particular setting. blat is specialized on queries with high sequence similarity, and is considered the fastest tool for this task.
+
+an accurate protein spliced alignment tool is particularly useful when a cdna sequencing project precedes a genome sequencing project. in those cases, protein sequences can be constructed using the cdna but the genomic location of the exons and introns is yet unknown. if the genome assemby is fragmented and genes are split onto different contigs, then any gene-finding or alignment method that considers each contig separately makes insufficient use of the available protein sequence information. here, a spliced alignment should take contig-spanning introns and exons into account for maximal accuracy at the contig boundaries. another application scenario for accurate protein spliced alignment is the problem of annotating a new assembly of an already annotated genome. frequently, a complete re-annotation is time-consuming as it often requires different groups to run different gene finders and integrating all available evidence. simply mapping the previously known protein sequences to the new genome is a fast and easy alternative, at least for those genes that can be mapped with 100% identity.
+
+some sequencing approaches sequence only filtered genomic regions that are enriched for genes like the methyl-filtrated sequencing or high-cot analysis used for many plants . in these cases the assembly will remain fragmented and many genes are split up onto different contigs, requiring that a spliced alignment tool takes this fragmentation into account.
+
+here, we present scipio, a tool for the retrieval of the genome sequence corresponding to a protein query. it uses blat to perform a spliced alignment that results in a list of candidate hits, which are then refined, filtered and assembled to produce a prediction as accurate as possible. no annotation data is required, and genes are identified correctly even if they span several genome contigs, and contain mismatches and frameshifts. with these capabilities, scipio is not only able to correctly identify the gene in the genome corresponding to the protein query but also to identify homologous genes in the genomes of closely related organisms. moreover, it provides a comprehensive output, both machine- and human-readable, already containing the genomic sequences searched for.
+
+implementation
+in most instances, the task of determining the gene structure of a query protein within a dna target sequence is a special case of the search for a spliced alignment. since several tools performing this task have already been available for a long time, writing another one would mean reinventing the wheel. our choice was to depend on a blat search.
+
+however, in the example of blat, when performing a search for the protein in the translated dna, the output does not coincide with the exon structure of a single gene. usually, multiple hits are found for each query, varying in accuracy, and exon boundaries are given only on amino acid level, missing those codons that are split by introns. hence, manual processing was still needed until now in the majority of cases to determine the exact location of the query. in cases where the genomic sequence is in an early stage of the assembly process, several parts of one particular gene are often found on different target sequences , making this task very tedious and time consuming.
+
+the scipio script
+we designed the perl script scipio to automate this process and output the results in both human- and machine-readable output formats . the summary of the process is depicted in the diagram in fig.  <dig>  we chose to run blat to provide us with the spliced alignments because it is specialized for the case of high sequence identity, which is obviously the case when locating genes of the same species , but it turned out to be very applicable also for the case of closely related species.
+
+stage one: hit refinement
+after running blat, scipio processes the query protein and target dna sequences, and the file containing the blat hits. in the first stage, each hit is then "refined" by a number of steps. a blat hit is a collection of consecutive matchings of the protein sequence aligned to the translated dna. we do not want to include hits with low quality. therefore, everything with an accuracy below a given threshold is discarded at this stage. the refinement then consists of the following steps:
+
+• unaligned parts of the target sequence between the matchings that form a blat hit are analysed. a hit is only likely to be considered if they consist of a longer piece of dna corresponding to at most one residue of the query, so they can be regarded as introns. scipio tries to determine the exact location of the splice site by looking for a known splice site pattern . this way, codons that are split by an intron, and are only joined after splicing, can be revealed. in cases where all residues are aligned by blat but a splice site pattern is missing, scipio tries to improve the prediction by shifting the splice sites in single nucleotide steps. if an exact location can not be found, a heuristic is used to determine a trade-off between the number of additional mismatches and the presence of the splice site pattern.
+
+• in addition, two more types of unaligned target sequence are distinguished: first, actual gaps with significant parts of the query sequence unaligned . second, short gaps resulting from sequencing and assembly errors leading to additional or missing bases or codons, with or without a frameshift. additional dna in this case is not interpreted as intron an but as a sequence shift of the query against the target.
+
+• scipio tries to locate very short exons where the blat hit misses parts of the query sequence. this is done by simple pattern matching. thus only pieces with full identity are added. terminal exons are added only when an intact splice site is found.
+
+the filtering during the first stage ensures that nothing will be shown that cannot be regarded as a good match. if no hit is left after filtering, scipio simply considers the gene non-existent in the target sequence, and no further processing is done.
+
+stage two: hit filtering and assembly
+all blat hits that survive the first stage are subsequently filtered in the second stage to determine those that form the gene corresponding to the protein query. if only complete chromosomes were considered, one could expect a single optimal blat hit coinciding with that gene; however, in cases without a complete assembly, partial hits on different targets need to be taken into account.
+
+first, all hits are sorted by a score proportional to the number of matches, with a penalty subtracted for each mismatch. second, all incompatible hits are discarded in the order just determined. hits are incompatible if their queries overlap but their targets do not. an exception is the complete identity on dna level at the ends of two contigs. this could result from an incomplete assembly, and the possibility of an overlap is taken into account. at the end of this step, we come out with a small number  of non-overlapping hits forming the best gene candidate.
+
+the final part of stage two is another refinement step: by assembling multiple hits, sequence parts may have been identified as parts of an intron that is split on different targets, the first half at the end of one target, the second at the beginning of the next. after the assembly scipio uses the same method as in stage one to determine the exact splice site locations.
+
+output
+the output contains target names, and location coordinates  of all features: introns, exons, and gaps; exons can have sub-features: sequence shifts, mismatches, or undetermined positions. in addition, it contains the genomic dna for all regions  and the translation of the coding sequence.
+
+for the output format we defined two essential requirements: human readability and machine readability. we chose yaml as it is a format that is complex enough to express our data structures and at the same time simple enough to be human readable and editable. yaml can be parsed easily and has numerous bindings to any modern programming language. the resulting native data structures can be used to further process the data generated by scipio.
+
+conversion tools
+scipio provides two tools to convert yaml files:
+
+• yaml2log: converts yaml files into an easily readable log file with summary information about the results and clearly arranged sequence alignments.
+
+• yaml2gff: converts yaml files into gff format which can be read by a wide range of genome-related software packages.
+
+RESULTS
+in many biological studies, protein sequences have been obtained by isolating mrnas and sequencing the reverse-transcribed cdnas. also, large-scale cdna sequencing projects resulted in thousands of supposed-to-be full-length cdna sequences for some eukaryotes  <cit> . protein sequences might have also been obtained by manual annotation. sets of genomic dna sequences of genes exist for some annotation projects. however, for many eukaryotic sequencing projects, the annotation process is lacking years behind the sequencing and assembly. in addition, experimentally obtained cdna sequences often differ from annotated sequences because new alternatively spliced forms have been isolated. therefore, for subsequent studies it might be useful or crucial to obtain the genomic dna and the gene structure corresponding to the protein of interest.
+
+scipio has been designed for this task, and based on its differentiated processing capabilities it is able to cope with genes spanning multiple contigs as well as various kinds of sequencing and assembly errors. scipio has been developed for the correct identification of eukaryotic genes. it can also be used for bacterial and archaeal genes although these genes are easily identified manually based on their simple single-exon structure. depending on the similarity of the protein sequences, scipio is also often able to correctly identify homologous genes in closely related organisms.
+
+we have implemented the following features:
+
+a. if the query is distributed on several targets, the target contigs will be assembled guided by the alignments to the query. untranslated regions from the last exon on a contig to the contig end and from the beginning of the next contig to the next exon are regarded as intronic. scipio is also able to resolve overlapping contig ends if they consist of coding sequence, hence contributing to an improvement of the assembly.
+
+b. the yaml2log script identifies cases from a list of alignment discrepancies and mismatches between query and target sequence that can result from sequencing/assembly errors . the simplest case is that amino acids differ , or that they are missing in either the target or the query . sequencing/assembly errors may lead to additional or missing bases. these frameshifts are represented by an x in the translation corresponding to one or two nucleotides. the query sequence might have either been obtained from cdna sources thus leading to a mismatch between query and translated target , or the sequencing errors might have already been interpreted represented by an x in the query . the target sequence might also contain in-frame stop codons . these can be the result of sequencing errors or real stop codons as they appear in pseudogenes. in all these cases, the stop codon is shown as an asterisk  in the translation.
+
+c. scipio interprets splice site patterns to determine intron locations. exons borders are chosen so that the splice sites belong to one of the following classes, in decreasing priority: gt-ag, gc-ag, at-ac, ga-ag, gg-ag. in cases where the translation of the adjacent intronic sequence was identical to the query, it was necessary to shift the intron location predicted by blat by several codons to determine the splice site location.
+
+d. scipio searches for stop codons at the end of genes. this helps evaluating the completeness of the query sequence.
+
+e. scipio tries to locate very short exons that are not recognized by blat. these short exons might either appear in-between longer exons or at the ends of the gene. for example, very often genes start with an n-terminal methionine that is the only translated codon in the first exon. scipio locates n-terminal methionines only if matching splice sites are found.
+
+insect genomes
+to develop and test scipio we used a test set of  <dig> arthropod genomes and a set of  <dig> proteins . the genome sequences  differ in quality and completeness and are thus representative for straight-forward and for difficult identifications of the genes.
+
+drosophila melanogaster is an example of a perfect genome sequence with all reads assembled to chromosomes and almost all gaps closed. bombyx mori p50t was used as example for a very preliminary assembly with many short contigs. the other genome sequences represent all stages in-between these extreme cases. for example, the genomes of drosophila persimilis and drosophila sechellia are quite complete which is visible from their number of contigs, but they have a low sequence coverage and/or contain many sequencing errors leading to high numbers of mismatches and frameshifts in the identified genes . in total, almost all query sequences have been identified correctly by scipio , although many are spread on several target contigs .  <dig>  % of the genes have correctly been identified but the target dna sequence contains sequencing or assembly errors. another  <dig>  % has not completely been found with the standard blat settings  because these genes contain very short exons. after changing the blat tilesize to  <dig> or  <dig> these genes have also completely been identified. further  <dig>  % of the genes could not be identified correctly, because the query sequence has been derived from manual annotation thus having incorporated est data, data from other genome assemblies , or errors in the manual annotation process. e.g., the bombyx mori p50t genome data is very incomplete but a lot of est data is available. thus, the query protein sequences have been built to a large part on these est data. est data has also been used to close gaps in the apis mellifera and drosophila virilis genomes. errors resulting from this process are not due to problems in the implementation of scipio. two sequences  could not be identified correctly, because the genome sequences shows an large number of sequencing errors resulting in a succession of frame shifts in this particular region. the query protein sequences have correctly been identified based on est data. the remaining  <dig> sequences  contain very long overlapping regions due to problems in the genome assemblies. currently, scipio handles overlapping hits by choosing the one with the higher overall score, in some cases discarding the one with fewer mismatches in the overlap region. the other cases in which scipio did not resolve the complete gene structure are those, where a frame shift exists very close to an intron border. blat does not include the stretches past the frameshifts since they are smaller than the tile size used for searching. scipio was not able to place the missing residues between the exons.
+
+cross species search
+to test the ability of scipio to correctly predict orthologous genes in closely related organisms we have annotated the myosins in the recently assembled primates pongo pygmaeus abelii and callithrix jacchus  <cit> . as a query, we used the  <dig> manually annotated myosins from homo sapiens  <cit> , which can be obtained from cymobase  <cit> . although the genome assembly is not complete and most of the sequencing/assembly errors described above have been seen, scipio correctly predicted and identified most orthologs of the human myosins in the two primates and located all parts of the genes if they were distributed on several target contigs, it also correctly identified two rare splice sites  that are specific for vertebrate sequences in two myosin classes. in the tails of the class- <dig> and class- <dig> myosins very small and divergent gaps had to be filled manually.
+
+comparison with existing tools
+to assess the improvement on prediction quality that scipio achieves, a comparative study was carried out with a selection of genomes varying in size and quality of assembly . running scipio, standalone blat, and exonerate, a number of myosin and kinesin queries were searched for in these genomic sequences.
+
+a list of  <dig> insect, one fungi, and two primate genomes, searched for kinesin and myosin genes to compare the performance of scipio with that of blat and exonerate. genomic target sequences were taken from different stages of assembly, as can be seen from the different typical target sizes . the protein query sequences were taken from the same species as the genome.
+
+the percentage of residues of the query sequences that the compared tools failed to recover from the target sequence. to gain comparable results, the hits proposed by blat and exonerate were assembled together manually: a collection of best-scoring non-overlapping hits was chosen for each query. the last two columns show the results if only the best-scoring hit for each query was used.
+
+exonerate is able to find introns with exact boundaries. hence, its accuracy is somewhat higher than blat's. however, in our setting, exonerate had running times of about three to ten times longer than scipio. scipio adds less than ten percent to blat's running time.
+
+it is important to note that manual postprocessing of blat's and exonerate's results was used to gain comparable values: while blat and exonerate come out with a collection of possibly overlapping hits with strongly varying accuracy, scipio is able to filter and assemble non-overlapping partial hits on multiple targets together to a single prediction for each query sequence. this additional feature of scipio had to be emulated by manually choosing a collection of best-scoring hits without large overlaps, and adding up the numbers of matches found, from the outputs of the two other programs.
+
+in the case of a genome in a very early stage of assembly , this assembling of hits increased the number of matching residues found to  <dig> % from  <dig> % which would be found taking only a single hit for each query. in the genome of macaca mulatta, although target sequences were complete chromosomes, exonerate still failed sometimes to return a single hit comprising the entire query sequence, and hence assembling of partial hits increased the number of residues found here, too. manual inspection showed that scipio produced false positives in rare cases when it rather had declared the gene not present in the target sequences.  <dig> residues  accounted for false exons.
+
+the results on sequence level  show strikingly how much the workload for manual postprocessing is reduced by scipio, given that every sequence not matched completely will have to be looked at again, and alignments marked as completed  will not.
+
+the number of query sequences that were predicted by the programs exactly at the correct location, with  <dig> % matching residues, without frameshifts or false positives. this figure reveals the amount of workload needed for manual postprocessing of the hits.
+
+while blat was unable to yield a complete prediction including the correct splice site locations in  <dig> % of the query sequences, exonerate, by modeling introns, did better but would still fail to give a complete prediction in about half of the queries, even when partial hits were combined manually. the reason why assembling hits does not improve the number of completed queries is that in cases when a genomic sequence  ends in the middle of an intron, exonerate will not use the intron model. instead, at the cost of mismatches, the alignment is extended into the intron, yielding false boundaries and consequently, a false prediction.
+
+in the case of d. melanogaster, where scipio completely recovers all  <dig> query sequences, exonerate misses five short exons; while these account only for  <dig>  % of all residues, it reduces its rate of success on sequence level to  <dig> of  <dig>  or  <dig>  %.
+
+these results show that scipio, apart from providing a more detailed and well arranged output, can improve the prediction rate to  <dig> % by searching for short exons. in the case of fragmented genomes, the feature of hit assembly significantly improves the chances of retrieving the complete genomic sequence belonging to a protein query.
+
+future plans
+the primary aim of the upcoming version of scipio is to eliminate false positive predictions and to close more gaps still left in the prediction.
+
+eukaryotic genes contain far more information than is encoded in the sequence of one expressed protein. most of this information is contained in the untranslated regions. therefore, our future developments will focus on analyzing the untranslated regions to provide the user with additional gene-related information. thus, scipio will be developed to identify untranslated exons and, in addition, to determine mutually exclusive exons, and other alternatively spliced exons.
+
+a web interface for scipio is currently under development to address a wider audience and to make scipio more user-friendly.
+
+CONCLUSIONS
+scipio is a tool for the determination of gene structure and annotation of genes for a given protein sequence. based on the widely used program blat, it performs exhaustive processing to ensure the best possible mapping of the protein onto the genome. by the ability of assembling partial hits ranging over multiple target sequences, scipio goes beyond the scope of present spliced alignment tools and presents the user with a coherent set of matches that are often accurate to the level of single bases. having a certain level of tolerance, scipio can handle mismatches and frameshifts that often result from sequencing errors in genomes and cdna. the same tolerance can be used to track down homologous genes in closely related species, allowing for cross-species annotation.
+
+availability and requirements
+project name: scipio
+
+project home page: 
+
+operating system: platform independent
+
+programming language: perl
+
+software requirements: installation of blat and bioperl.
+
+hardware requirements: blat may demand several times the genome size in ram. if the ram size is limiting, the most reasonable way is to split the genome and run scipio against the split files.
+
+license: scipio may be obtained upon request and used under a creative commons license.
+
+any restrictions to use by non-academics: using scipio by non-academics requires permission.
+
+abbreviations
+blat: blast like alignment tool; yaml: yaml ain't markup language.
+
+authors' contributions
+ok, fo and mk set the requirements for the system, performed testing, and wrote the manuscript. mk, ms and sw initiated the project, ok wrote software. fo and mk carried out the analysis of the insect genomes and the cross-species searches, ok the comparative tests. all authors read and approved the final version of the manuscript.
+
+supplementary material
+additional file 1
+source code of the software, two scipio output conversion tools, and a manual on the usage of the scipio script.
+
+click here for file
+
+ acknowledgements
+mk has been funded by grants ko 2251/3- <dig> and ko 2251/6- <dig>  and sw by grant wa 766/6- <dig> of the deutsche forschungsgemeinschaft.
+
+the sequence data for pongo pygmaeus abelii and callithrix jacchus were produced by the genome sequencing center at washington university school of medicine in st. louis  <cit> .

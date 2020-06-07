@@ -1,0 +1,176 @@
+BACKGROUND
+one of the main goals of computational cell biology aims to accurately simulate large biological systems at molecular resolution. stochastic effects and spatial constraints are increasingly being recognized as important factors in the normal functioning of molecular networks  <cit> . the efficiency of biochemical networks is enhanced by component co-localization  <cit> , and certain signaling networks are thought to be facilitated by transport and co-localization  <cit> . in addition, molecular crowding has been shown to affect biochemical systems  <cit> . modeling and simulation of these kinds of networks requires new kinds of stochastic simulators.
+
+we developed gridcell to simulate biological models with specific consideration for stochasticity, locality, and collision. gridcell is based on a simplified model for molecular movement and interaction. it uses a discrete three-dimensional cubic grid based on the d3q <dig> model often used in the application of the lattice-boltzmann method   <cit> . each voxel has access to itself and its  <dig> neighbours and is independent of voxels outside this immediate surrounding. figure  <dig> shows the  <dig> possible locations accessible to a voxel from a d3q <dig> grid. the integer-addressed 3d grid avoids floating-point computation and distance calculations, resulting in an efficient implementation. molecules are represented as particles that move and react stochastically within discrete volumes in discrete timesteps. collisions and molecular crowding are enforced since only one particle can occupy a given location at any time. gridcell stores the coordinates of all the particles on the 3d grid at every turn, thereby enabling particle tracking in both space and time.
+
+the simulation space is visualized via a 3d interface and 2d graphs, and surface plots summarize molecule concentrations over space and time. gridcell supports models specified by the systems biology markup language  . sbml models can be obtained from public repositories such as ebi's biomodels database  or designed using software such as sbmleditor or jdesigner .
+
+implementation
+algorithm
+the simulation employs a two-phase process in which particles  attempt to move and then  attempt to react every turn.
+
+movement phase
+a particle can move at most once per timestep. since a particle only has access to its immediate surrounding, a particle can only move in one of  <dig> nearest locations, including the current location. the selection of the movement direction is made randomly; therefore the particles follow a brownian random walk. figure  <dig> shows an example of  <dig> different brownian random walks of particles starting from the same location. in gridcell, any particle attempting to move to an occupied location will generate a collision. a collision prevents the particle attempting to move from moving during that turn and does not affect the other particle.
+
+diffusion
+particles following a brownian random walk should also follow the well-known einstein-smoluchowski equation
+
+  <r2> = 2ddt, 
+
+where <r2> is the mean-square displacement, d is the dimensionality, d the diffusion coefficient and t the elapsed time. figure  <dig> shows the mean-square displacement in units of voxel <v2>  versus the number of timesteps nts when the probability of movement of the particles at every timestep is equal to  <dig>  as expected for an uncrowded case, the mean-square displacement increases linearly with the number of timesteps. this leads to the following relation
+
+  <v2> = ants, 
+
+where a is the slope of the graph. by substituting <v2>=<r2>svox <dig> and nts=tlts where svox is the length of the sides of the voxels in meters and lts is the length of the timestep in seconds, we get
+
+  <r2>=asvox2ltst=2ddt. 
+
+since the probability of movement at each timestep of the particle is equal to  <dig>  d can be substituted for the maximum diffusion speed dmax that gridcell can support for a given timestep and voxel size. this upper limit on diffusion speed is caused by the design decision of restraining particle movement to its immediate neighbourhood . by calculating the slope of the graph and setting the dimensionality d equal to  <dig>  dmax can be calculated as
+
+  dmax =  <dig> svox2/ts. 
+
+smaller diffusion speeds are simulated by applying a different probability of movement such that
+
+  d = pmdmax, 
+
+where pm is the probability of movement of a particle at every timestep. as long as the diffusion speeds of the particles are smaller than dmax, diffusion will be modeled correctly. if a larger diffusion speed is needed, one can reduce the timestep or increase the size of the voxels.
+
+reaction phase
+a particle may react only once per turn and only with its immediate surrounding. the reaction phase is completely independent from the movement phase, therefore it does not matter if a particle previously moved or collided with another particle. common interactions include aggregation events such as molecular complex formation/dissolution or conversion events such as chemical reactions. only the simplest reactions involving  <dig> or less particles are directly supported. complex reactions involving more than  <dig> particles are decomposed into several elementary reactions. the probability of reaction per timestep is derived from the overall rate of reaction and is very similar to the approach taken by chemcell  <cit> . only  <dig> different reactions involve  <dig> or less participants:  <dig> reactant and  <dig> product,  <dig> reactant and  <dig> products and  <dig> reactants and  <dig> product. let's consider the two reactions that involve a single reactant
+
+  a → b 
+
+  a → b + c. 
+
+both reactions have a forward rate of reaction k in units of time- <dig> and timestep is t second. assuming a well-mixed approximation and n particles of type a in the system, then in both cases the expected number of reaction per turn is given by n. considering each particle individually, each particle has a probability equal to  <dig> - e-kt to react during each timestep. in our stochastic model, a uniform random number rn between  <dig> and  <dig> is generated for each particle, and the reaction occurs if rn <  <dig> - e-kt. in a reaction with only  <dig> reactant and  <dig> product, the reactant is simply replaced by the product. in a reaction with  <dig> reactant and  <dig> products, a search is first conducted in the surrounding area. if there is at least  <dig> free voxel in the surrounding area of the particle, the reaction takes place, and the second product is positioned in that free location while the first product is placed at the position of the initial reactant. the reaction is blocked if no free position is found. this limitation only modifies the overall reaction rate of the reaction in a situation where the whole cell is completely filled which would prevent any movement and reaction to take place.
+
+consider the following reaction with  <dig> reactants:
+
+  a + b → c, 
+
+with a rate constant k in units of - <dig> and a timestep between each iteration of t second. assuming na particle of type a, nb particle of type b, a volume v and the avogadro's number being av, then the total number of reactions nr in a well-mixed system is given by
+
+  nr=knanbtavv. 
+
+on average, the desired number of reactions in our system should be equivalent to the result of the above equation. in our system, particles can only react with their immediate surrounding locations. in a well-mixed system, the number of a,b pairs that are close enough to each other to generate a reaction is given by n = nanbvc/v where vc is the volume of the cube containing the  <dig> "neighbouring" voxels and v is still the total volume of the simulation. if each of those pairs react with probability p, then nr = np. setting the  <dig> equations nr = np = knanbt/ gives the equation
+
+  p=ktavvc. 
+
+the formula is independent of v, na and nb as expected. also, for a given rate constant k, it is possible to have a set of parameter t/vc such that p is greater than  <dig>  if that is the case, a smaller timestep or larger voxel size  has to be selected. a random number rn is generated. if rn <p, then the first reactant will search its surrounding area for the second reactant. if it is found, the reaction takes place and the product is placed at the location of the first reactant. if no reactant is found, the reaction is aborted. note that the second reactant does not try to react with the first one, doing so still enables us to get the right rate of reaction and reduces the number of operations needed to update the simulation. in the case where a particle can participate in many different reactions, a random number is generated to select which reaction is going to be tested first. if the first reaction does not take place, then the next reaction on the list is tested. the procedure will go on until either a reaction takes place or all possible reactions have been tried. this ensures that, on average, all reactions are tested equally.
+
+when  <dig> reactants of the same species form a product such as
+
+  a + a → b, 
+
+the individual rate of reaction of particle a needs to be modified to ensure that the overall rate of reaction is respected since each reactant will attempt to react with the other one. assuming y is the overall probability of reaction and x is the individual probability of reaction of species a, then
+
+  x=1−1−y. 
+
+more complex reactions are implemented by creating a cascade of several elementary equations. this process, done automatically by the software, will break the complex reactions into a series of simpler reactions by introducing "temporary" species. for example, consider the following reaction with  <dig> reactant and  <dig> products.
+
+  a → b + c + d + e + f 
+
+where k is the rate of reaction in time- <dig>  for each product exceeding  <dig>  a temporary species is created. in this case,  <dig> temporary species are created. it follows that the reaction is broken down into:
+
+  t <dig> → b + c 
+
+  t <dig> → d + e 
+
+  t <dig> → f + t <dig> 
+
+  a → t <dig> + t <dig> 
+
+where t <dig>  t <dig> and t <dig> are respectively the first, second and third temporary species. by setting the rate of reaction of equation  <dig> equal to k and the probability of reaction of equations containing any temporary species on the reactant side equal to  <dig>  we reduce the artifacts due to the creation of the "temporary" species to a minimum. indeed, the temporary species disappear from the system as quickly as possible and the overall rate of reaction is identical.
+
+shown below is the case where more than  <dig> reactants merge into a single product:
+
+  a + b + c + d + e → f. 
+
+the procedure is similar to the previous case,  <dig> temporary species is created for each reactant above  <dig> 
+
+  a + b → t <dig>  
+
+  c + d → t <dig>  
+
+  e + t <dig> → t <dig>  
+
+  t <dig> + t <dig> → f. 
+
+where t <dig>  t <dig> and t <dig> are respectively the first, second and third temporary species. in order to obtain the same overall probability of reaction and to reduce the impact of the temporary species on the system to a minimum, the probability of reaction of any reaction containing temporary species on the reactant side  is set to  <dig>  assuming that p is the probability of reaction of the reaction presented in equation  <dig> and p <dig> and p <dig> are the probability of the first and second simple reactions a + b → t <dig> and c + d → t <dig> then, we set p = p1p <dig>  we also set p <dig> = p <dig>  equating the  <dig> equations gives p <dig> = p <dig> = p.
+
+in general, the probability of the simple reactions pn containing no temporary species is equal to
+
+  pn=p⌊2nreactants⌋ 
+
+where p is the probability of reaction and nreactants is the number of reactants of the initial reaction. each temporary particle has a parameter lifetime which indicates the number of turns the particle has to live in the system before reverting back to its previous state. the short lifetime of temporary particles is important for  <dig> reasons. first, it makes sure that temporary particles are effectively temporary and never stay in the system for a long period of time. it also makes sure that all the reactants are to be close to each other in order for the reaction to complete. usually, a lifetime of 2– <dig> turns is reasonable since it gives enough time to react with the neighbouring particles while making sure temporary particles do not constitute the bulk of the system.
+
+reversible reactions are handled by creating  <dig> different separate reactions,  <dig> for the forward reaction with the forward reaction rate and  <dig> for the backward reaction with the corresponding backward reaction rate. assuming the following reaction
+
+  a + b + c + d + e ↔ f. 
+
+with forward reaction rate kf and backward reaction rate kb. this reversible reaction is then split into
+
+  a + b + c + d + e → f 
+
+with a reaction rate kf and
+
+  f → a + b + c + d + e 
+
+with reaction rate kb.
+
+temporary particles involved in a reversible reaction have a flag mentioning if they are participating in a forward or backward reaction such that they can revert back to the proper reactants when their lifetime reaches zero.
+
+performance analysis
+preliminary tests have been conducted to determine how the software reacts to different system sizes. the tests have been executed on a stand-alone microprocessor: a  <dig>  ghz p <dig> with 2gb of ram. the current algorithm is computed serially. as it can be shown in table  <dig>  the time required to compute a timestep increases linearly with the number of particles and voxels present in the system. tables  <dig> and  <dig> demonstrate how the performance is affected by independently modifying the number of voxels or the number of particles. the maximum number of particles that can be currently simulated is equal to the maximum number of voxels that can be supported, which is  <dig>  table  <dig> shows that the number of reactions occurring at each timestep has a negligible effect on the performance. the reason is that all reactions have to be tested, regardless of whether or not they actually react. there are no practical limitations to the number of chemical species or the number of different reactions present in the system beyond the absolute limit on the number of voxels.
+
+time required to compute a timestep versus the size of a simulation.
+
+time required to compute a timestep versus the number of voxels. no particles in the system
+
+time required to compute a timestep versus the number of particles. the system contains 1e <dig> voxels.
+
+time required to compute a timestep versus the average number of reactions occuring at each timestep. the system contains 1e <dig> voxels and 1e <dig> particles.
+
+user interface features
+the rendering is implemented in opengl, and most user-interface functions are written using the plib library, which is available online . gridcell's user interface  consists of a) a menu system, b) an interactive 3d simulation space, c) a species panel, d) a 2d plot of concentration versus time, and e) a 2d plot of concentration versus space.
+
+the menu system  provides the ability to load sbml models, set parameters and control the simulation. user-designated simulation parameters include the number of times to run the simulation, the timestep, the total simulation time, the sampling rate which is the frequency that the 2d graphs are updated and the results saved to file, and the frame rate which designates the frequency of updating the 3d visualization. gridcell computes the means and the standard deviations of the concentration over time if the user chooses to run multiple iterations of the simulation. these preferences may be saved and used later in any simulation. gridcell saves the particle concentrations and the 2d surface plot data in user-specified tab-delimited files. spatial information such as specific compartment geometries or co-localization of particles is specified in an optional configuration file.
+
+a key feature of the gridcell user interface is the ability to interact with the three-dimensional simulation volume . users can navigate into the 3d scene with mouse and keyboard controls to rotate, pan and zoom. buttons are present to i) start/pause simulations, ii) change the particle representation from cubes to points for faster rendering, iii) turn off the visualization for optimal simulation performance, and iv) hide or show all particle types.
+
+the species panel  contains the current amount of each species, and allows species selection for the visualization plots. a second column specifies which species to render in the 2d surface plot of concentration versus space . particle colours are automatically selected from a predefined colour palette.
+
+finally, two plots to summarize particle concentrations with respect to time  and space  are provided in real-time. the 2d spatial plot displays increasing concentration with increasing brightness along a selected cartesian axis.
+
+RESULTS
+michaelis-menten reaction
+the michaelis-menten equations are used to describe most enzymatic reactions. its kinetics is given by the following equation:
+
+  e + s ↔ es → e + p. 
+
+the enzyme e reacts with the substrate s to form the complex es with a rate of reaction k <dig>  es decomposes into the enzyme e and a new product p with a rate k <dig>  or reverts back to its original form e + s with rate kr.
+
+crowding
+one of the main differences between gridcell and other simulators is its ability to simulate particle crowding. molecular crowding occurs when particle density affects movement and reactivity. crowding is typically ignored in most models since kinetics are often based on controlled, in vitro conditions that are not crowded. in addition, simulators do not typically support this feature since it is computationally expensive to keep track of all particle positions and their excluded volume, and to implement collision-detection algorithms. some simulators  have shown crowding effects by explicitly introducing cubic obstacles  <cit>  in the model. in contrast, gridcell implicitly exhibits molecular crowding effects by allowing inter-particle collisions. we demonstrate the effect of crowding by adding inert particles to a michaelis-menten system. inert particles do not react with other molecules but reduce their movement and affect the overall number of reactions. the simulation parameters are described in table  <dig>  figure  <dig> shows the number of products over time for a wide range of concentrations of inert particles averaged over  <dig> iterations. the individual simulations provided almost identical results to one another with a relative standard deviation smaller than  <dig> % at the end of the simulation. the number indicated in the legend signifies the percentage of the voxels occupied by inert particles. in this specific example, with a voxel size of  <dig> - <dig> litres, this amounts to approximately  <dig> inert particles per step of 10%.
+
+parameters of the michaeles-menten simulation.
+
+interestingly, the maximum rate of reaction is obtained when the inert particles occupy 20% of the volume, which agrees with the fact that macromolecular crowding may enhance reaction rates, as the particles have to search a smaller volume to find each other  <cit> . however, above 30%, the reaction rates decrease linearly as more and more inert particles are added. under well-mixed and un-crowded systems, gridcell provides similar results to other ode simulators and stochastic algorithms such as the stochastic simulation algorithm  from gillespie  <cit>  with the exception of a small stochastic noise  <cit> .
+
+related work
+gridcell is related to a family of monte carlo  simulators . smartcell  <cit>  and mesord  <cit>  subdivide the simulation space into smaller subvolumes  that can contain many particles. each subvolume is composed of a well-mixed solution, and particles can diffuse to adjacent subvolumes. this approach permits quicker simulations, but it is impossible to track individual particles, and molecular crowding has no effect on movement and reaction rates. cell++  <cit>  combines a cellular automata engine with brownian dynamics in order to simulate large quantities of small molecules on a discretized grid, while large molecules exhibit stochastic behaviour and move in a continuous space. both spaces are then superimposed onto each other, and reactions can take place between the two different spaces. currently, only collisions between particles  and a fixed membrane separating two compartments are supported. therefore, molecular crowding effects are not simulated. unlike cell++, mcell  <cit>  tracks all individual particles in a continuous 3d space, and the diffusing particles follow brownian dynamics. particles may collide and interact with effector sites and 2d membrane surfaces, but not with other particles. chemcell  <cit>  calculates the probability of reaction at every timestep, and particles follow brownian motion in a continuous space that requires a computationally expensive search algorithm to find nearby particles, and the use of dimensionless particles removes the ability of particles to collide with one another. in contrast, gridcell enables stochasticity-based investigations of sbml networks while considering spatial effects of recruitment, localization and crowding.
+
+comparison and description of various simulators.
+
+future directions
+gridcell performance is tightly linked to the number of voxels in the simulation space. the simulator can currently support a maximum of  <dig> voxels/particles which is not enough to simulate at a molecular resolution structures as complex as a complete cell, the long term goal of gridcell. however, the simple and regular algorithm of gridcell, which does not require any searches or complex operations, is a prime candidate for acceleration by parallelization to achieve performance speedup and simulate large-scale systems.
+
+CONCLUSIONS
+gridcell is a stochastic simulator that uses a 3d grid and accounts for locality, very low concentration stochastic effects and particle collisions. its user-interface makes it easy to use while providing several tools to analyze the system. gridcell reproduces the results obtained with odes and the stochastic simulation algorithm  for simple systems when crowding and locality do not affect the system. we also show that particle collisions can have a significant impact on the speed of reaction and that the well-mixed assumption and dimensionless particles can induce a significantly different response in a biological system. the discrete 3d grid and the nearest-neighbour interactions remove the need to do any distance calculation, particle search and floating-point arithmetic. the regularity and simplicity of the algorithm makes it a good candidate for acceleration with a parallel architecture which will open the door to the simulation of even more complex systems.
+
+availability and requirements
+the software is available at  and runs under the windows xp operating system. this package includes sample sbml and gridcell configuration files. gridcell requires the systems biology markup language library  and the opengl utility toolkit . ebi's biomodels database: . sbmleditor: . jdesigner: . systems biology markup language : . 
+
+authors' contributions
+lb designed and programmed the gridcell simulator. saa contributed to the programming of the gridcell simulator and its graphical user interface. md and wjg contributed to the conception and design of the gridcell simulator. lb and saa drafted the manuscript and md and wjg revised the manuscript. all authors read and approved the final manuscript.
+

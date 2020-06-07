@@ -1,0 +1,261 @@
+BACKGROUND
+the set of bionlp shared tasks  <cit>  form a biannual challenge used by many to apply and develop state-of-the-art methods in the field of biomedical information extraction . in  <dig> in its third instalment, it again succeeded in attracting a considerable amount of contributions from an international community of researchers. this work is spread over six different subtasks, each with a focus on fine-grained ie to construct knowledge bases in their respective domain.
+
+the gene regulation network subtask  <cit>  tries to attain the construction of a relation network encompassing the extracted knowledge, in order to build models to represent the behaviour of a system. this network can then serve as a base for representing current knowledge, and be leveraged for making inferences and predictions, i.e. towards experiment design. in the case of this particular task, this system entails the whole of molecular interactions between genes and proteins in a specific bacterium, the bacillus subtilis. an example sentence for this task is given in figure  <dig> 
+
+participants are asked to extract a regulation network from sentences taken from pubmed abstracts describing these phenomena. this network is comprised of six different types of relations, which are related into a small hierarchy . at both train and test time, gold standard annotations of entities are provided, making this a pure relation extraction task, without the need to do named entity recognition, a task with its own set of difficulties and challenges. of further note is the fact that submissions are evaluated on the produced network as a whole, namely the set of relations detected on the test data as a whole. we discuss the impact of this global scoring in the section results and discussion. in the systems produced for this task, we notice a strong tendency to favour precision, i.e. controlling the false positive rate. the top submission  <cit>  obtained a precision score of 68%, however only reaching a recall of 34%. while there certainly is a need for reliable results when working with biomedical knowledge, covering a sufficient proportion of true positives  can be equally fundamental in many practical applications. examples of these are hypothesis generation and knowledge base construction, especially in settings where adding more data can not solve the problem of finding additional true positives . indeed, the interest in developing systems for inference and/or prediction equally lies in the retrieval of a sizeable hypothesis set, rather than reaching only those that can be found with high confidence. one way to balance a system in favour of recall is the exploitation of additional unannotated data. by working in a semi-supervised fashion, a learner can be made more aware of the wide variety of patterns encoding a relationship. this happens at the cost of introducing more noise , since there is no reliable way of labelling the extra data. in this paper we explore a method to decrease this cost, effectively keeping precision stable while improving recall.
+
+basing ourselves on the model of  <cit> , that achieved a second place for this task, we explore how semi-supervised techniques can improve the performance that this system obtains in its supervised form. we further investigate several techniques to counterbalance the noise added by these methods. next to the traditional measure of weighing regularisation parameters, we go on to develop a novel method based on probabilistic rule-finding. next, we look at the experimental set-up and compare the results of the proposed methods. we also discuss some of the properties of this task, and evaluate how these can impact performance in terms of precision and recall. this influence can be both direct, e.g. because of data skewness or pre-scoring processing, and indirect. an example of the latter is found in the choice of the final scoring metric , altering some of the parameter choices when designing and selecting a model.
+
+the section thereafter reviews related work. we finish with conclusions and future research questions.
+
+methods
+baseline model
+we base ourselves on the model of  <cit> . the main reasons for this are as follows:
+
+• their model came in second place, showing decent performance;
+
+• unlike the winning entry, their model does not use hand-crafted rules, and is based on support vector machines. their set-up therefore lends itself perfectly to extension into a semi-supervised framework as described below.
+
+the main configuration of the system of  <cit>  is a collection of support vector machines , one per relation type. the authors construct a data point for each couple of genic entities in a sentence, effectively considering all potential agent/target pairs for the relations. the kernel used is a gaussian rbf kernel .
+
+the novelty of  <cit>  lies in the feature construction. the feature vectors for candidate relation tuples are built as follows:
+
+ f=fbase⊙fcontext 
+
+this is a concatenation  of local features fbase, complemented by what is referred to as context features, fcontext. the local features consist of the classical word information  along with the biomedical compound type  for the words that the entities comprise, with different parts for the agent and target entities. the context part is then constructed in the following fashion, also separately for both entities:
+
+ fcontext=1z ∑wi∈sentenceαdfbase 
+
+with w being the words of the entities at hand, and the sum going over all the wi words in the sentence. d is the distance in number of words between w and wi. this is in essence an average of the vectors encoding the different non-entity words in the sentence, weighted inversely by their distance to the entity words. α is a constant controlling how fast the weights decay with distance, and z is a normalisation factor. note that the traditional fashion of including textual context exists of concatenating these separate word vectors instead of averaging. this leads to feature vectors with only values of  <dig> or  <dig> as components, whereas the entries in fcontext can take on all real values in the interval  <cit> . we direct the reader to the work of  <cit>  for further details.
+
+a few specific differences are to be noted between our implementation and that of the submitted system. we use the libsvm  <cit>  package as provided by the scikit-learn toolbox  <cit> ; this difference in library used should be of minor influence on results, and we are indeed able to replicate their performance. furthermore, as mentioned in the original paper, the distance d used for the submitted results was taken to be the distance in the parse tree, where later tests proved to be more favourable towards using a 'flat' sentence distance, as described above. we compared both options in a cross-validation setting  and found indeed the use of the latter to give better results. we use a value of α =  <dig> .
+
+a distant learning approach
+the main issue of a fully supervised system is the difficulty to generalise towards unseen patterns. this problem is more apparent the sparser the data, and the richer the representation. with our baseline system having an elaborate feature representation, we suspect this to be a big factor in this framework. furthermore, new data points will likely entail unseen words, in part counterbalancing the effectiveness of this sort of feature scheme, albeit widely used in nlp situations . because of these reasons, the base system is likely to suffer from a poor generalisability, as also testified by its poor recall score.
+
+a corpus of related, but unseen data points can provide a source of new patterns to incorporate in our learner. of course, the main obstacle is the lack of labelling for this data; we have no knowledge what points are to be marked as positive. instrumental in any semi-supervised framework are therefore:
+
+• an approximation method to identify the labelling of unseen data. as this can never fully substitute the precision of annotations supplied by a human expert, the uncertainty in this introduces additional noise. hence also the need for the next item:
+
+• means of managing the uncertainty in adding unlabelled data. since the labellings now contain more noise, this inherently changes the optimal learning strategy; a semi-supervised method needs to take this into account.
+
+we propose an expansion to the distant supervision framework . in this line of methods, the classifier is trained on a set of 'bags' of data points, with the defining property that positive bags are only known to be partly containing positively labelled points. the negative bags on the other hand are more certain to effectively contain only negative points. as shown in  <cit> , one use case for this set-up is exactly relation learning, in the event of having a set of known relations between two entities, but when no finer-grained annotations  are available.
+
+contrary to this framework, we do have at our disposal the fine-grained annotations of our labelled data set. however, the structure of these distant learning problems points us to the aforementioned approximation method to add unlabelled data to the training data. namely, the following observation is used: if a biological relation exists between two entities , there is a substantial probability that another  sentence containing both entities will also encode this relation. we therefore add any data point from the unannotated corpus that is composed of two such entities to the training set, labelling it as positive. note that, since our main goal is to introduce new patterns to the classifier, we also use the vocabulary from these sentences when constructing feature vectors. this ensures that we use an unbiased representation of these data points.
+
+opposite to the case of positive examples, the same inference can not be performed here to extract negative data points. absence from a sparse set of known relations only marginally changes the probabilities on these points. we therefore refrain from adding negatives from the unlabelled data, barring further methods to obtain a more accurate selection. this is where our case differs from most distant supervision systems, who are able to extract negative data points due to either explicitly providing negative seed examples, or having ample data to employ a closed world assumption  <cit> . the latter presumes an adequate coverage of positive data, such that everything outside of this knowledge is seen as negative. as will be seen, the pre-selection filter we develop in the following subsection provides us with an alternative method to extract negatives; there we will revisit our choice.
+
+we will refer to the above method as the 'basic' method , as opposed to the systems augmented with the techniques described below.
+
+all results are obtained on the official test set. .
+
+methods of counterbalancing the added noise
+whenever reliability of labelling is affected, this directly influences precision. the basic method proposed above is guaranteed to introduce new patterns to the classifier, which is expected to improve recall. however, this comes at the cost of adding uncertainty to the labelling of the data, which is prone to an increase in false positives.
+
+in this part, we will look at different methods to counter this effect and maintain adequate precision. we study the effects of a general method known to deal with different kinds of noise, namely having a non-constant regularisation parameter in the svm. we then move on to develop a method of pre-selecting the data that is added from the unlabelled corpus, leading to a more fine-grained control of the introduced uncertainty.
+
+weighted regularisation
+a conventional way to deal with noisy training examples comes with the observation that, in the traditional set-up, only the positive data points are plagued by this noise. hence, in a soft-margin svm framework , a different regularisation policy is introduced for positive and negative examples, as first proposed by  <cit> , and later also employed by e.g.  <cit> . let χ+, χ− be the set of positive and negative data points respectively, and ϕ be the feature representation for x, this then leads to the following optimisation formulation:
+
+ minw,b,ξx12||w||2+c+ ∑x∈χ+ξx+c-∑x∈χ-ξx 
+
+subject to:
+
+ w,ϕ+b≥1-ξx,∀x∈χ+w,ϕ+b≤-1+ξx,∀x∈χ-ξx≥ <dig> ∀x∈χ+∪χ- 
+
+w is the weight vector that defines the separating hyperplane together with the constant b as a bias term. the ξx serve in this optimisation problem as slack variables, allowing a trade-off of maximising the margin against having a few points surpassing that margin. by having two regularisation constants c+ and c− we can allow the margin for positive points to be 'softer', accounting for the additional uncertainty in this subset.
+
+an automatic rule-detection algorithm for pre-selection of unannotated data
+many machine learning systems that serve a specific application make use of a framework that incorporates specialist knowledge. a prevalent mechanism for this is by having some rule-based pre-/post-processing. we propose a method for extracting some of this knowledge from the labelled data in a fully automated fashion. this mechanism covers many standard techniques regularly used by system engineers, such as filtering on trigger words that explicitly refer to interactions   <cit> , or on the type of bio-molecule for specific roles   <cit> . however, the automatic nature of our method discards the need for manually identifying and pinpointing useful rules. furthermore, it is agnostic of the nature of the data, and hence perfectly adaptable to texts in any domain or task.
+
+in the framework of our semi-supervised system, this can then be used to obtain a more fine-grained selection from our unlabelled corpus. we do this by extracting patterns from the features of the labelled training data, and including from the unannotated data only those points that also adhere to these observed patterns.
+
+as we are dealing with a pre-selection step on what is expected to be positive, our main focus is on detecting sufficient conditions in the feature space for negativity. in order to find such a rule implicitly present in the data, we observe the following:
+
+ ⇒⇒p= <dig> 
+
+where fi is the ith feature of a data point, vi a set of values, and  <dig>  have been used as shorthand for the  labelling of that point. the extension towards rules that conjoin several features is immediate.
+
+while the above observation is necessary for a negative labelling, it is by no means sufficient, i.e. finding a zero frequency can not exclude chance, especially in small datasets. to see how much of a factor fi effectively is in the labelling of the point, one could look at probabilistic measures such as mutual information, bayes factor or the kullback-leibler divergence. however, most of these measures are only meaningful on non-zero probabilities, mainly because of the occurrence of logarithms or divisions of these probabilities.
+
+to escape the ill-behaved nature in this situation, we look at the probability mass p, and demand it to be above a certain threshold. this avoids the confusion of rarely occurring feature values with rules, since this significantly lowers the probability that all mass ends up with negative points by chance.
+
+in the algorithm we construct below, we select good features to extract rules from, as well as combinations of two feature dimensions. while it is feasible to explore the use of even more features simultaneously in a rule, we abstain from doing so to preserve the balance between exhaustiveness and system performance. the steps to efficiently find these rules are as follows:
+
+1: initialise r = , t = 
+
+2: for all i do divide the values for fi into two bins vi, v ¯i
+
+3: end for
+
+4: for all i do
+
+5:   if count > threshold then
+
+6:     add i to t
+
+7:     if count =  <dig> then
+
+8:       add rule  to r
+
+9:     end if
+
+10:   end if
+
+11: end for
+
+12: for all i; j ∈ t do
+
+13:   if count =  <dig> and count >threshold then
+
+14:     add rule  to r
+
+15:   end if
+
+16: end for
+
+a few things to note:
+
+• as many of our features can take any real value in the interval  <cit> , bins are constructed to re-establish a binary nature, i.e. membership of vi is analogous to fi =  <dig> in the case of bi-valued features. respectively, vi designates fi =  <dig> 
+
+• for the sake of legibility, we implicitly assume vi, vj to be the 'right' bins. in reality, membership to both vi and v ¯i, respectively vj and v ¯j are checked.
+
+• because p = p /p and p is a constant for a given training set, it is more efficient to work with joint probabilities.
+
+• because count ≤ min, count), we can already eliminate many combinations of feature dimensions to consider; this is the function of the set t. in our experiments, this reduces the number of combinations to check from  <dig>  million to  <dig>  and keeps the above algorithm tractable.
+
+important to note is that this algorithm now gives us a tool to also select for negative examples in a distant supervision-like fashion. the basic selection criterion adapted from this general framework relies on the augmented probability of having a positive label, given that the relation exists in the labelled data. as argued before, a similar reasoning generally does not hold for negatives, rendering selection for them infeasible. however, the rules extracted by the above algorithm can serve not only to eliminate very unlikely candidates for positive labelling, as previously done. in fact, because these rules try to encode sufficient conditions for negativity, we can also employ them to distinguish a subset of all the other unlabelled data as being very likely negative. this offers us the opportunity to add both positive and negative points from our unannotated corpus, a technique not feasible in the basic distant learning framework.
+
+the threshold effectively decides the amount of rules extracted from the labelled data, and can be seen as an additional hyperparameter in the model. based on our dataset, we found a threshold of  <dig> - 30% of the size of the  data set to give the most balanced results in terms of precision vs. recall. depending on the application requirements, a lower threshold will improve precision, while a higher threshold would have us expect an improvement in recall.
+
+RESULTS
+subject and data
+the gene regulation network task tries to accomplish detection of relations overarching a diverse set of molecular interactions. specifically, six different types of relations are to be extracted: inhibition, activation, requirement, binding, transcription and regulation. the training and development set consists of  <dig> sentences, jointly encoding  <dig> interactions. on average this amounts to  <dig> examples per relation type. considering the specialised language and grammar often used in scientific publications, the amount of training data seems rather sparse to learn a good general representation in such a complex output space.
+
+as previously argued, this is the main motivation for including additional data for use in the methods described above. we therefore augment the dataset we have with all sentences from pubmed abstracts responding to the query for "bacillus subtilis sporulation" . beginning from the annotated data points, we add a sentence from those unannotated texts if it contains at least two entities that also occur in our annotated data. without these entities, a sentence could indeed never encompass a candidate data point for a relation. as such, from the initial  <dig>  sentences, only  <dig>  are retained, resulting in  <dig>  possible entity pairs. although of minor influence on the end result, we also leave out sentences that are already in the training set. in table  <dig> we have shown the average amount of data points that effectively got added to the training set for each system.
+
+also mentioned is the percentage of the respective total candidate pool this is. the positive candidate pool consists of all data points conforming to the distant supervision criterion  as seen in the  system, while the negative pool is the complement of this .
+
+evaluation
+the slot error rate
+from the predictions, a network gets constructed with the entities as the nodes and the relations between them as arcs. this network is then used for measuring performance: it gets compared to the reference by means of the slot error rate . this measure is defined by  <cit>  as:
+
+ ser=s+i+dn 
+
+with:
+
+• s the number of substitutions, i.e. edges that are predicted, but with the wrong type;
+
+• i the number of insertions ;
+
+• d the number of deletions ;
+
+• n the number of arcs in the reference network.
+
+for the following analysis, we further define
+
+• c the number of correctly predicted relations;
+
+• m the number of arcs in the prediction.
+
+with this notation, precision and recall can be written as:
+
+ p=cm=cc+s+i;r=cn=cc+s+d 
+
+the main motivation of  <cit>  in proposing this error measure is the observation that f <dig>  the often-used harmonic mean of precision and recall, can be seen to be:
+
+ f1=1-2s+i+dn+m 
+
+this derivation leads to believe that substitutions get overweighted in the use of this scoring mechanism. while by no means questioning the usefulness of the separate components , the ser gets proposed as a more balanced way of combining them as a means to compare systems.
+
+the devil is however in the details; or rather, the denominator. while it is true that s gets a bigger weight in the numerator, one has to account for the weighting of the different components in the denominator, since
+
+ n+m=2+d+i 
+
+where we use that n = c + s + d and m = c + s + i. a similar weight scheme can hence be seen in the denominator as well, softening the argumentation against it. with a similar derivation, one finds:
+
+ ser=n-c+in=1-recall+1n. 
+
+this insight shows us that in attempting to lower the weight for s, this error rate has become completely independent of this factor altogether ! furthermore, the unboundedness of this measure can be fully attributed to the number of insertions. this can explain the prevalence of conservative systems that this task has received: as can be seen from the official results, all but one submission have a very low number of arcs in their prediction, which could be attributable to pursuing a low i figure.
+
+error measures: uses for comparison and model optimisation
+by this analysis, we wish by no means to imply that the ser is a bad scoring mechanism per se. this kind of word error rates is widely used in several research branches, and with good reason. however, as the name somewhat shows, these are situations where a more or less fixed number of slots need to be 'filled', such as  phoneme recognition or named entity recognition. in our notation, this would be equivalent to m≅n. if this constraint is taken into account, one can show that ser≅ <dig> , which is exactly what  <cit>  find in their comparative analysis of measures.
+
+in different settings however, where the above approximation is not sure to hold, the choice of ser implies an additional degree of freedom, of which the consequences are not evident to grasp. in this more general case, ser is seen to overly reward precision in a great part of the result space. this can even occur at the cost of recall, as will be shown below. we believe there is an interesting opportunity for further research and discussion on this matter. interesting, more general analyses can be found in both  <cit>  and  <cit> . in the light of this study however, we mainly wish to highlight the inherent bias towards precision this design choice entails. as we are investigating methods of obtaining recall, this is certainly a factor to take into account.
+
+comparison of performance between different systems  is not the only function of a measure. the same measures get generally used for intrasystem measurements as well: in the comparison of multiple incarnations of models, and more commonly, hyperparameter optimisation. in order to asses the behaviour of the latter under different performance measures, we consider an ideally automated setting of optimising, not unlike running a gradient descent/ascent algorithm. in contrast to the case of general convex optimisation however, there is no convergence to a unique optimum. rather, we are limited by the boundary of our system's performance, generally known as the precision-recall curve: the maximum precision that can be obtained for any required recall. hence, we are driven by the measure's gradient until that border is reached. as we can see in figure  <dig>  the gradient field of ser shows some interesting behaviour. in a substantial region of the recall-precision space, there is an enormous push towards increasing precision. in the region of precision below 50%, this even happens at the cost of maintaining recall. as a result, a system optimised for this measure will generally show good performance, but has little focus on improving recall. for comparison, the analogous field for the f <dig> measure is shown in figure  <dig>  which displays a better balance between favouring recall or precision, based on which is most lacking.
+
+as previously argued, there are use cases where an adequate amount of recall is called for. with this in mind, we point out that f <dig> is embedded in a larger family of f-measures:
+
+ fβ=prβ2p+r 
+
+where β is a measure of the relative value to the end user of recall with respect to precision  <cit> . we obtain f <dig> for the case of β =  <dig>  meaning precision and recall are balanced in evaluation. this parameter β can be a great tool for the system or task designer to designate the proportion of importance he wishes to place on the precision/recall trade-off. if precision is to be targeted, a value of β <  <dig> will accomplish this, without having gradients go 'against the grain' of increasing both basic measures.
+
+aggregation of predictions and impact on scoring
+a final concern is the aggregational processing that occurs before calculating the performance measures. in a traditional machine learning setup, scores are calculated in a local scope; meaning, every predicted point is compared to a ground truth, and from the numbers extracted for correct predictions, substitutions, insertions and deletions, the necessary proportions are calculated.
+
+in the grn task  <cit> , performance is measured in a global fashion, due to the processing on the solution set that takes place before calculating the score. this happens in two steps:
+
+• from the predicted classifications a network is built. all scoring is done with respect to this, implying that multiple classifications of a same relation get collapsed into one.
+
+• 'resolution of redundant arcs': recall that the different types of relations are ordered into a taxonomy . before scoring, any relation between two entities that is less specific  than another appearing in the set, is removed.
+
+we can see that this procedure renders the precision-recall trade-off a lot more intricate than in a traditional machine learning setting. in a local scoring procedure, the number of true positives can never decrease by adding more predictions; this is the main logic behind receiver operating characteristic  curves as monotonously non-decreasing functions. analogously, in the recall-precision space, this ensures a non-increasing curve of attainable points. furthermore, this curve spans the whole range of recall: a recall of 100% is always attainable with a precision of at least the ratio of positives in the test set, a worst case that corresponds with classifying all test points as positive ). these principles no longer hold when removing predictions prior to measuring; adding a more specific prediction to an existing true positive renders the latter as non-existent, and recall at the end of the precision-recall curve will be limited by the ratio of positives that have the most specific relation . this dynamic stands orthogonal to research on performance measures in a hierarchical setting , which is pursuing less level-dependence in assessing predictions.
+
+this demonstrates that attaining sufficient recall is a greater challenge than in a regular setting. furthermore, by adding a layer of complexity, it convolutes multiple tools that are basic in systems engineering: error analysis, model selection and comparison. we therefore wish to advocate the addition of local, unprocessed evaluation figures in future instalments of this task.
+
+experiments
+results for our experiments can be seen in table  <dig>  each system has seen its hyperparameters optimised separately by a grid search, 25-fold cross-validated over the training data. the basic method we propose is entry  in this table. even without any added noise-balancing measures, the distant learning framework can already showcase more than a doubling in recall compared to the original submission results of  <cit> . in light of the previous discussion, this demonstrates a manifest improvement in this dimension. results for the probabilistic pre-selection approach we developed can be found in the entries under . there we explore several possibilities. in the first , we only include  positives from our unlabelled set, in the fashion of our basic method. the second entry, select pos, select neg, also employs the found rules to further add negatives from the unannotated corpus. both are able to display a further improvement in f <dig>  while still maintaining a good recall-precision balance. especially the application of the filter to add negatives  warrants a substantial rise in f <dig> score through an additional improvement in precision compared to the model that only selects positives.
+
+to further evaluate the value of our pre-selection step, we also include the entry select pos, all neg, which includes all negatives without filtering them. compared to disregarding negatives from the unlabelled set altogether , this can be seen as greatly improving precision, but at a sizeable cost to recall. this strengthens the contribution of our algorithm, as the entry select pos, select neg shows an even greater increase in precision without overly damaging recall, leading to an impressive rise in f <dig> 
+
+from table  <dig>  we can see that this model filters out less than 10% of the potential negatives; this is enough to alleviate the most disruptive noise.
+
+these results confirm the value of filtering the unlabelled data before presenting them to the learning algorithm. as this has been done here exclusively based on the limited amount of labelled data, leveraging additional knowledge in this step could generate even more significant gains.
+
+weighted regularisation , a method traditionally suggested to handle additional noise in semi-supervised frameworks, also obtains a high recall for this test. this comes however at a very severe cost to its precision, compared to our newly developed solutions. this demonstrates the idiosyncratic nature of our methods as applied to this particular task with respect to mainline distant supervision methods, and further validates their contribution compared to utilising standard approaches.
+
+deeper study is required on the impact of our methods, since the performance of a system greatly depends on e.g. the features it uses. it remains an open question what the impact is of these implementation choices, such as the feature representation used, data preprocessing, etc. in comparison to the higher-level model choice. we suspect that a more fine-grained encoding of sentence context could further contribute to the performance of any system in this field.
+
+related work
+in information extraction −and relation extraction in particular− a major bottleneck is the lack of sufficient annotated examples. the manual labelling of enough training instances in order to build an accurate classifier is often prohibitively expensive. on the other hand, collecting a large quantity of unlabelled textual data is cheap. thus, it is interesting to train the extraction system on a small annotated corpus and in some way improve the quality of the learned classification patterns by exploiting the unlabelled examples. this had lead to bootstrapping, semi-supervised and even unsupervised learning techniques. a good overview on semi-supervised learning, the framework in which this work is embedded, can be found in both  <cit>  and  <cit> .
+
+the oldest methods regard self-training and co-training, where a classifier is trained iteratively. in self-training, examples from the pool of unlabelled instances are chosen in the next training step to which the current classifier assigns labels with most certainty. in co-training, examples are chosen in the next training step to which two or more current classifiers that possibly use an independent feature set assign labels with most certainty  <cit> . such a set-up promotes that the newly introduced training examples have similar patterns as the originally labelled examples, so no radical new patterns are learned at least not in the first steps of the iteration. this approach also does not offer an answer to the danger that the obtained classification function drifts away from the real classification boundary. in a variant scenario, a generative probabilistic classifier is used  for the training of the initial classifier based on the seed set of labelled examples. the expectation maximization  algorithm is then used to train the classifier that learns both from the labelled and unlabelled examples  <cit> , but the algorithm can easily get stuck in a local maximum.
+
+in so-called open domain information extraction, frequently occurring patterns that signal a relation between two entities are identified in a large set of unlabelled data  <cit> . these techniques are not well suited for the extraction of relations in the biomedical domain, especially when the detection of infrequent relations is targeted.
+
+another line of research is the generation of additional features from the unlabelled data. one recent work is  <cit> , building on the work of  <cit> . those methods generally obtain state-of-the-art performance, but fail to improve on them significantly.
+
+the relation extraction models that we present in this paper are closest to the work of  <cit> . these authors find sentences in web documents that contain two given entities. it is a priori known that these entities are involved in the sought relation. the selected sentences contain positive as well as negative examples of the sought relation. the negative examples for training the classifier are sentences in web documents that contain two given entities for whom it is known that the sought relation does not hold between them  <cit>  on the other hand approximate this by the equally often-used closed world assumption, which dictates that all relations are in the knowledge database. to cope with the noise in the set of positive examples, weighted regularization is used when training a svm, as we do in this paper. our experiments on texts from the biomedical literature show that this weighted regularization did not yield the best results for semi-supervised learning. we have proposed a semi-supervised model with probabilistic pre-selection of positive and negative examples from the pool of unlabelled examples that makes use of the knowledge in the labelled examples in a demonstrated effective way in order to select unlabelled examples. this model improves the results of state-of-the-art weighted regularisation techniques.
+
+CONCLUSIONS
+we have explored the addition of unlabelled data to increase the recall of our system. however, the noisy nature of this data tends to affect precision negatively. we have designed a pipeline to autonomously counterbalance this effect, based on no additional external knowledge. a promising extension of this method would be to include specialised external knowledge, either injected directly into the feature representation, or in the process of attributing labels to unannotated data. this could prove to be a powerful technique in attaining a more precise overall system. another interesting approach could be to construct a more extensive pipeline, using one of the more precision-bearing techniques to improve upon our proposed system.
+
+promising methods in general information extraction make use of language models  trained on huge amounts of unlabelled examples in order to find valuable replacements of words in the relation patterns or to identify valuable correlated word features used in the classification  <cit> . recent work in biomedical event extraction already touches upon such ideas  <cit> . this is a path we intend to further explore in future work.
+
+another particularly interesting approach is showcased by  <cit> , training a classifier jointly on both labelled and unlabelled data. a promising direction could be to apply similar methods to specialised language corpora, such as the biomedical texts explored in the bionlp tasks.
+
+we argue for the importance of recall in any information extraction task, to serve as a driving force for automated knowledge collection. this study contributes to gaining a deeper insight in the different factors at play in the  <dig> bionlp grn task with respect to measuring performance, and the interplay of precision and recall in particular. we hope this will spark further discussion and analysis of both task organisation and submitted systems, thus helping this shared task in driving forward the field of biomedical ie.
+
+abbreviations
+grn: gene regulation network; ie: information extraction; nlp: natural language processing; ser: slot error rate; svm: support vector machine;
+
+• s the number of substitutions, i.e. edges that are predicted, but with the wrong type;
+
+• i the number of insertions ;
+
+• d the number of deletions ;
+
+• c the number of correctly predicted edges;
+
+• n the number of arcs in the reference network;
+
+• m the number of arcs in the prediction.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+tp is the lead writer and conducted all data processing and analysis, mfm oversaw the study, helped write the manuscript and provided overall guidance. all authors read and approved the final version of the manuscript.
+

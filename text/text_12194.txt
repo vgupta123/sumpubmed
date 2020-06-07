@@ -1,0 +1,495 @@
+BACKGROUND
+biological databases contain a vast amount of readily accessible data concerning the function and relationships of genes and proteins, such as protein interactions, genes’ effects on diseases and functional gene annotations. here, we introduce biomine, a system that integrates data from several such databases under a common graph data model and repository, with the goal of enabling discovery and evaluation of connections spanning multiple types of relationships derived from different source databases. such indirect relationships can act as hypotheses for potential, yet undiscovered links, or they can be used to describe and validate relationships obtained from experimental data.
+
+biomine represents the knowledge extracted from the source databases using an abstract and efficiently accessible graph representation: biological entities and concepts  linked by their known relationships . figure  <dig> shows a small example graph illustrating the contents of the database.
+
+
+a practical motivation for our work is prioritization of putative disease genes resulting from genome-wide association studies  <cit> . such studies typically produce a large number of genes showing statistical association with the disease in question, of which only a fraction are actually biologically related to the disease. an important task is to identify the actually relevant genes from this list of putative disease genes.
+
+the main idea underlying the work in this paper is that genes and their protein products do not function in isolation, but rather as part of a large network of molecular interactions. thus the impact of a specific genetic abnormality is not restricted to the gene product that carries it, but can spread along the links of the network and alter the activity of functionally related gene products. consequently, mutations in functionally related genes  will often affect the same diseases  <cit> . analysis of disease-related protein networks has shown that proteins involved in a disease tend to physically interact with other proteins involved in the same disease  <cit> . with the recent rise in the availability of molecular network data, it has become practical to predict disease-affecting genes based on the network of biological relationships .
+
+as another example application, consider protein interaction measurements from genome-wide protein interaction screens  <cit> . a major issue with this kind of data is the prevalence of spurious interactions. an analysis by deane et al.  <cit>  suggests that only 30- <dig> % of interactions derived by such methods are biologically relevant. the problem of separating the true interactions from spurious ones can be formulated as a link prediction problem within the graph of already known interactions.
+
+we formulate the protein interaction prediction and gene prioritization tasks as instances of link prediction, where the goal is to recognize pairs of nodes that should be  connected by an edge. the predictions are based on a proximity measure computed on the integrated graph. we consider and evaluate a number of proximity measures that are based on weights assigned to the individual graph edges. these weights are based on three factors: the type of the relationship, an informativeness measure based on the number of other nodes linked to each node, and reliability or other suitable edge-specific score available in some of the source databases. we evaluate the power of this approach for prediction in a challenging setting: we use proximities of nodes in a 3-year-old version of the biomine database to predict the appearance of new links to the current database version.
+
+the contributions that follow in subsequent sections can be summarized as follows.
+
+
+ <dig> we introduce biomine, an integrated network of biological entities from heterogeneous source databases.
+
+ <dig> we systematically evaluate biomine in two challenging link discovery settings: protein interaction and gene–phenotype relationship prediction. the evaluations consist of comparing several node proximity measures, assessing the importance of different data sources for the link prediction task, and optimizing the weights of different types of links.
+
+ <dig> we show how to apply biomine to the task of disease gene prioritization, and propose a new clustering-based gene prioritization method which is applicable when there is no pre-existing reference set of known disease genes available.
+
+an early version of biomine has been outlined by sevon et al.  <cit> . to make this article self-contained, we provide an updated description of the edge weighting method introduced by sevon et al.
+
+related work
+we will next briefly review representative related work in the areas of integrating biological networks, graph-based disease gene prediction, and general node proximity measures for link prediction.
+
+integrating biological networks
+data about relationships of biological entities is readily available in numerous public databases. to enable joint analysis of such data, the data needs to be integrated and made accessible under a uniform query interface. several such data integration systems have been proposed in the literature. of these, most similar to our approach are ondex  <cit>  and biozon  <cit> , which both collect the data from various sources under a single data store, using a graph data schema centered around the non-redundant set of biological objects shared by each data source. the data model in both systems is a graph with typed nodes and edges, allowing for the incorporation of arbitrary data sources. in addition to curated data derived from the source databases, both ondex and biozon include in-house data such as similarity links computed from sequence similarity of proteins and predicted links derived by text mining. biozon provides several types of queries, e.g. searching by graph topology and ranking of nodes by importance defined by the graph structure. in ondex, the integrated data is accessed by providing a standard pipeline, in which individual filtering and graph layout operations may be combined to process the graph in application-specific ways. biowarehouse  <cit>  aims to provide generic tools for enabling users to build their own combinations of biological data sources. their data management approach is rather similar to ondex and biozon, but the data is stored in a relational database with a dedicated table for each data type instead of a generic graph structure. this approach allows database access through standard sql queries. biomart  <cit>  tackles the problem not by collecting data into a central location, but instead by representing the data in each original source database using a data storage service with a standard format, enabling them to be accessed through a uniform web-based query interface.
+
+graph-based disease gene prediction
+a simple approach for predicting potential disease genes is to just assign interaction partners of already known disease-related proteins as potential candidates  <cit> . krauthammer et al.  <cit>  use a more elaborate method, where evidence from known disease genes is propagated to nearby candidate genes according to a score based on shortest paths distance. kohler et al.  <cit>  also use a related approach, based on a random-walk-based network proximity measure instead of considering only a direct neighborhood or shortest paths. vanunu et al.  <cit>  take an even more global view, and expand the query from the given disease to include other diseases with phenotypic similarity. evidence is then propagated in a protein interaction network from all proteins known to be related to any of these diseases.
+
+in contrast to the previous methods, which only use protein interaction data, franke et al.  <cit>  and linghu et al.  <cit>  both construct a network of functional associations  using multiple types of integrated source data, and use mutual proximities of genes in this graph as supporting evidence for the disease association. they construct a network of functional associations using machine learning techniques to combine evidence from different data sources, using a fixed cutoff value to remove unreliable associations. franke et al.  <cit>  evaluate each candidate gene based on the shortest path distance to other candidate genes, while linghu et al.  <cit>  only use information from neighboring genes.
+
+hwang and kuang  <cit>  consider both multiple types of associations  and multiple types of nodes. instead of integrating them all together into a homogeneous network, they propose methods to propagate information in the network while taking its heterogeneity into account.
+
+an alternative to network-based approaches is to utilize pre-known sets of functionally related genes  <cit> . the idea in these methods is that each known pathway  is tested for relative excess of disease-associated genes, accumulating information from several modest associations into a single, stronger signal. the results of chasman  <cit>  indicate that while extremely strong associations remain best identified by conventional methods, the gene set approach provides a useful complementary mode of analysis for revealing modestly associated genes for complex diseases.
+
+literature mining is a popular source of information for hypothesis generation in biological discovery  <cit> . hristovski et al.  <cit>  predict disease genes using co-occurrence statistics of terms. following swanson’s ideas  <cit> , they look for strong connections of exactly two hops in a network of term co-occurrences: if the given disease name x co-occurs with some terms y  which in turn co-occur with some genes z, then z are candidate genes for disease x. hristovski et al. additionally take into account chromosomal location.
+
+a practical overview of freely available web tools to prioritize candidate genes is provided by tranchevent et al.  <cit> .
+
+node proximity measures for link prediction
+many node proximity measures have been proposed for link prediction in unweighted graphs. for an experimental comparison of these measures, see liben-nowell and kleinberg  <cit> . for the weighted graphs considered here, much less has been published.
+
+asthana et al.  <cit>  were the first to use network reliability for link prediction in protein networks. in our earlier publication  <cit> , we used two alternative proximity measures: probability of best path, and network reliability measured in a subgraph consisting of a fixed number of best paths. potamias et al.  <cit>  recently introduced expected-reliable-distance for link prediction in probabilistic weighted graphs. random walk methods are a popular choice for measuring proximity in networks , and can be straightforwardly extended to work with weighted graphs. we will review the exact definitions of the above-mentioned measures later.
+
+hwang and kuang  <cit>  and vanunu et al.  <cit>  propose different propagation methods for measuring proximity of nodes that are not directly connected. like random walk and network reliability, their measures are global in the sense that they consider — at least in principle — connectivity using the whole network. these methods seem to assume structured information about phenotype similarity and known disease genes.
+
+the field of network-based protein function prediction  is also related to the work in this study, and many methods have been developed to annotate proteins of unknown function based on existing annotations and network data. however, these methods are not directly applicable to the problem of predicting arbitrary edges in weighted graphs.
+
+methods
+we next describe the biomine database, and then give node proximity measures that can be used for link prediction. 
+
+the biomine database
+the biomine graph database essentially is an integrated index of several biological databases, each with different contents and format. biomine has a relatively simple data model: a labeled graph with typed nodes and edges. distinct entities of the source databases, such as genes, proteins and gene ontology  concepts, are the nodes of the biomine database, and connections  between entities, such as go annotations, gene-protein relationships and protein interactions, are edges between nodes. additionally, nodes and edges can have arbitrary attributes, such as names and reliabilities, to represent additional data from the source databases. in this section, we describe the database contents and data model, including the edge-weighting scheme.
+
+database contents
+we first briefly review the source databases indexed by biomine and summarize what data is derived from each of them. the contents of biomine are summarized in tables  <dig> and  <dig>  currently, data is extracted and stored for human and four model organisms: mouse, rat, fruit fly and nematode . the current primary topic is human biology, and the additional organisms are included to enable predictions based on potentially more comprehensively annotated homologous genes in these model organisms.
+
+
+“node” denotes any type of node, “omim” denotes nodes of type “gene”, “gene variant” or “phenotype”, “go” denotes nodes of type “molecular function”, “cellular component” or “biological process“, and “interpro” denotes nodes of type “protein family” or “protein feature”. edge types with less than  <dig>  instances are not listed.
+
+ncbi’s entrez gene <cit>  database is the main source of gene annotation in biomine. the gene nodes in biomine are derived from the respective gene entries in entrez. the main types of edges derived from entrez are gene ontology  annotations, protein interactions, cytogenetic gene locations, and information about genes’ participation in diseases . additionally, genes are linked to their protein products and homologous genes in other organisms. homology relationships are derived from another entrez database, homologene <cit> .
+
+uniprot <cit>  is the main source of protein-related information. its core elements are proteins, pathways and tissues, mapped to nodes in biomine. edges derived from uniprot include go annotations for proteins, protein interactions, participation of proteins in pathways, membership in protein families and other protein features , as well as tissue-specificity of proteins.
+
+gene ontology  aims to provide a controlled vocabulary for genes and gene products  <cit> . its core domains are cellular components, biological processes and molecular functions. the ontology is structured as a directed acyclic graph, and each term has defined relationships to one or more other terms in the same domain, and sometimes to other domains. this graph is imported as part of the biomine graph. the actual annotations linking genes and proteins to go nodes are derived from other databases, primarily from entrez gene and uniprot, as described above.
+
+interpro <cit>  is a protein signature database that enables classification of proteins into families and functional protein features, which are mapped into nodes in biomine. the interpro entries  are organized into a hierarchy, represented as edges between the interpro nodes. the actual edges linking protein and interpro nodes are derived from the uniprot database.
+
+string <cit>  contains known and predicted functional associations between proteins, based on text mining and sequence analysis, as well as protein-related information from other databases. these are directly mapped to biomine as edges between proteins. in addition, each association contains a score between  <dig> and  <dig> reflecting the confidence in the prediction, which is stored to biomine as edge reliability .
+
+online mendelian inheritance in man  is a catalogue of human genes and genetic disorders  <cit> , and is the main source of phenotype information in biomine. there are two types of records in omim: genes and phenotypes. the former are mapped to corresponding gene ids in entrez and are merged into a single node in biomine with the omim id as a secondary identifier. phenotype records are represented in biomine by dedicated nodes. the omim database also contains descriptions of allelic variants and gene locations, mapped to their distinct node types, and a large number of references to biomedical literature. the omim records consist of text with references to other omim records; these references are mapped to edges in biomine.
+
+kyoto encyclopedia of genes and genomes  is a large, integrated database resource consisting of  <dig> main databases, broadly categorized into systems information, genomic information, and chemical information  <cit> . biomine uses a subset of kegg, including pathways as the main node type, and the participation of genes, drugs and compounds in each pathway represented as edges between the corresponding node and pathway.
+
+pubmed <cit>  is a freely accessible on-line database of biomedical journal citations and abstracts with approximately  <dig> million entries at the time of writing. in addition to the data types listed above, many of the source databases  contain references to pubmed entries, to represent the fact that the corresponding entity is mentioned in the article. in biomine, these referenced pubmed entries are represented by article nodes. from pubmed itself, we only import the titles of these articles.
+
+data management
+the data storage is organized as a data warehouse: information from several source databases is first extracted and transformed into a general data format, and subsequently stored in a local relational database  for easy access by query programs. this approach is motivated by the requirement to rapidly perform complex queries needed by the link prediction methods, which excludes the online use of services . also, it enables performing some integrity checks of cross-references between the independently maintained data sources. on the other hand, we essentially only store an index: identifiers and additional names of entities, cross references between entities , and url’s to the original records in the source databases.
+
+the database is updated periodically with new data from the source databases. during the update process, synonyms, invalid references, and other anomalies are resolved, and the resulting data is compared to the previous version of the database to detect loss of data resulting, e.g., from formatting changes in source databases. the details of the complete conversion and importing process are out of the scope of this paper.
+
+in addition to the relational database, we use a dedicated cache server which stores the graph structure in a compact format in main memory, enabling significantly faster queries than would be possible by using only the relational database. a public query interface to the database is available at http://biomine.cs.helsinki.fi.
+
+data model
+we now present the biomine data model more formally. the biomine database is a directed, labelled and weighted graph g =  where v  and e are the sets of nodes and edges, respectively, and p:e ↦  <cit> 
+associates a probability p
+to each edge e ∈ e.
+
+the nodes v ∈ v are labelled by a type from set tv, such as gene or protein. tv
+consists of the node types in the left column of table  <dig>  we denote the node type mapping by tv:v ↦ tv.
+
+the set e ⊂ v × v of edges consists of node pairs .  edges are weighted. edges have labels from the edge type set te; we denote the mapping from edges to their types by te:e ↦ te. edge types represent relations between nodes, such as “gene codes for protein” or “article refers to gene”. the left column of table  <dig> lists the most common edge types in te.
+
+each edge type τ ∈ 
+te
+has an inverse type τ− <dig>  for instance, the inverse of “gene codes for protein” is “protein is coded by gene”. for each edge e =  ∈  e we assume that its inverse edge 
+with type te−1
+always exists in e. hence, the graph is effectively undirected but has directed edge types.
+
+in most cases there is only one possible edge type for a pair of node types. for example, an edge between a gene and a protein always has the type codes for. in some cases, though, there are different edge types between the same types of nodes, such as experimentally verified protein interaction vs. predicted protein association, or gene homology vs. textual reference between two gene records in omim.
+
+weighting of edges
+not all edges in biomine are equally important. for example, an experimentally verified protein interaction  should probably have a higher weight than a predicted one . similarly, annotated knowledge about a gene’s effect on a disease is probably more important than just knowing that the gene and the disease are mentioned in the same article.
+
+as an example of a second type of edge importances, consider two articles, where one refers to  <dig> genes and the other one to  <dig> genes. since the former article is more specific, the corresponding edges are likely to be more informative.
+
+a third and most obvious case of different importances is when a source database specifies a weight or score for a relation such as the confidence of predicted associations in the string database  <cit> .
+
+in biomine, we formalize the three above-mentioned factors as follows.
+
+
+ <dig> relevance. each edge type τ
+has a fixed relevance coefficientqτ ∈
+representing the relative importance of that relationship type. we denote the relevance of an arbitrary edge e by q. the suitable choice of values for each qτ
+is ultimately dependent on the specific application at hand. in subsection link prediction methods, we will experimentally choose the relevances such that they maximize link prediction accuracy. relevances can also be set manually, to reflect the user’s subjective interests.
+
+ <dig> informativeness. the informativenessi ∈ <cit> 
+of an edge 
+is measured based on the degrees of its incident nodes. as a simple method to penalize a node u with a high degree deg, we take some negative power deg−α
+of it. here 0 ≤ α ≤  <dig> is a parameter controlling how steeply the informativeness decreases with increasing node degree. the informativeness of an edge  is then defined by the degrees of both its endnodes:
+
+
+ i=deg−α·deg−α. 
+
+ based on preliminary experiments with different values of α, we by default set α =  <dig> . we consider two versions of degree penalty. the linktype-independent penalty simply uses the ordinary degrees of nodes. the linktype-specific penalty only takes the degree with respect to edges of the same type as edge .
+
+ <dig> reliability. the reliability of an edge e, denoted by r measures how confident we are that the relationship ∈ <cit> , measures how confident we are that the relationship represented by the edge actually exists. from the string database, we obtain a reliability value for each predicted edge e, directly mapped to biomine as r. for edges derived from other databases, r
+is currently defined to be one, as they contain manually curated information which is expected to be reliable.
+
+we combine these three factors into an overall edge weight by simply taking their product:
+
+
+ p=q·i·r. 
+
+in the next section, we will define general node proximity measures based on the edge weights. the above definition is directly applicable when using random walk as the node proximity measure. however, for probabilistic proximity measures, edge weights need to be in  <cit> , and consequently the following modification is used:
+
+
+ p=min·i·r,1). 
+
+ in this case weight p
+can be interpreted as the probability that e represents an actually existing, relevant and informative relationship.
+
+link prediction methods
+the computational problem that we consider is link prediction, the prediction of relationships that are not obvious in the existing data. the motivation for this is that the graph of biological knowledge is far from complete; most of the information is still missing, but the existing data can potentially help identify some of the missing pieces.
+
+link prediction as node proximity measurement
+in the most concrete form, link prediction means predicting the appearance of new edges into the database. we also use the term “link” in a broader sense, however. for example, in the experiments we will predict whether two genes will be discovered to affect the same disease . as a more complex example, we predict whether a gene affects susceptibility to a disease, based on its proximity to other genes already known to affect the disease.
+
+we base link prediction on a graph-based node proximity measure. the assumption is quite simply that nodes closely connected in the graph are likely to be related also biologically, potentially warranting the addition of a direct link to one of the source databases.  given the huge number of nodes in biomine, resulting in an even larger number of potentially related node pairs, it is obviously not feasible to predict links without some prior information about the set of potential links. such a set of candidate links could be established, for instance, as the top ranking genes from a genome-wide association study and their potential relationships to the node representing the phenotype being studied. under the assumption of correlation between biological relatedness and graph proximity, ranking genes by their proximities to the phenotype enables extracting the most promising candidates for further study. as another example, a list of candidate links to be evaluated can result from a genome-wide protein interaction screen, where only a minority of identified putative interactions are biologically relevant  <cit> .
+
+in the following paragraphs, we will define and consider a number of node proximity measures suitable for weighted graphs such as biomine. in the results section we will evaluate the hypothesis that links can be predicted applying such measures on the data in biomine.
+
+proximity measures
+we consider four existing proximity measures: probability of best path <cit> , network reliability <cit> , expected reliable distance <cit> , and a weighted version of rooted random walk with restart <cit> . of these, the first three are specifically defined for probabilistic graphs, while the rooted random walk is normally used for unweighted graphs, but can be modified straightforwardly to take edge weights into account.
+
+probability of best path
+each edge e has a probabilityp ∈ <cit> . let pathp consist of edges e <dig> …,ek. the path exists only if all of its edges exist, and correspondingly the probability of p is the product of the probabilities of its edges: pr = p·…·p.
+
+the simplest possible proximity measure for two nodes s,t ∈ v is the probability of the best path:
+
+
+  pbp=maxpis a path fromstotpr. 
+
+an obvious potential shortcoming of this measure is that it does not take into account other paths between s and t.
+
+network reliability
+to specify the next two, more complex proximity measures that are not restricted to considering the single best path, we first define a probabilistic graph model. let g =  be a probabilistic graph, such as a subgraph of biomine. g is a random realization of g if it is a non-probabilistic graph g = 
+with nodes v  and with edges sampled from e according to the probabilities p, i.e., each edge e ∈ e is selected to be an edge of g with probability p, independently of other edges. the probability of a given random realization g thus is
+
+
+ pr=∏e∈egp∏e∈e−eg). 
+
+the network reliability, pr
+between nodes s and t is defined as the probability that a randomly picked instance of g contains a path between s and t:
+
+
+  pr=∑g|sandtare connected ingpr. 
+
+expected reliable distance
+given a graph g sampled from g, we denote the shortest-path distance  between s and t by dg.
+
+the expected-reliable-distance <cit>  is now defined as the expected shortest-path distance in all instances g in which a path exists between s and t:
+
+
+ der=1pr·∑g|sandtare connected ingpr·dg. 
+
+the expected-reliable-distance reflects the expected proximity of nodes s and t, but does this on the condition that they are connected.
+
+random walk with restart
+as a final probability measure, we consider a symmetric, weighted version of a standard random walk stationary distribution score with restarts <cit> . we first define a directed version of the score. a random walk starts at a node s. it then iteratively moves to a random neighbor of the current node x, such that the probability of traversing edge e is proportional to the edge weight p. additionally, there is a fixed probability β
+of returning to the initial node s at each step, instead of traversing an edge. now, the directed version of the score, drw′ is defined simply as the stationary distribution probability of the walker being at node t after indefinitely many iterations. the final, symmetric version of the score is defined as the average of the corresponding directed scores:
+
+
+  drw=drw′+drw′ <dig>  
+
+in practice, we compute the score by simulating a random walk from both nodes of the pair in turn, using  <dig> , <dig> iterations, and counting the number of iterations where the walker is located in the other node.
+
+RESULTS
+we now test biomine as a resource for biological link prediction, first with experiments predicting protein interactions and phenotypical relationships of genes. the main goal of the experiments in the first subsection is to demonstrate that the proposed approach of combining data from heterogeneous data sources into a single graph proximity measure is beneficial. secondary goals are assessing the relative importances of different types of data and finding suitable weights for them, as well as evaluating the different node proximity measures defined in the methods section. while the optimization of edge weights serves as a simple example of how to optimize parameters in biomine, a thorough optimization of all the parameters is outside the scope of this paper. in the second subsection we will consider the specific application of prioritizing putative disease genes.
+
+predicting future links
+the aim in the first evaluation is to predict protein interactions and phenotypical relationships of genes. the tests in this section are carried out with two versions of the biomine database: old from june  <dig>  and current from june  <dig>  such that the current version is used to validate predictions made using the old version. this prediction task is scientifically interesting and most challenging: can we predict which links will be discovered and added to the source databases? predictions are performed by ranking node pairs by their proximity values, as defined by one of the general graph-based proximity functions defined in the previous section.
+
+we consider two different link prediction settings:
+
+
+ <dig> predict protein interactions that will be added to the entrez gene database  <cit>  in the three-year period between the database versions.
+
+ <dig> predict pairs of genes that will be discovered to affect the same disease during the three-year period. these are based on gene-phenotype associations reported in the entrez gene database, from the two genes to a shared phenotype. 
+
+evaluation methodology
+given a list of node pairs  and a proximity function f , we rank the given node pairs by f  computed using the old version of the biomine graph database. the hypothesis is that pairs ranking higher are more likely to be biologically related and thus to be directly linked in the current database version. the pairs that became linked are the positive instances while all pairs that remained unlinked are considered negative instances .
+
+we measure the prediction performance using roc analysis <cit> , a generic framework for analyzing and comparing classifiers. in our case, a proximity measure immediately gives a classifier: fix a cut-off value q ∈ <cit>  for the proximity, then predict all pairs 
+with f ≥ q to become linked and all other pairs to remain unlinked. in roc analysis, two statistics are associated to each classifier:  the true positive rate, which in our case is the fraction of positive instances that have proximity at least q, and  the false positive rate, which is the fraction of negative instances with proximity at least q.
+
+in the roc framework, a proximity measure can conveniently be evaluated without fixing a single cut-off value q. a roc plot is a two-dimensional curve that plots the true positive rate on the y-axis and the false positive rate on the x-axis. a single classifier  corresponds to a single point in the roc plot, and a roc curve is obtained by considering all possible cut-off values q. such a curve depicts the different tradeoffs between the benefits  and costs . in practice, roc curves can be constructed by iterating the node pairs in ranked order and plotting the curve accordingly, with q being defined implicitly by the fraction of instances covered at any point.
+
+the resulting roc curves can be compared either visually, or by computing the area under roc curve  as a composite statistic. auc has an interpretation as the probability that a randomly chosen positive instance will be ranked above a randomly chosen negative instance  <cit> . we also evaluate the statistical significance of the difference in aucs between two classifiers, using the statistical roc analysis tool star <cit> .
+
+we sample a set of positive and negative instances for the evaluations, as described below. in those experiments where we optimize parameters, we use separate samples for training  and validation . both the training and validation sets are sampled in the same way, under the constraint that no node pair appears in both data sets.
+
+sampling of test data
+we performed the experiments by sampling  <dig> positive and  <dig> negative instances for each of the two settings as follows.
+
+sampling of protein interactions
+we first extracted the set of all protein interaction edges that exist only in the current database version. from these interactions, we randomly sampled  <dig> node pairs as the positive instances. a set of  <dig> negative instances was then sampled by randomly pairing nodes appearing in the set of positive instances, excluding any node pairs that have an interaction in the current database version. we picked the negative pairs in this manner to make the comparison as fair as possible, as a completely random selection of negative instances would most likely contain less researched proteins , unnecessarily making the prediction task easier.
+
+sampling of disease gene pairs
+the set of potential positive instances was defined as those gene pairs that became linked by a path of two “gene affects phenotype” edges derived from the entrez gene database, going through any intermediate phenotype node. first, all pairs of genes linked in the current database version were considered as candidates for positive instances. from these pairs, we removed ones that were already linked in the old database version by some path of length two consisting of any combination of following edge types:
+
+
+“gene affects phenotype” 
+
+“gene refers to phenotype” 
+
+“phenotype refers to gene” 
+
+of the remaining candidate pairs, we randomly sampled  <dig> positive instances to be used in the experiments. a set of  <dig> negative instances was then sampled by randomly pairing nodes appearing in this set of positive instances, such that all pairs linked  either in the old or new database version were excluded.
+
+the sets of sampled positive and negative node pairs are available in additional file  <dig> 
+
+experimental results for link prediction
+comparison of proximity measures
+we first performed a set of experiments to evaluate and compare the four proposed proximity measures: probability of best path, network reliability, expected-reliable-distance, and random walk with restarts. in this experiment we used uniform relevance q =  <dig>  for all edge types, and the amount of degree penalty was set to α =  <dig> . these are the parameter values that were found to perform best among a number of alternatives tested in our previous paper  <cit> , for both the best path and network reliability proximity measures. for the random walk method, we set the restart probability β
+to  <dig>  .
+
+
+in the disease gene prediction setting , random walk is again most accurate overall. however, the difference to network reliability is non-significant . more importantly, the two methods are comparable on the most relevant, leftmost part of the roc curve. probability of best path is equally accurate in that area, but slightly less accurate in other cases . the expected-reliable-distance is significantly inferior .
+
+we decided to use the random walk measure in the rest of the experiments of the paper, since it clearly outperformed the other methods in the protein interaction prediction task, and none of the other methods outperformed it in the disease gene prediction.
+
+choosing weights for different edge types
+in the previous experiment, edges of all types were weighted uniformly. suitably weighting different edge types is expected to improve prediction accuracy, as discussed above. our next goal is to examine whether edges of different types can be weighted according to the prediction task to improve prediction accuracy.
+
+for both of the considered prediction settings , we separately performed the following simple manual procedure to approximately optimize link prediction accuracy, as measured by auc. in the optimization, we used one sample of  <dig> +  <dig> instances as a training set, and then evaluated performance with the resulting relevance coefficients using another sample of  <dig> +  <dig> instances as a validation set.
+
+in preliminary experiments, it was observed that the most significant effect was obtained by adjusting the weight of the edge type “codes for”, that is, the links connecting genes to their protein products. the relevance rcodes_for was consequently first set to value  <dig> .
+
+after setting rcodes_for, we evaluated the individual effects of all other relevance parameters for the most abundant edge types in biomine by varying them one at a time while keeping all the other parameters at the default value  <dig> . based on this experiment, each relevance parameter was set to the value where the resulting auc was maximized. this heuristic is simple and ignores any dependencies between edge types, so the result is not guaranteed to be optimal. on the other hand, the simplicity of the procedure helps avoid overfitting to the data. in the protein interaction setting, not all relevance parameters manifested any clear effect on accuracy, which is possibly partially due to the limited size of the training set , and partially to some edge types being less relevant than others for the task at hand. the relevances for these edge types were left at the default value of  <dig>  as were the relevance coefficients for other, less common edge types not considered in this experiment.
+
+
+the adjusted relevance values are listed in table  <dig>  the dashes denote cases where adjusting the relevance of the particular edge type did not have any noticeable effect on accuracy. note that the values are not directly comparable, since larger relevances may result as a compensation for low informativeness: the most abundant edge types  are likely to be least informative in our edge weighting model.
+
+
+value “–” indicates that adjusting the relevance of the edge type did not have a clear effect on accuracy.
+
+to evaluate prediction performance with the adjusted relevance parameters, we next performed similar link prediction experiments using a separate validation set, with the following three sets of parameters:  uniform relevance and informativeness for all edge types ;  uniform relevance, degree penalty coefficient α =  <dig> ;  relevance parameters set to their adjusted values , degree penalty coefficient α =  <dig> . again, separate experiments were performed for the two link prediction settings . the first version, using no degree penalty, is included in this experiment to demonstrate the usability of having a degree-based informativeness component in the edge weighting function, as all other experiments in the article have been performed using degree penalization.
+
+
+using adjusted relevances clearly improves accuracy in both settings: auc =  <dig>  vs. auc =  <dig> 
+ for the protein interaction setting  and auc =  <dig>  vs. auc =  <dig>   for the disease gene setting . moreover, the experiment shows that having a degree-based informativeness component in the edge weights is useful, especially in the disease gene prediction setting , and to a lesser extent in the protein interaction setting .
+
+overall, prediction performance is clearly improved by suitably weighting the edges compared to using uniform weights: auc =  <dig>  vs. auc =  <dig>   in the disease gene setting and auc =  <dig> 
+vs. auc =  <dig>   in the protein interaction setting.
+
+accuracy of individual data sources
+finally, we evaluate the value of integrating data from different heterogeneous sources, by comparing the link prediction accuracy obtained using data from each individual data source to accuracy obtained using all data in biomine. these experiments are performed using the separate validation data set. again, the test does not cover all edge types in biomine, only the major ones: gene ontology annotations, protein interactions from uniprot and entrez gene, participation of genes in pathways, protein associations from string, article references, and gene-gene and gene-phenotype references from omim. figure  <dig> shows the prediction accuracy using each of these data types alone, as well as for the complete biomine database  using the weights reported in table  <dig> 
+
+
+the main observation from this experiment is that using all data in biomine results in significantly better accuracy than using any single type of data alone. this is especially true for the disease gene prediction setting. another observation is that the predictive power of different data types differs somewhat between the two link prediction tasks.
+
+in the protein interaction setting, using only article references suffices to give a relatively good performance. two main factors are likely to contribute to this result. first, links to articles are abundant . second, they relate many different types of nodes and thereby contain richer information than any other individual data source. note also the article references are actually derived from several data sources, although they are reported as a single data type in this experiment.
+
+summary of results for link prediction
+we briefly summarize the experimental results from this section below. a more elaborate treatment is deferred to discussion.
+
+
+ <dig> biomine can be used to predict future links with high accuracy.
+
+ <dig> a random walk proximity measure performed best among the four tested node proximity measures.
+
+ <dig> link prediction accuracy was improved by experimentally adjusting the weights of different edge types. the adjusted relevance coefficients generalized to separate validation sets of node pairs with good results.
+
+ <dig> applying a degree penalty based on node degree improved prediction results.
+
+ <dig> integration of multiple data types produced superior results over any individual type of data.
+
+disease gene prediction
+as a second example application, we next consider using biomine for the refinement of results from genome-wide association studies, that is, identifying the actually relevant genes from the list of all genes showing statistical association to the disease. as discussed above, our approach is based on the assumption that genes proximal in the integrated graph of biological associations are more likely to be related to the same disease than a pair of more distant genes.
+
+we formulate the task as a classification problem. assume a set s of statistically disease-associated genes from an association study, where only genes in the subset sp ⊂ s
+actually increase susceptibility to the disease, i.e., they are the  positives. the rest, sn = s − sp, are negatives or false positives of the association study. also assume a proximity measure p, as in the previous section. the task now is to predict sp
+ by outputting an estimate s^p⊂s.
+
+we consider two alternative formulations of the problem:
+
+
+supervised classification using only positive instances . in this easier formulation we are given, in addition to s, a separate reference set sr
+of genes already known to increase susceptibility to the disease. the predictions are then based on proximities between elements of s and sr.
+
+unsupervised classification . in this “de novo” version of the problem, we do not assume information about known disease genes. instead, s is the only input. in this case, the predictions are based only on the mutual proximities of the genes in s.
+
+in the supervised version of the problem, the idea is that among the statistically associated genes, those proximal to already known disease genes will be identified as the most promising candidates. in the unsupervised version, such existing information is not assumed. instead, associated genes that are close to other associated genes will be considered as the most likely candidates.
+
+classifiers
+we use the random walk with restart  as the proximity measure p in these experiments, as it outperformed the other tested measures in the link prediction experiments above, and also performed consistently well in comparison to other methods in the disease gene prediction problem considered here . based on the pairwise proximity measure, we next define three alternative classifiers.
+
+supervised classifier
+for the supervised version of the problem, we simply rank genes in s based on their average proximity to elements of the reference set sr:
+
+
+  scoreproxa=1/|sr|·∑t∈srp. 
+
+this definition is closely related, although not identical to the one used by kohler at al.  <cit> . a binary classifier is obtained by setting a threshold q: s^p={s∈s:score≥q}; s^n={s∈s:score<q}.
+
+knn classifier
+in the unsupervised version of the problem, there is no fixed reference set; instead we just rank each gene by its proximity to k nearest elements of s:
+
+
+  scoreknnb=1/k·maxs′⊂s−s,|s′|=k∑t∈s′p. 
+
+this is motivated by the fact that random genes  are not likely to have many close neighbors in s; on the other hand, genes actually related to the disease are expected to be proximal to each other, and thus likely to be found in the set of k nearest neighbors. this definition can be seen as a generalization of the scoring scheme used by franke et al.  <cit> ). again, a classifier can be obtained by simply thresholding, as for the supervised classifier above. for the experiments of this section, we have used a fixed value of k =  <dig> for the number of neighbors. 
+
+cluster-based classifier
+we propose the following new method for the unsupervised version of the problem. do not rank individual genes; instead find a single cluster s^p⊂s of genes that maximizes
+
+
+  scoreclusb=∑s,t∈s^ps≠t−q). 
+
+label the rest of the genes s^n=s−s^p as negative. here, q is a parameter governing how proximal a gene should be on average to the other members of the cluster to be considered positive. this definition may be best explained by considering the decision of whether to add a new gene s to some current estimate of s^p. adding a gene s increases the score if the average proximity of s to the genes already assigned to s^p is larger than the constant q. the definition is similar to the maximum edge-weighted clique problem  <cit> , and also related to the outlier detection problem in clustering  <cit> ; the difference to the latter one is that here only one cluster is sought, and searching the cluster and handling of outliers is done in a single integrated step.
+
+a practical way of using the cluster-based classifier is to vary the sensitivity parameter q in order to obtain a number of predicted sets of different sizes. since the predicted sets are not monotone, that is, a smaller predicted set is not necessarily a subset of a larger prediction, there is not necessarily an immediately implied ranking of genes. however, as a rule, genes that appear in smaller predictions and more often can be considered more clustered.
+
+to implement the cluster-based classifier, in particular to find the s^p⊂s that maximizes equation  <dig> for a given value of q, we use greedy search with multiple initializations, as follows. we maintain an estimate of s^p. at each step of the algorithm, we test all possible moves of a single element between s^p and s^n. there are thus |s| possible moves. let c denote the current value of  and let cs
+be the candidate situation after moving s from its current set to the other set. for each possible move s ∈ s, we compute the improvement score−score
+and choose the s that maximizes it. the algorithm is terminated when the score cannot be improved any more by moving any single element. we perform the above greedy algorithm for a number of different, randomly chosen initial estimates of s^p, to reduce the problem of convergence to local optimum. in the experiments described next, we have used  <dig> restarts .
+
+test settings
+a problem with systematic evaluation of disease gene prediction performance is that although results from several genome-scan experiments are publicly available , the “correct” answer  is not known. therefore, instead of using actual genome-scan data, we evaluate the performance of the proposed methods by using artificial gene lists simulating lists of top-ranking genes from an association study, where the positive instances come from  <dig> already known disease gene families compiled by kohler et al.  <cit> . these disease families have been constructed using information primarily from the omim database  <cit> , augmented by domain knowledge and literature or database searches to find all genes clearly associated with each disease.
+
+generation of test cases
+each test case is a set s of genes, consisting of a fixed number of “positive” genes sp from one of the  <dig> disease gene families, and a control set sn
+of “negative” genes chosen at random from the other disease gene families. the control genes were chosen from the other disease families instead of all genes in the database to avoid bias caused by the fact that known disease genes have usually been studied more and thus have more edges in the database.
+
+the original  <dig> families contain a total of  <dig> genes with  <dig> distinct genes, whereby the largest family contains  <dig> genes and the smallest only three genes. as a baseline setting, we consider prioritizing gene sets with |sp| =  <dig> and |sn| =  <dig>  and thus |s| = 20
+genes in total. we will then evaluate more challenging settings by varying these parameters. the number of genes in the disease gene families is a limiting factor in designing the experiments, and this choice means that only those  <dig> families that have at least  <dig> members can be used as positive instances in the experiments.
+
+we performed experiments varying both the number of positive and negative instances, with |sp| ∈ { <dig> , <dig> } and |sn| ∈ { <dig> , <dig> ,45}. for each combination ,  <dig> test cases were generated, each containing |sp| genes sampled from a single disease gene family and |sn|
+genes sampled from among the other  <dig> disease gene families. as there were only  <dig> <  <dig> disease gene families with at least  <dig> members,  <dig> of the families are used twice for each set of tests with  <dig> positive genes. the generated test cases are available in additional file  <dig> 
+
+due to the limited number of genes available in the original disease gene families, we did not sample separate sets sr to be used in the experiments with the supervised problem setting. instead, we use the already sampled sets sp to define sr, using the following leave-one-out cross-validation procedure: when computing the score defined by equation  <dig> for each gene p ∈ sp, we use sp∖{p} as the reference set sr. to compensate for this, also the negative genes are similarly scored using |sp|− <dig> reference genes only, where a subset sp′⊂sp with |sp′|=|sp|− <dig> is used to score each negative gene n ∈ sn .
+
+the results obtained using this approach are expected to be equivalent with results that would be obtained by using distinct sets sr
+, while enabling using a larger number of the original gene families for the experiments; if sp and sr were to be sampled separately, then only the  <dig> gene families that have at least  <dig> genes would be available for the experiments, which is only 39% of the families usable with the described cross-validation approach .
+
+different versions of biomine data
+some of the test cases are unrealistically easy to solve using biomine, since it may contain edges that directly reflect knowledge about the disease gene families. for instance, direct textual references between genes belonging to the same disease family could have been derived from the omim database. to make the test settings here more realistic and challenging, we also carried out experiments where the most obvious sources of phenotype-related data were excluded. more specifically, we performed the experiments of this section using the following two alternative versions of the biomine graph:
+
+
+complete data includes all data in biomine.
+
+reduced data was obtained from the complete data by removing the following entities and links that most directly relate to the problem : 
+although even after removing these data types there is “trivial” data left, the aim is that performing experiments with this more challenging subset of the data will reveal how the methods perform when there is less data on which to base the inferences.
+
+remove all phenotype nodes . this avoids direct references to phenotypes.
+
+remove all edges derived from the omim database. this avoids references closely related to phenotypes.
+
+remove all edges derived from the string database. this removes predicted protein relationships, which may partly be based on data derived from omim.
+
+using roc to evaluate classifiers
+the supervised and knn classifiers can directly be evaluated in the roc framework, and we again use both visualization of roc curves and area under curve  as an overall score.
+
+the cluster-based classifier does not directly rank the genes but instead finds a partition into positive and negative instances. any candidate cluster thus gives a point in the roc space, but the clusters have to be computed separately for each value of q, unlike with methods that directly produce a ranking of genes. we compute a pseudo-roc curve for the cluster-based method by varying the sensitivity parameter q over a set of predefined thresholds. for each threshold, we perform experiments for all the  <dig> data sets. we then compute the true positive rate and false positive rate for each data set, and average these over all the data sets to obtain a composite point in the roc space for each value of q. these points are then plotted to obtain the final roc curve. 
+
+comparing results between the two versions of the ranking problem
+the two problem settings, the supervised and unsupervised one, are not directly comparable since they are not really practical alternatives: the supervised method should be used whenever a reference set of known disease genes is available, since this helps in ranking; and when such a reference set is not available, there is no other option but to use an unsupervised method. thus, a fair comparison is not straightforward to set up. nevertheless, such a comparison between the methods can provide insight on how crucial having a pre-known reference set is for the prediction task.
+
+we compare the classifiers in settings where each  gene is scored using information from the same number of other positive genes by all methods. for example, when |sp| =  <dig>  each gene within sp is ranked using the  <dig> other positive genes by the supervised  classifier. for the knn classifier, each positive gene is ranked using the  <dig> nearest neighbors , while in the cluster-based method, each positive gene can potentially cluster with the  <dig> other positive genes.
+
+experimental results for disease gene prediction
+comparison of classifiers
+first, we test the three proposed classifiers on the problem of identifying a set sp of  <dig> disease genes among a set of  <dig> unrelated genes sn.  <dig> independent test cases of  <dig> genes are analyzed, as described above. the questions addressed by this setting are  how well disease genes can be prioritized using biomine using any of the methods;  how much more difficult it is to prioritize disease genes without a reference set of pre-known disease genes; and  how well the cluster-based classifier  works compared to the simpler baseline classifier based on the k nearest neighbors .
+
+
+effect of increasing the number of negatives
+to make the problem more realistic and challenging, we next evaluate how the accuracy of the proposed methods is affected when the amount of false positives in the set of genes to be prioritized is increased. for this experiment, we used the  <dig> sets of  <dig> test cases with |sn| ∈ { <dig> , <dig> ,45}. as in the previous setting, the amount of positive genes |sp|
+is fixed to  <dig>  giving positive-to-negative ratios from 1: <dig> to 1: <dig> and total number of genes to be ranked |s| between  <dig> and  <dig> 
+
+again, we test the three proposed classifiers, with complete and reduced data separately. for the supervised classifier, auc should not be affected by the increasing number of negatives, as the ranking of each gene always occurs using a fixed reference set, irrespective of the number of negative genes. on the other hand, the more challenging unsupervised problem becomes more difficult when the amount of negatives is increased.
+
+
+the results indicate that a reference set sr
+is obviously useful, but if one is not available, relatively good predictions can still be obtained with the cluster-based method if the fraction of positive instances within the set of genes to be prioritized is sufficiently high.
+
+effect of decreasing the number of positives
+in the final experiment, we evaluate how decreasing the number of positives affects prioritization, by varying the number of positives |sp| between  <dig> and  <dig>  while fixing the number of negatives to  <dig>  figure  <dig> plots the average auc obtained by each classifier as a function of the number of positive genes |sp|. as expected, decreasing the number of positives has a dramatic effect on accuracy, especially in the unsupervised version of the problem, but also in the supervised version. notably, the clustering-based method does not work well with the smallest values of |sp|, and is outperformed by the knn method in these settings. based on this experiment, it appears that at least  <dig> positive genes are required in the set to be prioritized in order to benefit from the cluster-based approach.
+
+
+summary of results for disease gene prediction
+the results of this section can be summarized as follows.
+
+
+ <dig> the biomine data and node proximity measures can be used to obtain a high accuracy in identifying actual disease genes from a putative set of genes. the best results are obtained, if a reference set sr
+of known causal genes is available.
+
+ <dig> with a sufficient true disease gene density in the candidate list, the cluster-based method  performed almost as well. this is an interesting result, because the clustering method does not require a pre-known reference set. however, the cluster-based approach did not work well when the number of positive genes within the candidate list was small; in our experiments, at least  <dig> positive genes were needed for the cluster-based approach to be beneficial.
+
+discussion
+we first considered a number of node proximity measures as the basic element of link prediction. in these experiments, a random-walk based proximity measure was found to perform best. this result strongly contrasts results from a recent study comparing similar proximity measures on probabilistic graphs  <cit> , where a method based on expected shortest path distance performed best, followed by probability of best path, network reliability, and finally random walk, with clear margins. the most striking difference is that in their link prediction experiments, random walk performed only slightly better than a random guess. we hypothesize that the main reason is the difference in the edge weighting schemes, which may be more suitable for some methods than for others. one difference in weighting is that the graphs of potamias et al. contain more edges with probabilities close to  <dig> , whereas in our scheme the types of edges and degrees of nodes have a larger effect on edge weights, and the resulting distribution of edge weights is more uniform.
+
+our empirical results show that the biomine approach has strong statistical prediction power . however, the prediction accuracy is likely not sufficient for predicting arbitrary links within biomine, as there are relatively few true positives among a huge number of potential links. consider the current statistics of biomine: the number of node pairs is of the order of  <dig>  while the current number of edges is of the order of  <dig>  for the sake of example, assume that the number of true positive links is  <dig> times larger than the number of current edges, i.e.,  <dig>  the fraction of true positives among all potential links would be 108/ <dig>  i.e., one positive instance for every  <dig>  negative ones.
+
+now, assume a true positive rate of  <dig>  and a false positive rate of  <dig> , similar to experimental results in figure  <dig>  we are then  <dig>  times more likely to classify positively a true positive than a true negative. incidentally, this ratio is identical to the ratio of the negative and positive instances assumed above. in other words, the predicted positives would be expected to contain an equal amount of true and false positives. if one produced predictions for the whole biomine, there would with these parameters be about  <dig> true and false positives—clearly too much for any practical use.
+
+in practical applications, such as analysis of protein interaction measurements or disease gene ranking, the set of potential links to predict is limited to a predefined set of candidate links that is already enriched with positive instances. this also means that although the proximity measure itself does not take into account the type of links to be predicted, the set of candidates is already chosen in such a way that the edge type is implicitly defined.
+
+we next discuss our two test settings, protein interaction prediction and gene prioritization, and their results.
+
+the protein interaction prediction experiments have been carried out with respect to new links introduced to the source databases between  <dig> and  <dig>  with the above-mentioned good results. an interesting question is if and how much the methods are biased to making predictions in active areas of research. existing information in the source databases reflects past and current research topics and hypotheses, and these may well correlate with future research and discoveries. a topic for future study is to investigate if certain types of links are easier to predict than others.
+
+use of biomine in disease gene ranking enables identifying, from among a number of putative candidate genes, the ones that appear most plausible based on the data contained in the source databases. this approach is expected to work best in cases where several functionally related genes contribute to the disease, and knowledge about functions of the genes is already present in the source databases. obviously, less studied genes with little or no functional annotations cannot be identified in this way.
+
+we considered two versions of the gene ranking problem: one where genes are ranked based on their proximities to an already known reference set of disease-related genes , and another where ranking is based on the mutual proximities of the putative genes . both formulations have already been considered in previous work <cit> . the methods of producing data and computing proximities are different, however. kohler et al.  <cit>  only use a single type of edge  while franke et al.  <cit>  collapse information from several data sources into a single type of edge. neither of these approaches considers edge weights. in contrast, we retain the original edge types and construct a heterogeneous, weighted network. an additional difference is that the approach of franke et al. is directly aimed at linkage studies where genes within continuous susceptibility intervals are examined, whereas we consider cases where the genes may be spread over the whole genome.
+
+powerful methods for disease gene prediction have been proposed by hwang and kuang  <cit>  and vanunu et al.  <cit> . they assume availability of three specific types of links  and these are used in specific ways. in contrast, we do not make such assumptions about edge types: the link prediction methods used in this study are purely based on node proximities. while the approaches of hwang, kuang and vanunu et al. can take better advantage of specific information, the methods used in this paper are more flexible and can also utilize unanticipated types of links.
+
+unlike the methods considered here, wang et al.  <cit>  and chasman  <cit>  do not use graph data, but instead perform joint testing of disease association within predefined sets of related genes . in contrast, the methods applied in this paper are not limited to detecting association only within such predefined sets.
+
+to sum up, the following combination of factors distinguishes our work from previous work on utilizing protein networks for disease gene prioritization:
+
+
+use of weighted edges, with weights based on combining information from the type of edges, node degrees and weights in the original databases,
+
+use of a heterogeneous graph, and
+
+the novel single-cluster clustering formulation.
+
+in this paper, the evaluation of biomine has been carried out quantitatively, using numerical measures of prediction accuracy. such measures are directly motivated by the prediction tasks considered in this study. an important, complementary application of biomine is visualizing relationships between entities of the biological graph , enabling the basis of predictions to be shown to the user for subjective analysis and verification. finding connections previously unknown to the user may help understand biological mechanisms and produce new biological hypotheses.
+
+consider, for instance, the top ranking genes from a gene mapping study, or a gene that by some other evidence might be related to the phenotype under study. a subgraph that connects them  <cit>  can be used to show the concrete chains of annotations that link the genes to the phenotype. such use of biomine is remotely similar to search engines: enter a number of query entities, and biomine will search for chains and networks of entities that summarize the known relationships between the query entities. this search functionality is available in the biomine web site http://biomine.cs.helsinki.fi.
+
+CONCLUSIONS
+we presented biomine, a system that integrates data from a number of heterogeneous sources into a single, graph-structured index. the experimental results indicate that biomine enables performing useful prediction tasks, such as prediction of new links and ranking of putative disease genes.
+
+based on the experiments, a number of components contribute to the success.
+
+
+ <dig> the biomine database and data model: both integration of multiple types of data from several data sources, as well as use of weights on edges were important factors.
+
+ <dig> suitable methods and measures for prediction: random walk with restart worked best as a link prediction measure; for candidate gene ranking, slightly more complex supervised or unsupervised prediction methods  can be used depending on the availability of a reference set of known disease genes.
+
+ <dig> enriched data for the prediction problem: biomine has, together with the above-mentioned methods, statistically strong predictive power. however, for practical use in prediction or ranking tasks, a selected set of candidate hypotheses should be available. this is the case, for instance, in analysis of candidate genes from a genome-wide association study.
+
+our main motivation comes from gene mapping, in particular from analyzing and visualizing relations of candidate genes to the phenotype under study. in our experiments, biomine had a high accuracy in identifying actual disease genes from a putative set of genes using a simple ranking scheme based on an already known reference set of disease genes. experiments using a novel clustering-based method demonstrated that putative disease genes can also be ranked without an already established reference set, if the number and density of true disease genes is sufficient among the candidates. an interesting future research topic in this area is a semi-supervised setting where information both from a reference set of disease genes and from mutual proximities of the candidate genes is used. this might be useful especially in cases where only a small number of reference genes is available for the disease under study.
+
+the current version of the biomine database contains  <dig>  million entities and  <dig>  million relations between them, with focus on human genetics. the index can be queried using a public web interface on the biomine web page. and results are visualized graphically. while gene mapping has been the motivating application, we believe that biomine has applications in many other biomedical problems that benefit from integration of data and from the ability to estimate proximities of biological entities.
+
+biomine in its current form has a number of practical limitations. it only covers part of the available data, with focus on human genetics. keeping the database updated and extending it requires resources. the database could be improved in a number of ways, including automatic learning of relevance coefficients for different edge types, or better semantic use of taxonomies such as gene ontology. discovery of statistical relations between entities would be an interesting addition, for instance gene set enrichment analysis  <cit> . naturally, future work will include applications of biomine to specific biomedical problems.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+le designed and implemented a major part of the system, conceived the methods introduced in the paper, designed and carried out the experiments, and drafted the manuscript. ht participated in the design of the system and the study, and in drafting the manuscript. both authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+gene pairs used in link prediction experiments
+
+click here for file
+
+ additional file 2
+gene sets used in disease gene prediction experiments
+
+click here for file
+
+ acknowledgements
+we thank the whole biomine team: atte hinkka, petteri hintsanen, kimmo kulovesi and petteri sevon for co-operation in conceiving, designing and implementing biomine. we also thank päivi onkamo and the anonymous referees for their valuable comments on the manuscript. le and ht have been supported by the algorithmic data analysis  centre of excellence of the academy of finland . ht has also been supported by the european commission under the 7th framework programme fp7-ict-2007-c fet-open, contract bison- <dig>  and le has been supported by the graduate school hecse.

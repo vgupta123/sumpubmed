@@ -1,0 +1,135 @@
+BACKGROUND
+rna methylation is an emerging area that studies chemical modifications in the nucleotides of rnas  <cit> . such modification in especially coding mrnas or transcripts has been shown  <cit>  or speculated to play a critical role in regulating cellular functions  <cit> . however, the overall mechanism by which mrna is methylated and the related functions in different contexts including various diseases are still elusive. deciphering their functions and regulations under various contexts represents a grand challenge facing the biology community.
+
+the state-of-the-art high throughput technology that enables the detection of rna methylation in transcriptome is an affinity-based shotgun sequencing approach known as methylated rna immunoprecipitation  sequencing   <cit> . merip-seq was first introduced in recent studies  <cit>  on transcriptome-wide mrna m6a methylation and is a high throughput sequencing assay that is designed for transcriptome-wide survey of rna epigenetics  <cit> . as shown in figure  <dig>  in merip-seq, mrna is first fragmented before immunoprecipitation with anti-m6a antibody, and then the immunoprecipitated and control mrna fragments are subject to sequencing. the output includes an ip and a control sample, which measure the immunoprecipitated m6a-methylated mrna reads and the mrna expression , respectively. these paired samples are used to reconstruct the transcriptome-wide m6a methylome. while merip-seq has demonstrated high accuracy in identifying the cell-specific transcriptome methylation patterns, as a nascent assay, merip-seq poses unique bioinformatics challenges that call for novel and sophisticated statistical computational algorithms.
+
+from a biological perspective, merip-seq can be thought as a combination of two well-studied methods: chip-seq  <cit>  and rna-seq  <cit> . like chip-seq, reads accumulate around the methylation sites to form peaks. unlike chip-seq based measurements for dna methylation, merip-seq measures mrna methylation and hence produces read peaks around the methylation sites that span two or more exons. in addition, the control sample of merip-seq measures mrna expression, which, compared to those in chip-seq, can vary much more drastically in different cells or tissues. due to these unique features, exomepeak  <cit>  was developed specifically for peak calling, or methylation site prediction, in merip-seq. although exomepeak can perform fairly robust exome-based peak calling, it ignored the dependency of reads, and therefore could either miss true peaks with low intensity or erroneously predict narrow, noisy outliers as true peaks. in this paper, we introduce hepeak, a novel hidden markov model  for exome-based peak calling algorithm. the test results showed that hepeak improved both prediction sensitivity and specificity over exomepeak.
+
+methods
+hepeak pipeline
+to address the aforementioned merip-seq issues, hepeak includes several high-throughput sequencing tools in its pipeline. first, hepeak utilizes tophat  <cit>  to align fragmented mrna reads to the reference transcriptome, allowing short reads to span exon-exon junctions. next, sam-tools  <cit>  is applied to exclude the multi-mapping reads and index alignment results. after these pre-processing steps, hepeak performs hmm-based peak calling on the exons of each gene, where the introns are excluded, to identify the genomic locus of methylation sites. the output result of hepeak is in bed format, which can be visualized together with input alignments in igv <dig>   <cit> .
+
+exome-based peak calling
+the goal of peak calling in merip-seq is to detect regions in transcripts where the read counts in the ip sample is more "enriched" than those in the control sample. just as with exomepeak, our previously developed peak calling algorithm for merip-seq, hepeak performs the peak calling on connected exons of a specific gene, a clear contrast to genome-based chip-seq peak calling methods, such as macs  <cit> . this projection of genome onto transcriptome effectively circumvents the difficulty due to the ambiguity of isoforms' assignment but it still preserves the convenience of gene-based annotation, making biological interpretation of the prediction straightforward.
+
+the definition of hmm for merip-seq data
+given a particular mrna , its concatenated exons are first divided into n mutually connected bins, whose size is selected as the read length l. with respect to the nth bin, the unknown hidden methylation status is denoted as zn ∈ { <dig>  2} where  <dig> represents unmethylation and  <dig> otherwise. since a peak likely spans multiple bins, we assume that the methylation status zn follows a first order markov chain, whose transition matrix a contains entries defined as
+
+  ajk=p,j,k∈{ <dig> } 
+
+where ajk denotes the probability for the latent variable switching from the status j at the th bin to the status k at the nth bin. here j, k is the indicator of the hidden state. additionally, we assume that the initial probability p = π and p =  <dig> - π.
+
+next, let xn denote the read counts in the ip sample and yn the counts in the control sample, both for bin n. we assume that, given the methylation status zn, these read counts follow the poisson distribution defined as
+
+  p=pois 
+
+  p=pois 
+
+where mip and mctrl are the total reads  in the ip and the control samples, respectively and λip,zn for zn =  <dig>  or  <dig> and λctrl are the normalized poisson rates, respectively. it is worthwhile pointing out that λip,zn switches according to the status of zn; on the contrary, λctrl stays the same.
+
+it would be intuitive next to define the relationship between the poisson rates for the methylated and unmethylated in the ip and the control sample, respectively. however, unlike in chip-seq, where this relationship is mostly defined only for the ip sample, defining the relationship for both the ip and the control is non-trivial and model complexity also needs to be assessed to avoid potential difficulties in subsequent inference. to this end, we transform the formulation by observing that, given  and , the conditional probability of observing xn in the ip given the total reads in the control as tn = xn + yn follows the binomial distribution
+
+  p=bino 
+
+where
+
+  pzn=mipλip,znmctrlλctrl+mipλip,zn. 
+
+note that pzn for zn =  <dig>  can be considered as the percentage of the mean ip read counts in the combined read counts of the ip and control samples for a bin, when it is unmethylated . the distribution  effectively combines the reads in the ip and control samples under one model. as such, instead of using  and , we define  as the emission probability of the proposed hmm and work with pzn directly. doing so avoids modelling and inferring the potentially complex relationships between the rates. given x = {x <dig>  x <dig>  x <dig> ..., xn}, a set of reads for n bins and z = {z <dig>  z <dig>  z <dig> ..., zn}, the sequence of methylation, we use γ to denote the marginal posterior distribution of a latent variable zn at state k, and ε to denote the joint posterior distribution of two successive latent variables, so that
+
+  γ=p 
+
+  ε=p. 
+
+here, the parameter is defined as θ={ak,j∀k∀j;π;pk∀k}. then, the log likelihood for the proposed hmm chain can be expressed as
+
+  q=ezlnp=∑k=12γlnπk+∑n=1n∑j=12γlnp+∑n=2n∑j=12∑k=12εlnajk 
+
+we call this new formulation hepeak or hidden markov model -based exome peak finding. the graphical model of hepeak formulation is shown in figure 2a. compared with exomepeak, hepeak considers the correlation of the reads between adjacent bins and more accurately models the behaviour of methylated reads in merip-seq .
+
+the em solution
+given hepeak, the goal is to call peaks, i.e., predict zn∀n, and at the same time estimate the model parameters: θ. to this end, we developed an expected-maximization  solution, which performs peak calling and parameter estimation in an iterative fashion. we provide the steps of the em algorithm in the following. the detailed derivation is included in appendix.
+
+at the mth iteration, proceed as follows.
+
+e step: given parameter θ, estimated at the m- <dig> step, calculate the posterior distribution of the latent variable p).
+
+  γ=p) 
+
+m step: compute and update π, ajk and pk for all j, k as
+
+  π=γ∑j=01γ 
+
+  ajk=∑n=2nε∑l=01∑n=2nε 
+
+  pk=∑n=1nγxn∑n=1nγ 
+
+after the em iteration converges, the model parameter θ can be obtained. given the estimated θ, the viterbi algorithm is applied to maximize the joint likelihood in  to obtain the maximum a posteriori  estimate of the methylation status zn.
+
+peak region detection
+in order to evaluate the statistical significance of the putative peak regions predicted by the viterbi algorithm, the log odds ratio of the posterior for the peak state  over the posterior for the background state  can be computed as follows
+
+  peakscore=logpp 
+
+briefly, this log-transformed scoring method  <cit>  tries to utilize the posterior probability of each bin to assess the confidence of the potential peak region. the potential peak region is defined as consecutive bins predicted by the viterbi and its peakscore is calculated as the averaged peakscores for all the combined bins. next, peakscore is assumed to follow a gaussian distribution with mean ) and standard deviation)  <cit> , estimated from all the bins. then, after performing the z transform of peakscores, a one-sided test for significance of the potential peak region can be conducted and p-value can calculated. then, the benjamini-hochberg method  <cit>  is utilized to correct the multiple testing and compute the false discovery rate .
+
+RESULTS
+simulation test
+because we do not have the ground truth for the methylation status in real data, the performance of hepeak was first validated using a simulated data, where read counts for the ip and the control samples were simulated according to the proposed hepeak model.
+
+specifically, a total of  <dig> genes, whose lengths were randomly selected from  <dig> nt to 3k nt, were generated. reads of each gene in both ip and the control samples were allowed to vary according to the poisson distribution, where we chose λ ∈  and assumed it constant for both methylated and unmethylated bins. additionally, we set λip ∈  when methylated and λip = , when unmethylated, resulting in  <dig> peaks generated. the transition matrix a was defined as
+
+a= <dig> . <dig> .9
+
+and the initial probability π =  <dig>  note that a and π were based on the estimates obtained by hepeak when applied to the real m6a data discussed in the next section. figure  <dig> showed an illustration of the simulated data. in general, when a bin is methylated, there were more reads in ip than in control; otherwise, there were more reads in control.
+
+the receiver operating characteristics  curve of the peak calling results is shown in figure 4a and we can see that the roc curve of hepeak wraps around that of exomepeak, which indicates that hepeak achieves a higher detection sensitivity and specificity. the area under the curve  for hepeak is  <dig> , which is larger than that of exomepeak . as shown in figure 4b, the read distributions of a simulated gene with  <dig> bins marked as methylated peaks and  <dig> bins as unmethylated, the corresponding detection results show that hepeak can correctly detect  <dig> out of  <dig> true peaks, with  <dig> false positive, while exomepeak results in  <dig> false positives to get the same sensitivity.
+
+evaluation of hepeak on real m6a merip-seq data
+to further validate the accuracy of hepeak, we applied hepeak to two m6a merip-seq datasets including one from human hek293t cell line  <cit>  and the other from the mouse midbrain cells  <cit> . the raw fastq datasets were obtained from gene expression omnibus . the datasets were preprocessed according to the hepeak pipeline, where the raw data was first aligned to the reference hg <dig> and mm <dig> assembly by tophat, and then peak calling was performed to predict the transcriptome-wide m6a methylation for each dataset. as a comparison, exomepeak was also applied to these datasets.
+
+a large number of genes were predicted to have m6a methylation sites in both human and mouse datasets. for hek293t dataset, hepeak identified  <dig> peaks on  <dig> genes at a fdr <  <dig> , whereas exomepeak  reported  <dig> peaks on  <dig> genes. out of all the genes,  <dig> genes were predicted to be methylated by both hepeak and exomepeak, whereas  <dig> genes were predicted only by hepeak, as opposed to  <dig> genes uniquely reported by exomepeak . for mouse midbrain cells, hepeak discovered  <dig> peaks on  <dig> genes ; in contrast, exomepeak detected  <dig> peaks on  <dig> genes. among them,  <dig> genes were shared by the two algorithms, while hepeak identified  <dig> more genes than exomepeak . the above results demonstrate that more potential methylated genes ignored by exomepeak, can be discovered by hepeak, which makes use of dependency of consecutive bins and greatly boosts the detection sensitivity. the advantage of hepeak becomes even clearer if we carefully examined the results in igv for the two datasets . take hek293t dataset for example. for gene sec24a, visual inspection should confirm methylation where read counts in the ip sample show slight enrichment to that in control sample. hepeak demonstrate a higher sensitivity by utilizing the whole consecutive bins to determine the peak region where reads are greatly enriched compared to other region. for gene mrpl <dig>  both methods found m6a methylation sites. however, due to hmm, hepeak correctly merged the two peaks into one peak.
+
+hepeak recapitulates previous reported m6a patterns
+on average, hepeak predicted  <dig>  and  <dig>  sites per gene in human and mouse, respectively. next, we examined the pattern of m6a sites by mapping all the peaks to the transcriptome and tallying the distribution of m6a sites in genes. for mrna residing peaks, about 45% of the peaks located in the 3'utrs, about 35% in the cds, and only less than 20% from the 5'utr . as shown in figure  <dig>  m6a methylation sites were significantly enriched near the stop codon and overly present in the 3'utr for both human and mouse, indicating that m6a may be involved in transcriptional regulation, consistent with the reported results in previous studies  <cit> . to gain additional insights into prediction, dreme  <cit>  was performed on the called peak sequences to predict the motif of the m6a methylation site. as shown in figure  <dig>  the most enriched motifs for the hek293t cells and mouse midbrain cells are ggach  <cit> , which were identified bound by methytransferase mettl <dig> and mettl <dig>  <cit> .
+
+hepeak revealed distribution of m6a in lncrna
+we next examined the m6a sites predicted by hepeak in long non-coding rnas , i.e., non-coding rnas of more than  <dig> bp in length. m6a sites were found in lncrnas in  <cit> . in human hek293t cells, about  <dig> peaks were predicted in lncrnas, which accounted for  <dig> % of the total predicted peaks . similarly, in mouse midbrain cells,  <dig> peaks  were detected in lncrnas. we then examined the distribution of the peaks in lncrna in human hek293t cells and found it is significantly different from that in mrnas . instead of being enriched near the stop codon in mrnas, m6a sites in lncrnas favour 5'utr over 3'utr. a similar pattern was also observed for mouse midbrain cells. these findings imply that the regulatory functions in mrnas may be different from those in lncrnas
+
+CONCLUSIONS
+in this paper, a novel hmm-based peak calling algorithm, hepeak, was developed for peak calling for merip-seq data. by introducing the exome-based annotation, hepeak circumvents the ambiguity related to isoforms. in order to characterize correlation between continuous bins in an m6a peak region, hepeak utilized hmm to model the dependency. additionally, ip reads and control reads are modelled in one mathematical model to avoid separate hmm peak-calling procedures in ip and control as in ripseeker  <cit> . compared with exomepeak, which treated each bin independently, hepeak was shown to achieve higher detection specificity and sensitivity in the simulated data. when applying hepeak to the collection of two published merip-seq data from human and mouse, the results revealed that m6a methylation extensively existed in genes. hepeak showed higher sensitivity than exomepeak and predicted more novel m6a sites. particularly, almost all the peaks detected by exomepeak can be found by hepeak. moreover, with respect to the peak regions, m6a sites called by hepeak were biologically more meaningful than exomepeak, by connecting separate m6a sites together, of which gaps were not tested significantly enriched by exomepeak due to the limitation of the independence assumption.
+
+furthermore, in both human and mouse mrnas, the distributions of m6a sites were similar, where more m6a sites were observed in the 3'utr as supposed to cds and 5'utr, and the sites were significantly enriched near the stop codon as previously reported. these findings highly suggest that m6a may play a role in transcriptional regulation. in addition, we examined the sequence motif of the predicted m6a sites and found that both human and mouse shared the similar m6a motif -ggach. this consistency suggests that m6a methylation uses the same mechanism in different cells and species. moreover, m6a sites were also predicted in lncrnas but bear a different distribution from that in mrnas, implying that m6a may have different roles in regulating mrnas and lncrnas.
+
+appendix
+the derivation of the em solution is detailed in the following. based on the notations defined in the main text, the total likelihood in the mth step of hepeak is expressed as follows
+
+  q,θ)=∑zp*lnp=∑zp* 
+
+as defined in ,
+
+  ∑zp*zn,k=γ=e∑zp*zn- <dig> jzn,k=ε=e 
+
+given xn follows a binomial distribution, then
+
+  p=tnxn*pkxntn-xn⇔lnp=lntn!-lnxn!-lnyn!+xn*lnpk+*ln 
+
+thus, pk can be computed through maximizing the likelihood function of the total probability, the same as setting the first derivative equal to zero,
+
+  ∂q∂pk=0⇒pk=∑n=1nγ*xn∑n=1nγ*tn 
+
+in the same fashion, πk and aj,k can be computed,
+
+  ∂q∂πk=0⇒πk=γ∑j=12γ 
+
+  ∂q∂aj,k=0⇒aj,k=∑n=2nε∑l=12∑n=2nε 
+
+list of abbreviations used
+hmm, hidden-markov model; fdr, false discovery rate; hepeak, hmm-based exome peak calling method; exomepeak, exome-based peak calling method; merip-seq, methylated rna immunoprecipatation combined with rna sequencing; em, expectation of maximum likelihood method; cds, coding dna sequence; utr, untranslated region.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+xc and yh designed the method and drafted the manuscript. jm helped with preprocessing the data and analyzed the peak distribution. mkr and cy provided biological interpretation of results on real data. yh supervised the work, made critical revisions of the paper, and approved the submission of the manuscript.
+

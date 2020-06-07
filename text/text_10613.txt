@@ -1,0 +1,227 @@
+BACKGROUND
+functional rnas are often more conserved in their structure than in sequence. thus to find rnas related to a known example, we look for sequences capable of assuming the appropriate secondary structure. here, we investigate the problem of rna motif search based on user-defined descriptors. rna motif descriptors specify restrictions on base-pairing structure of the target rna, as well as sequence constraints characterizing conserved functional sites. as opposed to popular fully-automated systems based on probabilistic models , this approach allows expert users to handcraft motif descriptors and highlight the most important features of the target rnas, thus better targeting a particular biological phenomenon . in this paper, we revisit the problem of descriptor-based search and present a new tool, rnarobo, that improves the speed of such searches compared to previous methods, including rnabob  <cit> , rnamotif  <cit> , rnamot  <cit>  and ralignator  <cit> .
+
+currently, most popular tools for rna motif search, such as inferrnal  <cit>  or cmfinder  <cit> , are not based on handcrafted motif descriptors. instead, they use covariance models founded on stochastic context-free grammars, that are built automatically from a set of known occurrences of the target rna. this approach addresses many shortcomings of descriptor-based methods, most notably the difficulties in deciding which parts of the motif are important for recognizing a particular rna, as well as high false positive rates of less specific descriptors.
+
+covariance models are relatively rich probabilistic models, and consequently many examples are required to build a model of a given rna family. this precondition can be sometimes easily satisfied, most notably in cases where an alignment of the target family is already present in a database, such as rfam  <cit> .
+
+however, if only a few examples are known for a particular rna motif, we are under the necessity to find more occurrences before such parameter-rich models can be employed. in such cases, motif descriptors have been used with great success to uncover the distribution of small structured rnas in the genomic space. these functional rnas include hammerhead ribozymes , hepatitis delta virus-like ribozymes , as well as genomic aptamers, including the first known human aptamers  <cit> .
+
+this approach is particularly useful for searching for structures that are hard to predict from simple thermodynamic models, such as pseudoknots and nested multi-pseudoknots. hdv-like ribozymes, which have only five conserved, non-contiguous nucleotides out of approximately  <dig> necessary to form the minimal catalytically-proficient double-pseudoknot  <cit> , represent a particularly striking example of a functional rna with low sequence conservation and strict structural requirements. loose descriptors with low sequence requirements tend to yield large numbers of matches in low-complexity genomic sequences ; on the other hand, overly strict descriptors often yield too few or no examples of the sought-for functional rna. to maximize the yield of bona fide examples of functional rnas with low sequence requirements, their motif descriptors require careful tuning and multiple runs through available genomic sequences. there is thus a great need for efficient descriptor-based search algorithms.
+
+the specific search problem addressed by our method is np-hard  <cit> ; hardness was also proved for other similar problems involving alignment with arbitrary non-nested interactions  <cit> . on the other hand, structures without pseudoknots or with simple pseudoknot configurations can be solved by dynamic programming in polynomial time  <cit> , but the running time is at least cubic in the size of the sequence. nevertheless, even algorithms with worst-case exponential time were shown to be effective in practice, such as backtracking algorithm of rnamot  <cit>  or non-deterministic finite-state automata with node rewriting of rnabob  <cit> . many other tools were subsequently developed, including locomotif  <cit> , palingol  <cit> , rnamotif  <cit> , patsearch  <cit> , and rnamst  <cit> . individual tools differ in descriptor capabilities and post-processing options; an extensive review can be found in  <cit> .
+
+to speed up the search, some tools use advanced data structures to build an index of target dna. for example, structator  <cit>  and rnapattmatch  <cit>  use affix arrays  <cit>  and ralignator  <cit>  uses enhanced suffix arrays  <cit> .
+
+here, we present a new tool, rnarobo, which builds on the descriptor format of rnabob and the backtracking algorithm of rnamot. we improve these tools in two ways. first, we extend the rnabob descriptor format to allow insertions representing bulges in helical elements. in our experiments, we demonstrate that this seemingly minor change helps to better characterize certain families of ribozymes and aptamers and even enables discovery of new occurrences of these motifs that are likely biologically active. second, we developed a new method for improving the running time of the backtracking algorithm, in some cases speeding up motif searches more than 100-fold compared to other tools.
+
+each rna structure descriptor consists of several structural elements. in our algorithm, individual elements are aligned to the dna sequence by dynamic programming, with backtracking guiding the search for successive elements to appropriate locations with respect to the already matched elements.
+
+the performance of backtracking depends greatly on ordering of elements in the search. ideally, the first elements will have few matches, filtering out most of the sequence from further processing. such filtering is a common theme in many text search methods, such as the popular sequence similarity search tool blast  <cit> . finding the best element ordering for the backtracking search is an interesting and non-trivial problem, due to complex dependencies between locations of individual elements. we approach this as an on-line problem, using the observed performance of the search so far to adjust the ordering on-the-fly. we demonstrate that this strategy leads to a significant reduction in the running time on real data, especially for complex descriptors.
+
+the rest of the paper is organized as follows. first, we define descriptors and their capabilities, and describe the basic backtracking algorithm. then we introduce our data-driven element ordering strategy. finally, we demonstrate effectiveness of our approach by revisiting the results of several biological studies and compare our running time with several existing tools. the software tool rnarobo implementing improvements described in this paper is available at http://compbio.fmph.uniba.sk/rnarobo.
+
+methods
+descriptor-based search for rna motifs
+here, we briefly describe the search algorithm implemented in our tool rnarobo which is loosely based on the algorithm of rnamot  <cit> . the input for the algorithm is a descriptor specifying the desired rna structural motif and a dna sequence. the goal is to find all occurrences of the motif in the sequence. a descriptor consists of three parts: 
+a motif map – a list of individual structural elements ordered from 5’ to 3’ end along the sequence,
+
+a detailed specification of each structural element,
+
+an optional search order.
+
+
+
+each structural element is either single-stranded or paired . single-stranded elements are regular expressions, similar to those used in prosite  <cit> . the user can also allow a fixed number of mismatches and insertions to appear anywhere in the motif. paired elements correspond to helices in the rna structure and consist of two interacting regions of the dna sequence. the descriptor can specify the minimum and maximum length of the helix, sequence constraints in the form of a regular expression, as well as constraints on the paired bases . again, users can allow a certain number of mispairs between paired bases, mismatches with respect to the sequence constraints, and insertions of single-base bulges. each paired element occurs twice in the motif map, specifying the location of both strands. we place no restrictions on the relative order of elements in the motif map, and thus the descriptor can specify arbitrary pseudoknotted structures. an example of a descriptor is in fig.  <dig>  and the full description of the file format is given in additional file 1: section s <dig> 
+fig.  <dig> an illustration of an atp aptamer motif and its corresponding descriptor based on genomic adenosine aptamers  <cit> . nucleotide constraints for individual positions are expressed in the iupac notation  <cit> 
+
+
+
+the user can optionally specify the search order in which individual elements will be considered in the backtracking search. the search order has a large influence on the running time, and the main focus of this paper is automated selection of appropriate search orders.
+
+algorithm outline the algorithm uses a simple backtracking strategy with a fixed search order of elements e <dig> e <dig> …,en. first, we find all matches of element e <dig> in a certain sequence window t. then we consider each match of e <dig> in turn and try to expand it to an occurrence of the complete motif by recursively searching for matches of e <dig> …,en in appropriate relative positions with respect to the match of e <dig>  an illustration of the search procedure is depicted in fig.  <dig> 
+fig.  <dig> an illustration of the rnarobo search procedure for the motif of atp aptamer. the search follows the order of elements s <dig>  s <dig>  h <dig>  h <dig>  s2
+
+
+
+
+to find matches of element ei, we devised general but relatively slow dynamic programming algorithms. for single-strand elements with no wild cards or insertions, we use a much faster bit-parallel bounded nondeterministic dawg matching algorithm  <cit> . for the rest of the single-strand elements, we first use bit-parallel shift-and forward filtering  <cit>  to identify sequence positions with possible element occurrences, and only subsequently we verify matches by the full dynamic programming algorithm.
+
+the dynamic programming tables of our algorithms have many dimensions, because we need to keep track of the number of insertions, mismatches, and for paired elements also mispairs. in a typical sequence search scenario, each of these differences is assigned some negative score and the goal is to optimize the overall score. in contrast, we have a separate upper bound for each type of difference from the motif; therefore, each type adds another dimension to the dynamic programming table.
+
+for example, for paired elements, our table h has seven dimensions. the value of ht <dig> t <dig> p,m,r,i,b is true if and only if prefix p of the regular expression can be aligned with a suffix t′ of t with m mismatches, a prefix p′ of the regular expression for the reverse strand can be aligned with a prefix t″ of t with no mismatches, and the alignment of t′ and t″ to each other contains i insertions and r mispairings. furthermore, since we do not allow insertions to be adjacent, we use a binary flag b such that b is true if and only if one of t and t is an insertion. the complete dynamic programming recurrences can be found in additional file 1: section s <dig> 
+
+the number of allowed insertions, mismatches, and mispairs is typically very small, and thus the dynamic programming runs in o time, where t is the length of the sequence window t and k is the length of the motif. the search procedure divides the whole sequence into windows of size max{20l,3000}, where l is the maximum length of an occurrence. successive windows overlap by length l so that each occurrence is guaranteed to be completely contained in at least one window.
+
+for the first element e <dig> in the search order, we run the search on the whole window. for the successive elements, we compute a search domain in which this element may occur and restrict the dynamic programming accordingly. the search domain is determined based on the positions of the closest matches on the left and on the right already fixed in the previous steps of the backtracking search and by the flexibility in the length of the elements separating the matches of previously fixed elements from the current element, as illustrated in fig.  <dig> 
+fig.  <dig> computation of the search domain for a single-stranded element s <dig>  here we have a partly matched motif composed of five single-stranded elements s <dig> …,s <dig>  assume that elements s <dig> and s <dig> have already been matched. the match of s <dig> has to start in the left green interval and end in the right green interval, and it has to completely cover the red interval in the middle
+
+
+
+the overall running time of our algorithm can be, in the worst case, exponential in the number of elements of the descriptor. however, the number of these elements is typically small, and if we use a well-chosen search order, the early branching elements will have relatively few matches, thus limiting the degree of the search tree. many branches of the search are terminated early, because no match of an element is found in its search domain.
+
+element ordering
+the search order of elements significantly affects the running time. in this section, we present our data-driven element ordering  strategy. in general, it is advantageous to start with elements that have few matches, thus eliminating a large portion of the sequence to be searched. once the matches of some elements are found, it is also important to consider flexibility of the placement of a new element with respect to those that are already matched.
+
+while these principles are quite natural, it is difficult to transform them into an effective criterion for creating good search orders. therefore, we propose a data-driven method for finding a close-to-optimal element ordering.
+
+our approach consists of two parts. first, we use a heuristic approach to create a set o of candidate orderings. we then use these orderings on sequence windows, measure their actual performance, and select the best one. we do this while processing the initial segment of the query sequence, thus limiting the amount of overhead spent on selecting a suitable search order.
+
+heuristic proposal of element orders
+to create the proposal set o, we concentrate on the first k-tuple of elements in the search order . we create all possible k-tuples and score them by the heuristic scoring function described below. all the k-tuples with scores above some threshold are then augmented to complete search orders forming the proposal set o. in experiments we select k-tuples that achieve score that is at least  <dig> % of the maximum among all k-tuple scores. we limit the size of o to  <dig> if there are too many good candidates.
+
+the goal of this initial heuristic evaluation is to select a small subset of k-tuples to be evaluated empirically. we want this subset to include k-tuples that can be augmented to complete search orders yielding running times close to the optimum. conversely, we should not include too many tuples yielding slow running times, because their evaluation will increase the overall running time.
+
+the score of a k-tuple e <dig> …,ek is a weighted sum of two heuristic functions evaluated for individual elements 
+  <dig> h=∑i=1k2k−ic1·h1+c2·h <dig> 
+
+function h <dig> approximates the information content of element ei and function h <dig> considers flexibility of element ei with respect to the already matched elements e <dig> …,ei− <dig>  note that element weights decrease exponentially, because elements placed earlier in the search order tend to be searched in a larger portion of the sequence. we set the weight c <dig> in the linear function to − <dig> , while c <dig> is  <dig> for paired elements and  <dig> for single-strand elements to reflect that the search for unpaired elements is considerably faster.
+
+information content heuristic
+the first heuristic function h <dig> is an approximation of the information content of an element, favoring elements that pose more specific constraints. thus this function follows the fail-first rule generally used in backtracking searches  <cit> . information content is a measure of uncertainty reduction about an outcome once we have received a new piece of information. in particular, it is the difference in the entropy of a random variable before and after some message has been received. the entropy of a discrete random variable x with possible values x <dig> x <dig> … is defined as 
+  <dig> h=−∑iplog2p. 
+
+let us first consider a single-stranded element s, and let n be the longest possible occurrence of this element. in our setting, the random variable is a sequence of length n and the message is that the sequence starts with a match of the pattern. to estimate the background entropy before receiving the message, we consider all 4n sequences of length n equally likely, obtaining 
+  <dig> hbefore=−∑i=14n14nlog214n=2n. 
+
+we compare this value with the entropy of the uniform distribution over all sequences of length n that have an occurrence of the element starting at the first position. if x is the number of such sequences, we have hafter= log2x and the information content of s is 
+  <dig> h1=hbefore−hafter=2n−log2x. 
+
+since the value of x is hard to compute for complex elements, we use an upper bound xu≥x . to obtain the upper bound xu, we count different ways of obtaining a sequence matching s, disregarding the fact that some sequences may be obtained in several different ways and consequently counted multiple times.
+
+in the simplest case, element s does not contain any flexible-length wild cards and does not allow for any distortions . the element specifies for each position i the set of allowed nucleotides; let c be the size of this set. the value of x is then simply 
+  <dig> x=∏i=1nc. 
+
+next we extend the bound to cases when s contains wild cards. each wild card corresponds to an arbitrary nucleotide or to an empty string. a block of k consecutive wild cards thus corresponds to an arbitrary sequence of length up to k. let x <dig> be the value obtained by formula  if we consider only non-wild card positions in s. a single block of k consecutive wild cards increases the value of n  by k. these k additional nucleotides can be arbitrary, and are split into a block of length i matching the block of wild cards and a block of length k−i located after the element occurrence . since the value of i can be any integer between  <dig> and k, this leads to the upper bound of x14k sequences matching s. if s has multiple blocks of wild cards of lengths k <dig> …,kb, each of them can be split into two blocks independently, leading to the upper bound 
+  <dig> x2=x1·∏i=1b4ki. 
+
+similarly, we adjust the value of x to account for mismatches and insertions allowed in the element to obtain the final upper bound xu; see details in additional file 1: section s <dig>  for practical reasons, we handle mismatches using a formula which is not guaranteed to be an upper bound of the real set size x for each motif, but works well in practice.
+
+the situation is analogous for paired elements. let h be an element consisting of two paired strands h <dig> and h <dig>  and let n be the maximum length of a match to one of these two strands, after accounting for wild cards and insertions. since we now consider sequences of total length 2n, the background entropy is 
+ hbefore=log242n=4n. 
+
+we use hafter= log2x, where x is the number of pairs of sequences of length n such that h <dig> occurs in the first sequence starting at the first position, and h <dig> occurs in the second sequence ending at the last position, and these two occurrences satisfy the complementarity constraints with up to allowed amount of distortion. we again use an approximate upper bound xu instead of the actual count x, counting different ways that such a matching can occur.
+
+as with single-stranded elements, we first count the number of sequences that match h without considering wild cards and distortions. let p be the number of valid base pairs between position i of h <dig> and the corresponding position of h <dig>  the value of p is determined by both complementarity constraints specified by h and by sequence constraints for the respective positions in h <dig> and h <dig>  as before, the number of matching sequences is the product 
+  <dig> x1=∏i=1np. 
+
+to obtain the final bound xu, we adjust the value of x <dig> to account for wild cards, mismatches, and insertions, similarly as in the single-stranded case. we also adjust the bound for allowed mispairs, where the two paired nucleotides do not form a valid base pair. details can be found in additional file 1: section s <dig> 
+
+domain flexibility heuristic
+the second heuristic scoring function h <dig> measures the flexibility of positioning element ei with respect to already matched elements e <dig> …,ei− <dig>  the matches of these elements specify the search domain for element ei, as shown in fig.  <dig>  longer domains require more time for finding matches and are also likely to yield more matches, each of which will be then examined individually in backtracking. therefore, we set the weight c in  to be negative.
+
+to compute the exact size of the search domain, we need to know positions of matches of e <dig> …,ei− <dig>  in order to score a particular search order before the search starts, we need to approximate flexibility of ei without this knowledge. for an unpaired element ei, we find the nearest fixed element eℓ on the left side of ei . then we sum up the flexibilities of all elements between eℓ and ei in the descriptor, where the flexibility of an element is the difference between its maximum and minimum length. we denote this sum fleft. analogously, we obtain fright for the right side of ei. if there is a fixed element on both sides of ei, we take the minimum of fleft and fright, as both are upper bounds on the search domain size for ei: 
+  <dig> h2=min{fleft,fright}. 
+
+if there is no fixed element at one side, we only use the other side to compute h <dig>  for a paired element ei, we first compute flexibilities of the two strands individually, while considering the other strand to be fixed. then we take the maximum of these two.
+
+candidate order elimination
+the heuristic function defined above is used to select promising initial k-tuples for search orders. these are then completed to full search orders by adding remaining elements in the order determined by the information content heuristic, forming the initial candidate set o.
+
+the initial candidate set contains a mix of good and bad orderings. we process several window s of the sequence to determine which orderings are good. for each window, we sample a random search order x from o and use it in the search procedure, measuring its performance tx. in particular, we record nanoseconds used by the process  and normalize it by the window size. based on the gathered data, we continually eliminate orderings with bad performance using a statistical test.
+
+we treat tx as a random variable, and approximate it by the normal distribution with an unknown mean and variance. our goal is to pick from the set of candidate orderings o the ordering leading to the shortest mean execution time. formally, we want to find x∗∈o, such that for each y, e≤e. given several observed values of tx and ty, we use welch’s t-test  <cit>  to test the null hypothesis e≥e against the alternative hypothesis e<e. this test is used for hypothesis testing concerning difference between the actual means of two normally distributed populations with possibly unequal variances, based on independent sets of samples from these distributions  <cit> .
+
+each time we gather a new sample from tx for some x∈o, we test x against the rest of o. when we observe a statistically significant difference between two candidates , we eliminate the one with the higher mean time of execution from set o. if two candidates cannot be shown significantly different, even after both were sampled many times , we simply eliminate the ordering with the higher sample mean.
+
+once we eliminate all but one search order from set o, we start to refine this final ordering. recall that it consists of an initial k-tuple extended to a full ordering by the information content heuristic. we drop this heuristic extension, and start training the following k-tuple in the search order with the first k-tuple already fixed. we continue until we completely fix the search order.
+
+performance of ddeo
+we have evaluated ddeo heuristic on the hepatitis delta virus like ribozyme  descriptor . even though the entropy-based heuristic is not perfect and the candidate set contains bad orderings in addition to the good ones, the orderings with bad performance are eliminated after only a few samples . these “bad runs” thus do not increase the overall running time significantly. .
+fig.  <dig> descriptor for hdv-like ribozyme with structured p <dig> region. the motif contains four paired elements organized in a double pseudoknot
+
+
+
+RESULTS
+we have performed several experiments comparing rnarobo with other established rna motif search tools: rnabob , rnamotif , rnamot , and ralignator  <cit> . we have concentrated on both the speed and the ability to discover biologically meaningful motif occurrences.
+
+accuracy of hits table  <dig> shows the results of an experiment, where we revisited several scientific studies involving discovery of ribozymes and aptamers  <cit> . we have constructed rna descriptors for rnabob and used both rnabob and our new tool rnarobo to identify motif occurrences. extended description of the experiment and the descriptors are included in additional file 1: section s <dig>  as expected, the results of the two programs were identical, with rnarobo running much faster . almost all of the hits found by the programs were occurrences of known targets also identified in the original studies, confirming the accuracy of the algorithm .
+
+sequence
+descriptor
+#hits
+known targets found
+note
+
+yarrowia lipolytica
+
+bacillus cereus
+
+
+strongylocentrotus purpuratus
+ff: only hits passing the fold-filter are reported
+
+
+
+novel findings compared to rnabob, rnarobo allows insertions  in helix elements, enabling much more flexible descriptors better characterizing certain families. for example, in the case of hammerhead type i ribozyme , the descriptor with insertions identified  <dig> known occurrences in yarrowia lipolytica   <cit> , compared to a single occurrence identified without insertions.
+
+allowing insertions, we have also discovered several new candidate occurrences. firstly, three new hits of hammerhead ribozyme  in b. cereus are likely false positives as determined by the fold-filter pipeline  <cit> . this pipeline uses tools from viennarna package  <cit>  and dotknot  <cit>  to determine if an occurrence of a motif is likely to assume the secondary structure implied by the descriptor.
+
+on the other hand, a novel gtp aptamer  in davis and szostak library is likely functional, since the library was selected for gtp binding.
+
+in case of hammerhead ribozyme  in y. lipolytica, the number of hits increased massively from  <dig> to  <dig> by allowing insertions. these hits form two distinct families. the first contains previously known “yli” ribozymes, as identified by perreault et al.  <cit> . however, the ten hits of the second family are novel and pass through the fold-filter pipeline. they likely represent a novel hhr family in y. lipolytica genome similar to a large family of hhrs in the schistosoma mansoni genome ; no hhr type i families besides the “yli” ribozymes were previously found in y. lipolytica.
+
+allowing insertions in hdv-like ribozymes in s. purpuratus genome did not yield any new hits . we have attempted to loosen the constraints on the p <dig> region, which yielded numerous hits both with and without insertions. consequently, we have applied fold-filter and kept only hits passing the pipeline. the descriptor with insertions yielded a previously unidentified hit that aligns well with other hdv ribozymes, thus likely being functional. the above examples show that rnarobo can be helpful in finding interesting novel occurrences, even for known families established in the literature.
+
+speed comparison table  <dig> shows the comparison of running times of scanning both strands of the whole human genome for occurrences of nine realistic rna motifs. in most cases, rnarobo is the fastest tool, in many cases speeding up the search more than 100-fold. note that running times of both rnabob and rnamotif greatly depend on the complexity of the motif, while rnarobo does not show pronounced dependency on the descriptor. this is most apparent for the hdv descriptors which feature a double pseudoknot. allowing insertions in the helices does not significantly slow down rnarobo search.
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+experiments were run on intel xeon e <dig> cpu. rnarobo-ins is rnarobo run with modified descriptors allowing insertions in helical elements. rnamot did not finish on most of the inputs within time limit of three days. only results that finished within three days are shown. since ddeo is randomized, we show the average running time of five runs of rnarobo. standard deviation was up to  <dig> % or  <dig> sec, with the exception of the hhr extended descriptor, where the running time ranged from  <dig> to  <dig> sec
+
+boldface numbers represent the best running times for a particular descriptor
+
+
+
+ralignator  <cit>  is a recent addition to the family of descriptor-based search tools. in contrast to the previous works, the authors add a preprocessing step building index data structures that help to speed up the subsequent searches. unfortunately, the structural pattern definition language of ralignator is very different from that used by other tools; therefore it is difficult to translate rnarobo patterns to ralignator and vice versa. nevertheless, we defined approximate counterparts of two patterns  in the other descriptor language in order to compare the two tools. results convincingly show that rnarobo outperforms ralignator in terms of the running time from four-fold to more than 1000-fold . these results hold whether we used exact or approximate patterns, with or without preprocessing .
+
+comparison to convariance-model-based tools descriptor-based tools, such as rnarobo, are used by researchers to explore motif families for which only a few occurrences are known, and are heavily based on incorporating user’s intuition in building motif descritors. on the other hand, covariance models, such as infernal  <cit> , can be used to search for new instances for motif families where many occurrences are already known, and their common features are extracted automatically and encoded in the covariance model. due to this substantial difference, it is difficult to design a fair comparison between these two classes of algorithms.
+
+nevertheless, we have attempted to compare rnarobo to infernal in case of the hammerhead ribozyme family that has been previously extensively studied by several groups. infernal was generally 3– <dig> times slower than rnarobo when searching for these motifs in yarrowia lipolytica. both programs identify bona fide ribozymes; however, infernal also identifies candidates with mutations in the active site of the catalytic rna, making these instances most likely inactive. such results may be useful for rnas that tolerate a certain level of global mutation rate, but in our case we most likely find false positives. the descriptor of rnarobo allows specification of regions that are under strong purifying selection and need to be conserved; on the other hand, allowing insertions in helices allowed rnarobo to discover a new putative family of yarrowia lipolytica hammerhead ribozymes that infernal did not find.
+
+CONCLUSIONS
+in this work, we have developed a new tool rnarobo for rna motif search. rnarobo allows expert human users to describe the most relevant features of a target rna structure and then to search for distant homologs in available genomic data. the focus of our work was an automated strategy for element ordering in the backtracking search employing a heuristic scoring function based on information content and search domain size estimates. we used statistical tests to eliminate candidate orderings that do not perform well in practice. our experiments demonstrate that rnarobo is much faster for complex motifs than existing tools, thus facilitating large-scale whole-genome searches.
+
+our work leaves open further avenues for research. the problem of finding the best element ordering, or even estimating the expected number of matches of a single element in a random sequence, is very intriguing from the theoretical point of view. even though our simple elimination scheme proved to be effective in practice, it would be interesting to treat the problem as an on-line learning problem and develop a theory that would allow us to estimate how fast a particular elimination algorithm converges to the best  ordering. our heuristic scoring function can perhaps be improved by adding more partial scores and combining them with weights estimated by regression techniques from performance data observed on several descriptors. finally, dna sequences are non-uniform, and a scheme that could adapt to changing character of sequences as they are processed would likely lead to further improvement of our algorithm. an interesting application of our algorithm would be assigning basic structural motifs to sequences as they are produced by high-throughput sequencers.
+
+a logical extension of our problem is to construct descriptors automatically from known examples of rnas. a step in this direction has already been taken and several algorithms to locate common substructures of two rnas were developed  <cit> . such patterns are then basis of several practical tools for pattern-based rna comparison, including exparna  <cit> , locarna  <cit> , and exparna-p  <cit> .
+
+ethics approval and consent to participate
+not applicable.
+
+consent for publication
+not applicable.
+
+availability of data and material
+software is available at http://compbio.fmph.uniba.sk/rnarobo. data sets are publicly available as outlined in the paper. descriptors for the searches are provided in additional file  <dig> 
+
+additional file
+additional file  <dig> supplementary online material. the file contains supplementary material with additional details on methods, file formats, and experiments. 
+
+ abbreviations
+
+not applicable.
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+al, tv, and bb conceived the study. lr, tv, and bb developed algorithms and methods. lr implemented the software. lr, and rj designed and executed the experiments. all authors have participated on writing the article. all authors read and approved the final manuscript.
+
+funding
+
+this research was funded by vega grants 1/0684/ <dig>  and 1/0719/ <dig> , slovak research and development agency grant apvv-14- <dig>  pew charitable trusts , nih eureka 5r01gm <dig> , nsf mcb  <dig> , nih 1f31gm <dig> .
+
+authors’ information
+
+not applicable.
+

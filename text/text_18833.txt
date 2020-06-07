@@ -1,0 +1,154 @@
+BACKGROUND
+although the use of clustering methods has rapidly become one of the standard computational approaches in the literature of microarray gene expression data analysis  <cit> , little attention has been paid to uncertainty in the results obtained. in clustering, the patterns of expression of different genes across time, treatments, and tissues are grouped into distinct clusters , in which genes in the same cluster are assumed to be potentially functionally related or to be influenced by a common upstream factor. such cluster structure is often used to aid the elucidation of regulatory networks. agglomerative hierarchical clustering  <cit>  is one of the most frequently used methods for clustering gene expression profiles. however, commonly used methods for agglomerative hierarchical clustering rely on the setting of some score threshold to distinguish members of a particular cluster from non-members, making the determination of the number of clusters arbitrary and subjective. the algorithm provides no guide to choosing the "correct" number of clusters or the level at which to prune the tree. it is often difficult to know which distance metric to choose, especially for structured data such as gene expression profiles. moreover, these approaches do not provide a measure of uncertainty about the clustering, making it difficult to compute the predictive quality of the clustering and to make comparisons between clusterings based on different model assumptions . attempts to address these problems in a classical statistical framework have focused on the use of bootstrapping  <cit>  or the use of permutation procedures to calculate local p-values for the significance of branching in a dendrogram produced by agglomerative hierarchical clustering  <cit> .
+
+a commonly used computational method of non-hierarchical clustering, based on measuring euclidean distance between feature vectors is given by the k-means algorithm  <cit> . however, the k-means algorithm requires the number of clusters to be predefined, and has been shown to be inadequate for describing clusters of unequal size or shape  <cit> , which limits its applicability to many biological datasets.
+
+bayesian methods provide a principled approach to these types of analyses and are becoming increasingly popular in a variety of problems across many disciplines: clustering stocks with different price dynamics in finance  <cit> , clustering regions with different growth patterns in economics  <cit> , in signal processing applications  <cit> , as well as in computational biology and genetics  <cit> .
+
+bayesian approaches to hierarchical clustering of gene expression data have been described by neal  <cit> , who used a dirichlet diffusion tree model, and by heard et al.  <cit>  who describe a bayesian model-based approach for clustering time series, based on regression models and nonlinear basis functions. in previous work  <cit>  we have also described an approach to the problem of automatically clustering gene expression profiles, based on the theory of dirichlet process  mixtures. however, all this work, like most bayesian approaches, is based on sampling using markov chain monte carlo  methods. while mcmc has useful theoretical guarantees, its applicability to large post-genomic datasets is limited by its speed.
+
+in this paper, we present an r/bioconductor port of the fast novel algorithm for bayesian agglomerative hierarchical clustering  introduced by heller and ghahramani  <cit> . this algorithm is based on evaluating the marginal likelihoods of a probabilistic model, and may be interpreted as a bottom-up approximate inference method for a dirichlet process mixture model . a dpm is a widely used model for clustering  <cit>  which has the interesting property that the prior probability of a new data point joining a cluster is proportional to the number of points already in that cluster. moreover, with a probability proportional to α/n the th data point forms a new cluster. here α is a hyperparameter controlling the expected number of clusters as a function of the number of data points n. the bhc algorithm uses a model based criterion based on the marginal likelihoods of a dpm to merge clusters, rather than using an ad-hoc distance metric. bayesian hypothesis testing is used to decide which cluster merges increase the tree quality. importantly, the optimum tree depth is also calculated, resulting in the best number and size of clusters to fit the data.
+
+implementation
+the bhc algorithm is similar to traditional agglomerative clustering in that it is a one-pass, bottom-up method which initializes each data point in its own cluster and iteratively merges pairs of clusters. however, instead of distance, the algorithm uses a statistical hypothesis test to choose which clusters to merge.
+
+let  = {x,..., x} denote the entire data set, and  the set of data points at the leaves of the subtree ti. the algorithm is initialized with n trivial trees, {ti : i =  <dig> ..n} each containing a single data point  = {x}. at each stage the algorithm considers merging all pairs of existing trees. in considering each merge, two hypotheses are compared. the first hypothesis, denoted by  is that all the data in  were in fact generated independently and identically from the same probabilistic model, p with unknown parameters θ. the alternative hypothesis, denoted by  would be that the data in  has two or more clusters in it.
+
+to evaluate the probability of the data under hypothesis , we need to specify some prior over the parameters of the model, p with hyperparameters β. we now have the ingredients to compute the probability of the data  under :
+
+   
+
+this calculates the probability that all the data in  were generated from the same parameter values assuming a model of the form p. this is a natural model-based criterion for measuring how well the data fit into one cluster.
+
+the probability of the data under the alternative hypothesis,  , is simply a product over the subtrees  where the probability of a data set under a tree ) is defined below. combining the probability of the data under hypotheses  and , weighted by the prior that all points in  belong to one cluster, , we obtain the marginal probability of the data in tree tk:
+
+   
+
+the prior for the merged hypothesis, πk, can be defined such a manner that bhc efficiently computes probabilities of clusterings consistent with the widely used dirichlet process mixture model. note that πk is not an estimated parameter but rather a deterministic function of α and the number of points in a given subtree. it is computed bottom-up as the tree is built as described in  <cit> .
+
+the posterior probability of the merged hypothesis  is then obtained using baye's rule:
+
+   
+
+if this posterior probability rk >  <dig>  it means that the merged hypothesis is more probable than the alternative partitionings and therefore sub-trees should be left intact. conversely, if rk <  <dig>  then the branches constitute separate clusters.
+
+the bhc algorithm is very simple and is shown in the appendix. full details of the algorithm and underlying theory, as well as validation results based on synthetic and real non-biological datasets  can be found in  <cit> .
+
+evaluating the quality of clustering
+for a data set which has labelled classes, it is possible to compare the quality of hierarchical clusterings obtained from different methods to these known classes. however, the literature is notably lacking in quantitative measures of dendrogram quality suitable for use with the bhc algorithm.
+
+for instance, most of the quality indices implemented in the clvalid package  <cit>  require a distance metric: since bhc does not use a distance metric these indices are unsuitable for our comparisons. another commonly used index for measuring the agreement between two clusterings is the adjusted rand index  <cit> : large values for the adjusted rand index mean better agreement between two clusterings. a value of unity would indicate a perfect match between the clustering partition and ground truth, with zero being the expected result for a random partition. however, this index is only really of use if the true clustering structure is known. in most real-world applications of clustering to microarray data, the biological ground truth is unknown. nevertheless, the adjusted rand index has been used to evaluate the performance of a variety of clustering algorithms on experimental microarray data by yeung et al  <cit> . these authors used a subset of the data described by ideker et al.  <cit> , a set of  <dig> mrna profiles across  <dig> experiments representing systematic perturbations of the yeast galactose-utilization pathway. a subset of  <dig> of these genes were assigned to four functional categories , based on gene ontology  annotations. however, in their supplementary material, yeung et al. note that since this array data may not fully reflect these functional categories, this classification should be used with caution.
+
+for the purposes of comparison, we have applied our bhc algorithm to this data set, treating the four assigned classes as "ground truth", with the caveat above. the bhc algorithm automatically correctly identifies four classes in the data, as shown by the dendrogram . the adjusted rand index is  <dig> , which is in the upper range of those calculated by yeung et al.  <cit> . for comparison, standard hierarchical clustering using average linkage and a correlation distance metric gives an adjusted rand index of  <dig> . the shrinkage correlation coefficient  of yao et al.  <cit> , which used the same data set as a benchmark, gives an adjusted rand index of  <dig> .
+
+quality measures
+in order to perform the comparison of two dendrograms produced by different clustering methods, we have devised a new quantitative measure: dendrogrampurity, which takes as input a dendrogram tree structure  and a set of class labels  for the leaves of the tree and outputs a single number measuring how "pure" the subtrees of  are with respect to the class labels .
+
+dendrogrampurity: where t is a binary tree  with set of leaves ℒ = { <dig> ..., l} and  = {c <dig> ..., cl} is the set of known class assignments for each leaf. the dendrogrampurity is defined to be the measure obtained from this random process: pick a leaf ℓ uniformly at random. pick another leaf j in the same class, i.e. cℓ = cj. find the smallest subtree containing ℓ and j. measure the fraction of leaves in that subtree which are in the same class, i.e. cℓ. the expected value of this fraction is the dendrogrampurity. this measure can be computed efficiently using a bottom up recursion . the overall tree purity is  <dig> if and only if all leaves in each class are contained within some pure subtree.
+
+for each leaf of the tree it also useful to measure how well it fits in with the labels of the leaves in the surrounding subtree. leaves which do not fit well contribute to decreasing the overall dendrogram purity. these may highlight unusual or misclassified genes, drugs or cell lines. we define the leafharmony of a leaf ℓ as a measure of how well that leaf fits in.
+
+leafharmony: pick a random leaf j in same class as leaf ℓ, i.e. cj = cℓ, j ≠ ℓ. find the smallest subtree containing ℓ and j. measure the fraction of leaves in that subtree which are in class cℓ. the expected value of this fraction is the leafharmony for ℓ and it measures the contribution of that leaf to the dendrogrampurity.
+
+for the case of data sets where there are not clearly defined class labels these measures are not applicable so we have defined a third measure, the leafdisparity, which highlights differences between two hierarchical clusterings  of the same data. intuitively, this measures for each leaf of one dedrogram how similar the surrounding subtree is to the corresponding subtree in the other dendrogram. define the correlation between two sets  and ℛ to be , where |·| denotes the number of elements in a set.  and . note that a tree  can be converted into a set-of-sets representation  = {τ <dig> ..., τk}. for each node j in the tree, τj is the set of the leaves in the subtree descending from j. .
+
+leafdisparity: convert each tree into a set-of-sets representation. align the trees: for each set τj in , find the set ρk in  such that the correlation is greatest: rj = maxkc. for each leaf ℓ find the average of rj over all sets that contain ℓ, calling this . if the element ℓ appears in both  and  let its disparity be the minimum of  <dig> -  in either tree. thus this measure will be symmetric and sensitive to disagreement between the hierarchical clustering given by each tree.
+
+software implementation
+the r/bioconductor port consists of two functions, bhc and writeoutclusterlabels. the bhc function calls efficient c++ routines for the special case of the bhc algorithm as described in this paper. the algorithm has a computational complexity of order n <dig> for n data points, and runs in about  <dig> minutes on a macbook pro  <dig> ghz laptop for a data-set of size  <dig> and dimensionality  <dig> . the reverse clustering  runs in approximately a minute. for runtimes for data sets of various sizes .
+
+the writeoutclusterlabels function outputs the resulting cluster labels to an ascii file. because the bhc function outputs its results in a standard r dendrogram object, a graphical representation of the output can be obtained by calling the standard r plot function. a 2d heat-map visualization of the clustering can be generated using the standard r function heatmap.
+
+in our model the hyperparameters are the concentration parameter, α, which controls the distribution of the prior weight assigned to each cluster in the dpm, and is directly related to the expected number of clusters, and the hyperparameters, β, of the probabilistic model defining each component of the mixture. the concentration parameter, α, was fixed to a small, positive value . the hyperparameters for the individual mixture component  priors β are scaled by a single additional hyperparameter, giving the data model greater flexibility. this additional hyperparameter was determined by optimising the overall model evidence , using a combination of golden section search and successive parabolic interpolation . the unscaled β hyperparameters were set by using the whole data-set as a measure of the relative proportions of each discrete value for each gene.
+
+application to microarray data
+we illustrate our methods with application to a published data set of genechip expression profiles of a. thaliana subjected to a variety of biotic and abiotic stresses, derived from the atgenexpress consortium , identical to that used by torres-zabala et al.  <cit> . the expression profiles were selected, normalized and interpreted by the gc content-adjusted robust multi-array algorithm   <cit>  exactly as in the original manuscript. continuous transcript levels were discretised into three levels  by dividing the levels at fixed quantiles for each given gene. this makes our analyses more robust to any experimental systematics, as well as simplifying the algorithm by using multinomial distributions and their conjugate dirichlet priors. by discretizing mrna levels we model the important qualitative changes in mrna levels without making strong unjustifiable assumptions  about the form of the noise in microarray experiments. we note that such an approach has also been used by other workers in the field  <cit> . in order to identify the optimal discretization thresholds we utilized the following procedure. the discretization threshold is parameterised via the quantiles, x, of the data for a given gene, such that the data counts are distributed in the proportions x : : x. we can then optimise x jointly over all the genes by running the bhc algorithm for different x values  and using the lower bound on the overall model evidence, modified to account for the above parameterisation by dividing the evidence by the relevant bin width for each data point. evidence values and the optimal value for the hyperparameter mentioned in the previous section are shown . these results indicate that the optimal quantitles for the discretization of this data set are 20/60/ <dig> and 25/50/ <dig> for the experiment and gene clustering, respectively.
+
+RESULTS
+clustering of the arabidopsis genes and experimental conditions was carried out using our bhc algorithm and a biologically plausible clustering pattern was observed . this was compared to the conventional agglomerative hierarchical clustering of the same data carried out by de torres-zabala et al.  <cit> , using an uncentred correlation coefficient as a distance metric and complete linkage. we observed that the essential features of the hierarchical clustering of experimental conditions were reproduced, but with more specific clusters as evidenced by the dendrogrampurity measure of  <dig>   versus  <dig>  . leafharmony measures for the bhc clustering  show that most leaves have a value of  <dig> , indicating the consistency of the clusters produced. in particular, we observed specific clusters for drought, osmotic stress and salt. in the case of pathogen infection  and the phytohormone abscisic acid  treatment, we find that each group of experiments forms a well-defined cluster. we note that in the clustering of de torres-zabala et al.  <cit>  only two of the aba experiments  cluster at the lowest level, and splitting the dendrogram at this level places the aba  <dig> h experiment in a separate cluster with salt and osmotic stress experiments. the clustering produced by bhc thus seems more intuitive, with the aba  <dig> h experiment appearing unconnected in the dendrogram. an advantage of the bhc method over conventional hierarchical clustering is that bayesian hypothesis testing is used to decide which clusters to merge.
+
+the overall dendrogram structures, are, however, demonstrably different, as evidenced by the comparatively low values of leafdisparity  and the adjusted rand indices of  <dig>  for the gene clusters and  <dig>  for the experiment clusters.
+
+for the genes, we find that bhc produces a clustering of finer granularity; for instance, genes highlighted in clusters i-iv in de torres-zabala et al.  <cit>  are split between a number of smaller clusters . most of the genes in clusters i and ii are divided between our clusters  <dig> and  <dig>  cluster  <dig> contains  <dig> out of the  <dig> genes in cluster ii, including six pp2cs, nced <dig> and three nac domain transcription factors, all of which are known to be regulated by aba. genes in cluster iii are all in bhc cluster  <dig>  which is enriched with gene ontology annotations indicating chloroplast function . to further validate the quality of the clusters produced by bhc we have analyzed the statistically significantly over-represented go annotations related to a given cluster of genes. the probability that this over-representation is not found by chance can be calculated by the use of a hypergeometric test, implemented in the r/bioconductor package gostats  <cit> . because of the effects of multiple testing, a subsequent correction of the p-values is necessary. we apply a bonferroni correction, which gives a conservative  correction for multiple testing. we extract the lowest levels of the ontology graphs using the gostats command 'sigcategories'. in the supplementary material we show the lowest level go annotations for the bhc clusters which are significant at a bonferroni-corrected p-value of  <dig> . we compared the enriched go annotations for the bhc clusters to those from the agglomerative hierarchical clustering of torres-zabala et al. . to quantify this comparison, we calculated the biological homogeneity index  of datta and datta  <cit>  as implemented in the clvalid package of brock et al.  <cit> . this index provides a measure the 'biological meaning' of clusters based on the homogeneity of functional classes represented by the go annotations. taking the number of clusters to be  <dig>  as found by bhc, we calculate a bhi of  <dig>   versus  <dig>  , indicating more biologically homogeneous clusters in the former case.
+
+as mentioned above, we observe some overlap between significant go annotations for two of these clusters . however, many biologically significant terms are enriched only in the bhc clusters , indicating that the bhc clusters represent a more refined view of the data, which enables processes important in defence to be identified. this can be illustrated by examining the go groupings of the bhc clusters that are intuitively meaningful in the context of plant-microbe interactions.
+
+for example, cluster  <dig> comprises a major cluster of genes associated with chloroplast function and chlorophyll biosynthesis. chloroplasts are emerging as a key target of bacterial effector function  <cit> .
+
+interestingly, cluster  <dig> is strongly biased towards genes involved in ion homeostasis, and changes in ion fluxes represent the earliest physiological changes associated with plant defences. rapid ion changes are often associated with changes in phosphorylation status of transporters, and cluster  <dig> is over-represented by cellular components associated with phosphorylation. reconfiguration of secondary metabolism is central to the ability to modify plant defences. notably, clusters  <dig> and  <dig> elegantly capture pathway components of indolic and jasmonic acid metabolism. within this context, cluster  <dig> is worthy of further investigation. members of cluster  <dig> directly impact upon the secondary metabolism defined in clusters  <dig> and  <dig> above. thus the bhc approach may have revealed a set of co-regulated genes whose biological activity is responsible for activating the biosynthetic networks highlighted in clusters  <dig> and  <dig> 
+
+experiments to address this hypothesis are currently underway.
+
+CONCLUSIONS
+we have presented an r/bioconductor port of a fast novel algorithm for bayesian agglomerative hierarchical clustering and have demonstrated its use in clustering gene expression microarray data. biologically plausible results are presented from a well studied data set: expression profiles of a. thaliana subjected to a variety of biotic and abiotic stresses. the bhc approach has identified a new avenue of research not revealed by the previous clustering analyses of this data. the use of a probabilistic approach to model uncertainty in the data, and bayesian model selection to decide at each step which clusters to merge, avoids several limitations of traditional clustering methods, such as how many clusters there should be and how to choose a principled distance metric. extensions of the algorithm described here are straightforward for other distributions in the exponential family, such as gaussians  <cit> , which may be useful when such distributions are well justified for the data in question.
+
+availability and requirements
+available under the gnu gpl from  and through the bioconductor website. online supplementary data is available at the journal's web site.
+
+authors' contributions
+rs and yx wrote the code. rs carried out the computational analyses. kh and zg developed the algorithm. wmt and mg provided the arabidopsis data. kd, mg, zg and dlw wrote the paper. zg and dlw directed the research. all authors read and approved the final version of the manuscript.
+
+appendix
+   input: data  = {x ... x}, model p, prior p
+
+   initialize: number of clusters c = n, and  = {x} for i =  <dig> ...n
+
+   while c >  <dig> do
+
+      find the pair  and  with the highest probability of the merged hypothesis:
+
+  
+
+      merge , tk ← 
+
+      delete di and dj, c ← c - 1
+
+   end while
+
+   output: bayesian mixture model where each tree node is a mixture component
+
+the tree can be cut at points where rk <  <dig> 
+
+algorithm 1: bayesian hierarchical clustering algorithm
+
+supplementary material
+additional file 1
+click here for file
+
+ additional file 2
+click here for file
+
+ additional file 3
+click here for file
+
+ additional file 4
+click here for file
+
+ additional file 5
+click here for file
+
+ additional file 6
+leafdisparity values for the nasc experiments. the bhc clustering dendrogram is compared to a standard hierarchical method using uncentred correlation coefficients and complete linnkage.
+
+click here for file
+
+ additional file 7
+click here for file
+
+ additional file 8
+bhc cluster membership. bhc cluster membership
+
+click here for file
+
+ additional file 9
+go annotations for bhc clusters. statistically significantly over-represented go annotations for bhc clusters 
+
+click here for file
+
+ additional file 10
+go annotations for agglomerative hierarchical clustering. statistically significantly over-represented go annotations for clusters manually identified from agglomerative hierarchical clustering 
+
+click here for file
+
+ acknowledgements
+this work is supported by the engineering and physical sciences research council , the biotechnology and biological sciences research council  and an eu marie-curie irg fellowship .

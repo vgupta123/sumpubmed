@@ -1,0 +1,481 @@
+BACKGROUND
+metabolic network models describing the biochemical reaction network and material fluxes inside microorganisms open interesting routes for the model-based optimization of bioprocesses. the estimation of these fluxes is called metabolic flux analysis . based on measurements of exchange fluxes between the environment and the cell, and possibly thermodynamic, physiological, statistical  <cit>  or loop-law constraints  <cit>  and/or measurements from 13c labeling experiments, an accurate estimate of the full set of fluxes can be obtained . dynamic metabolic flux analysis  has lately been studied as an extension of regular mfa, rendering a dynamic view of the fluxes, also in non-stationary conditions  <cit> . recent dmfa implementations suffer from some drawbacks, though. in this work, a new methodology based on a b-spline parameterization of the fluxes is presented. these are estimated using state-of-the-art dynamic optimization methods and tools, i.e., orthogonal collocation, an interior-point optimizer and automatic differentiation. the resulting algorithm is also fully contained, resolving the fact that in previous methods, a choice of the set of free fluxes was required. as will be shown, the choice of this set has a significant influence on the resulting estimates, highlighting the need for a more reasoned determination of this set. in this algorithm this set of free fluxes is chosen optimally, alleviating the need for an a priori  choice and improving the estimates.
+
+in the background section, the basics of metabolic reaction networks are covered, together with the derivation of the dmfa model structure. existing implementations of dmfa are described, along with their features and drawbacks. the main contribution of this work is in the methods section. here, the proposed methodology of incremental flux estimation using b-splines is described. this methodology is validated on the case studies in the results and discussion section. finally, the conclusions section summarizes the main results of this work.
+
+metabolic reaction networks
+a metabolic reaction network represents  all metabolic reactions which occur inside a cell  <cit> . in these networks, mmetabolites, both intracellular and extracellular, are connected to each other through nreactions, which can be intracellular reactions or reactions between the cell and the environment, so-called exchange reactions. the reaction rates of these reactions, the so-called fluxes, are summarized in the  flux vector v. the metabolites can be further subdivided into mintintracellular metabolites and mextextracellular metabolites. growth of the cell is usually represented as a pseudo-reaction to biomass, which is defined as an additional extracellular compound, rendering mext+ <dig> extracellular metabolites in total. all reactions are also classified as being reversible or irreversible, based on thermodynamic information. this results in nirr irreversible reactions and nrev reversible reactions. the information embedded in this network can be represented by the stoichiometric matrixs of dimension , which contains the stoichiometric coefficients of all reactions. in particular, the element sij at row i and column j contains the stoichiometric coefficient of metabolite i in reaction j. this stoichiometric matrix can be further partitioned into sint, sext and sbiot, which are the row corresponding to intracellular and extracellular metabolites, and biomass, respectively. to also describe the irreversibilities in matrix form, an  irreversibility matrix iirr is set up, which selects the irreversible fluxes from the full set of fluxes. a small network with corresponding stoichiometric and irreversibility matrices is shown in figure  <dig>  for this network, mint=mext= <dig> and n= <dig>  the iirr matrix is made up of three rows, as there are three irreversible fluxes. every row contains a  <dig> at one of the columns corresponding to an irreversible flux.figure  <dig> 
+example of metabolic reaction network, stoichiometric matrix and irreversibility matrix. a small-scale example of a metabolic reaction network with  <dig> fluxes,  <dig> intracellular metabolites,  <dig> extracellular metabolites and biomass. the number of free fluxes for this network is  <dig>  in the middle is the corresponding stoichiometric matrix, split up into the parts for intracellular and extracellular metabolites, and biomass, and at the bottom is the irreversibility matrix for this network.
+
+
+
+modeling of intracellular dynamics
+by writing the dynamic mass balances for all intracellular metabolites, the following system of ordinary differential equations  arises:   dcintdt=sint·v−μ·cint 
+
+with t the time , cint the  vector of intracellular concentrations , sint the mint rows of the stoichiometric matrix which correspond to the intracellular metabolites, v the  vector of specific fluxes  and μ the scalar specific growth rate of the organism  which equals the flux of the pseudo-reaction to biomass. the first term on the right hand side is the reaction term, the second term is a dilution term which arises due to the growth of the biomass. to get a fully defined model, expressions for all intracellular fluxes are needed.
+
+multi-scale model for microbial dynamics
+the intracellular model ) can be combined with a description for the extracellular dynamics, rendering a multi-scale model describing both intracellular and extracellular concentration variables:   dcextdt=sext·v·cbio 
+
+  dcbiodt=sbiot·v·cbio 
+
+  dcintdt=sint·v−μ·cint 
+
+with cext the  vector of extracellular concentrations , cbio the scalar biomass concentration , sext the mext rows of the stoichiometric matrix which correspond to the extracellular metabolites and sbiot the row of the stoichiometric matrix which corresponds to the biomass pseudo-metabolite. this system is for the description of concentration evolution in a bioreactor operating in batch-mode, but of course transport terms can be added to make it suitable for fed-batch or continuous operation of bioreactors. it is important to notice that cext and cbio are defined per liter of medium, while cint is defined per gram of biomass dry weight. as the fluxes are specific, i.e., defined per gram of biomass dry weight, which is more descriptive from a kinetics point of view, the fluxes are multiplied with the biomass concentration in equations  and . again, to fully define this model structure, expressions for all fluxes are needed. these expressions are typically estimated from experimental data.
+
+simplifying the multi-scale model: assuming a pseudo steady-state
+because the number of fluxes, and hence the number of expressions which need to be identified and estimated from experimental data, grows quite large for even a medium-scale metabolic reaction network, a simplification is typically made in the form of a pseudo steady-state assumption. first, the dilution term in equation  is discarded as it is typically much smaller than the reaction term  <cit> . based on the empirical knowledge that the intracellular dynamics are much faster than the extracellular dynamics  <cit> , the pseudo steady-state assumption can be used to simplify the intracellular part of the multi-scale model to the following  system of linear equations:   sint·v= <dig> 
+
+in the majority of metabolic reaction networks, the number of intracellular metabolites is smaller than the number of reactions, making this an underdetermined system of linear equations. the number of degrees of freedom d in the system equals the number of unknowns minus the number of independent equations, i.e., d=n−rank. all solutions to this system can be written as a linear combination of a set of independent fluxes, called the free fluxes:   v=k·u 
+
+with k a suitable basis for the null space of sint of dimensions  and u the  vector of free fluxes. by substituting this into the extracellular model, the following simplified model arises:   dcextdt=sext·k·u·cbio 
+
+  dcbiodt=sbiot·k·u·cbio 
+
+note that to fully define this simplified model, only expressions for the free fluxes need to be identified, resulting in a substantial reduction in experimental and numerical cost.
+
+the resulting model can be written in a more concise way by putting together all concentration variables in the  state vector x:   dxdt=se·k·u·qbiot·x 
+
+with:   x=cextcbio 
+
+  se=sextsbiot 
+
+with se of size , and qbiot a  row vector which selects the last element of x, the biomass concentration, i.e., qbiot=00… <dig>  this more concise representation will be used in the remainder of this text.
+
+dynamic metabolic flux analysis
+the dynamic metabolic flux analysis  problem now consists of identifying the free flux profiles over time, based on measurements of the states, i.e., the extracellular metabolite concentrations, or the fluxes themselves. this problem can be written as a dynamic input estimation problem using a least-squares objective function:   minimizeu,x0∑i=1ntime∑j=1noutyj−mijσij <dig> 
+
+subject to:   x˙=se·k·u·qbiot·x 
+
+  x=x <dig> 
+
+  y=f,u) 
+
+  z=iirr·k·u 
+
+  x≥ <dig> z≥ <dig> 
+
+with ntime the total number of time points at which measurements were taken and nout the number of outputs of the system. this system includes algebraic states z, which represent the irreversible fluxes. by constraining these states to be positive, the irreversible fluxes are also kept positive. furthermore, y is the  vector of outputs of the system, which can be any non-linear function f of the states and free fluxes, and yj is the model output j at time ti. the objective function is a weighted sum of least squares, with mij and σij respectively the average and the standard deviation for the measurement of output j at time point ti, and x <dig> is the vector of initial values for the states, which is typically also an optimization variable.
+
+this problem has been treated in literature in different ways. antoniewicz  <cit>  identifies four approaches for dmfa.  the first approach  <cit>  divides the experimental time domain in metabolic phases, after which in each phase a classical, static mfa problem is solved, based on averaged measurements of exchange fluxes. this method does not produce time-resolved fluxes.  in another approach  <cit> , the measurements themselves are approximated by spline functions, which are then differentiated, resulting in a set of extra flux measurements. these measurements are then used to estimate the  fluxes using a series of standard, static mfa problems at different points in time. this approach is easy to use, but presents a number of disadvantages  <cit> . the most important disadvantage is the fact that every set of data is fitted with its own, independent set of parameters, disregarding the correlation between the different measurements in the estimation process itself. due to this independent estimation, it is also not possible to use a consistent criterion for assessing the goodness of the fit, as not all data are taken into account in every estimation problem. furthermore, by representing the dynamic problem as a series of disconnected, static problems, important information on the dynamic nature of the system is lost. further information loss also occurs when taking derivatives of the spline functions. also the dynamic, possibilistic framework of llaneras et al.  <cit>  can be categorized in this class. in this framework, dynamic extracellular concentration measurements are taken into account into a possibilistic mfa strategy by approximating the derivatives of the concentrations. again, the need for numerical differentiation is an important drawback of also this methodology.  most of these drawbacks have been overcome using the approach described in  <cit> . in this method, the free fluxes are not estimated as specific fluxes, but are combined with the biomass concentration to non-specific free fluxes. these are then parameterized as piecewise linear functions, which ascertains that the dynamic system can be solved analytically, resulting in a non-dynamic, non-linear parameter estimation problem. this approach, unfortunately, introduces some new drawbacks, i.e., the fact that specific fluxes, which are most descriptive from a biological kinetics point of view, cannot be estimated directly, again resulting in a loss of information when these need to be calculated, the non-smoothness of the flux profiles because of the piecewise linear description, and the fact that the irreversibility constraints on the fluxes are not taken into account.  the most recent approach, called dynamic flux estimation   <cit> , uses power-law or michaelis-menten kinetic functions to describe the fluxes, which must be a priori postulated. this kinetic information is not yet available for all metabolic reactions in a range of environmental conditions, so an approach which does not need these kinetic functions is preferred. the interested reader is referred to  <cit>  for a review of applications of these four classes of methods for dmfa.
+
+the approach which is presented in this work addresses the disadvantages of previous methods by establishing the true non-linear, dynamic nature of the dmfa problem and using state-of-the-art tools for solving this kind of problems. more specifically, the dynamic optimization problem is solved using  direct collocation on finite elements to obtain a finite dimensional optimization problem, and  automatic differentiation to calculate exact first and second order information. the smoothness of the free flux profiles is ensured by using b-spline functions of second order. b-splines have already been used to discretize the state variables for parameter estimation in biological models  <cit> , but not yet to discretize the fluxes in dmfa models. by using all data at once in the parameter estimation process, the goodness-of-fit of the resulting model can be assessed in a consistent way. furthermore, no knowledge of the kinetics of the different metabolic reactions is needed. however, if this information is available, it can easily be integrated in this methodology in all possible functional forms, including non-linear expressions, as the problem is solved as a non-linear optimization problem.
+
+methods
+this section is organized in the following way. first, the dmfa problem is transformed into a dynamic parameter estimation problem by use of the b-spline parameterizations. this problem is then further discretized by applying the orthogonal collocation technique, rendering the definition of an nlp subproblem for a fixed number of internal knots in the different spline functions. an adaptive, incremental algorithm to generate a sequence of these subproblems is then defined, in which the number of internal knots is systematically increased, and the experimental horizon is elongated until the full experiment is described. after this, an extension of the algorithm is described in which the k matrix is chosen optimally, i.e., in such a way that the sum of squared errors  is minimized. this extension makes the algorithm fully integrated, once a network is chosen and measurements are provided. finally, the determination of the confidence algorithms for the flux estimates is outlined.
+
+parameterization of the free fluxes using b-splines
+in this novel approach, every free flux is parameterized as a polynomial spline function, based on b-spline basis functions  <cit> . these b-spline functions are defined by  the degree k,  the locations of the g+ <dig> so-called knots t <dig> t <dig> …,tg,tg+ <dig>  of which the middle ones are the g internal knots, and  the q control points, or spline parameters pu. to get a smooth flux profile, i.e., a function with continuous first derivative, the degree of the spline function should be at least two, and for this reason the degree will be fixed to two in this work, i.e., k= <dig>  also, the start and end knots  are fixed at respectively the start and end times of the experimental horizon under consideration. this leaves three entities to calibrate: the number of internal knots, the internal knot locations and the spline parameters. the basis functions are defined recursively by the cox-de boor recursion formula:   bi,0=1ifti≤t≤ti+10otherwise 
+
+  bi,p=t−titi+p−ti·bi,p−1+ti+p+1−tti+p+1−ti+1·bi+ <dig> p− <dig> 
+
+the spline function is then defined as a linear combination of the b-spline basis functions with the spline parameters as coefficients:   û=∑i=1qpu,i·bi− <dig> k 
+
+because of the fact that the vector space of spline functions of degree k with g+ <dig> knots has dimension g+k+ <dig>  the number of b-spline basis functions and corresponding spline parameters is related to the degree and the number of internal knots as follows:   q=g+k+ <dig> 
+
+however, based on the recursive definition, only g+2−=g−k+ <dig> basis functions can be defined from the g+ <dig> knots. this means that 2k extra knots need to be added to fully define the spline function. this is usually done by adding k knots at the beginning and at the end of the knot sequence, equal to the starting and ending knot, respectively  <cit> . for k= <dig>  e.g., the total sequence of knots is t <dig> t <dig> t <dig> t <dig> …,tg,tg+ <dig> tg+ <dig> tg+ <dig>  based on this total knot vector and the order, the spline functions can be efficiently evaluated using the cox-de boor algorithm  <cit> .
+
+a second degree spline function with two internal knots is shown in figure  <dig>  along with the b-spline basis functions that generate the spline. in this figure, the basis functions are already multiplied with their corresponding spline parameter. it is clear that the different basis functions are only non-zero in a part of the interval, i.e., the spline parameters only influence a part of the final spline function. this property is called local support. the location of the internal knots is also important, because, when more knots are situated in a specific region, there is a higher flexibility in that specific region, enabling the function to have a more exotic shape. as will also be seen in the results and discussion section, the internal knots will flock together in regions in which there is a high curvature, and will move away from flat regions.figure  <dig> 
+example of a second degree b-spline function. a second degree spline function with two internal knots , along with the b-spline functions that generate it . in this figure, the b-spline basis functions are already multiplied with their corresponding spline parameter, so the spline function is obtained by summing the  <dig> basis functions at each point in time.
+
+
+
+in the final sequential algorithm, three main operations on the splines are used. the first operation is constraining a knot to the specific measurement interval it is in. this is done to prevent knots from straying too far from their initial optimal location. the second operation is inserting a knot at the end of a specified time frame. in this operation, knot insertion, a feature inherent to b-splines, is used to insert a knot without changing the spline profile. this way, the next optimization can be started from a good initial guess, with an extra knot inserted. this operation also takes into account the bounds which were placed on previously added knots, i.e., the knot is inserted in the time frame at the end, where no knot has yet been inserted. the last operation prolongates the splines, which only changes the ending knot to the new value. this means that the spline profile is slightly changed, because the spline parameters stay the same, but is still close to the previous profile.
+
+each free flux is represented by its own spline function, and thus has its own set of internal knot locations and spline parameters. for ease of notation, the spline parameters for the different free fluxes will be concatenated into three vectors:   g=g1⋮gd 
+
+  tknot=tknot,1⋮tknot,d 
+
+  pu=pu,1⋮pu,d 
+
+the vector g contains the number of internal knots for the d free fluxes, which are integer variables. the vector tknot contains the internal knot locations for all free fluxes, i.e., this vector contains ng elements, with ng=∑i=1dgi. the last vector pu contains all spline parameters or control points for all free fluxes. the number of elements in this vector equals ng+d·. in total, there are d integer parameters, the numbers of internal knots, and 2·ng+d· continuous parameters, the knot locations and spline parameters, to estimate.
+
+formulation of the dynamic estimation problem
+the parameters in g directly control the number of the other parameters. as the least squares objective will keep on decreasing with increasing number of parameters, the optimal g will contain infinity values at all elements, rendering a perfect fit. for this reason, g is not added as an optimization variable in the optimization problem. the estimation of these values will be addressed later on. using the b-spline flux parametrizations, the input estimation problem ) is reformulated as a dynamic parameter estimation problem:   minimizepu,tknot,x0∑i=1ntime∑j=1noutyj−mijσij <dig> 
+
+subject to:   x˙=se·k·u^·qbiot·x 
+
+  x=x <dig> 
+
+  y=f,u^) 
+
+  z=iirr·k·u^ 
+
+  x≥ <dig> z≥ <dig> 
+
+discretization of the dynamic parameter estimation problem using collocation
+the resulting dynamic optimization problem must be discretized in some way to be able to solve it  <cit> . in this work, direct collocation on finite elements was chosen  <cit> . for a full overview on the direct collocation method, the reader is referred to  <cit> . for the methodology in this work, cubic lagrange polynomials were chosen, with collocation points situated at the radau roots. the finite element borders were chosen at the time points of the measurements.
+
+the direct collocation method turns the differential and algebraic states into discrete, continuous variables px and pz, respectively, and the dynamic system into two sets of equality constraints:  the collocation constraints hcoll, which make sure that the polynomials satisfy the dynamic system exactly at the collocation points, and  the continuity constraints hcont, which ensure the continuity of the lagrange polynomials over the finite element borders. after discretizing the system of odes, the dynamic parameter estimation problem turns into the following non-linear programming problem :   minimizepx,pz,pu,tknot,x0∑i=1ntime∑j=1noutyj−mijσij <dig> 
+
+subject to:   hcoll= <dig> 
+
+  hcont= <dig> 
+
+  x^=x <dig> 
+
+  y=f,u^) 
+
+  px≥ <dig> pz≥ <dig> 
+
+with px the collocation variables, including the initial values for the states.
+
+if the spline degree k and the lagrange polynomial degree are fixed to  <dig> and  <dig> respectively, and the number of finite elements is taken as ntime− <dig>  as the finite elements are situated between the measurement time points, the dimensions of this problem depend on the total number of internal knots ng, the number of time points ntime and the characteristics of the network. these dimensions are given in table  <dig> table  <dig> 
+dimensions of the resulting non-linear programming problems
+
+
+
+variables
+differential state variables p
+x
+algebraic state variables p
+z
+irr
+spline parameters p
+u
+n
+internal knot locations t
+knot
+n
+g
+initial values x
+0
+m
+
+n·d
+
+equality constraints
+irr
+m
+
+m
+int·d
+
+d·2
+
+
+the resulting nlp  is solved using the interior-point optimization routine ipopt  <cit> . gradient, jacobians and hessian are generated exactly using automatic differentiation with casadi  <cit> .
+
+adaptive incremental free flux estimation
+the number of internal knots directly controls the number of the other parameters. as the least squares objective will keep on decreasing with increasing number of parameters, the optimal number of knots will be infinity, rendering a perfect fit of the measurement noise instead of the trend. for this reason, a mechanism to prevent overfitting has to be used. furthermore, although the polynomial spline functions are linear functions of the spline parameters, the system of odes is non-linear, and the splines are also non-linear in the knot locations. these non-linearities in the constraints lead to local minima in the optimization problem. to address these issues, a systematic, incremental strategy for estimating the free flux parameters and knot locations has been devised, based on the akaike model discrimination criterion . this criterion  <cit>  is frequently used to discriminate between different model structures which can describe the same phenomenon. it takes into account both the model error, i.e., the least squares error, and the number of parameters needed to describe the data. it has been applied successfully for model discrimination in both linear and non-linear models for biological systems . in this work, the corrected aic criterion for small sample sizes  is used, as this is more suited in cases where the number of measurements is close to the number of parameters:   aicc=f+2·np+2·np·nmeas−np− <dig> 
+
+with f the weighted least squares error, as defined in equation , and nmeas the total number of measurements, i.e., ntime·nout. from this definition it is clear that:   nmeas≥np+ <dig> 
+
+as otherwise the denominator can become zero or negative. in the remainder of this text, aicc is indicated just as aic, for simplicity.
+
+an algorithmic description of the methodology is given in figure  <dig>  the method is started by estimating splines without knots, i.e., only second degree polynomials, on a reduced dataset, i.e., the first l timepoints, where l is the number of timepoints needed to make sure that the denominator of equation  is strictly positive:   l·nout≥3·d+mext+ <dig> figure  <dig> 
+incremental flux estimation algorithm. a schematic representation of the algorithm for the incremental flux estimation. the steps marked with a red a, b and c correspond to the steps in figure  <dig> 
+
+
+
+after selecting the correct number of timepoints, the polynomials are fitted and the optimal aic value is saved as f, together with the optimal splines u. then, it is checked if a new knot can be inserted based on the number of measurements available at this point. if so, d optimization problems are generated, in which every time one knot is inserted into one free flux spline at a time. the three problems are solved, and the minimum aic value over these problems is saved as aic∗, along with the corresponding optimal splines u∗, in which there is now one knot in one of the splines. now, two possibilities arise. if aic∗ is smaller than f, a new, better solution is found, and another knot can be added using the same steps just described. if aic∗ is higher than f, however, the old optimum was better than the new one, and so the old one is kept. at this point, an optimal solution for this number of time points has been found, and a new time point can be added if there is still one left to be added. after adding the time point, the splines are prolongated, and the prolongated problem is solved to get the new starting values for f and u for the next iteration. once all time points have been added, u contains the final, optimal set of free flux profiles for the specified dataset.
+
+although the akaike criterion can compare different models, it cannot assess the absolute goodness-of-fit. to this end, a χ2-test is also executed on the resulting model  <cit> . the resulting model is accepted if the variance weighted sum of squared errors is smaller than the critical χ2-value for the specified confidence level  and number of degrees of freedom, which is the number of measurements minus the number of independent parameters.
+
+this methodology ensures that each optimization problem is initialized with an excellent initial guess for the knot locations and spline parameters, rendering shorter optimization times and convergence to at least a decent local minimum in each iteration.
+
+choice of the null space basis k
+the only degree of freedom left at this point is the choice of the basis k for the null space of sint. the choice of this basis defines which fluxes are used as free fluxes, and as these are the profiles that are estimated, this choice can have significant consequences concerning the final fit of the model. free fluxes with a large curvature in their profile need more parameters to be successfully estimated. there are three options:  a fixed rational basis,  a fixed orthonormal basis, or  an optimal orthonormal basis. a rational basis is derived from the reduced row echelon form of sint. in this form, d fluxes are chosen as free fluxes, and the other ones are linear combinations of these free fluxes. the rational basis has the advantage that the free fluxes are easy to interpret, but they are probably not the best choice considering goodness-of-fit. an orthonormal basis is typically derived from the singular value decomposition of sint. in this case, the free fluxes are themselves linear combinations of the fluxes, rendering free fluxes which cannot be easily interpreted, although the set of all fluxes is still easily calculated from the free fluxes. this basis is numerically preferable, but still not optimal considering goodness-of-fit. as a last possibility, the basis can be optimized during the estimation of the fluxes. to do this, the values in the k matrix are added as optimization variables, and two matrix constraints are added, one that defines k to be a null space of sint, and another one which constrains k to be orthonormal:   sint·k= <dig> 
+
+  kt·k−i= <dig> 
+
+with i a  identity matrix. in this last constraint, only the diagonal and one of the two off-diagonal parts are independent, since kt·k is symmetric. in total, n·d variables are added , along with mint·d null space constraints and d· <dig> orthogonality constraints, rendering d· <dig> extra degrees of freedom for the optimization.
+
+formulation of the non-linear estimation problem with an optimal k
+when using the optimal basis, the optimization problem looks like this:   minimizepx,pz,pu,tknot,x <dig> k∑i=1ntime∑j=1noutyj−mijσij <dig> 
+
+subject to:   hcoll= <dig> 
+
+  hcont= <dig> 
+
+  x^=x <dig> 
+
+  y=f,u^) 
+
+  px≥ <dig> pz≥ <dig> 
+
+  sint·k= <dig> 
+
+  kt·k−i= <dig> 
+
+determination of confidence bounds on the estimated flux profiles
+after the optimal model is estimated, uncertainty of the parameters and free flux profiles is estimated using a monte carlo bootstrapping methodology  <cit> . the monte carlo approach is used frequently in mfa studies  <cit> . in this work, the method is used because of the non-linearity and constraints in the optimization problem. in this case, the fisher information approach can give highly different confidence intervals because of these non-linearities and bounds. based on the assumption of normally distributed measurements with known variances,  <dig> sets of measurements were sampled from these distributions and for each set of measurements, parameters were estimated, resulting in  <dig> sets of parameter values and  <dig> free flux profiles. 95% confidence intervals were generated by sorting these parameters and taking the  <dig> th and  <dig> th percentiles as respectively lower and upper confidence bounds.
+
+RESULTS
+this results section is structured in the following way. first, the small-scale case study is presented, along with the network, simulated measurements and reference fluxes used to simulate these measurements. for the small-scale network, different cases with and without measurement noise, and with different k matrices, are introduced. then, a detailed description of the iterations made by the algorithm for one case is given, to further clarify the operation. after this, the results of all cases in the small-scale case study are shown and discussed, highlighting the most important features of this methodology. then, the medium-scale case study is treated, again by showing the network, simulated measurements and reference fluxes. finally, the results for this case study are presented, with both the fixed and optimal  k matrices, along with an analysis of the computational complexity for both case studies.
+
+description of the small-scale case study
+the network is shown in figure  <dig>  along with the corresponding sint, se and iirr matrices. it consists of  <dig> extracellular metabolites and biomass,  <dig> intracellular metabolites and  <dig> fluxes. thus, the number of free fluxes is  <dig>  for the simulation of the measurements, these were chosen as flux  <dig>   <dig> and  <dig>  measurements were simulated by choosing reference profiles for these three fluxes, and simulating the states using the dynamic system.   u <dig> ref=caext <dig> +caext figure  <dig> 
+case study network and corresponding matrices. metabolic reaction network for the case study , along with the intracellular and combined extracellular and biomass stoichiometric matrices and irreversibility matrix , and the null space basis matrices corresponding to the cases with free fluxes  <dig>   <dig> and  <dig>  and free fluxes  <dig>   <dig> and  <dig> .
+
+
+
+  u <dig> ref= <dig> ·ceext3+ceext 
+
+  u <dig> ref=11+cfext 
+
+the starting values for the  <dig> states were chosen at  <dig>   <dig>   <dig> and  <dig> , respectively. two sets of measurements were generated, both at  <dig> equidistant points in time between  <dig> and  <dig> for all  <dig> states, rendering both  <dig> measurements in total:  one set with normal noise with a variance of 10− <dig>  to test the capabilities of the algorithm without measurement error, and  one set with a different, realistic variance for every measurement, to test the capabilities in a more realistic setting. a value for the variance of every measurement is necessary for the algorithm, because of the use of the variance-weighted sum of squared errors in the aic criterion. for that reason, the variance in the first case was not set at  <dig>  but at a very low value. the reference profiles and the simulated data based on these profiles for the realistic noise realization are shown in figure  <dig> figure  <dig> 
+reference free flux profiles and simulated measurements for the realistic noise setting. the profiles for the free fluxes  that were used to simulate the state measurements . the measurements in this figure correspond to the realistic noise setting, with different variances on all measurement points.
+
+
+
+the methodology was executed for  <dig> different k matrices:  the one corresponding to free fluxes  <dig>   <dig> and  <dig>  i.e., the same one as was used to generate the simulated measurements,  the one corresponding to free fluxes  <dig>   <dig> and  <dig>  of which free fluxes  <dig> and  <dig> are reversible, as opposed to the first case where all free fluxes are irreversible,  an orthonormal basis obtained through the matlab command null, and  a variable basis which is optimized using the additional constraints as described before. these cases are referred to as  <dig>   <dig>  orthonormal and optimal, respectively. in total, the algorithm was run  <dig> times:  <dig> times for the different cases with low noise, and  <dig> times for the different cases with the realistic noise realization.
+
+all reactions, all stoichiometric matrices, the irreversibility matrix, the null space basis matrices, and the simulated measurements and measurement variances for this case study are given in the additional files  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig> and  <dig> 
+
+description of the algorithm iterations
+to validate and clarify the operation of the proposed algorithm, the key iterations for the case with free fluxes  <dig>   <dig> and  <dig> are described in more detail. an overview of the different iterations is given in table  <dig> and the profiles for free flux  <dig> before and after all iterations are depicted in figure  <dig>  also, a detailed description of the steps in iteration  <dig> and  <dig> for all free fluxes is given in figure  <dig> figure  <dig> 
+intermediate flux profiles for the
+145
+ case. overview of the intermediate flux profiles during the iterations of the algorithm for the  <dig> case with realistic noise, for free flux  <dig>  the dashed lines are at the beginning of the iteration, the solid lines are at the end of the iteration, before the prolongation step. the iteration number is shown in the top right of each plot.
+detail of iterations  <dig> and  <dig> for the
+145
+ case. detailed view of the key steps in iteration  <dig> and  <dig> for all three free fluxes , for the  <dig> case, with realistic noise. the dashed lines are before optimization, the solid lines after optimization. the a, b and c steps correspond to the steps highlighted in the algorithm in figure  <dig> 
+overview of the iterations done by the incremental flux estimation algorithm for the
+145
+ case
+
+
+
+iter. no.
+n
+time
+n
+p
+aic
+ before insertion
+min.
+aic
+comment
+
+
+for this network, nout= <dig> and d= <dig>  so the number of time points needed to start is  <dig>  based on equation . in the first iteration, basically three second degree polynomials are fitted for each of the three fluxes. at this point it is not yet possible to insert a knot because after insertion the number of parameters would be  <dig>  and equation  would not be satisfied anymore. so a new time point is added at the end, and the problem is solved again for this extended dataset. now, it is possible to insert a knot. three subproblems are generated, one for each flux spline in which a knot is inserted. the minimum aic for these subproblems  is however bigger than the previous one , so no new minimum is found, and the dataset is extended again. this same pattern goes on until iteration  <dig>  which is shown in more detail in figure  <dig>  in step 8a, the prolongated problem of the previous iteration is solved, giving the base value for f , and the starting set of free flux profiles u for this iteration. the dashed lines indicate the profiles before optimization, i.e., after the prolongation step of iteration  <dig>  and the solid lines are the profiles after optimization. step 8b consists of three optimizations, one for each free flux. in step 8b <dig>  a knot is inserted into the spline corresponding to free flux  <dig>  which, as is shown by the dashed lines, does not change the profile of this flux. the profiles are then used as good starting values for the optimization, after which again the solid profiles result. the optimal location of this knot is  <dig> . this same procedure is repeated in steps 8b <dig> and 8b <dig>  with insertion in free flux  <dig> and  <dig> respectively. after this, the minimum aic value over steps 8b <dig>  8b <dig> and 8b <dig> is collected , along with the corresponding profiles. in this case, the minimum is found when inserting a knot in free flux  <dig>  since the minimum aic value is also lower than f, the profiles from step 8b <dig> form the starting values for a new round of insertions, after a constraint has been added that constrains the location of the newly added knot to its corresponding measurement interval, in this case between  <dig>  and  <dig> . this new round of insertions does not yield a better minimum . this means the profiles after step 8b <dig> are the best possible in this iteration, and these profiles are prolongated in step 8c. as can be seen in the figure, the prolongation changes the profiles slightly, but they are still good starting values for the base optimization of iteration  <dig> , yielding an f value of  <dig> . because of the knot that is already present in step 9b <dig>  the new knot for free flux  <dig> is inserted after time  <dig> . the new minimum  is again found after insertion in free flux  <dig>  and a second insertion in this iteration does not result in an improvement , so the profiles after step 9b <dig> are prolongated in step 9c. the algorithm ends in iteration  <dig>  because the full dataset is used at that point, rendering the optimal flux profiles for the full experiment.
+
+the fact that this procedure results in a good sequence of starting values for the different optimization problems is clearly shown in figure  <dig>  the dashed lines are again the profiles before each iteration, the solid lines are the profiles after the iteration. because of the high degree of non-linearity resulting from the free knot locations, these good starting values are essential for the efficient estimation of the fluxes.
+
+results in the low noise setting
+the estimated fluxes for the different choices of the null space basis k in the setting with a very small amount of noise are displayed in figure  <dig>  along with the reference profiles. the absolute error between the estimated profiles and the reference profiles are depicted in figure  <dig>  this figure also contains the numeric integral of the absolute value of the profiles, as a quantitative way to compare the different alternatives. the sum of all these values is given in the top of the column.figure  <dig> 
+estimated flux profiles for the low noise setting. the reference flux profiles  and estimated flux profiles for the different cases in the low noise setting: the case with optimized k matrix , the case with the orthonormal k matrix , the  <dig> case , and the  <dig> case . the profiles are for fluxes  <dig> through  <dig> from top to bottom.
+absolute deviation of the flux profiles from the reference for the low noise setting. the deviation of the estimated profiles from the reference for the different cases in the low noise setting: the case with optimized k matrix , the case with the orthonormal k matrix , the  <dig> case , and the  <dig> case . the profiles are for fluxes  <dig> through  <dig> from top to bottom. the number on the top right of each graph is the integral of the absolute value of each deviation profile. these numbers are summed for each case at the top of the column, next to the title.
+
+
+
+these figures indicate that, except in the orthonormal case, the methodology gives an accurate representation of the fluxes in the theoretically optimal low noise setting. the big differences with the reference profiles in the orthonormal case are mainly due to numerical problems, since in this low noise setting, a lot of knots are inserted , resulting in harder optimization problems and longer optimization times. although the other methods for the choice of k can cope with these difficulties, this is apparently not the case for the orthonormal method. the integral numbers for the other three methods are very close, so there is no clear difference between them in this low noise setting.
+
+results for the realistic noise realization
+the estimated fluxes based on the different choices for the null space basis k for the realistic noise setting are displayed in figure  <dig>  next to the reference profiles. again, the absolute errors between these estimated profiles and the reference profiles are given in figure  <dig>  along with the integral differences for each profile, and their sum per case. the state trajectories for the different cases are very similar, so these are only shown for the  <dig> case in figure  <dig>  in table  <dig>  the knot locations and goodness-of-fit values for the different cases are summarized. it is important to note that all estimations are approximations, as the real kinetic law for the fluxes is not known to the estimation procedure. a few observations can be made.figure  <dig> 
+estimated flux profiles for the realistic noise setting. the reference flux profiles  and estimated flux profiles for the different cases in the realistic noise setting: the case with optimized k matrix , the case with the orthonormal k matrix , the  <dig> case , and the  <dig> case . the profiles are for fluxes  <dig> through  <dig> from top to bottom.
+absolute deviation of the flux profiles from the reference for the realistic noise setting. the deviation of the estimated profiles from the reference for the different cases in the realistic noise setting: the case with optimized k matrix , the case with the orthonormal k matrix , the  <dig> case , and the  <dig> case . the profiles are for fluxes  <dig> through  <dig> from top to bottom. the number on the top right of each graph is the integral of the absolute value of each deviation profile. these numbers are summed for each case at the top of the column, next to the title.
+estimated state trajectories. the estimated state trajectories for the  <dig> case with realistic noise.
+results for the different cases: the intervals where knots are inserted for the three free fluxes, values for
+sse
+ and
+aic
+ and the number of parameters
+
+
+
+choice of k
+knot intervals for free flux
+sse
+aic
+n
+p
+1
+2
+3
+
+
+first of all, it is clear that the algorithm puts the knots in locations where they are most needed. in the  <dig> case, four knots are chosen for flux  <dig>  which exhibits the highest degree of curvature, two knots for flux  <dig>  and no knots for flux  <dig>  which has the flattest profile. fluxes  <dig>   <dig> and  <dig>  on the other hand, all exhibit profiles with a much higher degree of curvature, resulting in a higher total number of knots for the  <dig> case. both the sse and the number of parameters are higher for this case, resulting in a higher aic value. based on these observations, a possible strategy for choosing the basis k could be to choose free fluxes with a “flat” profile, i.e., with a low degree of curvature. this is in practice not feasible as the flux profiles are of course not known beforehand. a possible solution would be to choose a basis, estimate the fluxes, and choose a new basis based on the results of the estimation. for this to work, one would need a way of quantifying the degree of curvature of a function, which is not trivial. it would also be computationally very demanding, as the full estimation procedure would have to be repeated a number of times.
+
+the choice of a random orthonormal basis is also clearly not satisfactory. for this case, the knot locations cannot be displayed anymore on the flux profiles, as the free fluxes are in this case linear combinations of the different fluxes. in the final, optimal case, from the set of possible orthonormal bases, the one which minimizes the goodness-of-fit is chosen during the course of the algorithm, introducing a minimal number of extra parameters for the optimization. the estimated profiles for this case, as well as for the  <dig> case, accurately resemble the reference profiles, although the integral numbers indicate that the optimal case is slightly better. in the optimal case, however, three extra parameters are introduced, resulting in a lower sse, but a slightly higher aic value and computational time. this is only a small penalty, though, not outweighing the benefits of having an accurate estimate using only one run of the algorithm, and the fact that the algorithm is completely contained, as the user does not have to make any choices once the measurements and the details of the network are given. in this simulated case study, the results for the  <dig> case are probably better because the same basis was used to simulate the measurements. in a real-life setting, though, there is no generating set of free fluxes, and a choice regarding this set of free fluxes cannot be made. thus, the addition of the determination of the optimal k basis is a welcome addition in real-life settings, as the optimal basis is always found, without any choices required by the user. the operation of the algorithm in optimal k mode thus makes the algorithm fully contained.
+
+description of the medium-scale case study
+the medium-scale network was adapted from  <cit> , and all reactions are available in the supplementary data of that work. a few alterations were made, though. the pseudo-reaction of the glucose feed to the glucose in the medium , was removed, as this flux was considered constant and thus does not need to be estimated. furthermore, reaction  <dig> in  <cit>  , threonine to glycine, was set to be reversible, as otherwise no biomass could be formed, and also reaction  <dig> in  <cit>  , the citrate exchange reaction, was considered reversible. this resulted in a network with in total  <dig> fluxes,  <dig> intracellular metabolites and  <dig> extracellular metabolites . the number of free fluxes is  <dig>  and these were chosen to be  flux  <dig> ,  <dig> ,  <dig> ,  <dig> ,  <dig>  and  <dig> . furthermore, there are  <dig> irreversible fluxes.
+
+measurements were generated by considering a continuous reactor set-up in which, after starting the reactor with a full medium, only glucose is added from a feed with a fixed concentration. the model equation ) is changed accordingly:   dxdt=se·k·u·qbiot·x+d· 
+
+with d the dilution rate , which is controlled between  <dig> and  <dig> following the input profile in figure  <dig>  and xin the  vector of feed concentrations  of the different metabolites. as only glucose is in the feed, with a concentration of  <dig>  this vector is the following:   xin= <dig> .0⋮ <dig>  figure  <dig> 
+medium-scale case study input profile. the dilution rate input profile for the continuous controlled bioreactor model of the medium-scale case study.
+
+
+
+the reference fluxes for the six free fluxes were the following:   u <dig> ref= <dig>  
+
+  u <dig> ref= <dig> ·cgluc <dig> +cgluc 
+
+  u <dig> ref= <dig> ·cnh <dig> +cnh <dig> 
+
+  u <dig> ref= <dig> ·ccit <dig> +ccit 
+
+  u <dig> ref= <dig> · <dig> +cac 
+
+  u <dig> ref= <dig> ·co <dig> +co <dig> 
+
+the starting values for the concentrations   cgluc,cglyc,cnh <dig> cso <dig> ccit,cpdo,cac,cco <dig> co <dig> cbiomasst 
+
+in the simulation were chosen to be    <dig> . <dig> . <dig> . <dig> , <dig> , <dig> , <dig> .14t 
+
+in total,  <dig> measurements at equidistant points between  <dig> and  <dig> hours were generated for  <dig> concentrations  and  <dig> fluxes . in typical settings, oxygen and carbon dioxide concentrations are not measured directly, but their uptake and production fluxes, respectively, are measured through off-gas analysis on the bioreactor. the resulting set of  <dig> measurements is not shown separately, but can be found in figures  <dig> and  <dig>  along with the fitted states. the reference fluxes are shown in figures  <dig> and  <dig>  along with the estimated fluxes.figure  <dig> 
+estimated state trajectories. the estimated state trajectories for the medium-scale network with fixed k matrix, along with the simulated data on which the estimation is based.
+estimated state trajectories. the estimated state trajectories for the medium-scale network with optimized k matrix, along with the simulated data on which the estimation is based.
+estimated flux profiles. the estimated free flux profiles for the medium-scale network with fixed k matrix , including 95% confidence regions. for brevity, only the free fluxes are shown. all other fluxes can be calculated through the k matrix. in dashes are the reference profiles which were used to simulate the measurements.
+estimated flux profiles. the estimated free flux profiles for the medium-scale network with optimized k matrix , including 95% confidence regions. for brevity, only the free fluxes are shown. in dashes are the reference profiles which were used to simulate the measurements.
+
+
+
+all reactions, all stoichiometric matrices, the irreversibility matrix, the null space basis matrix, and the simulated measurements and measurement variances for this case study are given in the additional files  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig> and  <dig> 
+
+results for the medium-scale network
+the estimation of the fluxes in the medium-scale network was carried out with both a fixed k matrix, again the same one as used to simulate the measurements, and an optimized k matrix. the estimated fluxes for the fixed k are shown in figure  <dig>  the results for the optimal k matrix are shown in figure  <dig>  also, the fitted measurements for both cases are presented in figures  <dig> and  <dig>  it is clear that the proposed methodology is also able to estimate the fluxes in a larger network successfully. the confidence bounds are in this case, however, much wider than in the small-scale case. this is due to the larger amount of measurement noise added to the simulated measurements. due to the minimization of the aic criterion, this is the best possible fit while at the same time keeping the uncertainty as low as possible. also, the difference between the estimates with a fixed and an optimal k matrix is again very small. this again confirms the fact that the algorithm can be successfully used in the optimal k mode, i.e., without making an a priori choice on the free fluxes, as the results are very similar in the two cases. this is an important advantage of this method as in practice the set of free fluxes is not known.
+
+computational complexity of the algorithm
+the time needed to solve the dmfa problem using this methodology is the product of on the one hand the total number of optimization problems to solve, and on the other hand the average time per optimization problem. if only one knot addition is allowed for every measurement time point which is added, and when making abstraction of the possibility that in the first iteration no knot can be inserted, the total number of optimization problems equals ntime·d, and thus scales linearly with both the number of measurement time points and the number of free fluxes. the average time per optimization problem is harder to assess, as this is dependent on the total number of variables, as indicated in table  <dig>  but also on the number of non-zeros in the jacobians and hessians, and other characteristics of the nlp solver used. it is important to notice that the total number of fluxes does not influence the computational complexity, so this methodology should be usable also for larger networks with more fluxes, but a number of free fluxes which is still considerable. typical networks used for metabolic flux analysis have a number of fluxes in the range of  <dig>  but a number of free fluxes that is typically in the region of  <dig> table  <dig> 
+cpu times for the two case studies, both with fixed k and optimized k
+
+
+
+case study
+k matrix
+running time in seconds
+
+
+to give a general idea about the computational complexity of the algorithm, the total cpu times of the estimations for the small-scale and medium-scale network for both fixed and optimal k matrices are shown in table  <dig>  these times are attained when running the algorithm on one core of an eight-core intel i7- <dig> cpu at  <dig>  ghz. also, the average time per optimization problem over the different iterations is plotted as a function of the iteration number for the four cases, i.e., small- and medium-scale with fixed and free k, in figure  <dig>  based on these findings, a general guideline to keep cpu times reasonable is to keep the time horizon under consideration small, i.e., with not too many measurement time points, as this will reduce the total number of optimization problems. furthermore, every added time point increases the computational cost per optimization problem exponentially, so it is better to only use data around a specific region of interest, instead of using all possible data in a very wide time horizon. one could, for example, run the algorithm on a coarse subset of the measurements and choose, based on the results, a specific region of interest where a finer grid of measurements is used to get a better estimate. although it is not investigated in this work, the algorithm also exhibits very nice possibilities for parallellization, as in every iteration of the algorithm d mutually independent optimization problems have to be solved. these can be easily assigned to different cores on a multi-core cpu. finally, the automatic differentiation of the objective and constraint functions of the different subproblems can also be further exploited, as at this point, these are basically repeated when going from one iteration to the next. the only part which is added, though, is the part for the interval between the last and the newly added time point, while everything before this point stays the same. this initialization of the different subproblems offers opportunities for further reductions in cpu times in future research. nevertheless, the algorithm can already at present perfectly run in real-time on standard equipment as bioprocesses typically involve multiple days.figure  <dig> 
+average cpu time per optimization problem. the average cpu times per optimization problem plotted as a function of the iteration number. in red crosses for the small-scale network with fixed k, in blue triangles for the small-scale network with optimal k, in green squares for the medium-scale network with fixed k, and in black circles for the medium-scale network with optimal k.
+
+
+
+CONCLUSIONS
+in this contribution, a novel systematic methodology for dynamic metabolic flux analysis, based on b-spline parameterizations, has been presented. because of the high degree of non-linearity in the estimation of the knot locations, an incremental knot insertion algorithm is proposed. by using this algorithm, at least an excellent local minimum is found. furthermore, the algorithm is fully contained, as the user does not have to make any choices regarding the null space basis of the intracellular stoichiometric matrix. this methodology tackles the disadvantages of previous methods for dmfa by making sure that the estimates are smooth, that specific fluxes are estimated and that extra constraints can be taken into account. the algorithm is validated on a small-scale simulated case study in both a low noise and a realistic noise setting. in both cases, an accurate dynamic estimation of the fluxes is obtained. the algorithm was also tested on a more realistic network with  <dig> fluxes and  <dig> free fluxes. although cpu times are longer, mainly due to a larger number of measurements, the algorithm was also able to successfully estimate the fluxes in this larger case study. the algorithm can still be run in real-time as biological processes are typically slow. to keep cpu times under control, the total number of measurements should be reduced if possible, as the cpu time per iteration tends to grow exponentially over the iterations. this can be done, e.g., by only considering time horizons which are of specific interest to the researcher. possible further improvements of the algorithm, mainly in the regions of parallellization and subproblem initialization, are indicated.
+
+additional files
+additional file  <dig> 
+list of reactions for the small-scale network. lists of reactions, intracellular and extracellular metabolites for the small-scale network, in microsoft office word format.
+
+
+
+additional file  <dig> 
+intracellular stoichiometric matrix for the small-scale network.  s
+int matrix for the small-scale network, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+combined extracellular and biomass stoichiometric matrix for the small-scale network.  s
+e matrix for the small-scale network, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+irreversibility matrix for the small-scale network.  i
+irr matrix for the small-scale network, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+null space basis for the
+145
+ case of the small-scale case study.  k matrix for the  <dig> case of the small-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+null space basis for the
+367
+ case of the small-scale case study.  k matrix for the  <dig> case of the small-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+null space basis for the
+orthonormal
+ case of the small-scale case study.  k matrix for the orthonormal case of the small-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+time points where measurements are taken in the small-scale case study.  vector of time points where measurements are taken in the small-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+measurements for the low noise setting in the small-scale case study.  matrix representing the measurements of the different concentrations  along the columns at the different measurement time points along the rows, for the low noise setting in the small-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+measurement variances for the low noise setting in the small-scale case study.  matrix representing the variances of the measurements of the different concentrations  along the columns at the different measurement time points along the rows, for the low noise setting in the small-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+measurements for the realistic noise setting in the small-scale case study.  matrix representing the measurements of the different concentrations  along the columns at the different measurement time points along the rows, for the realistic noise setting in the small-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+measurement variances for the realistic noise setting in the small-scale case study.  matrix representing the variances of the measurements of the different concentrations  along the columns at the different measurement time points along the rows, for the realistic noise setting in the small-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+list of reactions for the medium-scale network. lists of reactions, intracellular and extracellular metabolites for the medium-scale network, in microsoft office word format.
+
+
+
+additional file  <dig> 
+intracellular stoichiometric matrix for the medium-scale network.  s
+int matrix for the medium-scale network, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+combined extracellular and biomass stoichiometric matrix for the medium-scale network.  s
+e matrix for the medium-scale network, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+irreversibility matrix for the medium-scale network.  i
+irr matrix for the medium-scale network, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+null space basis for medium-scale case study.  k matrix for the medium-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+time points where measurements are taken in the medium-scale case study.  vector of time points where measurements are taken in the medium-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+concentration measurements for the medium-scale case study.  matrix representing the measurements of the different concentrations  along the columns at the different measurement time points along the rows, for the medium-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+concentration measurement variances for the medium-scale case study.  matrix representing the variances of the measurements of the different concentrations  along the columns at the different measurement time points along the rows, for the medium-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+flux measurements for the medium-scale case study.  matrix representing the measurements of the oxygen and carbon dioxide fluxes along the columns at the different measurement time points along the rows, for the medium-scale case study, in microsoft office excel format.
+
+
+
+additional file  <dig> 
+flux measurement variances for the medium-scale case study.  matrix representing the variances of the measurements of oxygen and carbon dioxide fluxes along the columns at the different measurement time points along the rows, for the medium-scale case study, in microsoft office excel format.
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+dv designed the study, implemented the algorithms and performed the computations. fl and jvi supervised the study. all authors have read and approved the final manuscript.
+

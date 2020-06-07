@@ -1,0 +1,191 @@
+BACKGROUND
+the rapid development of sequencing technologies has resulted in a flood of new data. for example, a single run of the latest version of the illumina sequencing system  can produce ~540– <dig> gb of sequences with 100-bp read lengths, and can take >11 days  <cit> . these technologies have made it easier to perform massive sequencing projects such as metagenomic analyses. for example,  <dig>  million genes, representing the human gut metagenome, were derived from  <dig> human fecal samples using next generation sequence technologies  <cit> . similarly, the human microbiome project  produced > <dig>  tb of sequences, representing the normal human metagenome, from  <dig> samples using the illumina genome analyzer iix system  <cit> .
+
+most fundamental metagenomic analyses are highly dependent on sequence alignment tools, such as the basic local alignment search tool   <cit> , blast-like alignment tool   <cit> , and fragment recruitment at high identity with tolerance  algorithm  <cit> , to search for nucleotide sequence similarity against sequence databases. the alignment sensitivity of the tool is a crucial factor for metagenomic studies because many of the reads are derived from microbes whose genomes have not yet been sequenced. on the other hand, the search speed is also an important issue because of the increasing amount of data produced from advances in sequencing platforms. for instance, ssearch  <cit> , which is an alignment tool based on the smith–waterman local alignment algorithm, is too slow to use for massive metagenomic analyses. however, the sensitivity and search speed often have contradictory requirements, and thus most alignment tools used for metagenomic studies sacrifice one of these aspects.
+
+an effective way to accelerate sequence similarity searching while maintaining sufficient sensitivity is to maximize the degree of parallelism. use of graphics processing units  is a suitable way to parallelize calculations with low financial and computational cost, because gpus are relatively inexpensive, powerful, and widely used for high-performance computing. many gpu-based sequence similarity search tools have been developed, such as cudasw++ <dig> , gpu-blast, ghostm, g-blastn, mummergpu, and saruman  <cit> . however, none of these gpu-based tools is suitable for metagenomic analyses because they cannot detect weak similarity of numerous query nucleotide sequences against reference genomes at reasonably high speed .
+
+here, we developed a nucleotide sequence similarity search tool clast  that can rapidly detect weak sequence similarity with both short and long query read lengths. clast uses gpus and searches with both global and local alignment algorithms. global alignment facilitates taxonomic and functional assignment of metagenomic reads, and local alignment is useful in motif searching. furthermore, we implemented a novel algorithm to construct the q-gram index  <cit> , which allows sequence similarity searching with reference data that has not been pre-indexed. this feature minimizes the memory requirements of clast, and allows the use of large and frequently updated reference databases. clast was optimized for both the nvidia fermi and more recent kepler gpu architectures.
+
+implementation
+method of detecting similar regions
+clast identifies similar regions between query and reference genome sequences by two phases of processing . in the first phase, clast identifies “seeds”, which are regions of reference genome sequences that exactly match query sequences. in the second phase, clast executes banded global or local alignment around these seeds  <cit> .figure  <dig> 
+overview of the clast search processing phases.  a read-only q-gram index was generated from reference genome sequences using a novel algorithm for parallel architecture .  the query sequences were searched against the read-only q-gram index.  seeds were filtered to reduce calculation time .  the seed sequences were aligned to the reference genome sequences .  results were filtered according to e-value and alignment length.
+
+
+
+in the first phase, clast creates k-mers along the reference genome sequence with a sliding window of k bases with a step of p bases . next, clast constructs a read-only q-gram index from the k-mers of the reference sequence that dramatically accelerates similarity searching . finally, clast creates seeds by referring k-mers across the query sequences to the q-gram index with a sliding window of k bases and a step of  <dig> base.
+
+in the second phase, clast performs banded alignments  for each seed to create “hit” with an identity, a similarity score, and an e-value . to reduce the alignment calculation time, clast only selects seeds that are adjacent to other seeds . this process dramatically reduces the calculation time and cost of the subsequent global  and local  alignments. in the alignments within each seed cluster, clast detects similar regions, and calculates identities, and similarity scores. additional file  <dig> describes the user-defined parameters by which clast controls workflow, such as e-value  <cit>  threshold, k, and p.figure  <dig> 
+banded global and local alignment.  the gray area denotes the region of alignment in this banded alignment. sequences were aligned from the edges of the seed in both the global and local modes. sequence comparison ended at the maximal alignment score in gray area in the global alignment  and local alignment .
+
+
+
+general algorithm for creating the read-only q-gram index in a parallel architecture
+we generated a new algorithm for creating and referencing a read-only q-gram index that was optimized for parallel architectures, such as gpus . this q-gram index is not implemented in a hash table, and consequently the memory requirements do not depend on the variety of hash keys but rather on the number of elements that the q-gram index contains. therefore, in this q-gram index, the key values can be as large as the limit of variables . this design enabled k to have a value up to  <dig> in the clast q-gram index.figure  <dig> 
+general algorithm for creating the read-only q-gram index in a parallel architecture.  the parallel algorithm to create a read-only q-gram index.  the algorithm to obtain a corresponding value stored in the read-only q-gram index of a querykey.  the parallel algorithm to obtain the corresponding values stored in the read-only q-gram index of many querykey.
+
+
+
+firstly, we describe the procedure for constructing the read-only q-gram index that consists of data and index arrays from the original data that consisted of keys and values  of each element in the original data . the data array consists of a sorted key array and a value array sorted by keys. the index array consists of the sorted non-redundant key array , a cellsize array , and a gateway array .
+
+secondly, we describe the way to obtain the corresponding values stored in the read-only q-gram index of a querykey . a binary search of the sorted non-redundant key array provides the corresponding cellsize and gateway arrays of the querykey . the querykey corresponds to the elements located from the gottengateway to  in the value array .
+
+finally, we describe the way to write the queryvalue array and its corresponding values stored in the read-only q-gram index . referencing the read-only q-gram index values by the querykey  array creates the gottencellsize and writevalue arrays. to assign each queryvalue and corresponding writevalue to a result array, a writeindex array was computed by an exclusive prefix sum operation of the gottencellsize array. the queryvalue and corresponding writevalues are written as the location from the writeindex to the  in the result array.
+
+in clast, the key and value arrays of the original data are the k-mer and k-mer position hash keys, respectively. in addition to the general algorithm for creating the q-gram index, clast overwrites elements of the cellsize array that are larger than the repeat threshold  with zero to minimize uninformative sequence search seeds. in clast, the querykey and queryvalue arrays are the hash key and position information of each k-mer of the query sequences, respectively. therefore, in clast, the result array indicates the correspondence of the k-mer position in the reference and query sequences and thus is the seed array.
+
+algorithm to reduce the number of seeds
+we defined “surrounding area” of each seed as the same query sequence, same reference sequence, within z  bases parallel to the diagonal, and within w  bases in the reference sequence direction . first, clast sorts seeds by location in the reference sequence . next, clast removes seeds the next of those are not in surrounding area . then, clast removes seeds the next of those are in adjacent . clast has removed isolated seeds and arranges seed clusters into its representative seeds for further steps .figure  <dig> 
+algorithm to reduce the number of seeds.  the gray area represents the “surrounding area” of each seed.  an example of seeds that is to be reduced. the number of each seed represents the order of seeds that is sorted by its position.  the first algorithm to check the seeds. a balloon means that next seed is in surrounding area, and a x-mark means not. clast removes the seeds with x-mark.  the second algorithm to check the seeds. a x-mark means that next seed is in surrounding area, and a baloon means not. clast removes the seeds with x-mark.  the seeds that remains in this example. the seeds are isolated, there is no seeds in surrounding area.
+
+
+
+splitting of long reference sequences for alignment
+because of the small working memory in gpus, clast is limited in the length of sequences that it can manipulate. therefore, reference genome sequences longer than the user-defined limit l  must be split into shorter overlapping sequence fragments with a clast accessory tool. because all prokaryotic genomes obtained to date are shorter than the default value of l, these reference genome sequences do not need to be fragmented for alignment.
+
+other specifications
+each clast process uses one gpu, and users can specify the gpu on which clast runs. this design allows a gpu queuing system to control clast processes.
+
+RESULTS
+clast accuracy evaluation by comparison with the smith–waterman algorithm
+to measure the search accuracy of clast, we compared the output results of blast  <dig> . <dig>  <cit> , blat  <dig>  <cit> , and clast against that of ssearch version  <dig> . <dig>  <cit>  . we chose only blast and blat in the accuracy test because these two tools are widely used in metagenomic analyses . this comparison consisted of six phases. first, we obtained the reference genome sequences of all bacteria and archaea in the national center for biotechnology information  refseq genome database   <cit>  that were completely sequenced and had full taxonomic information. second, we created two query sets  by randomly retrieving 100-base and 800-base sequence fragments from the  <dig>  reference genome sequences. thirdly, these query sets were searched against the reference genome sequences using ssearch, blast, blat, and clast. fourthly, we removed hits from the results for each alignment tool if the assigned regions and query were from the same reference genome sequence. this step makes the result equivalent to a search for the query sequence in the reference sequence database without the original query genome sequence. fifthly, we selected the best non-self hits from the result of each tools with the scoring criteria dependent on the alignment tool. then sixthly, blast, blat, and clast were considered to accurately find a hit when they reported the same hit and alignment position as ssearch. this accuracy test was performed on a desktop computer with an intel xeon x <dig>  <dig> core  <dig>  ghz cpu, 48 gb main memory, and two nvidia tesla c <dig> gpus.
+
+results of comparison of search accuracy
+in both the 100- and 800-base accuracy tests, the search accuracy of clast was comparable to that of blast, both when bit scores were > <dig>  or  <dig>  and when bit scores were < <dig>  or  <dig> . the search accuracy of clast was greater than that of blat in nearly all cases .figure  <dig> 
+result of each accuracy test. both of the graph represent the results of simulated metagenomic analysis test. horizontal axis represents bit score calculated by ssearch, and vertical axis represents ratio of accurately found hits.  results of  <dig> base accuracy test.  results of  <dig> base accuracy test.
+
+
+
+evaluating speed, sensitivity, and accuracy of taxonomic assignments
+massive metagenomic analyses generally depend on the alignment for each read against reference genomes to assign taxonomy for the read. therefore, we designed a simulated metagenomic analysis test to evaluate the sensitivity and accuracy of the taxonomic assignments as well as calculation time.
+
+the simulated metagenomic analysis test consisted of six phases. first, we created two query sets  from  <dig>  reference genome sequences as in the accuracy test. second, we searched for similar regions between each query sequence and the reference genome sequences. third, we removed hits from the results if the assigned region and query were from the same reference genome sequence. fourth, we selected the best non-self hits from the result of each tool, as in the previous accuracy test. fifth, taxonomic assignment of the query sequences was performed using taxonomy of the best non-self hits . finally, we counted the number of query sequences that had similar regions in any reference genome  and the number of queries that were correctly taxonomically assigned  . we compared the number of total reported hits, the number of correct genus assignments, and the correct genus assigned ratio  among the tools tested. total reported hits is a measure of the alignment tool sensitivity, and cga ratio is a measure of the accuracy of taxonomic assignment. since more sensitive similarity search tools will detect weaker similarity, and consequently will have a greater number of total reported hits, these tools are more useful for motif searching .figure  <dig> 
+comparison of the search accuracy of different alignment tools.  taxonomic assignment of the query sequences in the simulated metagenomic analysis test was performed in the following steps: 1: query sequences were generated by randomly selecting short fragments from reference genome sequences. 2: sequence similarities were calculated between the query and reference genome sequences. 3: if a query matched to the original reference sequence, it was deleted from the results. 4: the best non-self hits were selected for taxonomic assignment.  whether the result of taxonomic assignment were correct or not were assessed based on the taxonomic databases.
+
+
+
+in the simulated metagenomic analysis test, we compared clast with other similar tools, namely blast  <dig> . <dig>  blat  <dig>  fr-hit v <dig> , burrows–wheeler aligner /bwa-sw  <dig> . <dig>  bowtie  <dig>  <dig> . <dig>  and g-blastn  <dig> , which depends on blast  <dig> .28+  <cit> . g-blastn was separately compared with clast because g-blastn was designed for the nvidia kepler architecture gpu. the default command line options were used for each alignment tool tested . bwa/bwa-sw  <dig> . <dig>  bowtie  <dig>  <dig> . <dig>  and blat  <dig> cannot handle databases larger than 4 gb  <cit> . therefore, we separated the reference genome sequences into three sets for testing these programs. similarity search results from the three sets were merged for comparison with the results from blast, clast, and fr-hit. the best non-self hits were selected using cigar code and md tag , e-value , and alignment score . the simulated metagenomic analysis test  was performed on the same desktop computer as the accuracy test.
+
+results of comparison of calculation time between clast and other tools
+in the 100-base test, bowtie  <dig>  was the fastest tool, followed by bowtie  <dig> , bwa, clast , clast , blat, fr-hit , and blast. clast  was  <dig>  times faster than blast. clast  speed was comparable to clast  and  <dig>  times faster than blat.
+
+in the 800-base test, bowtie  <dig>  and clast  were the fastest tools. the calculation time of clast was comparable to bowtie  <dig>  and faster than bwa-sw . clast  was  <dig>  and  <dig>  times faster than blat and blast, respectively.figure  <dig> 
+search calculation time of each simulated metagenomic analysis test. the time for each tool to search  <dig>  query reads against  <dig>  reference genome sequences. horizontal axis represents calculation time.  results of  <dig> base test.  results of  <dig> base test.
+
+
+
+results of comparison of similarity search sensitivity and accuracy of taxonomic assignment
+in the 100-base test, the highest number of total reported hits  was obtained with blast , followed by fr-hit , clast , and the remaining tools. in the 800-base test, the highest number of total reported hits was also obtained with blast; however, clast  obtained nearly as many total reported hits, whereas the other tools obtained lower numbers. these results indicate that, for both read lengths, blast, fr-hit , and clast  achieved high sensitivity, and that clast  is sensitive enough to map metagenomic reads to reference genome sequences.figure  <dig> 
+results of the simulated metagenomic analysis test. blue: number of query reads that had at least one similar sequence in the database . red: number of query reads with correct taxonomic assignment . percentages are the cga ratio . horizontal axis represents number of queries.  results of  <dig> base test.  results of  <dig> base test.
+
+
+
+for both read lengths, bowtie  <dig> , clast , and fr-hit  achieved higher cga ratios  than the other tools. in the 100-base test, bwa and bowtie  <dig>  achieved very high cga ratios , but these algorithms produced fewer total reported hits than the other tools. in the 800-base test, the number of total reported hits from bwa-sw was  <dig>  and  <dig>  times greater than from clast  and fr-hit . however, the cga ratio of bwa-sw was much lower than that of fr-hit  and clast   because the number of incorrect genus assignments of bwa-sw was  <dig>  and  <dig>  times greater than those of clast  and fr-hit , respectively . similarly, the number of total reported hits of bowtie  <dig>  was  <dig>  and  <dig>  times greater than those of clast  and fr-hit , but the number of incorrect genus assignments of bowtie  <dig>  was  <dig>  and  <dig>  times greater than those of clast  and fr-hit  . these results indicate that global alignment is useful for the purpose of taxonomic assignment. bwa, bowtie  <dig> , fr-hit , and clast  are able to assign reads to taxonomic groups with reasonably high accuracy. especially among these four tools, clast  and fr-hit  achieved not only high accuracy of taxonomic assignment but also moderate search sensitivity . accuracy of taxonomic assignment of clast  and fr-hit  excelled those of bowtie  <dig>  and bwa-sw, and search sensitivity of clast  and fr-hit  excelled those of bowtie  <dig>  and bwa. in addition, by changing the identity threshold and the coverage threshold, the relationships between total reported hits and correct genus assignment of blast, blat, and clast  were shown as curves . although, the curves of the all tools were resembled each other, the curve of clast  was slightly higher than that of other tools in the  <dig> base test. the point of bowtie  <dig>  was near to that of clast  with 90% identity threshold in both tests. the point of bowtie  <dig>  achieved lower cga ratio than the curves of blast, blat, and clast  in the  <dig> base test, and was near to the curve of blat in the  <dig> base test.figure  <dig> 
+relationships of sensitivity  and specificity  for each software both of the  <dig> base test and the  <dig> base test. each point represents the result of simulated metagenomic analysis of blast, blat, clast , fr-hit , bwa, bwa-sw, bowtie  <dig> . the gray slanting line of each graph represents  <dig> % cga ratio. all points cannot be above the gray line. horizontal axis represents total reported hits, and vertical axis represents correct genus assignments.  results of  <dig> base test.  results of  <dig> base test.
+relationships between sensitivity and specificity of blast, blat, and clast by changing the identity threshold both of the  <dig> base test and the  <dig> base test. each curve represents the results of simulated metagenomic analysis of blast, blat, and clast  under several thresholds. each curve consists of the  <dig> points, indicating the results of simulated metagenomic analysis with  <dig> different thresholds. one point is the result that was not filtered by any identity and coverage thresholds , and the others are based on the results that were filtered by an identity threshold and a coverage threshold. the identity thresholds were 95%, 90%, 85%, and 80%. the coverage threshold was unified to 50%. in all curves, high identity thresholds represent small numbers of total reported hits and correct genus assignments . the points of bowtie  <dig> results  that were not filtered by any identity and coverage thresholds  are also plotted to be able to compare with the curves of other tools. horizontal axis represents total reported hits, and vertical axis represents correct genus assignments.  results of  <dig> base test.  results of  <dig> base test.
+
+
+
+calculation time using multiple gpus
+we ran clast on one, two, and eight gpus with actual metagenomic reads to investigate the effect of gpu number on the calculation time. the reference genome sequences were the same as that used in the simulated metagenomic analysis test. the query sequences, which are the illumina genome analyzer iix reads from a human gut microbial community, were obtained from qin et al.  <cit>  . for this test, we used a 4-node gpu server. each of the node had an intel xeon x <dig>  <dig> core  <dig>  ghz cpu, 64 gb main memory, and two nvidia tesla c <dig> gpus.
+
+results of calculation time using multiple gpus
+total similarity search-calculation time for clast with the real metagenomic reads showed a linear inverse relationship with gpu number . with only one gpu, the calculation times of clast were 355 min  and 373 min  . with two gpus, calculation times of clast were 188 min  and 192 min , and with eight gpus, calculation times of clast were 49 min  and 50 min . this result indicates that clast function can be greatly accelerated by using multiple gpus.figure  <dig> 
+calculation time of clast with real metagenomic reads.
+
+
+
+
+comparison with g-blastn
+in addition to comparison of clast with cpu-based tools, we compared the speed, sensitivity, and accuracy of clast taxonomic assignments to those of g-blastn . the dataset and the analysis pipeline for comparison with g-blastn were the same as those of the simulated metagenomic analysis test. we used a workstation with two intel xeon e5-2687 w  <dig> core  <dig>  ghz cpus,  <dig>  gb main memory, and two nvidia tesla k20m gpus . if the clast algorithm achieves the same speed as that of g-blastn, g-blastn  would be approximately two times as fast as clast  on the two k <dig> machine because g-blastn automatically uses all available gpus, and one clast process uses only the one specified gpu. we compared clast to g-blastn run in the megablast mode  and blastn modes .
+
+results of comparison with g-blastn
+in the simulated metagenomic analysis test, the g-blastn  analysis took  <dig>  s when the query length was  <dig> bases, and  <dig>  s when the query length was  <dig> bases, on the two k <dig> machines. on the other hand, clast took 210 s  and 215 s  for the 100-base query length, and  <dig>  s  and  <dig>  s  for the 800-base query length in the same gpu architecture. in other words, clast was 150– <dig> times faster than g-blastn . furthermore, g-blastn  took 199 s when query length was  <dig> bases, and 724 s when query length was  <dig> bases. thus, clast was  <dig> – <dig>  times faster than g-blastn . these results suggest that clast is much faster than g-blastn  and slightly faster than g-blastn .
+
+the total reported hits and correct genus assignments of g-blastn  were  <dig>  and  <dig> , respectively , when the query length was  <dig> bases. the total reported hits and correct genus assignments of g-blastn  were  <dig>  and  <dig> , respectively , when the query length was  <dig> bases. thus, g-blastn  performed similarly to blast in the simulated metagenomic analysis test. this result suggests that clast  can detect as much information as g-blastn  when the query length is  <dig> bases.
+
+the total reported hits and correct genus assignments of g-blastn  were  <dig>  and  <dig> , respectively , when the query length was  <dig> bases. the total reported hits and correct genus assignments of g-blastn  were  <dig>  and  <dig> , respectively , when the query length was  <dig> bases. thus, g-blastn  was similar to bowtie  <dig>  in the simulated metagenomic analysis test. this result showed that the accuracy of taxonomic assignments of clast  is greater than that of g-blastn  and that the sensitivity of clast  is greater than that of g-blastn .
+
+discussion
+as mentioned above, both high speed and accuracy of similarity searching are necessary for analyses of the large number of reads, often from uncharacterized microbes, derived from high-throughput several metagenomic sequencing projects. clast is an ultrafast and sensitive similarity-searching tool that is optimized for massive metagenomic analyses with next-generation sequencing technologies . here we demonstrated the excellent performance of the clast tool in terms of both computation speed and sensitivity. the high speed of clast largely comes from the use of gpus, which are relatively inexpensive, powerful, and widely used to accelerate high-performance computing. the sensitivity of clast largely comes from the use of banded dynamic alignment as a programming algorithm for seed extension. moreover, the speed and sensitivity of clast can be improved by specifying longer or shorter k values, respectively. however, clast may not be appropriate for users who are not familiar with gpu computing, and because clast is designed for metagenomic analyses, other tools are more suitable in other situations. for example, bwa or bowtie  <dig> are more appropriate for data analyses in genome resequencing projects for which there is a reference genome, and thus a higher-sensitivity tool is not required .figure  <dig> 
+scatter diagram of sensitivity versus time use.
+
+
+
+
+in addition to its speed and sensitivity, the dynamic programming of clast also allows both global and local alignments. global alignment is useful for assigning taxonomic assignment of metagenomic reads because global alignments can evaluates similarity of large regions of the query and reference genome sequences . our results demonstrate that clast  produces highly accurate taxonomic assignments, similar to several other global alignment tools. clast  also achieved relatively high sensitivity, which is higher than those of bwa and bowtie  <dig>  . on the other hand, local alignment is useful for motif searching, which is often used in functional metagenomics  <cit> , because it can identify partial sequence identity between reads and reference genome sequences. the unique ability of clast to perform both local and global alignment greatly enhances its usefulness in metagenomics analyses .
+
+large-scale metagenomic analyses often require use of very large and frequently updated reference databases. clast is exceptionally suited for these analyses because it requires minimal database preprocessing for larger genome sequences and does not have a database size limitation. in addition, the maximum memory usage of clast is independent of the size of the reference genome sequences in the database.
+
+although some other alignment tools are able to perform large-scale similarity searches, they tend to require more database preprocessing and memory usage than clast. for example, blast requires database preprocessing, and the calculation time of this preprocessing is highly related to the size of database. although blat does not require preprocessing, it cannot utilize databases larger than 4 gb  <cit> . fr-hit does not require preprocessing, but its memory usage is typically two or three times larger than the size of the database  <cit> . burrows–wheeler transform-based mapping tools usually also require database preprocessing, but because these mapping tools use block sorting, the preprocessing time is generally incidental. for instance, preprocessing of the human genome database  by burrows–wheeler transform-based tools usually takes only a few hours  <cit> . however, the microbial genome sequence database now exceeds 5 gb, and the ncbi non-redundant nucleotide sequence database is now >40 gb, and these databases will continue to grow. given its unique ability to use these extremely large and rapidly growing databases, clast shows great promise as an alignment tool for genomic and metagenomic analyses .
+
+clast requires ~2 gb of main memory and ~2 gb of vram, under default settings, and usual metagenomic analyses. more vram may be consumed when numerous outputs are produced compared with the input query and reference sequences, such as in 16s rrna gene amplicon sequencing analyses, but users can manipulate the vram usage by specifying specific parameters. the low memory usage of clast makes it a reasonable approach for large-scale metagenomic analyses by researchers who do not have access to specialized large-memory computers. this low memory usage is achieved by dividing both the reference genome sequences and query sequences into smaller units that are loaded stepwise to the main memory. although clast depends on a q-gram index of reference sequences, creation of the read-only q-gram index is also performed by the gpus and therefore does not add substantially to the running time. this feature is one of the most important and innovative advances of clast. in contrast, blat and fr-hit load all reference genome sequence data to the main memory at the same time, thus requiring a larger main memory for larger databases. indeed, fr-hit used >13 gb of memory in our simulated metagenomic analysis test.
+
+to further take advantage of parallel-computation power, clast can be run by multiple gpus, dramatically accelerating the homology search. this feature, combined with its low memory usage, makes clast appropriate for gpu clusters and supercomputers, which are often equipped with nodes having more than one gpu and less than 100 gb of memory. the source code of the clast tool is attached to this paper .
+
+CONCLUSIONS
+the novel high-speed and sensitive sequence similarity search tool clast was designed and validated for metagenomic analysis applications. clast was capable of identifying sequence similarities ~ <dig>  times faster than blast and  <dig>  times faster than blat owing to a gpu-based parallelization technique using cuda computing architecture. to improve the sensitivity of similarity searching for taxonomic assignment and motif searching, clast supports both global and local alignment. furthermore, clast does not require extensive database preprocessing, and consequently can be run on a standard desktop computer with nvidia gpus. taken together, our results demonstrate that clast run on a gpu-oriented cluster or supercomputer has the potential to be one of the most powerful and realistic approaches to analyze the massive amount of sequence data from next-generation sequencing technologies.
+
+availability and requirements
+project name: clast
+
+project home page:https://github.com/masayano/clast
+
+operating system: platform independent
+
+programming language: cuda
+
+other requirements: nvidia fermi architecture gpu, cuda  <dig> 
+
+license: gnu gpl
+
+any restrictions to use by non-academics: none
+
+
+
+additional files
+additional file  <dig> 
+features of gpu-based similarity searching tools.  cuda sw++ calculates  <dig> giga cell updates per second on a single-gpu geforce gtx  <dig> graphics card  <cit> . thus, it takes ~ <dig> million seconds for cuda sw++ to search for similar regions between  <dig> million 100-base query sequences and  <dig> billion bases of reference sequences. therefore, cuda sw++ is not suitable for analysis of reads from next-generation sequencing technologies.  gpu-blast is ~3– <dig> times faster than ncbi blast, but it is slower than blat  <cit> .  demonstrated in the results section.
+
+additional file  <dig> 
+information about the similar regions of clast hits.
+
+
+additional file  <dig> 
+parameters used in clast and its description.
+
+
+additional file  <dig> 
+detailed results of the accuracy test.
+
+
+additional file  <dig> 
+command line parameters for each tool in the simulated metagenomic analysis test.
+
+
+additional file  <dig> 
+detailed results of the simulated metagenomic analysis test.
+
+
+additional file  <dig> 
+detailed results of the simulated metagenomic analysis test with changing threshold values.
+
+
+additional file  <dig> 
+specifications of the tools used in the simulated metagenomic analysis test.  bwa/bwa-sw  <dig> . <dig> was used in this study; however, more recent bwa algorithms  can now utilize genomes > <dig> gb  <cit> .
+
+additional file  <dig> 
+source code of the clast tool.
+
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+kk designed the study. my developed the methods and performed the analyses. hm and kk provided advice on the analyses. my drafted the manuscript, and hm, ay, ty and kk critically revised the manuscript. all authors read and approved the final manuscript.
+

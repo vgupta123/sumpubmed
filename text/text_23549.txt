@@ -1,0 +1,353 @@
+BACKGROUND
+conventional class prediction methods often yield poor results or may even be inapplicable in the context of high-dimensional data with more predictors than observations like microarray data. microarray studies have thus stimulated the development of new approaches and motivated the adaptation of known traditional methods to the high-dimensional setting. most of them are implemented in the r language  <cit>  and freely available at  or from the bioinformatics platform . meanwhile, the latter has established itself as a standard tool for analyzing various types of high-throughput genomic data including microarray data  <cit> . throughout this article, the focus is on microarray data, but the presented package can be applied to any supervised classification problem involving a large number of continuous predictors such as, e.g. proteomic, metabolomic, or signal data. model selection and evaluation of prediction rules turn out to be highly difficult in the p ≫ n setting for several reasons: i) the hazard of overfitting, which is common to all prediction problems, is considerably increased by high dimensionality, ii) the usual evaluation scheme based on the splitting into learning and test data sets often applies only partially in the case of small samples, iii) modern classification techniques rely on the proper choice of hyperparameters whose optimization is highly computer-intensive, especially with high-dimensional data.
+
+the multiplicity of available methods for class prediction based on high-dimensional data is an additional practical challenge for inexperienced researchers. whereas logistic regression is well-established as the standard method to be used when analyzing classical data sets with much more observations than variables , there is no unique reference standard method for the n ≪ p case. moreover, the programs implementing well-known popular methods such as penalized logistic regression, nearest shrunken centroids  <cit> , random forests  <cit> , or partial least squares  <cit>  are characterized by a high heterogeneity as far as input format, output format, and tuning procedures are concerned. inexperienced users have thus to spend much effort understanding each of the programs and modifying the data formats, while potentially introducing severe errors which may considerably affect the final results. furthermore, the users may overlook important tuning parameters or detail settings that sometimes noticeably contribute to the success of the classifier. note that circumventing the problem of the multiplicity of methods by always using a single "favorite method"  potentially leads to poor results, especially when the considered method involves strong assumptions on the data structure.
+
+from the difficulties outlined above, we conclude that careful model selection and evaluation satisfying accepted good-practice standards  <cit>  is a very complex task for inexperienced users with limited statistical background. in this article, we introduce a new bioconductor package called cma  for automatically performing variable selection, parameter tuning, classifier construction, and unbiased evaluation of the constructed classifiers. the primary goal of cma is to enable statisticians with limited experience on high-dimensional class prediction or biologists and bioinformaticians with statistical background to achieve such a demanding task on their own. without much time and effort, users are provided with an overview of the unbiased accuracy of most top-performing classifiers. furthermore, the standardized evaluation framework underlying cma involving variable selection and hyperparameter tuning can also be beneficial for comparison purposes, for instance if a new classifier has to be compared to existing approaches.
+
+in a nutshell, cma offers an interface to a total of more than twenty different classifiers, seven univariate and multivariate variable selection methods, different evaluation schemes , and different measures of classification accuracy. a particular attention is devoted to preliminary variable selection and hyperparameter tuning, issues that are often neglected in current literature and software. more specifically, variable selection is always performed using the training data only, i.e. for each iteration successively in the case of cross-validation, following well-established good-practice guidelines  <cit> . hyperparameter tuning is performed through an inner cross-validation loop, as usually recommended  <cit> . this feature is intended to prevent users from trying several hyperparameter values on their own and selecting the best results a posteriori, a strategy which would obviously lead to severe bias  <cit> .
+
+the cma package is freely available from the bioconductor website at 
+
+overview of existing packages
+the idea of an r interface for the integration of microarray-based classification methods is not new. the cma package shows similarities to the bioconductor package 'mlinterfaces' standing for "an interface to various machine learning methods"  <cit> , see also the bioconductor textbook  <cit>  for a presentation of an older version. the mlinterfaces package includes numerous facilities such as the unified mlearn interface, the flexible learnerschema design enabling the introduction of new procedures on the y, and the xvalspec interface that allows arbitrary types of resampling and cross-validation to be employed. mlearn also returns the native r object from the learner for further interrogation. the package architecture of mlinterfaces is similar the cma structure in the sense that wrapper functions are used to call classification methods from other packages.
+
+however, cma includes additional predefined features as far as variable selection, hyperparameter tuning, classifier evaluation and comparison are concerned. while the method xval is flexible for experienced users, it provides only cross-validation  as predefined option. as the cma package also addresses inexperienced users, it includes the most common validation schemes in a standardized manner. in the current version of mlinterfaces, variable selection can also be carried out separately for each different learning set, but it does not seem to be a standard procedure. in the examples presented in the bioconductor textbook  <cit> , variable selection is only performed once using the complete sample. in contrast, cma performs variable selection separately for each learning set by default. further, cma includes additional features for hyperparameter tuning, thus allowing an objective comparison of different class prediction methods. if tuning is ignored, simpler methods without  tuning parameters tend to perform seemingly better than more complex algorithms. cma also implements additional measures of prediction accuracy and user-friendly visualization tools.
+
+the package 'mcrestimate'  <cit>  emphasizes very similar aspects as cma, focussing on the estimation of misclassification rates and cross-validation for model selection and evaluation. it is  the only bioconductor package beside ours supporting hyperparameter tuning and the workflow is fully compatible with good practice standards. the advances of cma compared to mcrestimate are summarized below. cma includes much more classifiers , which allows a comfortable extensive comparison without much effort. in particular, it provides an interface to recent machine learning methods, including two highly competitive boosting methods . cma also allows to pass arguments to the classifier, which may be useful in some cases, for instance to reduce the number of trees in a random forest for computational reasons. furthermore, all the methods included in cma support multi-class response variables, even the methods based on logistic regression . a very wide range of variable selection methods are available from cma, e.g. fast implementations of important univariate test statistics including typical multi-class approach . moreover, cma offers the possibility of constructing classifiers in a hybrid way: variable selection can be performed via the lasso and subsequently plugged into another algorithm. in addition to cross-validation, evaluation can be performed based on several most often used schemes such as bootstrap  or repeated subsampling. the definition of the learning sets can also be customized, which may be an advantage when, e.g. one wants to evaluate a classifier based on a single split learning/test data, as usual in the context of validation. cma also includes additional accuracy measures which are commonly used in medical research. convivial visualization tools are provided at the intention of either statisticians or practitioners. when several classifiers are run, the compare function produces ready-to-use tables listing different performance measures for several classifiers.
+
+from the technical point of view, an additional advance is that cma's implementation is fully organized in s <dig> classes, which bears advantages for both experienced users  and inexperienced users . as a consequence, cma has a clear inherent modular structure. the use of s <dig> classes is highly beneficial when adding new features, because it requires at most changes in one 'building block'. furthermore, s <dig> classes offer the advantage of specifying the input data in manifold ways, depending on the user's needs. for example, the cma users can enter their gene expression data as matrices, data frames combined with formulae, or expressionsets.
+
+overview of class prediction with high-dimensional data and notations
+settings and notation
+the classification problem can be briefly outlined as follows. we have a predictor space x, here x ⊆ ℝp . the finite set of class labels is denoted as y = { <dig>  ..., k - 1}, with k standing for the total number of classes, and p denotes the joint probability distribution on x×y. we are given a finite sample s = {,...,} of n predictor-class pairs. the considered task is to construct a decision function
+
+ f^:x→yx↦f^ 
+
+such that the generalization error
+
+  r=ep=∫x×yl) dp 
+
+is minimized, where l is a suitable loss function, usually taken to be the indicator loss  =  <dig> if u ≠ v, l =  <dig> otherwise). other loss functions and performances measures are discussed extensively in section  <dig> . <dig>  the symbol ^ indicates that the function is estimated from the given sample s.
+
+estimation of the generalization error
+as we are only equipped with a finite sample s and the underlying distribution is unknown, approximations to eq.  have to be found. the empirical counterpart to r 
+
+  remp=n−1∑i=1nl) 
+
+has a  negative bias, i.e. prediction error is underestimated. moreover, choosing the best classifier based on eq.  potentially leads to the selection of a classifier overfitting the sample s which may show poor performance on independent data. more details can be found in recent overview articles  <cit> . a better strategy consists of splitting s into distinct subsets ℒ  and t  with the intention to separate model selection and model evaluation. the classifier f^ is constructed using ℒ only and evaluated using t only, as depicted in figure  <dig> .
+
+in microarray data, the sample size n is usually very small, leading to serious problems for both the construction of the classifier and the estimation of its prediction accuracy. increasing the size of the learning set  typically improves the constructed prediction rule f^, but decreases the reliability of its evaluation. conversely, increasing the size of the test set  improves the accuracy estimation, but leads to poor classifiers, since these are based on fewer observations. while a compromise can be found if the sample size is large enough, alternative designs are needed for the case of small sizes. the cma package implements several approaches which are all based on the following scheme.
+
+ <dig>  generate b learning sets ℒb  from s and define the corresponding test set as tb=s\ℒb
+
+ <dig>  obtain f^b  from ℒb, for b =  <dig>  ..., b.
+
+ <dig>  the quantity
+
+  ϵ^=1b∑b=1b1|tb|∑i∈tbl) 
+
+is then used as an estimator of the error rate, where |·| stands for the cardinality of the considered set.
+
+the underlying idea is to reduce the variance of the error estimator by averaging, in the spirit of the bagging principle introduced by breiman  <cit> . the function generatelearningsets from the package cma implements several methods for generating ℒb and tb in step  <dig>  which are described below.
+
+loocv leaving-one-out cross-validation
+
+for the b-th iteration, tb consists of the b-th observation only. this is repeated for each observation in s, so that b = n.
+
+cv k-fold cross-validation 
+
+s is split into fold non-overlapping subsets of approximately equal size. for each iteration b, the b-th subset is used as tb and the union of the remaining subsets as ℒb, such that b = fold. setting fold = n is equivalent to method = "loocv". for fold <n, the splitting is not uniquely determined. it is thus recommended to repeat the whole procedure niter times  <cit>   to partly average out random variations.
+
+mccv monte-carlo-cross-validation 
+
+each of the b = niter learning sets of cardinality ntrain is drawn randomly from s without replacement. the argument ntrain specifies the number of observations to be included in each learning set.
+
+boot bootstrap 
+
+b = niter bootstrap samples   <cit>  of cardinality ntrain are used as learning sets. in practice, ntrain is usually set to the total sample size n.
+
+a schematic representation of cv, mccv and bootstrap sampling is provided in figure  <dig> . "stratified sampling" is possible by setting strat = true. this implies that, in each learning set ℒb, the proportion of the classes { <dig>  ..., k - 1} is approximately the same as in s. this option is very useful  in order to guarantee that each class is sufficiently represented in each ℒb, in particular if there are classes of small size. for more details on the evaluation of classifiers, readers may refer to recent overview articles discussing the respective drawbacks and advantages of these methods in  <cit> .
+
+note that, if one employs a method to impute missing values making use of class label information, imputation should be performed for each learning set separately. this procedure is not supported by cma. instead, we recommend to impute missing values before beginning the analyses with cma using a package like 'impute'  <cit>  that does not involve class label information.
+
+in cma, cross-validation is also used for hyperparameter tuning. the optimal value of the method parameter is determined within an inner cross-validation, as commonly recommended  <cit> . if cross-validation is used for both tuning parameters and evaluating a classifiers, the whole procedure is denoted as nested cross-validation. see figure  <dig> for a schematic representation and section  <dig> . <dig> for more details on hyperparameter tuning.
+
+ <dig> implementation
+the bioconductor package cma is user-friendly in the sense that  the methods automatically adapt to the data format provided by the user;  convenient functions take over frequent tasks such as automatic visualization of results;  reasonable default settings for hyperparameter tuning and other parameters requiring expert knowledge of particular classifiers are provided;  it works with uniform data structures. to do so, cma exploits the rich possibilities of object-oriented programming as realized by s <dig> classes of the methods package  <cit>  which make it easy to incorporate new features into an existing framework. for instance, with some basic knowledge of the s <dig> class system , users can easily embed new classification methods in addition to the  <dig> currently available in cma. moreover, the process of classifier building described in more detail in section  <dig> . <dig> can either be partitioned into several transparent small steps  or executed by only one compact function call. the last feature is beneficial for users who are not very familiar with r commands.
+
+ <dig> 
+RESULTS
+ <dig>  cma features
+ <dig> . <dig> overview
+the package offers a uniform, user-friendly interface to a total of more than twenty classification methods  comprising classical approaches as well as more sophisticated methods. user-friendliness means that the input formats are the same for all implemented methods, that the user may choose between three different input formats and that the output is self-explicable and informative. the implementation is fully organized in s <dig> classes, thus making the extension of cma very easy. in particular, own classification methods can easily be integrated if they return a proper object of class cloutput. in addition to the packages listed in table  <dig>  cma only requires the package 'limma' for full functionality. for all other features, no code of foreign packages is used. like most r packages, cma is more flexible than, e.g., web-based tools. experienced users can easily modify the programs or add new methods.
+
+the first column gives the method name, whereas the name of the classifier in the cma package is given in the second column. for each classifier, cma uses either own code or code borrowed from another package, as specified in the third column.
+
+moreover, cma automatically performs all important steps towards the construction and evaluation of classifiers. it can generate learning samples as explained in section  <dig>  including the generation of stratified samples. different schemes for generating learning sets and test sets are displayed schematically in figure  <dig> . the method geneselection provides optional variable selection preceding classification for each iteration b =  <dig>  ..., b separately, based on various ranking procedures, whereas the method tune carries out hyperparameter tuning for a fixed set of variables. it can be performed in a fully automatic manner using pre-defined grids. alternatively, it can be completely customized by the experienced user. performance can be assessed using the method evaluation for several performance measures commonly used in practice. comparison of the performance of several classifiers can be quickly tabulated and visualized using the method comparison. moreover, estimations of conditional class probabilities for predicted observations are provided by most of the classifiers, with only a few exceptions. this is more informative than only returning class labels and allows a more precise comparison of different classifiers. last but not least, most results can conveniently be summarized and visualized using pre-defined convenience methods as demonstrated in section  <dig> . for example, plot, cloutput-method produces probability plots, also known as "voting plot", plot, genesel-method visualizes variable importance as derived from one of the ranking procedures via a barplot, roc, cloutput-method draws empirical roc curves, toplist, genesel-method lists the most relevant variables, and summary, evaloutput-method makes a summary out of iteration- or observationwise performance measures.
+
+ <dig> . <dig> classification methods
+this subsection gives a brief summarizing overview of the classifiers implemented in cma. we have tried to compose a balanced mixture of methods from several fields although we do not claim our selection to be representative, taking into account the large amount of literature on this subject. for more detailed information on the single methods, readers are referred to the references given in table  <dig> and the references therein. all classifiers can be constructed using the cma method classification, where the argument classifier specifies the classification method to be used.
+
+discriminant analysis
+discriminant analysis is the optimal classifier if the conditional distributions of the predictors given the classes are gaussian. diagonal, linear and quadratic discriminant analysis differ only by their assumptions for the  covariance matrices Σk = cov, k =  <dig>  ..., k -  <dig> 
+
+ diagonal linear discriminant analysis  assumes that the within-class covariance matrices Σk are diagonal and equal for all classes, i.e. Σk=Σ=diag, k =  <dig>  ..., k -  <dig>  thus requiring the estimation of only p covariance parameters.
+
+ linear discriminant analysis  assumes Σk = Σ, k =  <dig>  ..., k -  <dig> without further restrictions for Σ so that p/ <dig> parameters have to be estimated.
+
+ quadratic discriminant analysis  does not impose any particular restriction on Σk, k =  <dig>  ..., k -  <dig> 
+
+while  turns out to be still practicable for microarray data, linear and quadratic discriminant analysis are not competitive in this setting, at least not without dimension reduction or excessive variable selection .
+
+the so-called pam method , which is also commonly denoted as "shrunken centroids discriminant analysis" can be viewed as a modification of diagonal discriminant analysis  using univariate soft thresholding  <cit>  to perform variable selection and yield stabilized estimates of the variance parameters .
+
+fisher's discriminant analysis   has a different motivation, but can be shown to be equivalent to linear discriminant analysis under certain assumptions. it looks for projections atx such that the ratio of between-class and within-class variance is maximized, leading to a linear decision function in a lower dimensional space. flexible discriminant analysis  can be interpreted as fda in a higher-dimensional space generated by basis functions, also allowing nonlinear decision functions  <cit> . in cma, the basis functions are given by penalized splines as implemented in the r package 'mgcv'  <cit> .
+
+shrinkage discriminant analysis  <cit>   tries to stabilize covariance estimation by shrinking the unrestricted covariance matrix from linear discriminant analysis to a more simply structured target covariance matrix, e.g. a diagonal matrix.
+
+partial least squares
+partial least squares is a dimension reduction method that looks for directions {wr}r=1r maximizing |cov|  subject to the constraints wrtwr= <dig> and wrtws= <dig> for r ≠ s, where r ≪ p. instead of working with the original predictors, one then plugs the projections living in a lower dimensional space into other classification methods, for example linear discriminant analysis , logistic regression  or random forest . see boulesteix and strimmer  <cit>  for an overview of partial least squares applications to genomic data analysis.
+
+regularization and shrinkage methods
+in both penalized logistic regression and support vector machines, f^ is constructed such that it minimizes an expression of the form
+
+  ∑i=1nl)+λj, 
+
+where l is a loss function as outlined above and j  is a regularizer preventing overfitting. the trade-off between the two terms is known as bias-variance trade-off and governed via the tuning parameter λ. for ℓ <dig> penalized logistic regression , f = xtβ is linear and depends only on the vector β of regression coefficients, j  is the ℓ <dig> norm j  = βtβ and l is the negative log-likelihood of a binomial distribution. setting j=|β|=∑j=1p|βj| yields the lasso  <cit>  , while combining both regularizers yields the elastic net  <cit>  . cma also implements a multi-class version of ℓ <dig> penalized logistic regression, replacing the binomial negative likelihood by its multinomial counterpart.
+
+for support vector machines , we have
+
+ f=∑i∈vαik, 
+
+where v ⊂ { <dig>  ..., n} is the set of the so-called "support vectors", αi are coefficients and k is a positive definite kernel. frequently used kernels are the linear kernel ⟨·,·⟩, the polynomial kernel ⟨·,·⟩d or the gaussian kernel k = expt/σ2). the function j  is given as j=∑i∈v∑j∈vαiαjk  and l is the so-called hinge loss  <cit> .
+
+random forests
+the random forest method  <cit>  aggregates an ensemble of binary decision-tree classifiers  <cit>  constructed based on bootstrap samples drawn from the learning set . the "bootstrap aggregating" strategy  turns out to be particularly successful in combination with unstable classifiers such as decision trees. in order to make the obtained trees even more different and thus increase their stability and to reduce the computation time, random forests have an additional feature. at each split, a subset of candidate predictors is selected out of the available predictors. the random forest method also performs implicit variable selection and can be used to assess variable importance .
+
+boosting
+similarly to random forests, boosting is based on a weighted ensemble of "weak learners" for classification, i.e. f = ∑αmfweak, where αm >  <dig>  are adequately chosen coefficients. the term weak learner which stems from the machine learning community  <cit> , denotes a method with poor performance  and low complexity. famous examples for weak learners are binary decision trees with few  splits or linear functions in one predictor which is termed componentwise boosting. friedman  <cit>  reformulates boosting as a functional gradient descent combined with appropriate loss functions. the cma package implements decision tree-based  and componentwise  boosting with exponential, binomial and squared loss in the two-class case, and multinomial loss in the multi-class case.
+
+feed-forward neural networks
+cma implements one-hidden-layer feed-forward neural networks . starting with a vector of covariates x, one forms projections artx, r =  <dig>  ..., r, that are then transformed using an activation function h, usually sigmoidal, in order to obtain a hidden layer consisting of units {zr=h}r=1r that are subsequently used for prediction. training of neural networks tends to be rather complicated and unstable. for large p, cma works in the space of "eigengenes", following the suggestion of  <cit>  by applying the singular value decomposition  <cit>  to the predictor matrix.
+
+probabilistic neural networks
+although termed "neural networks", probabilistic neural networks  are actually a parzen-windows type classifier  <cit>  related to the nearest neighbors approach. for x ∈ t from the test set and each class k =  <dig>  ..., k -  <dig>  one computes
+
+ wk=nk−1∑xi∈ℒi⋅exp⁡t/σ2),k= <dig> ...,k− <dig> 
+
+where nk denotes the number of observations from class k in the learning set and σ <dig> >  <dig> is a parameter. the quotient {wk/∑k=0k−1wk}k=0k− <dig> is then considered as an estimate of the class probability, for k =  <dig>  ..., k -  <dig> 
+
+nearest neighbors and probabilistic nearest neighbors
+cma implements one of the variants of the ordinary nearest neighbors approach using the euclidean distance as distance measure  and another variant called "probabilistic" that additionally provides estimates for class probabilities by using distances as weights, however without a genuine underlying probability model . given a learning set ℒ and a test set t, respectively, the probabilistic nearest neighbors method determines for each element in ℒ the k >  <dig> nearest neighbors n⊂ℒ and then estimates class probabilities as
+
+ p=exp⁡i)exp⁡i),k= <dig> ...,k− <dig> x∈t 
+
+where β >  <dig> is a method parameter and d a distance measure.
+
+note that users can easily incorporate their own classifiers into the cma framework. to do this, they have to define a classifier with the same structure as those already implemented in cma. for illustrative purposes, we consider a simple classifier assigning observations to two classes. the code defining this classifier is given below. once the classifier is defined, it can be used in the method classification in place of the cma classifiers enumerated above.
+
+myclassifier <- function {
+
+   xlearn <- x ; yearn <- y 
+
+   xtest <- x ; ytest <- y 
+
+   w <- hyperpar * t
+
+   pred <- )+1)/2
+
+   new
+
+}
+
+ <dig> . <dig> variable selection methods
+this section addresses the variable ranking- and selection procedures available in cma. we distinguish three types of methods: pure filter methods  based on parametric or nonparametric statistical tests not directly related to the prediction task, methods which rank variables according to their discriminatory power , and classification methods selecting sparse sets of variables that can be used for other classification methods in a hybrid way . the multi-class case is fully supported by all the methods. methods that are defined for binary responses only are applied within a "one-vs-all" or "pairwise" scheme. the former means that for each class k =  <dig>  ..., k -  <dig>  one recodes the class label y into k pseudo class labels y˜k = i for k =  <dig> ..., k -  <dig>  while the latter considers all  possible pairs of classes successively. the variable selection procedure is run k times or  times, respectively, and the same number of genes are selected for each run. the final subset of selected genes consists of the union of the subsets obtained in the different runs.
+
+in the cma package, variable selection can be performed  using the method geneselection, with the argument method specifying the procedure and the argument scheme indicating which scheme  should be used in the k >  <dig> case. the implemented methods are:
+
+ ordinary two-sample t.test 
+
+ welch modification of the t.test 
+
+ wilcoxon rank sum test 
+
+ f test 
+
+ kruskal-wallis test 
+
+ "moderated" t and f test, respectively, using the package 'limma'  <cit>  
+
+ one-step recursive feature elimination  in combination with the linear svm  <cit>  
+
+ random forest variable importance measure  <cit>  
+
+ lasso  <cit>  
+
+ elastic net  <cit>  
+
+ componentwise boosting   <cit> 
+
+ ad-hoc "golub" criterion  <cit> 
+
+each method can be interpreted as a function i on the set of predictor indices: i: { <dig> ..., p} → ℝ+ where i increases with discriminating power. i is the absolute value of the test statistic for the  methods and the absolute value of the corresponding regression coefficient for the -methods, while the -methods are already variable importance measures per definition. predictor j is said to be more important than predictor l if i <i. it should be noted that the variable ordering is not necessarily determined uniquely, especially for the -methods where variable importances are non-zero for few predictors only and for the  methods based on ranks. after variable ranking, variable selection is then completed by choosing a suitable number of variables  that should be used by the classifier. for the multi-class case with one-vs-all or pairwise schemes, one obtains k and  separate rankings, respectively, and the union of them forms the set of predictor variables. we again emphasize that the variable importance assignment is based on learning data only, which means that the procedure is repeated for each learning/test set splitting successively.
+
+note that the method geneselection may be used to order any kind of variables, not only genes. for example, if one uses cma to classify genes based on samples instead of classifying samples based on genes, the function geneselection is used to select samples instead of selecting genes in spite of its name.
+
+ <dig> . <dig> hyperparameter tuning
+the function tune of the cma package implements inner cross-validation for hyperparameter tuning, as represented schematically in figure  <dig>  the following procedure is repeated for each learning set ℒb defined by the argument learningsets. the learning set is partitioned into l subsets of approximately equal size. for different values of the hyperparameters, the error rate is estimated based on ℒb within a l-fold cross-validation scheme. the hyperparameter values yielding the smallest cross-validated error rate are then selected and used for the construction of the classifier based on ℒb. hence, the test data set tb is not used for hyperparameter tuning. this procedure is often denoted as inner or internal cross-validation, yielding a so-called nested cross-validation procedure if cross-validation is also used to evaluate the error rate of the classification method of interest.
+
+examples of tuning parameters for the classifiers included in cma are given in table  <dig>  note that one could also consider the number of genes as an hyperparameter to be tuned in nested cross-validation, although this is still not standard practice. we plan to do this extension in future work.
+
+the first column gives the method name, whereas the name of the hyperparameter in the cma package is given in the second column. the third column gives the range of the parameter and the fourth column its signification.
+
+it is crucial to perform hyperparameter tuning properly, for instance within an inner cross-validation as implemented in cma. on the one hand, by using a complicated classifier involving many parameters without tuning them, one implicitly favors simpler classifiers which do not involve any hyperparameters. on the other hand, it would be completely incorrect to tune the parameters a posteriori, i.e. to try several values of the tuning parameters successively and to show only the best results  <cit> . such a design would artificially favor complicated classifiers with many tuning parameters, and one would expect the obtained optimal classifier to generalize poorly on an independent validation data set. this problem is connected to occam's razor.
+
+for example, let us consider diagonal discriminant analysis , which is also known as naive bayes classifier due to its simplicity, and on the other hand a svm with a gaussian kernel, which depends on at least two hyperparameters: the first one is the width of the gaussian kernel and the second one is the cost parameter that governs the amount of regularization. while there are rules of thumb for choosing the width of the gaussian kernel, this does not apply to the cost. setting the cost to an arbitrary value can cause both over- and underfitting. in contrast, dlda does not overfit due to its simplicity, but may tend to underfit.
+
+note that the hyperparameter tuning procedure may yield sub-optimal values for the hyperparameters if used in combination with the gene selection procedure. that is because, in the present version of the cma package, the set of genes remains fixed for all iterations of the inner cross-validation. this may affect the performance of the tuning procedure in the following way. since in the inner cross-validation procedure variable selection is based on both the training sets and the test sets, the selected gene subset fits the test sets artificially well, which may affect the selection of the optimal hyperparameter values. for example, hyperparameter values corresponding to too complex models  might yield small cross-validation error rates and get selected by the inner cross-validation procedure. thus, using the tuning procedure in combination with gene selection tends to yield sub-optimal hyperparameter values. this may result in overestimated error rates in outer cross-validation, but not in "false positive research findings"  <cit> , in the sense that in this case cma will rather underestimate the association between predictors and response than find an association when there is none.
+
+that is why we recommend to use the tuning procedure of cma only with methods that do not require any preliminary variable selection. note that most of the classification methods needing tuning do not require any preliminary variable selection . hence, this recommendation is not very restrictive in practice. however, we plan to modify the tuning procedure of cma in a future version in order to allow the combination of tuning and gene selection. this can be done by re-performing gene selection in each inner cross-validation iteration successively, as already correctly implemented in the existing package 'mcrestimate'  <cit> .
+
+ <dig> . <dig> performance measures
+once the classification step has been performed for all b iterations using the method classification, the method evaluation offers a variety of possibilities for evaluating the results. as accuracy measures, the user may choose among the following criteria.
+
+• misclassification rate
+this is the simplest and most commonly used performance measure, corresponding to the indicator loss function in eq. . from b iterations, one obtains a total of ∑b|tb| predictions. it implies that, with most procedures, the class label of each predictor-class pair in the sample s is predicted several times. the method evaluation can be applied in two directions: one can compute the misclassification rate either iterationwise, i.e. for each iteration separately , yielding ϵ^iter=b=1b or observationwise, i.e. for each observation separately , yielding ϵ^obs=i=1n.  the latter can be aggregated by classes which is useful in the frequent case where some classes can be discriminated better than the other. furthermore, observationwise evaluation can help identifying outliers which are often characterized by high misclassification error rates. although ϵ^iter or ϵ^obs can be further averaged, the whole vectors are preferred to their less informative average, in order to reflect uncertainty more appropriately. a second advantage is that graphical summaries in the form of boxplots can be obtained.
+
+• cost-based evaluation
+cost-based evaluation is a generalization of the misclassification error rate. the loss function is defined on the discrete set { <dig>  ..., k - 1} × { <dig>  ..., k - 1}, associating a specific cost to each possible combination of predicted and true classes. it can be represented as a matrix l = , r, s =  <dig> ..., where lrs is the cost or loss caused by assigning an observation of class r to class s. a usual convention is lrr =  <dig> and lrs >  <dig> for r ≠ s. as for the misclassification rate, both iteration- and observationwise evaluation are possible.
+
+• sensitivity, specificity and area under the curve 
+these three performance measures are standard measures in medical diagnosis, see  <cit>  for an overview. they are computed for binary classification only.
+
+• brier score and average probability of correct classification
+in classification settings, the brier score is defined as
+
+ n−1∑i=1n∑k=0k−1−p^) <dig>  
+
+where p^ stands for the estimated probability for class k, conditional on x. zero is the optimal value of the brier score.
+
+a similar measure is the average probability of correct classification which is defined as
+
+ n−1∑i=1n∑k=0k−1p^, 
+
+and equals  <dig> in the optimal case. both measures have the advantage that they are based on the continuous scale of probabilities, thus yielding more precise results. as a drawback, however, they cannot be applied to all classifiers but only to those associated with a probabilistic background . for other methods, they can either not be computed at all  or their application is questionable .
+
+•  <dig>  and  <dig> + estimators
+the ordinary misclassification error rate estimates resulting from working with learning sets of size <n tend to overestimate the true prediction error. a simple correction proposed for learning sets generated from bootstrapping  uses a convex combination of the re-substitution error -which has a bias in the other direction  and the bootstrap error estimation . a further refinement of this idea is the  <dig> + estimator  <cit>  which is approximately unbiased and seems to be particularly appropriate in the case of overfitting classifiers.
+
+the method compare can be used as a shortcut if several measures have to be computed for several classifiers. the function obsinfo can be used for outlier detection: given a vector of observationwise performance measures, it filters out observations for which the classifier fits poorly on average .
+
+ <dig>  a real-life data example
+ <dig> . <dig> application to the srbct data
+this section gives a demonstration of the cma package through an application to real life microarray data. it illustrates the typical workflow comprising learning set generation, variable selection, hyperparameter tuning, classifier training, and evaluation. the small blue round cell tumor data set was first analyzed by khan et al  <cit>  and is available from the r package 'pamr'  <cit> . it comprises n =  <dig> samples from four tumor classes and expression levels from p =  <dig> genes. in general, good classification results can be obtained with this data set, even with relatively simple methods  <cit> . the main difficulty arises from the two classes with small size .
+
+cma implements a large number of classifiers and variable selection methods. in this demonstrating example, we compare the performance of seven of them, which are representative of the cma functionalities: i) diagonal linear discriminant without variable selection and tuning, ii) linear discriminant analysis with variable selection, iii) quadratic discriminant analysis with variable selection, iv) partial least squares followed by linear discriminant analysis with tuning of the number of components, v) shrunken centroids discriminant analysis with tuning of the shrinkage parameter, vi) support vector machines with radial kernel without tuning , and vii) support vector machines with radial kernel and with tuning of the cost parameter and the width of the gaussian kernel.
+
+we choose to work with stratified five-fold cross-validation, repeated ten times in order to achieve more stable results  <cit> . for linear discriminant analysis we decide to work with ten and for quadratic discriminant analysis with only two variables. these numbers are chosen arbitrarily without any deeper motivation, which we consider legitimate for the purpose of illustration. in practice, this choice should be given more attention. we start by preparing the data and generating learning sets:
+
+> data
+
+> khany <- khan 
+
+> khanx <- as.matrix
+
+> set.seed
+
+> fivecv10iter <- generatelearningsets
+
+khany is an n-vector of class labels coded as  <dig> , <dig> , for the number of transcripts. fivecv10iter is an object of class learningsets that stores for each of the niter =  <dig> iterations which observations belong to the learning sets as generated by the chosen method specified through the arguments method, fold and strat. for reproducibility purposes, it is crucial to set the random seed.
+
+as a preliminary step to classification, we then perform variable selection for those methods requiring it . for illustrative purposes, we first try several variable selection methods and display a part of their results for comparison.
+
+> genesel_f <- geneselection
+
+> genesel_kru <- geneselection
+
+> genesel_lim <- geneselection
+
+> genesel_rf <- geneselection
+
+for comparing these four variable selection methods, one can now use the toplist method on the objects genesel_f, genesel_kru, genesel_wil, genesel_rf to show, e.g. their top- <dig> genes. genes are referred to by their column index in x. the commands given below display the  <dig> top-ranking genes found based on the first learning set using each of the four methods.
+
+> tab <- cbind , kru.test = toplist , lim.test = toplist , rf.imp = toplist )
+
+> rownames <- paste
+
+> print
+the object tab indicates how many methods selected each gene in the top- <dig> list. we observe a moderate overlap of the four lists, with some genes appearing in three out of four lists:
+
+> table)
+we now turn to hyperparameter tuning, which is performed via nested cross-validation. for partial least squares, we optimize the number of latent components r over the grid { <dig> ..., 5}. for the nearest shrunken centroids approach, the shrinkage intensity Δ is optimized over the grid { <dig> ,  <dig> ,  <dig> ,  <dig>   <dig>  5} . for the svm with gaussian kernel, one has to tune two hyperparameters: the cost for violating the margin in the primal formulation of the svm and the width of the gaussian kernel  which are optimized over { <dig> ,  <dig>   <dig>   <dig>   <dig>   <dig>  500} × {1/, 1/, 1/p, 2/p, 4/p} .
+
+> tune_pls <- tune)
+
+> tune_scda <- tune)
+
+> tune_svm <- tune, kernel = "radial")
+
+in the second and third function calls to tune, the argument grids is an empty list, which means that the default settings are used. the objects created in the steps described above are now passed to the function classification. the object genesel_f is passed to the classifiers ldacma and qdacma, since the f-test is the standard approach for variable selection in the multi-class setting. the argument nbgene indicates that only the "best" nbgene genes are used, where "best" is understood in terms of the f ratio.
+
+> class_dlda <- classification
+
+> class_lda <- classification
+
+> class_qda <- classification
+
+> class_plsda <- classification
+
+> class_scda <- classification
+
+> class_svm <- classification
+
+> class_svm_t <- classification
+
+the classification results can now be visualized using the function comparison, which takes a list of classifier outputs as input. for instance, the results may be tabulated and visualized in the form of boxplots, as displayed in figure 3:
+
+> classifierlist <- list
+
+> par)
+
+> comparison <- compare)
+
+> print
+the tuned svm labeled svm <dig> performs slightly better than it is untuned version, though the difference is not substantial. compared with the performance of the other classifiers applied to this dataset, it seems that the additional complexity of the svm does not pay out in a setting where even simple methods perform well.
+
+ <dig> . <dig> running times
+running times of the different variable selection and classification methods used in the real life example. †:  <dig> bootstrap trees per run.
+
+ <dig> 
+CONCLUSIONS
+cma is a new user-friendly bioconductor package for constructing and evaluating classifiers based on a high number of predictors in a unified framework. it was originally motivated by microarray-based classification, but can also be used for prediction based on other types of high-dimensional data such as, e.g. proteomic, metabolomic data, or signal data. cma combines user-friendliness  and methodological strength . we plan to further develop cma and include additional features. some potential extensions are outlined below.
+
+in the context of clinical bioinformatics, researchers often focus their attention on the additional predictive value of high-dimensional molecular data given that good clinical predictors are already available. in this context, combined classifiers using both clinical and high-dimensional molecular data have been recently developed  <cit> . such methods could be integrated into the cma framework by defining an additional argument corresponding to  clinical variables.
+
+another potential extension is the development of procedures for measuring the stability of classifiers, following the scheme of our bioconductor package 'geneselector'  <cit>  which implements resampling methods in the context of univariate ranking for the detection of differential expression. in our opinion, it is important to check the stability of predictive rules with respect to perturbations of the original data. this last aspect refers to the issue of 'noise discovery' and 'random findings' from microarray data  <cit> . in future research, one could also work on the inclusion of additional information about predictor variables in the form of gene ontologies or pathway maps as available from kegg  <cit>  or cmap  with the intention to stabilize variable selection and to simultaneously select groups of predictors, in the vein of the so-called "gene set enrichment analysis"  <cit> .
+
+as kindly suggested by a reviewer, it could also be interesting to combine several classifiers into an ensemble. such aggregated classifiers may be more robust and thus perform better than each single classifier. as a standardized interface to a large number of classifiers, cma offers the opportunity to combine their results with very little effort.
+
+lastly, cma currently deals only with classification. the framework could be extended to other forms of high-dimensional regression, for instance high-dimensional survival analysis  <cit> .
+
+in conclusion, we would like to outline in which situations cma may help and warn against potential wrong use. cma provides a unified interface to a large number of classifiers and allows a fair evaluation and comparison of the considered methods. hence, cma is a step towards reproducibility and standardization of research in the field of microarray-based outcome prediction. in particular, cma users do not favor a given method or overestimate prediction accuracy due to wrong variable selection/tuning schemes. however, they should be cautious while interpreting and presenting their results. trying all available classifiers successively and reporting only the best results would be a wrong approach  <cit>  potentially leading to severe "optimistic bias". in this spirit, ioannidis  <cit>  points out that many results obtained with microarray data are nothing but "noise discovery" and daumer et al  <cit>  recommend to try to validate findings in an independent data set, whenever possible and feasible. in summary, instead of fishing for low prediction errors using all available methods, one should rather report all the obtained results or validate the best classifier using independent fresh validation data. note that both procedures can be performed using cma.
+
+ <dig> availability and requirements
+• project name: cma
+
+• project homepage: 
+
+• operating system: windows, linux, mac
+
+• programming language: r
+
+• other requirements: installation of the r software for statistical computing, release  <dig> . <dig> or higher. for full functionality, the add-on packages 'mass', 'class', 'nnet', 'glmpath', 'e1071', 'randomforest', 'plsgenomics', 'gbm', 'mgcv', 'corpcor', 'limma' are also required.
+
+• license: none for usage
+
+• any restrictions to use by non-academics: none
+
+ <dig> authors' contributions
+ms implemented the cma package and wrote the manuscript. alb had the initial idea and supervised the project. alb and md contributed to the concept and to the manuscript.
+
+ <dig> acknowledgements
+we thank the four referees for their very constructive comments which helped us to improve this manuscript. this work was partially supported by the porticus foundation in the context of the international school for technical medicine and clinical bioinformatics.

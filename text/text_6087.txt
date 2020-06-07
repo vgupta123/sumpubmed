@@ -1,0 +1,146 @@
+BACKGROUND
+proteins can be naturally classified into families of homologous sequences that derive from a common ancestor. the comparison of homologous sequences and the analysis of their phylogenetic relationships provide very useful information regarding the structure, function and evolution of genes. thanks to the progress of sequencing projects, this comparative approach can now be applied at the whole genome scale in many different taxa, and several databases have been developed to provide a simple access to collections of multiple sequence alignments and phylogenetic trees  <cit> . the building of such phylogenomic databases involves three steps that require important computing resources: 1) compare all proteins to each other to detect sequence similarities, 2) cluster homologous sequences into families  and 3) compute multiple sequence alignments and phylogenetic trees for each family. with the recent progress of sequencing technologies, there is an urgent need to prepare for the deluge and hence to develop methods able to deal with a huge quantity of sequences. in this paper, we present a new approach for the clustering of homologous sequences, based on single transitive links  with alignment coverage constraints and implemented in a software package . we model the dataset as a similarity network where sequences are vertices and similarities are edges  <cit> . to overcome memory limitations we follow an online framework  <cit>  in which we visit the edges one at a time to update the families dynamically. this approach enables also an incremental procedure where sequences and similarities are added into the dataset so that it would not be necessary to rebuild the families from scratch. finally, we adopt a divide-and-conquer strategy to deal with the quantity of data  <cit>  and design a parallel algorithm whose theoretical complexity is addressed in this paper.
+
+we evaluated the computational performances and scalability of this method on a very large dataset of more than  <dig> millions sequences from the hogenom phylogenomic database  <cit> . our approach presents several advantages over other clustering algorithms: it is extremely fast, it requires only limited memory and can be run on a parallel architecture - which is essential for ensuring its scalability to large datasets. silix outperforms other existing software programs both in terms of speed and memory requirements. moreover, it allows a satisfying quality of clustering. we discuss the interest of silix for the clustering of homologous sequences in huge datasets, possibly in combination with other clustering methods.
+
+implementation
+modelling
+single linkage and filtering with alignment coverage constraints
+the principle of the single-linkage clustering is that if sequence a is considered homologous to sequence b, and b homologous to c, then a, b and c are grouped into the same family, whatever the level of similarity between a and c. the choice of the sequence similarity criteria that is used to infer homology is therefore an essential parameter of the single-linkage clustering approach. different criteria can be used, separately or in combination . then, if a pair of sequences  does not satisfy the criteria, the pair is not considered for the clustering. the choice of these criteria depends on the goal of the clustering.
+
+the method presented in this paper was motivated by the development of databases of homologous genes . the goal of these databases is to allow the study of the evolution of entire proteins considered as a unit, in contrast to databases such as pfam  <cit>  or prodom  <cit>  that aim at studying the domain architecture of proteins. hence, in hogenom, proteins are classified in the same family only if they are homologous over their entire length - or almost. in practice, protein sequences are compared against each other with blastp  <cit> . for each pairwise alignment, the list of high-scoring segment pairs  is analyzed to exclude hsps that are not compatible with a global alignment . then, proteins are classified in the same family if the remaining hsps cover at least a given percentage of coverage of the longest protein with a percentage of identity greater or equal to a given threshold . therefore the first step of the clustering process consists in analyzing pairwise sequence alignments resulting from the all-against-all comparisons  in order to obtain a binary information: keeping or excluding pairs whether they meet or not these sequence similarity criteria. this step  can be time consuming, but can be easily distributed .
+
+sequence families are the connected components of the similarity network
+here we consider the second step: given a list of pairs of similar sequences previously positively filtered, group the sequences into families. we define an undirected graph g =  with the set of vertices v representing sequences and the sets of edges e representing similarities between these sequences. we define n = |v | and m = |e |. naturally, finding sequence families consists in computing the connected components of g. in this paper, we want to address the case of large n and m and we therefore develop a parsimonious approach in terms of memory use. we want to examine the edges online  <cit>  and avoid storing them into a connectivity matrix. therefore the classical depth-first search algorithm  <cit>  is not adapted. by analogy with external-memory graph algorithms  <cit> , our approach consists in dynamically reducing the connected components into trees. when an edge is examined, we need to execute two operations: find the tree containing each of the two vertices and union these trees by merging their vertices into a new tree. consequently, the connected component problem consists in  iteratively build a collection of trees representing the connected components of the graph g and  transform each resulting tree into a star tree which root is the representative  of the family. the final formulation of the problem is therefore building a spanning star forest g* = .
+
+using a memory-efficient structure
+the connected components of g actually form a partition of v into non-overlapping subsets of vertices that we call disjoint-sets. initially each vertex is a set by itself. we need to store the information of the partition and be able to update it dynamically. for this purpose, we use the disjoint-sets data structure  <cit>  which is well suited when the graph is discovered edge by edge. this structure allows efficient implementation of the find and union operations by representing each set as a tree. practically, the forest composed by all the trees is implemented as an array parent of size n. each element i of a tree has a parent parent such that parent = r if r is the root of the tree. moreover, it is straightforward and practical to transform each tree into a star tree such that the parent information is a common label for the vertices in a connected component. this will allow to directly retrieve each sequence family by reading the parent information.
+
+online procedure for a set of similarities
+to build g* from a set of sequence similarities, we develop a two steps procedure. first, we adopt the algorithm called union-find by rank with path compression  <cit> . it consists in updating trees of minimal height while discovering the edges of the graph g online. for this purpose, the rank of a vertex is basically defined as its height in the tree. each edge  is processed as explained in algorithm  <dig> . it is basically based on the find function that associates the root of the tree containing a vertex of interest and the pathcompression function which connects the vertices in a path to the root of a tree. the time complexity was proved to be in our case almost o  <cit> . secondly, we use pathcompression for each vertex in o time. this procedure requires the storage of n parent and n rank values such that the memory requirements are o.
+
+algorithm  <dig> addedge by union- find
+
+function: find : returns the root of the tree containing i
+
+function: pathcompression: parent of vertices in the path from i to the root of the tree containing i are set to r
+
+1: r <dig> ← find; r <dig> ← find
+
+2: k ← arg maxl =  <dig>   <dig> )
+
+3: if rank == rank and r <dig> ≠ r <dig> then
+
+4:   rank++
+
+5: end if
+
+6: pathcompression
+
+7: pathcompression
+
+parallelization for multiple sets of similarities
+we take advantage of the possibility of exploring series of sets of sequence similarities with a client-server parallel architecture. we assume that it is usually affordable to split a large set into q sets. for the sake of clarity, we consider here a group of q processors, which is a reasonable hypothesis in practice. we note that it would also be recommended to have sets of comparable sizes. we adopt a divide-and-conquer strategy where different processors use the previous sequential algorithm to independently obtain a collection of spanning star forests  where  such that . these subsolutions are successively merged to obtain the final solution g*  <cit> . we first design an algorithm to merge two of these forests in o time . it is also based on the disjoint-sets data structure since, for each vertex i, it basically consists in adding in one forest a formal edge between i and the root of the tree containing i in the other forest. then we build a parallel formulation of our approach  <cit>  where  are obtained with step  of the sequential algorithm and iteratively merged . the parallel time complexity can be estimated as o. we notice that the merge procedure is many orders of magnitude faster than the processing of a single set of similarities. for this reason, we decide not to distribute over the processors the merge procedures that will be consequently performed by the server processor in the order of the  availability.
+
+algorithm  <dig> merge
+
+function: find: returns the root of the tree containing i
+
+1: for all i such that find ≠ i in do
+
+2:   r ← find in 
+
+3:   addedge in 
+
+4: end for
+
+algorithm  <dig> parallel silix
+
+1: each processor r builds  with the sequential algorithm
+
+2: if r >  <dig> client then
+
+3:   mpi_send to server processor 1
+
+4: else
+
+5:   for k in  <dig> ...p do
+
+6:      mpi_receive among  in their order of availability
+
+7:      merge
+
+8:   end for
+
+9:   for all i in do
+
+10:      pathcompression)
+
+11:   end for
+
+12: end if
+
+dealing with partial sequences
+filtering
+because genome sequences are often not 100% complete and hence some genes may overlap with gaps in the genome assembly, it is important to be able to treat some partial protein sequences . these partial sequences cannot be classified using the same criteria as the complete ones and are therefore treated separately. in a first step, gene families are built using only complete protein sequences as explained previously. in a second step, partial sequences are added to this classification, using different alignment length thresholds . it is important to note that, if there are several families that meet these alignment coverage criteria, a partial sequence is included in the one with which it shows the strongest similarity score.
+
+modelling
+to allow the treatment of partial sequences, we propose a modified version of our approach. we redefine the previously mentioned graph g =  and we define the undirected graph h = g ∪  with two sets of vertices vc and vp, the complete and partial sequences respectively, and the set of edges ep between complete and partial sequences, each edge in ep being weighted by the similarity score. we also impose that edges between partial sequences are not allowed. in this case, nc = |vc|, np = |vp|, n = nc + np, mc = |ec|, mp = |ep| and m = mc + mp. at this point, we note that sequence families correspond to the connected components of a subgraph of h obtained by only conserving the edge of maximum weight for each vertex in vp: this will guarantee that each partial sequence is connected to only one complete sequence and prevent partial sequences to link two connected components. as described previously, the problem consists in building a novel graph  that has the following properties:
+
+• h* is a spanning star forest,
+
+• h* is called a semi-bipartite graph, i.e. a graph that can be partitioned into two exclusive and comprehensive parts  with internal edges  only existing within one of the two parts  <cit> . the particularity is here that edges between the two parts are weighted,
+
+• ∀v ∈ vp, deg =  <dig> 
+
+online procedure and parallelization
+first, it is necessary to insert an additional step between the two steps of the above-mentioned online procedure: build a subset of ep by selecting for each vertex the edge of maximal weight, in o time. then we extend the step  to all the vertices in vp for a time complexity in o. this procedure runs in o space since it requires the storage of n parent values. for the parallelized algorithm, we modify the merging of two forests presented in algorithm  <dig> to consider vertices of vp and once again select edges of maximal weight, such that the overall parallel complexity can be estimated to be in o.
+
+the silix software package
+all the presented algorithms are implemented into the silix software package which is written in ansi c++ and uses mpi  and elements of the well-established boost library http://www.boost.org. silix can take two kinds of input. first, the user can provide the result file of an all-against-all blast search  in tabular format . in that case, silix performs the filtering step by analyzing blast hits to search for pairs of sequences that fulfill similarity criteria  set by the user to build families. in this mode, partial sequences can be treated separately, as described above. second, if the user prefers to use other types of criteria for the filtering, silix can simply take as input a list of pairs of sequences ids and perform the clustering step. compilation and installation are compliant with the gnu standard procedure. the package is freely available on the silix webpage http://lbbe.univ-lyon <dig> fr/silix. online documentation and man pages are also available. silix is licensed under the general public license http://www.gnu.org/licenses/licenses.html.
+
+RESULTS
+silix is faster and more memory efficient than other methods
+to test silix and compare it to state-of-the-art programs, we extracted protein sequences from the hogenom database . the current release of hogenom contains  <dig> , <dig> protein sequences . we selected  <dig> , <dig> non-redundant sequences including about 1% partial sequences. sequences were compared against each others with blastp  <cit>  with an e-value threshold set to 10- <dig>  the blast output file contained  <dig> , <dig>  pairwise alignments. then we selected three previously published programs, for which the source code is publicly available: hcluster_sg  <cit>  and mc-upgma  <cit>  that are based on hierarchical clustering, and mcl  <cit>  that relies on graph-based heuristics.
+
+the clustering of the protein dataset with silix was very fast  and required only limited memory capacity . silix outperformed the  <dig> other methods, both in terms of speed and ram usage . the program hcluster_sg took  <dig> times more time than silix to perform the clustering , and required a very large amount of ram memory . with larger sequence datasets , the ram requirements of hcluster_sg will certainly exceed computer memory resources presently available. mcl also required a large amount of memory  and was very slow . mc-upgma is almost as efficient as silix in terms of ram usage, but requires ample disk space to hold intermediate files . the main problem with mc-upgma is that it is too slow on such a large dataset. mc-upgma uses an iterative procedure to cluster sequences. on our dataset, the first  <dig> iterations took  <dig> days. the authors of mc-upgma tested their method on a smaller dataset and they indicate in their article that  <dig> iterations were necessary to reach convergence . we therefore extrapolated that mc-upgma would take more than  <dig> days on our dataset, and hence we decided to stop it before it finished the clustering. note also that to optimize the performance of mc-upgma, the authors recommend using very permissive similarity threshold , which is unaffordable given the number of sequences in our dataset. in conclusion, silix presents the best efficacy to tackle the challenge of huge dataset analysis with cpu and memory requirements equivalent to those of a laptop computer. note that silix may also be used in combination with other methods. to test this strategy, we first ran silix with permissive similarity thresholds , and then we used hcluster_sg to subdivide families of more than  <dig> sequences. this combined procedure still runs in a reasonable total cpu time  and also divides by  <dig> the ram usage. furthermore the second step of this combined procedure can easily be distributed on several computers.
+
+hcluster_sg corresponds to the use of hcluster_sg on the largest families  retrieved by silix with permissive similarity thresholds . silix and mc-upgma run on a quadri-quadcore xeon  <dig>  ghz with  <dig> gb ram, hcluster_sg and mcl on a octo-quadcore opteron  <dig>  ghz with  <dig> gb ram.
+
+silix is scalable in practice
+as the number of available sequences increases dramatically and the number of similarities is quadratic with this number of sequences, the cpu time required for the clustering is expected to increase very rapidly. to ensure the scalability of our method, we designed a parallel implementation of silix with a low number of inter-processors communications to take advantage of multiple kinds of parallel hardware architectures. this algorithm delocalizes the processing of the sequence similarity dataset, including the filtering step, and merges the results in a last step . we designed a divide-and-conquer approach that requires only q -  <dig> communications where q is the number of processors, with a procedure for merging partial results from two processors that is considerably faster than the independent computations on each processor. for these reasons, we observe practical performances consistent with the theoretical complexity such that the run time decrease is inversely-proportional to the number of processors .
+
+clustering quality
+although the speed and memory requirements are important parameters for the choice of clustering method, the most important criterion is of course the quality of the results. single linkage clustering is known to be problematic because spurious similarities can lead to the clustering of non-homologous sequences. even with stringent sequence similarity criteria, single linkage clustering can lead to erroneous clustering, because of the so-called problem of "domain chaining"  <cit> , as illustrated in figure  <dig>  to avoid this problem, silix performs single linkage clustering with alignment coverage constraints, i.e. pairs of similar sequences are considered for the clustering only if they meet two criteria: i) the alignment should cover at least a given percentage of the longest sequence; ii) sequence similarity within the alignment should exceed a given threshold. to assess the quality of silix clustering, we used  <dig> different strategies. first, we compared clustering results to the classification of protein families reported in the interpro database  <cit> . second we assessed the performance of silix on a set of  <dig> families of orthologous genes encoded by mitochondrial genomes in  <dig> metazoan species.
+
+evaluation of silix performances with interpro
+we evaluated the performance of silix on the hogenom dataset, using the procedure proposed by loewenstein and colleagues  <cit> : we extracted the most frequent correspondence between silix families and protein  families from interpro  containing more than  <dig> sequences, and then we calculated the specificity and sensitivity of silix classification with respect to the interpro family. we also computed the jaccard score , which is a standard metric of the trade-off between specificity and sensitivity. to evaluate the impact of sequence similarity criteria, we ran silix with different thresholds for alignment coverage and percentage of identity. the performance of silix were compared to those obtained with hcluster_sg, used alone or in combination with silix. . as expected, increasing the alignment coverage and/or the sequence identity thresholds leads to increase specificity , but decreases sensitivity . the best trade-off between specificity and sensitivity was obtained for thresholds of 80% for alignment coverage and 35% for sequence identity . with these parameters, the jaccard score of silix is slightly better than that of hcluster_sg . interestingly, the use of hcluster_sg in combination with silix  leads to a better jaccard score than hcluster_sg alone. thus the use of silix in combination with other methods can strongly decrease computing time without any loss in clustering quality.
+
+specificity, sensitivity and jaccard coefficient were estimated by comparison with interpro classification. the best quality metrics are indicated in bold. silix was used with an alignment coverage threshold set to 80% and with various sequence identity thresholds. hcluster_sg was used on the entire dataset or only on the largest families  retrieved by silix with a permissive sequence identity thresholds of 25% ).
+
+evaluation of silix performances with metazoan mitochondrial gene families
+we used interpro to evaluate clustering performances because this database is widely recognized for its quality and it has already been used for that purpose  <cit> . this strategy may however not be optimal because the building of the interpro database also relies on arbitrary sequence similarity criteria. hence, some cases that were considered as false positives in the above evaluations might in fact correspond to true homologues . ideally, to evaluate clustering quality, one would need a set of homologous gene families known a priori, i.e. identified without using sequence similarity criteria. the mitochondrial genome of metazoan taxa can provide such an ideal test set. indeed, in animals the mitochondrial genome contains  <dig> protein-coding genes. these proteins show different levels of sequence conservation across taxa, but the gene content is extremely conserved: except in very rare cases, all metazoan mitochondrial genomes contain these  <dig> genes  <cit> . this very strong conservation of synteny allows the identification of orthologous genes, even with very low levels of sequence similarity. we extracted from refseq  a set of complete mitochondrial genomes from  <dig> different species. the  <dig> mitochondrial proteins are present in all taxa, except atp <dig> that is missing in the genome of  <dig> species. these mitochondrial proteins were then added to the hogenom dataset. sequence comparisons were performed with blastp , and the clustering was performed with silix on the entire dataset, using thresholds of 80% for alignment coverage and 35% for sequence identity. for each of the  <dig> gene families, the majority of sequences were grouped in a single silix family. the sensitivity, measured as the number of known proteins that are included in this first silix family, is generally very high: it is higher than 94% for  <dig> out of the  <dig> gene families, and even higher than 99% for  <dig> of them . the nd <dig> family was split into  <dig> main silix families corresponding respectively to deuterostomia, protostomia and other metazoa , and containing overall 95% of all known nd <dig> proteins. the atp <dig> protein is very short  and evolves rapidly. the largest silix family contains only 53% of all known atp <dig>  and the three largest silix families contain 77% of known sequences, whereas 14% of known atp <dig> were not included in any silix family - in most cases because they did not have any blast hit with a e-value below 10- <dig>  thus, on this test set the sensitivity is generally very good, except for rapidly evolving sequences. to evaluate the specificity, we manually investigated all silix families containing at least one protein of our mitochondrial set. we did not identify a single case where one mitochondrial protein was clustered with non-related proteins. thus, even though the clustering was performed with the entire hogenom dataset , we did not detect any false positive clustering. this indicates that single linkage clustering with alignment coverage constraints is robust to spurious similarity matches.
+
+protein-coding genes were extracted from complete mitochondrial genomes of  <dig> different metazoan species, and clustered using silix . for each of the  <dig> genes, we indicate the number of sequences present in the dataset, the number of families  identified by silix that contained these sequences, and the number and percentage of sequences included in the  <dig> largest silix families , as well as the number and percentage of singletons .
+
+CONCLUSIONS
+different methods have been proposed for the clustering of proteins into families of homologous sequences  <cit> . these methods differ both in terms of the quality of the clustering, and in terms of the computing resources required to perform the clustering. the single-linkage clustering approach is used in different phylogenomic databases such as ensemblcompara  <cit>  or hogenom  <cit> . here we propose a new implementation of the single linkage clustering method with alignment coverage constraints, silix, which is extremely efficient, both in terms of computing time and memory requirements. moreover, this method can be cost-effectively run on parallel architectures, and hence is easily scalable. thus, in terms of the computing resource requirements, this method is much more efficient than other available methods for the treatment of huge sequence datasets. in terms of clustering quality, silix performs as well as hcluster_sg, the only other available clustering program that could be run in reasonable time on such a large sequence dataset. given its speed, silix may also efficiently be used as a first clustering step, before running other algorithms.
+
+availability and requirements
+• project name: silix
+
+• project home page: http://lbbe.univ-lyon <dig> fr/silix
+
+• operating system: all unix-like operating systems such as linux and mac os x.
+
+• programming language: c++
+
+• other requirements: mpi, the boost:program options class, and optionally cppunit and the boost:unordered_map class.
+
+• license: gnu gpl.
+
+authors' contributions
+vm developed the method and the software package. sp provided datasets and carried out the validation of the approach. ld initiated the work and participated in its coordination. all authors wrote the manuscript and gave final approval.
+
+acknowledgements and funding
+the authors would like to thank bastien boussau, daniel kahn, vincent lacroix, marie-france sagot, franck picard and eric tannier for helpful discussions and comments, bruno spataro for the computing facilities and yanniv loewenstein, jan baumbach and antje krause for their answers about the availability and use of their programs. this work has been supported by the french agence nationale de la recherche under grant nemo anr-08-blan-0304- <dig> 

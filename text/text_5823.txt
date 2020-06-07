@@ -1,0 +1,135 @@
+BACKGROUND
+the rapid progress of high-throughput dna sequencing techniques has dramatically reduced the costs of whole genome sequencing, which leads to revolutionary advances in gene industry  <cit> . genome studies have produced tremendous volume of data that poses great challenges to storage and transfer. data compression becomes necessary as a silver-bullet solution to ease the dilemma . nevertheless, the popular generic compression tools, such as gzip  and bzip <dig> , cannot obtain satisfactory performance on high-throughput dna sequencing data, because they do not utilize the biological characteristics of the data like repeat fragments and palindromes. efficient compression methods oriented to high-throughput dna sequencing data are highly demanded.
+
+many specialized compression methods have been proposed for sequencing data in raw fastq format , sequencing reads   and/or aligned sam/bam format  <cit> . depending on whether extra reference genomes are required, these compression methods normally can be classified into reference-based and reference-free methods.
+
+reference-based methods align the targeted sequences to some external reference sequence for identifying the similarity between them. the variances of the alignment are encoded instead of the original targeted sequences. reference-based methods generally obtain better compression ratios with more time consumption by involving a sequence alignment pre-processing. representative state-of-the-art reference-based methods include cram  <cit> , quip  <cit> , and deez  <cit> . cram  <cit> , working with bam-based input, records the variances of reads and a reference genome with huffman coding. quip  <cit>  with ‘-r’ option compresses sam/bam data in a standard reference-based scheme and employs highly optimized statistical models for various sam fields, thus leading to compromising compression rate. it is also applicable to reference-based fastq compression in ‘-a’ mode where a de novo assembly procedure is introduced to construct references in the target data rather than using existing references. deez  <cit>  lowers the cost of representing common differences among the reads’ mapping results by implicitly assembling the underlying donor genome in order to encode these variants only once.
+
+reference-free methods compress the raw sequencing data, mainly in fastq format, directly based on their natural statistics. for example, fqzcomp  <cit>  uses an order-k context model to predict the nucleotide sequences in fastq format followed by arithmetic coding based compression. dsrc  <cit>  partitions input fastq data into blocks enabling independent compression of them using lz <dig> and huffman encoding schemes. dsrc  <dig>  <cit>  is an improvement of dsrc by introducing threaded parallelism and more efficient coding scheme. lfqc  <cit>  preforms data transformation to the four fields of the sequencing records in an fastq file separately, followed by regular data compressor namely zpaq and lpaq <dig>  leon  <cit>  first builds a reference as a probabilistic de bruijn graph based on bloom filter, and then records the reads and quality scores as mapped paths in the graph using arithmetic encoding. scalce  <cit>  reorganizes reads in an fastq file that share common ‘core’ substrings into groups, and then compacts the groups using gzip or lz77-like tools. seqdb  <cit>  coordinates sequences bases and their corresponding quality scores into 2d byte arrays and compresses them with an existing multithreaded compressor blosc. quip  <cit> , in addition to the reference-based compression mode, also provides reference-free compression using arithmetic coding based on high order markov chains. instead of exploiting the redundancy of homologous sequences, reference-free methods put more effort into predictive model and coding scheme, which tends to improve the time efficiency by sacrificing compression ratio to some degree  <cit> .
+
+this work focus on long-term archiving and space-sensitive scenarios, where superior compression ratio is pursued and reference-based methods are more favourable. in our previous work  <cit> , we have proposed a self-contained reference-based method, namely lw-fqzip  <dig>  to compress high-throughput dna sequencing data in raw fastq format. lw-fqzip  <dig> introduces a light-weight mapping model to efficiently align short reads against the reference sequence based on a k-mer indexing strategy. the light-weight mapping model distinguishes lw-fqzip  <dig> from other reference-based methods for not relying on any external alignment software. nevertheless, lw-fqzip  <dig> is far from satisfactory in terms of compression efficiency.
+
+lw-fqzip  <dig> is an improved version of lw-fqzip  <dig> by introducing parallelism and more efficient coding schemes. especially, lw-fqzip  <dig> is equipped with light-weight mapping model, bitwise prediction by partial matching , arithmetic coding, and multi-threading parallelism. it can support various fastq files generated from the most well-known high-throughput sequencing platforms and obtain superior compression ratios at reasonable time and memory space costs.
+
+implementation
+the general framework of lw-fqzip  <dig> is shown in fig.  <dig>  firstly, lw-fqzip  <dig> splits an input fastq file into three data streams  and then the nucleotide sequences  are divided into equal-sized sub-blocks which are simultaneously fed to the light-weight mapping model implemented with multi-threading. after the sequence mapping, the matching results  and mismatch values are recorded in different intermediate files. secondly, the metadata and quality scores are simultaneously proceeded by abridging the consecutive repeats with incremental encoding and run-length-limited encoding, respectively. finally, the intermediate files generated from the metadata, nucleotide sequences, and quality scores streams are compacted with a combination of bitwise order- <dig> ppm model and arithmetic coder in parallel, except that the intermediate file storing mismatch values is compressed by a distinct bitwise order- <dig> arithmetic coder. in best compression ratio mode, i.e., lw-fqzip  <dig> with a ‘–g’ option selected, the quality scores and mismatch values are compacted using the zpaq tool  and the other intermediate files encoded with lpaq9m . lw-fqzip  <dig> is available at http://csse.szu.edu.cn/staff/zhuzx/lwfqzip <dig> and https://github.com/zhuzxlab/lw-fqzip <dig>  the pseudo-code of lw-fqzip  <dig> is provided in algorithm  <dig>  additional file  <dig>  the key components of lw-fqzip  <dig> are described as follows.fig.  <dig> the general framework of lw-fqzip  <dig>  firstly, the input fastq file is split into three data streams of metadata, bases, and quality scores. secondly, the quality scores and metadata are compacted with run-length-limited encoding and incremental encoding, respectively. the nucleotide bases are partitioned and mapped to an external reference sequence based on the light-weight mapping model. finally, the processed intermediate files from the three streams are compressed with arithmetic coder and/or other specific coding schemes
+
+
+
+
+compression of metadata and quality scores
+in lw-fqzip  <dig>  the metadata are pre-processed with incremental encoding, with which the variances of one metadata to its previous neighbour is stored rather than the original data. the quality scores are pre-processed with run-length-limited encoding. more details of the incremental encoding and run-length-limited encoding are available in  <cit> .
+
+after pre-processing, the processed data can be compressed with lpaq9m  or a combination of ppm model and arithmetic coder. in the latter case, a binary tree is established to store the predictive context information. the pre-processed metadata and quality scores are transformed into binary streams to train an order- <dig> ppm model, i.e., prediction based on a 4-byte context . the binary quality scores are matched against the predicted results per bit by producing ‘0’ or ‘1’, and then the context prediction model is updated accordingly. finally, the prediction results are recorded using arithmetic coder or zpaq . the pseudo-code of the compression with ppm prediction model and arithmetic coding/zpaq is provided in algorithm  <dig>  additional file  <dig> 
+
+reference-based compression of nucleotide sequences using light-weight mapping model
+the target nucleotide sequences are mapped to an external reference sequence based on the light-weight mapping model  <cit>  and the mapping results are recorded instead of the original sequences.
+
+to make this article self-contained, the light-weight mapping model is briefly introduced in this subsection. the mapping model is designed to implement fast alignment by indexing the k-mer substrings within the reference. a hash table i
+r is firstly established to save all positions of k-mer substrings in the reference with some predefined prefix, e.g., ‘cg’. on mapping a read of nucleotide bases x to the reference, the model identifies all k-mer substring included in i
+r and selects the valuable k-mer substrings served as seeds, where some restrictions are predefined to eliminate the low-quality k-mer substrings . based on the selected seeds, multiple local alignments are performed to identify the maximum matches. the mapping results of x including the mapped position, palindrome flag, match length, match type and mismatch values are recorded in some intermediate files. if no k-mer substring in x is identified in i
+r, the palindrome of x undergoes the same mapping procedure. in the case neither x nor its palindrome is mapped to the reference, the plain x is output for encoding directly.
+
+to improve the matching rate, the unmapped parts of reads are further partitioned into shorter segments and realigned against the reference where palindrome match is considered. the mismatched nucleotide bases are composed exclusively of four characters , which are much easier to encode than quality scores. therefore, a simpler yet efficient model based on the bitwise order- <dig> arithmetic coder  or zpaq is adopted. if no proper reference is available, lw-fqzip  <dig> also provides an option ‘-a’ to generate a reference by assembling a portion of reads that contain the predefined prefix.
+
+blocking and multithreading
+parallelism is introduced to lw-fqzip  <dig> to improve the computational efficiency using the pthreads library. in the mapping procedure, the input fastq file is partitioned into b  equal-sized blocks. accordingly, b threads are simultaneously executed with each running a light-weight mapping model for a corresponding block. afterward, a new single thread is created to collect the mapping results of the previous b threads and dispatch the results into different intermediate files. after the three data streams, i.e., metadata, quality scores, and nucleotide sequences are properly processed, multiple threads are created to compress the six intermediate files with the corresponding encoding schemes as shown in fig.  <dig> 
+
+in summary, lw-fqzip  <dig> improves lw-fqzip  <dig> by introducing multi-threading for the time-consuming read mapping and using more efficient encoding schemes based on ppm model, arithmetic coders, lpaq9m and/or zpaq. the implementation details of lw-fqzip  <dig> are provided in the additional file  <dig> 
+
+RESULTS
+lw-fqzip  <dig> is verified using ten representative real-world fastq files  on a platform running 64-bit red hat  <dig> .7- <dig> with four 8-core intel xeon e7- <dig> cpus . these data sets, generated from various well-known high-throughput dna sequencing platforms, were downloaded from the sequence read archive of the national centre for biotechnology information   <cit> . details of these data sets are provided in table  <dig> table  <dig> the ten real-world fastq data sets used for performance evaluation
+
+
+note: the long-read data sets have variable-length reads, while the short-read data sets have fixed-length reads
+
+
+
+
+lw-fqzip  <dig> is compared with the other state-of-the-art lossless fastq compressors namely quip  <cit> , dsrc  <dig>  <cit> , fqzcomp  <cit> , cram  <cit> , lfqc  <cit> , leon  <cit>  and scalce  <cit> . the general-purpose compression tools, i.e., gzip and bzip <dig>  as well as the original lw-fqzip  <dig> are also included in the comparison as baselines. all compared methods are configured to obtain the best compression ratio . lw-fqzip  <dig> is evaluated on two modes, i.e., the normal mode  and the best compression ratio mode ’, using lpaq9m and zpaq to compress the intermediate files). quip is also executed in two modes, i.e., the reference-based compression  and the assembly-based compression . quip, cram, and lw-fqzip  <dig> fall within reference-based scheme. the other methods are reference-free methods.
+
+the performance of the methods is evaluated in terms of compression ratio, speed, and memory consumption. the compression ratios of all compared methods on the ten fastq data sets are tabulated in table  <dig>  the average compression and decompression speeds of all methods are plotted in fig.  <dig>  the memory sizes consumed by the compared methods on each data set are reported in table  <dig>  more details of the data sets and experimental studies are provided in additional file 1: tables s1-s <dig>  the average cpu utilization and version information of all compared methods are provided in additional file 1: tables s <dig> and s <dig>  respectively.table  <dig> the compression ratios of the compared methods on ten test data sets
+
+ <dig> %
+ <dig> %
+ <dig> %
+ <dig> %
+ <dig> %
+ <dig> %
+ <dig> %
+ <dig> %
+ <dig> %
+ <dig> %
+ <dig> %
+compressed ratio: the compressed file size divided by the original file size; ‘n/a’: the program cannot work on the data, some error occur in program, such as loses fidelity after decompression or decompression failed; ‘a’: the read order is changed after decompression; the best results are highlighted in bold
+
+
+fig.  <dig> the average compression and decompression speeds of the compared methods on ten test data sets. the compression speed is calculated as the original file size divided by the compression time. the decompression speed is calculated as the original file size divided by the decompression time
+
+
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+
+note: the best results are highlighted in bold
+
+
+
+
+from table  <dig>  it is shown that lw-fqzip  <dig> and lw-fqzip  <dig>  successfully work on all test data sets. lw-fqzip  <dig>  tends to obtain superior compression ratios to the other methods especially on long-read data. dsrc  <dig>  quip, fqzcomp, leon, scalce and lw-fqzip  <dig> suffer from some issues like incompatibility and fidelity-loss on the long-read data generated from pacbio rs and minion platforms. lw-fqzip  <dig>  cram, fqzcomp and lfqc also fail on some short-read data sets of large size. lfqc obtains comparable compression ratios to lw-fqzip  <dig> and lw-fqzip  <dig>  in the data sets it works out. we made an extra comparison analysis between lw-fqzip  <dig>  lw-fqzip  and lfqc in terms of compression ratio, memory usage, and time consumption in a radar chart in fig.  <dig>  the results show that lw-fqzip  and lfqc attain slightly better compression ratios than lw-fqzip  <dig> at the cost of memory usage and time consumption, respectively. nevertheless, lw-fqzip  <dig> achieves better compromise over all metrics than the other two methods.fig.  <dig> comparison between lw-fqzip  <dig>  lw-fqzip  <dig>  and lfqc in a radar chart in terms of average compression ratio, compression time, decompression time, compression memory usage, and decompression usage. in each criterion, the results of the three methods are normalized to the range of  <cit>  and a smaller value, i.e., closer to the centroid, indicates a better performance
+
+
+
+
+in terms of compression and decompression speeds, lw-fqzip  <dig> outperforms other reference-based methods as shown in fig.  <dig>  it is worth highlighting that lw-fqzip  <dig> outperforms lw-fqzip  <dig> in terms of compatibility, compression ratio, and speed, which suggests a substantial improvement of lw-fqzip  <dig> to lw-fqzip  <dig>  as expected, reference-free methods tend to be faster than reference-based methods. among the reference-free methods, dsrc  <dig> compresses the fastest with compromising compression ratio by taking full advantage of multithreading. quip and leon manage to obtain some trade-offs between the three evaluation criteria. scalce is a very efficient tool by introducing a boosting scheme based on locally consistent parsing  technique to sort the reads, which enables scalce to compress similar reads together and attain competitive compression ratios at high speed.
+
+we also try to adopt the lcp technique in our method as the framework shown in additional file 1: figure s <dig>  in this attempt, the successfully mapped reads are still compressed with the original lw-fqzip  <dig>  whereas the unmapped reads undergo the lcp boosting and gzip compression. lcp is applied to only a small portion of the reads, yet the results shown in additional file 1: table s <dig>  suggest that lcp can improve the compression ratio. indeed, re-sorting the reads according to their similarity is really an efficient option to improve the compression ratio, especially for archiving-oriented applications. however, since the order of the reads is changed, it inevitably imposes extra cost if random access of the archive is the concern in the downstream analysis. lw-fqzip  <dig> is designed to preserve the original read order to facilitate the implementation of random access in the future extension of this tool.
+
+the compared methods are also tested on the benchmark data sets suggested by the mpeg working group on genomic compression . the results are presented in additional file 1: tables s18-s <dig>  where the proposed method shows consistent efficiency.
+
+the experimental results suggest that all specialized methods outperform the general-purpose tools in terms of compression ratio but use more memory space. the reference-based methods tend to be slower than the reference-free methods, due to the extra running time involved in the sequence alignment preprocessing. different methods are designed with different strengths and can be used for different purposes. there is no single method dominates other methods in all criteria.
+
+the effect of palindrome handling is investigated in the additional file 1: tables s <dig> and s <dig>  with palindrome handling more reads can be mapped to the reference at a higher speed , thus the compression ratio and speed are improved slightly, while the extra memory consumption is eligible.
+
+the effect of thread number is studied in additional file 1: figure s <dig>  the compression speed is affected not only by the number of threads but also the disk i/o speed. as a result, the compression might not be speeded up proportionally as the number of threads increases . using faster disk system like solid state disk  can help to speed up both compression and decompression .
+
+CONCLUSIONS
+this article presents a specialized compression tool lw-fqzip  <dig> for fastq files. lw-fqzip  <dig> shows superior compression ratios and compatibility with reasonable  compression speed and memory space consumption. it could serve as a candidate tool for archival or storage space-sensitive applications of sequencing data.
+
+the emerging long-read technologies, e.g., single molecule real time  sequencing  <cit>  and nanopore sequencing  <cit> , produce much longer dna sequences, reportedly providing a more complete picture of genome structure. they are deemed to be a complementary solution to overcome the shortages of short-read sequencing. the exponentially increasing long-read sequencing data poses new great challenges to the existing specialized compression methods. lw-fqzip  <dig> shows good compatibility to long-read sequencing data. the current work is hoped to provide insights into the storage problems of new sequencing data. more efficient alignment models for long-read data will be developed in the future work.
+
+additional file
+
+additional file 1: this document provides the implementation details of lw-fqzip  <dig> and the detailed experimental results of each compared algorithm in the related comparison study. algorithm  <dig>  the main procedure of lw-fqzip  <dig>  algorithm  <dig>  compression with ppm prediction model and arithmetic coding. table s <dig>  the performance of lw-fqzip  <dig>  table s <dig>  the performance of lw-fqzip  <dig> . table s <dig>  the performance of lw-fqzip  <dig>  table s <dig>  the performance of quip . table s <dig>  the performance of quip . table s <dig>  the performance of dsrc  <dig>  table s <dig>  the performance of cram. table s <dig>  the performance of fqzcomp. table s <dig>  the performance of lfqc. table s <dig>  the performance of leon. table s <dig>  the performance of scalce. table s <dig>  the performance of bzip  <dig>  table s <dig>  the performance of gzip. table s <dig>  the average number of cpu cores used by the compared methods. table s <dig>  the compression ratios and time consumptions of lw-fqzip  <dig> w/o complementary palindrome mapping. table s <dig>  the memory usage of the lw-fqzip  <dig> w/o complementary palindrome mapping. table s <dig>  the version information of all compared methods. table s <dig>  the compression ratios of the compared methods on benchmark data provided by mpeg working group on genomic compression. table s <dig>  the performance of lw-fqzip  <dig> on benchmark data provided by mpeg working group on genomic compression. table s <dig>  the performance of lw-fqzip  <dig>  on benchmark data provided by mpeg working group on genomic compression. table s <dig>  the compression ratios of lw-fqzip <dig> + lcp, lw-fqzip <dig> -g + lcp, scalce, and lw-fqzip  <dig> on seven representative data sets. table s <dig>  the comparison of compression speed of lw-fqzip  <dig> using ssd and hdd disk systems. figure s <dig>  the compression speeds of lw-fqzip  <dig> using different number of threads on five representative data sets. figure s <dig>  the framework of lw-fqzip  <dig> with lcp technique. 
+
+
+
+
+abbreviations
+ppmprediction by partial matching
+
+lcplocally consistent parsing
+
+ncbinational centre for biotechnology information
+
+smrtsingle molecule real time
+
+ssdsolid state disk
+

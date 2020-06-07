@@ -1,0 +1,143 @@
+BACKGROUND
+the aim of peak finding in chip-seq analysis is identification of genomic regions with a high density of mapped sequence tags relative to a measured or estimated background. a simple approach to achieving this goal consists of two steps. firstly, a sequence of mapped tags along the genome is extracted. secondly, every contiguous sequence of base pairs with more than a predefined threshold number of tags is selected as an enriched region or binding site. however, the experimental noise and inherent complexities of the tags require more sophisticated algorithms. numerous solutions have been designed following different statistical models and enrichment measures, including window-based models such as erange  <cit> , hidden markov model-based methods such as hpeak  <cit>  and others, for example, findpeaks  <cit> . differences in the characteristics of the algorithms result in identification of different sets of peaks for the same chip-seq data set. these algorithmic diversities provide an opportunity to analyze chip-seq datasets under different conditions, but the problem of deciding which method is optimal for a given data set remains unsolved  <cit> . here, in the spirit of protein structure prediction meta-servers, e.g.  <cit> , we present the first meta-solution as a method that combines results from peak-finders chosen by the user.
+
+implementation
+the implemented meta-server collects results from several peak finders and from these extracts the final result. the peak finders currently included in pfms are: macs v <dig> . <dig>  <cit> , cisgenome v <dig>   <cit> , sissrs v <dig>   <cit> , erange v <dig>   <cit> , seqsite v <dig>   <cit> , findpeaks v <dig> . <dig>   <cit> , and hpeak v <dig>   <cit> . the system can be configured to include any combination of these peak finders. pfms is implemented in a multi-threading manner. the peak finders can be run in parallel, or sequentially depending on user’s hardware.
+
+input
+pfms supports three input data formats: bed, bam, and sam. internally, bam and sam formats are converted to the bed format in the initial step of the analysis in pfms. the conversion is performed employing bedtools  <cit>  and samtools  <cit> . the application analyzes one chromosome at a time which implies extraction of the tags of the specified chromosome in a given data set. it is achieved by employment of findpeaks split tool  <cit> . pfms repeats the analysis process for all the chromosomes included in the dataset unless specified otherwise. although the bed format is widely used, some of the included peak finders require the data set to be given in custom formats . therefore, pfms internally converts the input data according to the required format of the peak finders.
+
+data processing
+seven peak identification methods are currently integrated in pfms. they are run separately to identify lists of putative peaks. the peaks are collected, normalized and converted to either bed or wig, as selected by the user. the bed option is more convenient for additional downstream analysis, while wig is better for visualization purposes since it retains information about the peak shapes.
+
+bed option
+pfms selects an integrated list of significant peaks from the combined results by any of the following methods: voting mechanism, minfp or minfn. the first method does not use any normalization, while the other two use normalized scores of peaks obtained from the individual peak finders. the normalization is carried out using one of five different normalization methods described below.
+
+wig option
+wig files store information about the shape of the peaks. firstly, peaks are divided into steps and any operation on the file is in fact done at the level of steps, not the whole peaks. therefore pfms normalizes the peak scores using the average or naive quantile method as described below. ranking the steps or normalizing them using normal method does not make sense from the statistical point of view, thus these two methods have not been implemented for wig option. finally, pfms integrates the overlapping peaks and sums up their scores. the results are easy to visualize using genome browsers, such as ucsc genome browser either in wig or bed format. an overview of the implemented procedure is shown in figure  <dig> 
+
+peak-score normalization
+the peaks detected by the individual peak finders are usually scored by various enrichment measures. due to different ranges of the scores, weighting of the selected peaks may be biased to the peaks ranked with higher scaled scores. to overcome this drawback, the output from each peak finder is normalized; five normalization methods are implemented.
+
+normal normalization
+the program calculates the mean value and the standard deviation of the peaks scores identified by the selected peak finders. the peak scores are then transformed to have mean value of the normal_shift parameter and unit standard deviation. the remaining negative peak scores are set to  <dig>  while they are kept in the down-stream analysis for voting. any default value for the normal_shift parameter is set to  <dig> . the negative peak scores are considered as outliers since they are more than  <dig>  standard deviations from the mean value and can be set to  <dig> without any significant impact on the analysis. the fraction of such peaks for normal_shift of  <dig> is around  <dig> %, provided the scores in the file have normal distribution. however, in real datasets, peak scores rarely exhibit normal distribution, and so few if any peak scores are set to  <dig>  the scores are then multiplied by the maximum number of peaks taken from all peak finders and rounded up.
+
+  normalized_peak_score=peak_score-peak_score¯sd+normal_shift∗max_no_of_peaks 
+
+where: normalized_peak_score- score of the peak after normal normalization peak_score- original score of the peak peak_score¯- the mean score in the results of the currently normalized peak finder sd- standard deviation of scores in the results of the currently normalized peak finder normal_shift- the mean value of the scores after normalization max_no_of_peaks- maximal number of peaks returned by the peak finders
+
+for example, five peaks with scores  were obtained from sissr, while  <dig> peaks were obtained from macs, which was the highest number of peaks from a single peak finder. the mean value was  <dig> and the standard deviation was  <dig>  after applying normal normalization, the sissr scores were normalized to . this normalization type may be used with bed option only.
+
+naive quantile normalization
+the user defines which quantile is to be used for normalization  the peak scores are sorted within the files with original scores from selected peak finders and the specified quantile is selected. then, each peak score from the currently normalized peak finder is divided by the value of the selected quantile and, as in the previous method, multiplied by the maximum number of peaks in the results of the peak finders and rounded up .
+
+  normalized_peak_score=peak_scorequantilen∗max_number_of_peaks 
+
+where: normalized_peak_score - score of the peak after naive quantile normalization peak_score- original score of the peak quantile
+n
+- the n-th quantile of the peak scores from the currently normalized peak finder max_no_of_peaks- maximal number of peaks returned by the peak finders
+
+as an example, sissr returned five peaks with scores , while  <dig> peaks were obtained from macs, which was the highest number of peaks from a single peak finder. by using quantile  <dig> , the peak scores of sissr were normalized to , and rounded up to . naive quantile normalization type may be used with the bed and wig options.
+
+average normalization
+this normalization is very similar to the naive quantile normalization. the only difference is that instead of selecting a certain quantile, the mean value of all the scores is used. average normalization is performed according to  <dig>  
+
+  normalized_peak_score=peak_scorepeak_score¯∗max_number_of_peaks 
+
+where: normalized_peak_score - score of the peak after average normalization peak_score - original score of the peak peak_score¯- mean peak score in the currently normalized peak finder results max_no_of_peaks- maximal number of peaks returned by the peak finders
+
+as an example, sissr returned five scores , while  <dig> peaks were obtained from macs, which was the highest number of peaks from a single peak finder. the mean value of sissr peak scores, which was  <dig>  was used to normalize the peak scores of sissr to , after rounding . average normalization type may be used with the bed and wig options.
+
+rank normalization
+after sorting the lists of the peaks detected by the peak finders, the peaks are clustered using their scores, so that all peaks with the same score are in the same cluster. next, each cluster gets a rank computed according to the following equation .
+
+  cluster_scorei=no_of_peaksi2+∑k=0i-1no_of_peaksk∗max_no_of_peaksno_of_peaks_from_pf 
+
+where: cluster_score
+i
+- rank  for all peaks in the cluster ino_of_peaks
+i
+- the number of peaks in cluster imax_no_of_peaks - maximal number of peaks returned by the peak finders no_of_peaks_from_pf - number of peaks returned by the currently normalizing peak finder
+
+for example, five peaks with scores  were obtained from sissr, while macs produced  <dig> peaks, which was the highest number of peaks obtained from a single peak finder. after applying the rank normalization method the sissr peak scores were normalized to  <dig>   <dig>   <dig>   <dig>   <dig>  rank normalization type may only be used with bed option.
+
+top rank normalization
+in contrast to the previous normalization methods, top rank normalization assumes that the methods that return fewer peaks also return a smaller fraction of false positives. in this method, similarly to rank normalization, after sorting the lists of the peaks detected by the peak finders, the peaks are clustered using their scores, so that all peaks with the same score are in the same cluster. the clusters are sorted starting with the highest-scoring cluster and ending with the lowest-scoring one. next, each cluster gets a rank computed according to the following equation .
+
+  cluster_scorei=max_no_of_peaks-no_of_peaksi-12+∑k=0i-1no_of_peaksk 
+
+where: cluster_score
+i
+- rank  for all peaks in the cluster ino_of_peaks
+i
+- the number of peaks in cluster imax_no_of_peaks- maximal number of peaks returned by the peak finders
+
+for example, five peaks with scores  were obtained from sissr, while macs produced  <dig> peaks, which was the highest number of peaks obtained from a single peak finder. after applying top rank normalization method the sissr peak-scores were normalized to  <dig>   <dig>   <dig> ,  <dig> ,  <dig>  and rounded up to  <dig>   <dig>   <dig>   <dig>   <dig>  top rank normalization may be used with bed option only.
+
+result generation
+bed option
+prior to peak-selection, overlapping regions of the peaks obtained from each peak finder are aggregated and weighted by summing up the normalized scores of the regions. apart from the aggregated score, the number of votes for each region is kept. the number of votes is defined as the number of peak finders that called the region. finally, the consensus peaks are selected based on one of the following methods.
+
+in-degree centrality voting mechanism
+is our simplest mechanism of peak selection. all the aggregated regions are considered as candidate sites. a putative binding site is reported if the number of votes for a region is higher than or equal to a predefined threshold . note, that in this method the scores generated by the peak finders are not utilized. for example, given a set of regions 1a:  <cit> , 1b:  <cit> , 2:  <cit> , and 3:  <cit>  generated by pf  <dig>  pf <dig>  pf <dig> and pf <dig>  respectively, with the threshold value  <dig>  the regions  <cit>  and  <cit>  are reported as binding sites. if the threshold was set to  <dig>  the output region would be  <cit>  .
+
+minfp peak selection method
+attempts to minimize the number of false positive peaks, at the cost of losing some true positive peaks. in this method the user defines min_rank, which is the minimum number of votes that a region has to receive in order to be identified as a putative peak. we calculate maxp, the highest score of a peak having fewer than min_rank votes. each peak that has a score higher than maxp is reported as a putative binding site.
+
+minfn peak selection method
+attempts to minimize the number of false negative peaks, at the cost of including some false positive peaks. min_rank is defined as in minfp. minp is the lowest score of the peak having min_rank or more votes. each peak that has a score higher than minp is reported as a putative binding site.
+
+wig option
+with the wig option, peaks are divided into steps, each characterized by a score. the number of scores and the step size determine the width of the peak. all step sizes are unified to the smallest value among all wig files returned by individual peak finders. all identified peaks are collected and the overlapping regions integrated. the integrated regions are weighted with the normalized score of the overlapping peaks. optionally, the highest weighted peaks may be selected from the list of the integrated regions by setting a cut-off value. the goal is to select the regions that are called by the majority of the peak finders and that have high scores. this leads to a set of enriched regions that are easy to visualize.
+
+RESULTS
+our method was evaluated against the benchmark datasets published by rye et al.  <cit> . they analyzed chip-seq reads of three transcription factors  using five different peak finders . furthermore, the authors visually inspected a number of detected peaks, classifying them as true positive, false positive or ambiguous, providing an excellent resource for evaluation of peak finder performance. in our analysis we ran all seven peak finders included in pfms on the three datasets incorporating control data with those peak finders that support experimental background measurements. pfms with various combinations of parameters and peak finders was evaluated. the peaks obtained by the peak finders and by pfms were intersected with the rye’s results using bedtools  <cit> , keeping track of counts of true positives and false positives for each data set and parameter setting. the performance results of all runs are shown in figure  <dig> 
+
+in order to clearly compare the performance of single peak finders and various configurations of pfms three different measures were applied. firstly, we calculated euclidian distance of the points on the figure  <dig> to point  for each of the investigated tfs. secondly, for each configuration, we calculated average euclidean distance for the three tfs results . however, in the first measure the largest impact on the overall output have the results for the most 'difficult’ tf. a ranked-based approach was applied to compensate for this factor. we ordered increasingly the euclidean distances separately for each tf. for each configuration we summed up the ranking position from all three tfs obtaining combined ranking score. the third measure implemented in order to compare the performance of the peak finders and various configurations of pfms was the average normalized distance. to calculate this measure we applied studentization on the distances for each of the tf datasets. then, for each peak finder and pfms configuration we calculated mean value of the measure for the three datasets. for all three measures, the lower the score, the better configuration is.
+
+in our validation analysis, the peak finders were ran with the default settings. however, tuning settings of the peak finders for the given datasets may improve the results. configuration of the individual peak finders may be easily modified within pfms . cisgenome, macs and sissr were found to perform much better than the remaining four peak finders. not surprisingly, pfms performed best with only the three peak finders included. the top three choices for transcription factor dataset analysis utilize only these three peak finders with the min_rank parameter set to  <dig>  we recommend either voting or minfp with rank normalization or top rank normalization as these three configurations outperform each of the single peak finders as well as any other configuration of pfms. depending on the quality measure, one of the three configurations was the optimal one. however using any of the three quality measures the above mentioned configurations make the top three choices. as predicted, the minfp option returns results with only few false positives but quite often misses true positives. apparently, this leads to a very high specificity and can be useful for applications such as selecting the strongest putative tf target genes for biological validation  <cit> . we recommend using the minfp option with cisgenome, macs, sissr and optionally with seqsite.
+
+in contrast, minfn has very high sensitivity, i.e. it returns most of the true positives at the cost of including a considerable number of false positives. this option also performs best with the four peak finders. the choice of normalization type did not seem to be crucial for the quality of the results when using minfn or minfp. nevertheless, we do not recommend using the normal normalization unless one is certain that the peak scores obtained from all peak finders have a bell-shaped distribution. otherwise, it is much safer to use naive quantile normalization , average or rank normalization. these methods do not require any assumptions about the distribution of the scores.
+
+the configurations described in this section proved to be the best for transcription factor chip-seq datasets. other types of chip-seq data such as histone modifications were not tested. further investigation needs to be carried out and more validated datasets have to be provided to reveal the optimal settings for both pfms itself as well as the individual peak finders. as an example, histone modifications chip-seq datasets are likely to have varying peak widths and shapes depending on the pattern of the modification  and the density of the chromatin. therefore, different approaches and options might be better for different cases.
+
+pfms can be used as a single interface for analyzing chip-seq datasets employing several peak finders simultaneously since users may choose a set of peak finders amongst the ones currently integrated in this application. in addition to the list of putative peaks identified by pfms, the results of each peak finder may be stored in the output directory of pfms.
+
+CONCLUSIONS
+we present peak finder metaserver - a novel tool for finding peaks in chip-seq data. the tool combines the results from various widely used methods and generates consensus results. we investigated seven peak finders and identified three that perform best for transcription factor chip-seq datasets, i.e. cisgenome, macs and sissr. applying only these three peak finders and setting the voting peak selection method and the minrank parameter to  <dig>  to the best of our knowledge this is the best method of finding peaks in transcription factor chip-seq datasets. meta-server approach proved to be successful and pfms with the above mentioned settings generates results of a better quality than any of the individual peak finders. different configurations of our tool can be optimal for different types of analyses, but identification of optimal settings requires other validated datasets.
+
+availability and requirements
+•project name: peak finder metaserver
+
+•project homepage:http://bioinf.icm.uu.se/~pfms/
+
+•operating system: linux, macos
+
+•programming language: python
+
+•other requirements: python  <dig>  or higher, gcc compiler, perl, jre  <dig> 
+
+•license: gnu
+
+•any restrictions to use by non-academics: none
+
+abbreviations
+chip-seq: chromatin immunoprecipitation sequencing; pfms: peak finder metaserver; tf: transcription factor.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+mk - created the first version of pfms with three peak finders , implemented all the normalization and cut-off point evaluation methods, took part in testing the method, created all the figures and wrote the first version of the manuscript. hu - made further developments of pfms, added four peak finders , and integrated all peak finders. converted the method to a multithread application, took part in testing the pfms, took part in writing of the manuscript. se - conceived the system and took part in the writing of the manuscript. jk - supervised the work and took part in the writing of the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+table s <dig>  an.xls file containing table s <dig>  can be viewed with microsoft excel or similar software. table s <dig> - the comparison of the results obtained from individual peak finders and various pfms configurations. the table contains results of the three quality measures for individual peak finders and various pfms configurations. 'distance’ means the euclidian distance of a point from . 'ranking’ corresponds to the ranking quality measure described above. 'normalized distance’ is the euclidean distance after studentization within the results for a certain tf dataset. the three last columns contain measures combined for all three tf datasets. the user may compare the performance of each peak finder and pfms configuration by sorting appropriate columns.
+
+click here for file
+
+ acknowledgements
+we want to thank an anonymous referee for a critical and insightful review and inspiration to create measures to compare our tool with other peak finders.
+
+funding
+studies supported by uppsala university, and foundation for polish science, international phd projects  program , and a grant n <dig>  <dig> from the polish ministry of science and higher education .

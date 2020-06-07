@@ -1,0 +1,375 @@
+BACKGROUND
+a major challenge in translating new genome sequences into useful community resources is the accurate annotation of genes and other functionally-relevant features
+ <cit> . while there have been clear improvements in gene prediction algorithms
+ <cit> , accurate prediction of small one and two-exon genes remains stubbornly problematic
+ <cit> . false-positive signals arising from the poor specificity of promoter motifs and other commonly-used signals employed by general purpose gene-finding algorithms are widespread
+ <cit> . to address the flood of false-positive signals for small genes, many annotators filter out small-gene predictions lacking direct experimental expression evidence, resulting in a major problem of false negatives
+ <cit> .
+
+we propose here an alternative and complementary strategy for genome-wide annotation – a strategy that has as its strength predicting the small one- and two-exon genes that all-purpose gene-finding algorithms often fail to predict accurately. our approach focuses on finding all related paralogous genes within a target gene family and then using signals from the corresponding multiple sequence alignment to aid in refining the model predictions. we have implemented this approach in an open-source and freely available application called spada . spada can be used directly with a user’s own protein family alignments or with a comprehensive set of protein family alignments from public sources such as pfam
+ <cit> , interpro
+ <cit>  or prosite
+ <cit> , enabling the exhaustive discovery of essentially all members of the input families within a given genome sequence. because these public resources continue to expand and include new and novel protein families, spada’s ability to comprehensively identify arbitrarily large families of small peptides in genomes will steadily grow.
+
+here we describe the conceptual basis of spada and go onto test its performance with selected families of notoriously difficult genes to annotate properly - specifically, plant cysteine-rich peptides  in two model plant species , the s-protein homologue  family in a. thaliana, and the alpha-amanitin toxin gene family in the mushroom amanita bisporigera. in the case of crps, we examine the accuracy and recall compared to published composite test/training sets for these species based on previous semi-manual curation and subsequent experimental expression validation
+ <cit> . we also compare spada’s performance against a range of commonly-used generic gene-prediction algorithms
+ <cit> , providing evidence of spada’s advantage in identifying these challenging classes of small peptides.
+
+method
+spada is a computational pipeline that, when provided with a multiple sequence alignment for a gene/protein family of interest, identifies all members of this family in a target genome. technically, spada’s pipeline is a general homology-based gene finding program with specifically enhanced power to detect and annotate small peptides with one or two exons. unlike general-purpose gene prediction programs such as fgenesh
+ <cit> , spada works on an entire gene family at one time - with the goal of finding all family members in the genome. unlike other homology-based gene predictors such as genewise
+ <cit>  and exonerate
+ <cit>  that map a single protein sequence to the target genome, spada performs a similarity search using a profile alignment and identifies all homologs of the family. in addition, spada provides automated access to both similarity search tools  and ab initio gene predictors , significantly improving the annotation efficiency of multi-member gene families. as shown in figure
+ <dig>  spada consists of four consecutive components: 
+
+• pre-processing
+
+• motif mining
+
+• model prediction
+
+• model evaluation & selection
+
+in spada, hmmer
+ <cit>  is first used to identify hits in the target genome sequence  as well as in the target proteome  using a reasonably generous e-value . these hits are then tiled with regard to their genomic coordinates and merged into overlapping clusters. finally, one best hit in each cluster is picked to generate a list of candidate hits.
+
+the pipeline then allows the user to run one or more processes to predict gene structures for these potential genes. by default, spada runs augustus
+ <cit>  using hit locations as clues for "cds regions" . in parallel, spada runs a custom pipeline optimized for predicting the exon boundaries of genes containing one or two exons using genewise
+ <cit> , splicepredictor
+ <cit>  and custom perl scripts.
+
+in the next step, all gene structure predictions are combined to make a raw calling set, with each hit having one or more gene structure predictions. spada uses multiple statistics to assess the confidence of each candidate gene model, including an alignment score , an hmm alignment score , the presence/absence of proper start/stop codons, as well as the signalp d-score
+ <cit>  in the case of secreted peptides.
+
+finally, the best candidate gene model is picked for each hit and the resulting set is filtered using empirical cutoffs  to remove false positives.
+
+pre-processing
+building family-specific multiple sequence alignments
+the original motivation for developing this pipeline was accurately identifying and predicting cysteine-rich peptides  in plant genomes. for this purpose, spada comes with a complete set of manually-curated protein sequence alignments for plant cysteine-rich peptide  families
+ <cit> . in  <dig>  silverstein et al. built multiple sequence alignments for most plant crp families through iteratively scanning est sequences from different plant species in tigr’s gene indices
+ <cit> . these alignments were re-aligned here using clustalo
+ <cit>  and trimmed using trimal
+ <cit>  to remove spurious sequences and poorly aligned positions. finally, a profile hidden markov model  was built for each crp family using "hmmbuild" in the hmmer package
+ <cit> .
+
+as a general homology-based gene finding program, spada has been designed to work with any set of protein families. users can start with a list of amino acid sequence alignments of their own interest, run the script "build_profile.pl" to generate custom hmm profiles, and initiate the pipeline using the new hmm. with this in mind, we have tested spada’s performance on an additional protein family as a proof of concept  and assessed its applicability to secreted protein families other than crps.
+
+processing genome sequence and annotation
+in spada, genome fasta sequences are translated in all six reading frames to amino acid sequences and then open reading frames  are extracted by breaking up these long amino acid sequences using stop codons. here an orf is defined as a segment of amino acid sequence with at least  <dig> residues and uninterrupted by stop codons. extracting orfs from the original translated genomic sequence reduces the target database size for the subsequent motif mining step and improves sensitivity. using orfs also ensures that no protein-coding exon spans stop codons in the middle of a sequence and that each exon will have a reasonable length. in theory, all protein-coding exons should locate within these orfs, which will be discovered in the next motif-mining step. however, the exact exon boundaries are still unclear at this point of the search procedure.
+
+if a gene annotation file in general feature format version  <dig>   is available, spada can also read and process it, extracting the amino acid sequences of existing annotations and passing them onto the next motif mining step. in doing so, exon boundaries can be better refined, further improving the accuracy in the model prediction step.
+
+hard-masking of genome sequences is recommended  before running the pipeline. some plant species have very large genomes with highly repetitive content . by hard-masking the genome sequence, the target database size in the motif-mining step is effectively reduced, significantly improving the search sensitivity of the entire pipeline. however, if many family members locate in repeat-rich genomic regions , the unmasked genome version should be used.
+
+motif mining
+in spada, profile hmms are used to search against translated genomic sequences  using "hmmsearch", a component of the hmmer package 
+ <cit> . this program finds significant hits against a protein sequence database using one or more profiles as inputs. the output of the scan is a list of genomic intervals with significant sequence similarity to query profiles and amino acid sequences translated from these intervals. for single-exon genes, a contiguous stretch of amino acid sequence in the target databases will be discovered, roughly corresponding to the exon in the original genomic sequence. for genes containing two or more exons, partial amino acid sequence hits corresponding to different exons will be separated by introns  or distributed in different target sequences . spada collects all these full and partial hits in translated protein sequences, recovers their original genomic coordinates, filters out low-significance hits , selects the most significant hit for each genomic interval since multiple input profiles may hit the same region, and merges nearby partial hits. during this merging step, spada requires that each neighboring partial hit should hit a different segment  in the input profile hmm. the merged genomic intervals  roughly correspond to the multiple exons in the underlying gene model - although the exact intron-exon boundaries and start/stop codon locations are yet to be refined at this stage of the procedure.
+
+in parallel, spada searches against existing protein sequences , yielding a separate list of hits to the input profiles. these hits are also treated as partial hits, i.e., mapped to their original genomic coordinates and then used to build "extended hits". this "hmmsearch against proteome" step is considered complementary to the abovementioned "hmmsearch against translated genome" step, since it improves prediction sensitivity by capturing otherwise non-significant partial hits in the translated genome search.
+
+model prediction
+at this point, spada has generated a list of "extended hits" approximately corresponding to actual exon boundaries. for each extended hit the surrounding genomic sequence is extracted. by default,  <dig> bp upstream from the hits are extracted, since the first exon  is usually separated from the second exon  by an intron up to  <dig> bp, as determined by manual curation and understanding of plant genomes. at the other end,  <dig> bp downstream from the hit boundaries are extracted, since the correct stop codon can typically be found within  <dig> bp downstream of the hmm hit
+ <cit> . spada next runs one or more components  in parallel to determine gene structure in this region. a total of five prediction components are currently supported by the pipeline: augustus
+ <cit> , genewise
+ <cit> , glimmerhmm
+ <cit> , genemark
+ <cit>  and geneid
+ <cit> . by default spada only runs two of these components  since performance evaluation on a group of common plant peptides suggests that running all five of them does not offer a significant extra gain compare to running just two of them .
+
+the first component, which we denote "augustus_evidence", runs augustus
+ <cit>  in its "evidence mode". the genomic sequence is used as input along with a "hint file" providing the program instructions for which part of the input sequence are known to be part of the coding sequence. in other words, location information of extended hits is incorporated in the prediction process. augustus will then try to complete the gene model by looking for start/stop codons and canonical donor-acceptor splice sites around the hits while preserving the open reading frame. the improvement in prediction accuracy and specificity by running augustus in the "evidence mode"  is significant and will be discussed in results & discussion.
+
+in parallel, spada runs a custom pipeline specifically designed to identify and predict genes with one or two exon and with a leading signal peptide. this component, which we denote "genewise+splicepredictor", first runs genewise
+ <cit>  to align the extended hit sequence  to genomic sequence and identifies compatible splice sites that preserve the hit orfs. if genewise fails due to non-canonical splice sites, spada then runs splicepredictor
+ <cit>  to find all possible donor/acceptor splice sites and extracts compatible ones, extending the orfs to the nearest start codon and stop codon. in practice, this "genewise+splicepredictor" approach works well as a complement to the "augustus_evidence" approach .
+
+at this stage in the pipeline, spada reports all compatible gene models predicted by the two components. these candidate models are then passed on to the next step for evaluation in order to generate a best calling set.
+
+model evaluation & selection
+for each extended hit, spada then evaluates the underlying candidate models using a number of measures and picks the most "confident" model for output. these evaluation statistics include the presence of start/stop codons at the beginning/end of the model, the presence of inframe stop codons, the signalp score
+ <cit>  in the case of a secreted gene family, and in particular, the multiple sequence alignment  score and the "hmmsearch probability"  score, as described below.
+
+in theory, the correct gene model should encode an amino acid sequence that aligns to the original family-specific protein alignments better than any other candidate models. to calculate the msa score, spada aligns the amino acid sequence of the candidate model to the profile alignment using clustalo "profile-to-profile" mode
+ <cit> . spada then scores all pairwise alignments using blosum <dig> scoring matrix
+ <cit>  and calculates a mean alignment score. the blosum <dig> matrix is used instead of blosum <dig> because the sequences that are being aligned tend to be fairly similar to each other, and a matrix with more conserved target frequencies such as blosum <dig> should be more reasonable. ideally, the candidate model with the highest msa score should be the most probable model.
+
+nevertheless, the msa score is not sufficient to pick the best model, since candidate models are sometimes too close to each other in sequence and the msa scores may not vary appreciably among model alternatives. therefore spada also calculates an "hmmsearch probability" score for each candidate model. in theory, if hmmsearch is run using the original family hmm against all candidate models, the most significant hit in the output should then be the best model. in practice, the probability score in the hmmsearch output serves as a better predictor than the e-value itself, especially when a model contains more than one hit domain. the msa score and the hmmprob score are used to evaluate each candidate model. spada then picks the best candidate model that meets the following criteria:  it has a signalp d-score of no less than  <dig>  ;  it has proper start/stop codons and no premature stop codon; and  it has the highest .
+
+spada uses a relatively relaxed e-value cutoff in the motif mining step  in order to increase specificity. this also results in numerous false positive hits. these hits will generally not have valid candidate gene models built for them in the model prediction step, and thus would not make it into the ultimate output. however, spada does employ a final filtering step based on hmmsearch e-value to refine gene models that are retained. we evaluated the performance of the pipeline under different final e-value cutoffs  and set the default cutoff to  <dig> , which may be adjusted by the user to achieve customized search purposes. for all gene models passing the filter, spada outputs the sequences in fasta format and gene coordinate information in gff format. spada also generates for each gene family a multiple sequence alignment including all predicted models and the family-specific consensus sequence. if a gene annotation file has been passed to the pipeline, spada will also report the comparison results of predicted models with existing annotation .
+
+performance evaluation
+compilation of the test set
+we have compiled a test set of plant cysteine-rich peptides  in two genomes: the model dicotyledon, arabidopsis thaliana, and the model legume, medicago truncatula. in previous work, silverstein et al. have exhaustively searched and curated all  <dig> crp families  in arabidopsis
+ <cit> . a large number of crps have also been identified and curated in an early release of the medicago genome sequence
+ <cit> . recently, as a collaborative effort with j. craig venter institute , we expanded this list of crps in m. truncatula. we manually inspected and curated  <dig> crp families  in m. truncatula <cit> . finally, we now have a complete list of crp members for arabidopsis and medicago .
+
+we collected evidence from multiple sources to validate the expression of the models in the compiled test set. on the one hand, extensive rna-seq data were downloaded from ncbi sequence read archive
+ <cit>  for both arabidopsis and medicago; on the other hand, we downloaded the atmtdefl microarray dateset
+ <cit>  to find additional support for expression of these gene families. the atmtdefl array include probe sets for  <dig> arabidopsis defls,  <dig> arabidopsis defl-related genes , and  <dig> medicago defls, plus additional marker genes. in total,  <dig>  out of the  <dig> crps in the arabidopsis test set and  <dig>  out of the  <dig> medicago crps receive support from either rna-seq  or microarray data . these carefully curated, high-quality crp calls were then taken as our test set in evaluating the performance of different model prediction components in spada under different hmmsearch e-value cutoffs. all experimental procedures complied with the guidelines of the institutional biosafety committee  at university of minnesota .
+
+evaluation procedure
+we tested a number of popular gene prediction programs as spada model prediction components. in addition to the previously mentioned components, we also tested geneid 
+ <cit> , glimmerhmm 
+ <cit> , genemark 
+ <cit> , and augustus . the "augustus_evidence" differs from the "augustus_de_novo" component simply by the inclusion of a "hint file"  fed to the program. we evaluated the pipeline performance running these components  based on our curated test dataset , and decided to use the "augustus_evidence" and "genewise+splicepredictor" approaches as default components in the spada model prediction step.
+
+prediction performance was measured at two different levels: coding nucleotide sequence and exonic structure. at each level, we measured the sensitivity and specificity for each component. we first define the true positives , true negatives , false negatives  and false negatives . at the nucleotide level, sensitivity  is then defined as the proportion of coding nucleotides that have been correctly predicted as coding
+, while specificity  is the proportion of predicted coding nucleotides that are actually coding
+ <cit> . at the exon level, sn is the proportion of actual exons in the input sequence that are correctly predicted, while sp is the proportion of all predicted exons that are correctly predicted
+ <cit> . other measures such as correlation coefficient  and average conditional probability  were not evaluated since they require the calculation of tn nucleotides/exons, which are noncoding regions that are predicted as noncoding. unlike a general gene-finding program that tries to predict all coding genes in a given sequence, spada focuses only on coding genes that are significantly similar to a given profile, while ignoring all other genes. consequently "tn" statistics is not straightforward to evaluate in this context.
+
+performance evaluation was done in both a. thaliana and m. truncatula. the extracted genomic sequences were used as input sequences. we evaluated the pipeline performance using each of the "geneid", "augustus_de_novo", "glimmerhmm", "genemark", "genewise+splicepredictor", "augustus_evidence" component , as well as "spada"  and "all" . all programs were installed and run locally on a gnu/linux workstation. the appropriate parameter files, model files and training directories, if available, were used to run these programs in each species, otherwise the default parameter files  were used. the output of these runs were parsed to derive a unique prediction for each test sequence.
+
+rna-seq and microarray processing, data visualization
+we mapped the rna-seq short reads  to the reference using tophat and summarized the results using cufflinks
+ <cit> . cufflinks is able to estimate the expression value at the level of transcripts. we used a cutoff of fpkm  >  <dig> to determine if a model  is expressed.
+
+for the atmtdefl array, pma  calls and normalized expression values of each probe set were obtained from the supplemental tables of two recent papers
+ <cit> . we mapped the probe sequences to the transcript models in the test set as well as spada prediction. in many cases the annotated gene boundaries are not complete and lack portions of the 3’-utr that is prioritized in affymetrix designs, and the probes designed in these regions would not be mapped. as a result, we require at least six probes in a probe set matching the target gene . finally, the pma calls of a probe set should be 'present’ in at least one tissue/treatment condition to indicate expression support for the transcript model it is mapped to.
+
+in order to visualize some of the novel spada predictions as compared to the original genome annotation, as well as the underlying rna-seq read mapping support, we loaded the data  into igv , adjusted the width of each track, and made screenshots.
+
+RESULTS
+performance evaluation of spada on plant cysteine rich peptide  families
+spada performance under different search e-value thresholds
+using our manually-curated high-quality crp test set from arabidopsis and medicago, we first evaluated the performance of spada under different search e-value thresholds. generally speaking, with a loose e-value threshold , spada is able to predict almost all true models  while making many false predictions  . by setting the search threshold to a more stringent value, spada avoids making most of the false predictions, but also loses a small number of true models. in an effort to optimize search sensitivity  and specificity , we set the default search e-value threshold to  <dig> . users can also change the default e-value threshold to build custom searches .
+
+performance comparison of different gene prediction components
+we then compared the performance of spada running different model prediction components: geneid, augustus , glimerhmm, genemark, genewise+splicepredictor as well as "spada"  and "all"  . the high specificities observed in all components are likely due to the model evaluation and selection step, where most false models are filtered. prediction sensitivities, on the other hand, show substantial differences among components. in both genomes tested, "augustus_evidence" and "genewise+splicepredictor" gave the highest sensitivities among the six individual components. the default spada pipeline  runs these two components and achieved even higher sensitivity. on the other hand, running all six individual components  gives the highest sensitivity, suggesting that search accuracy can still be improved by including more heterogeneous prediction programs in the pipeline. however, the gain in sensitivity offered by running all six components is marginal compared to running just two of them , suggesting that a plateau in search accuracy could soon be reached and adding more prediction programs in the pipeline may not help much.
+
+these results are expected as spada does not work as a general gene finding program but instead focuses on particular classes of genes with known profiles. small genes are typically difficult to predict and often missed by genome annotation pipeline due to the intrinsic properties of many automatic gene finding algorithms
+ <cit> . in our test with geneid, augustus and glimmerhmm against the medicago genome, the arabidopsis training matrix was used since a medicago specific one is not yet available. this explains to a large extent the extremely low sensitivity performance for these three programs in medicago. search specificities were generally quite high and did not vary much among different programs or genomes tested, indicating the relatively stringent search e-value  in effect allows few false positives.
+
+cysteine-rich peptides predicted by spada in arabidopsis and medicago
+using the default search e-value threshold and model prediction components, spada predicts  <dig> crps in arabidopsis and  <dig>  in medicago . these numbers are generally consistent with our manually curated crp test sets  and  <dig> for medicago <cit> , with a sensitivity of 91%–93% and specificity of 85%–95% at the nucleotide level . members within a sub-class typically show a conserved signal peptide and cysteine configuration . we also checked the expression of these predictions using publicly available rna-seq data from ncbi:  <dig>  out of the  <dig> arabidopsis crps and  <dig>  out of the  <dig> medicago crps receive either rna-seq or atmtdefl array expression support . it should be noted that spada makes no attempt to predict pseudogenes as it filters out hits with in-frame stop codons. however, some pseudogenes with premature stop codons might still be predicted by spada as valid gene models if the in-frame part shows significant  similarity to the search hmm. this in part explains the higher number of spada predictions  in medicago than our test set  since pseudogenes were manually removed to obtain the test set.
+a. thaliana 
+ and
+m. truncatula
+
+
+a. thaliana
+m. truncatula
+the default e-value threshold of  <dig>  is a compromise between sensitivity and specificity that generally works well for both organisms. for the purpose of identifying all potential small coding genes, a search with high sensitivity should be performed since it allows the user to see all potential hits and then determine for him/herself the boundary between false predictions and true predictions based on search scores. the users can then set the cutoff threshold empirically and select genes for experimental verification on their own. thus, we also report here two crp prediction sets by running spada using e-value threshold of  <dig> . in practice, users are encouraged to change the default e-value threshold to build custom searches.
+
+according to the latest versions of genome annotation for arabidopsis and medicago, about 5% to 15% of spada predictions fall completely into intergenic regions . through manual inspection of these models, we found that some of the unannotated models turn out to be orfs with premature stop codons , while others had quite significant hmmsearch e-value and complete orfs. in addition, some predicted models receive expression support from either existing est sequence or rna-seq data. an example is shown in figure
+ <dig> where the predicted crp model is supported by rna-seq mapping, fits well in the family-specific alignment, but was missed by the genome annotation  as well as by our test set. while such cases are infrequent , we speculate the specificity of spada is likely to be underestimated.
+
+a. thaliana
+m. truncatula
+number of unannotated predictions
+a
+number of novel models
+b
+
+a
+an unannotated prediction is a gene model predicted by spada but missed by current genome annotation.
+
+
+b
+novel models are unannotated predictions that are manually inspected to be true members of the family with evidence from family-specific alignment and/or rna-seq evidence.
+
+we then performed manual inspection on these unannotated crp models and tried to determine whether the calls are truly bad predictions  or valid members of the family missed by current genome annotation . the number of "novel" crps discovered in this fashion, is given in table
+ <dig> . spada was able to identify  <dig> novel crps in medicago that were missed by current genome annotation pipeline. the actual number of new crps in medicago will be even higher since we only evaluated a subset of all crp groups . this result is not unexpected given that the medicago genome was released only recently and resources and efforts put into the genome annotation pipeline have been limited. on the other hand, only  <dig> novel crps were found in arabidopsis, suggesting a relatively higher quality of gene calls in this extensively studied model organism.
+
+through examination of the novel crps, we also noted that while some of the novel hits have a very significant hmmsearch e-value , most have moderate e-values , suggesting that their sequence similarity to the input hmm profile is limited. while the input profile alignments were manually built and may not be exhaustive in capturing all groups of crps, we speculate that some of these novel crps might form new clades that define novel profile alignments, separate from the original alignment. consequently, a new round of genome scans using these novel profiles has the potential for capturing even more members that have been missed in the previous search.
+
+case study: the s-protein homologue  family in arabidopsis
+in addition to plant crps, spada is readily generalizable to other classes of putative secreted peptides by substituting an appropriate sets of hmms in place of crp hmms. here, we used the sph peptides 
+ <cit>  as an example. a seed alignment including  <dig> plant self-incompatibility protein s <dig> sequences  was obtained from the pfam database. an hmm profile was built from this alignment and then used as input to scan the arabidopsis genome  by running spada. spada predicted  <dig> sph peptides in total . forty-five  of these predictions are identical with tair <dig> annotation. seventeen have minor discrepancies with tair <dig> gene models . nine are in major conflict with existing gene models . we also discovered  <dig> new sphs not present in tair <dig>  through manual inspection of gene models and sequence alignments with other family members, we found  <dig> out of the  <dig> major conflicts reflect an error in tair <dig> , while  <dig> out of the  <dig> models absent from tair <dig> are true members of the sph family, missed by the current genome annotation . thus, we demonstrate that spada accurately detects other classes of secreted peptides given a well-constructed profile alignment.
+
+case study: a fungal cyclic peptide family in amanita bisporigera
+in order to assess whether spada could be useful in searches for families of small non-secreted peptides outside the plant kingdom, we also examined the fungal cyclic peptides of amanita mushrooms
+ <cit> . this family includes the amatoxins and phallotoxins, such as α-amanitin and phalloidin, respectively, which are synthesized as proproteins of 34- <dig> amino acids. we began by creating a multiple sequence alignment via clustalo of reported proproteins
+ <cit>  and executed spada as usual with the signal peptide filter turned off, using arabidopsis as the training model for augustus in searching the low-coverage genome contigs of amanita bisporigera. as a negative control, we scanned the genome of amanita thiersii, which is non-toxic and not known to produce this class of toxins.
+
+spada identified five new peptides in the incomplete a. bisporigera genome with strong homology  that fit well with the alignment of known proproteins . one additional hit ran off the end of the contig, producing the incomplete propeptide "msdtnvmrlpfttp". no additional predictions were made by spada with e <  <dig>  beyond sequences that were already included in the original alignment. further, spada did not identify any hits when scanning the genome of a. thiersii, as would be expected from that organism’s non-toxic nature.
+
+discussion
+homology-based gene prediction
+unlike general-purpose gene predicting programs, spada works as a family-based gene finder. the major difference between spada and general gene predicting programs is that it incorporates prior information from the family profile in the prediction process. spada takes advantage of generic gene prediction programs, but goes a step further by suggesting where to look for family members. through scanning the target genome using pre-built family-specific alignments, spada identifies and builds "extented hits" that serve as the backbone of the underlying exonic structure. this location information greatly improves prediction accuracy, as shown by the different performances of "augustus_de_novo" and "augustus_evidence" components in figure
+ <dig>  among the six individual predicting components, the four that do not require additional information and make de novo predictions all yield low sensitivities. the other two approaches, "augustus_evidence" and "genewise+splicepredictor", make use of the location information and are able to predict most of the true positives.
+
+family-based gene prediction was first introduced in the augustus package as the augustus-ppx  module
+ <cit> . although augustus-ppx was shown to be more sensitive and accurate in predicting long, multi-exon gene family members than the standard augustus algorithm, its approach is not suitable for small, divergent peptide families such as crps, sphs or amanita toxin-like peptides examined here. rather than using the entire protein family alignment profile as input, augustus-ppx makes use of conserved, ungapped blocks from the alignment to make a profile. this enables the algorithm to identify core match regions in the genome sequence which together act as a scaffold in the gene prediction. a modification of the standard augustus gene-centric hmm is then used to fill in the pieces between scaffold elements with splice elements and other signals, ultimately emitting the most probable full gene structure. while this approach works well for families of typical genes with large numbers of conserved elements, it completely breaks down when applied to small, divergent peptide families like the crps, as these families tend to contain no conserved, ungapped regions of appreciable size to seed the initial scaffold. indeed, when we applied augustus-ppx to the crps we observed no improvement over "augustus_de_novo".
+
+improving prediction accuracy by model evaluation
+the default spada pipeline  achieves even higher sensitivity than the two individual components. this owes to the model evaluation & selection step. for each hmm hit, spada collects all candidate gene models built by its model predicting components, and in the model evaluation step, picks a best candidate model based on multiple evaluation statistics. true family members will probably get a high-scoring gene model, while most false positive hits will have no qualifying or only low-scoring gene models built. high-scoring gene models that passed the filter are more likely to be true models since they are the ones that best fit the family-specific alignment.
+
+pseudogenes and gene models without expression evidence may still have significant value
+spada identifies paralogous gene family members throughout the genome. many of these predictions currently lack expression evidence and some of the gene predictions have premature stop codons suggesting they may be psuedogenes. nonetheless, it is important to identify all gene family members, regardless of their expression and pseudogene status, especially in evolutionarily dynamic gene families,. the semi-automated approach that inspired spada’s development identified hundreds of defensin-like genes in arabidopsis which, at the time, had no expression evidence
+ <cit> . later, these genes turned out to be highly specifically expressed in reproductive tissues not previously examined with earlier genome-wide expression approaches
+ <cit> . moreover, one must also be careful not to discard pseudogene predictions that are highly similar to other family members. a gene that appears as a pseudogene in the reference sequenced accession of a species may indeed be fully intact in other accessions, as observed among the defensin-like pollen-tube attractant, atlures
+ <cit> . in their study, takeuchi and higashiyama observed half a dozen atlures with disabling mutations in non-reference accessions, as well as putative functional and intact forms of atlures  <dig>  and  <dig> , which are pseudogenes in the reference col- <dig> genotype
+ <cit> .
+
+improving ssp annotation in current plant ssp databases
+previous work has sought to exhaustively identify small secreted peptides  in arabidopsis
+ <cit> , rice
+ <cit>  and populus deltoides <cit> . these earlier studies only scanned short orfs  in translated genome sequence, though pan et al. <cit>  did include multiple-exon gene predictions from ab initio gene predition programs such as fgenesh and augustus. however, with a primary focus on detecting all small secreted peptides, these studies did not utilize protein family information in the model building process since secreted peptides are so diverse. the arabidopsis unannotated secreted peptide database  only contains one-exon orf predictions, and thus mis-annonates most  two-exon secreted peptides . the oryspssp database  does contain multi-exon models predicted by fgenesh  and augustus  in addition to single-exon orfs
+ <cit> . however, since no prior information is incorporated into predictions by these ab initio gene predicting programs, multi-exon models in oryspssp are frequently in conflict with the true rice crps . as a result, while most single-exon peptides in arabidopsis and rice are captured in auspd and oryspssp respectively, a large portion of the two-exon and multi-exon genes  are clearly under-represented in these two databases. spada, on the other hand, used additional gene structure information obtained in the motif mining step and was able to correctly predict most of the crp models .
+
+complementarity of spada to generic gene prediction programs
+spada is not designed to identify all genes in a genome. however, its applicability to new annotation projects steadily will increase due to the marked growth of protein sequence family signatures and alignments. interpro release  <dig>  contains  <dig>  protein family signatures. in the last  <dig> years, the number of families characterized by interpro has increased by 24%, compared with a 38% increase in the  <dig> years prior to that
+ <cit> .  it should be noted that spada is unlikely to perform well with genes that have large numbers of exons due to the combinatoric explosion of potential splice donor and acceptor pair combinations to evaluate. for longer multi-exon gene families, augustus-ppx should be used. still, spada has been shown here to be extremely effective in predicting families of one- and two- exon genes often missed or excluded by standard gene prediction algorithms
+ <cit> . hence, it is anticipated that gene annotation pipelines would be improved by routinely running spada to pick up small genes in addition to the standard generic gene prediction algorithms  for larger genes.
+
+impact of better gene prediction algorithms on plant genomics
+as sequencing costs have come down, there has been a commensurate expansion in the sequencing of multiple plant genomes within each species. moreover, genome wide association studies  are now routinely carried out in these populations. gene annotation cannot be simply transferred across members of a species due to the myriad of snps and indels that alter gene structures. gan et al. estimated that gene structural changes occurred in more than 30% of genes among the  <dig> arabidopsis accessions they resequenced and assembled
+ <cit> . further, gwas studies have repeatedly implicated unannotated intergenic regions as having the most significant association with important agronomic traits
+ <cit> . while it is likely that many of these gwas peaks identify non-coding rnas or regions in strong linkage disequlibrium with causative variants, we suspect that many of these sites may actually mark members of as yet unannotated families of small genes. indeed, in our own gwa studies
+ <cit> , many peaks turned out to coincide with ncr or other crp family members that prior to our intensive family-based annotation studies had been un-annotated in medicago.
+
+discovery of genes resembling nodule-cysteine-rich  peptides in arabidopsis
+in striking contrast to arabidopsis, the medicago genome harbors a huge number  of nodule cysteine-rich peptides  – defensin-like proteins with nodule-specific expression . these ncrs are unique to medicago 
+ <cit>  and have recently been shown to play vital roles in the communication between medicago and symbiotic rhizobia
+ <cit> .
+
+surprisingly, three crps were found in the arabidopsis genome falling into the nodule-specific sub-families . previously, ncrs were thought to be unique to medicago and other irlc legumes, playing a vital role in the legume-rhizobia symbiotic interaction
+ <cit> . looking closely at the sequence alignments , these "arabidopsis ncrs" have all the conserved cysteine residues in the expected configuration, while also exhibiting substantial divergence from medicago ncrs - and forming a separate arabidopsis-specific clade. furthermore, only one arabidopsis ncr is predicted in each sub-class. it is possible, therefore, that these "arabidopsis ncrs" are descendants from the most recent common ancestral genes that later evolved into medicago ncrs. after the arabidopsis-medicago divergence, these ancient ncrs could have become increasingly divergent in the legume  clade, eventually gaining new functions in nodule development and symbiosis, possibly through neo-functionalization, conferring a selective advantage and thus increasing rapidly in copy number through gene duplication.
+
+limitations of the spada pipeline
+because the model prediction step in the pipeline is not optimized for multi-exon gene models nor the extremely large introns present in animal genomes, we do not yet recommend spada to identify small peptides in animals . also, spada is not expected to work well with bacterial genomes due to the absence of introns in their gene models. however, we speculate this pipeline will work well with organisms such as yeast, oomycete and fungi, since they have similar gene structures to plants
+ <cit> . in fact, it was recently found that oomycetes and fungi genomes encode large number of secreted effectors as a result of the evolutionary "arms-race" between pathogen and host
+ <cit> . potentially, spada will be useful in effector discovery in these pathogen genomes given that a growing number of informative family alignments are becoming available.
+
+the spada pipeline is useful beyond secreted peptides and outside plants
+although spada was initially designed to target secreted peptide families in plants, it can be used on non-secreted peptide families, especially in fungal systems. in the results section, we tested spada using draft genome contigs of the mushroom a. bisporigera in search of additional members of a class of potent liver toxin pro-peptides characterized in earlier work
+ <cit> . roughly  <dig> pro-peptides belonging to this family had been cloned and sequenced, with only about a dozen present among the draft genome sequence contigs. spada identified  <dig> new family members with convincing alignments and significant e-values . three of these were in contigs long enough that extensive homology in the 3’-utr region characteristic of the family could be observed. the contigs of the remaining two hits ended shortly after the coding sequence preventing 3’-utr homology characteristics from being confirmed. when the same input hmm constructed from the known  <dig> pro-peptides
+ <cit>  was used to scan against a related mushroom amanita thiersii that is known not to produce toxic peptides, spada did not identify any candidate genes with e <  <dig> .
+
+CONCLUSIONS
+spada is a homology-based gene prediction program to accurately identify and predict the gene structure for short peptides with one to a few exons. spada works well on small plant peptides such as the cysteine-rich peptide families. spada gives much more accurate and precise gene calls than traditional ab initio gene finding programs in tested genomes. running spada on less well-annotated plant genomes  reveals numerous mis-annotated and unannotated crps in the current genome annotation. predictions made by spada constitute the most complete set of plant cysteine-rich peptides, and in this regard, will provide an invaluable resource for the research of small, secreted peptides in plants. the systematic application of spada to other classes of small peptides by communities will greatly improve the genome annotation of different protein families in public genome databases.
+
+availability and requirements
+project name: small peptide alignment discovery application
+
+project home page:https://github.com/orionzhou/spada
+
+operating system: linux
+
+programming language: perl
+
+other requirements: spada is a perl-based pipeline that internally runs hmmer, augustus, genewise, splicepredictor and a number of custom scripts. instructions for installation and running are available at
+https://github.com/orionzhou/spada/wiki.
+
+license: apache license, version  <dig> 
+
+any restrictions to use by non-academics: none
+
+abbreviations
+orf: open reading frame; crp: cysteine-rich peptide; defl: defensin-like protein; ncr: nodule cysteine-rich peptide; pma: present, marginal and absent; gwas: genome wide association study; sph: s-protein homologue; hmm: hidden markov model; gff: general feature format; msa: multiple sequence alignment; irlc: inverted repeat-lacking clade.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+pz: wrote software, significantly contributed to the concept and design of the software, carried out primary analysis, drafted and revised the manuscript; kats: conceived of the idea for the software, extensively tested the software and contributed to its development, reviewed and edited the manuscript; lg: extensively tested the software and contributed to its development; jdw: provided access to the a. bisporigera draft genome, carefully examined homology in the 3’-utr region of the  <dig> putative hits in that genome, and reviewed and edited the manuscript; sn: extensively tested the software and contributed to its development, reviewed and edited the manuscript; jg: extensively tested the software and contributed to its development; ndy: significantly contributed to the concept of the software, reviewed and edited the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+file s <dig>  manually curated crps  in a. thaliana and m. truncatula .
+
+click here for file
+
+ additional file 2
+table s <dig>  expression support of the arabidopsis crp test set.
+
+click here for file
+
+ additional file 3
+table s <dig>  expression support of the medicago crp test set.
+
+click here for file
+
+ additional file 4
+figure s <dig>  performance comparison of five gene prediction components under different search e-value thresholds.
+
+click here for file
+
+ additional file 5
+table s <dig>  crps predicted by spada in a. thaliana using e-value threshold of  <dig> .
+
+click here for file
+
+ additional file 6
+table s <dig>  crps predicted by spada in m. truncatula using e-value threshold of  <dig> .
+
+click here for file
+
+ additional file 7
+figure s <dig>  genome distribution of crps predicted in arabidopsis thaliana.
+
+click here for file
+
+ additional file 8
+figure s <dig>  genome distribution of crps predicted in medicago truncatula.
+
+click here for file
+
+ additional file 9
+file s <dig>  crp predictions made by spada in a. thaliana and m. truncatula using search e-value threshold of  <dig>  .
+
+click here for file
+
+ additional file 10
+figure s <dig>  multiple sequence alignments of medicago crp sub-families crp <dig> and crp <dig> 
+
+click here for file
+
+ additional file 11
+table s <dig>  expression support of the crps predicted by spada in a. thaliana.
+
+click here for file
+
+ additional file 12
+table s <dig>  expression support of the crps predicted by spada in m. truncatula.
+
+click here for file
+
+ additional file 13
+table s <dig>  crps predicted by spada in a. thaliana using e-value threshold of  <dig> 
+
+click here for file
+
+ additional file 14
+table s <dig>  crps predicted by spada in m. truncatula using e-value threshold of  <dig> 
+
+click here for file
+
+ additional file 15
+file s <dig>  novel crp predictions made by spada in a. thaliana and m. truncatula as determined by manual inspection .
+
+click here for file
+
+ additional file 16
+table s <dig>  sph peptides predicted by spada in a. thaliana.
+
+click here for file
+
+ additional file 17
+file s <dig>  sph predictions made by spada in arabidopsis using search e-value threshold of  <dig>  .
+
+click here for file
+
+ additional file 18
+figure s <dig>  a typical arabidopsis crp mis-annonated in arabidopsis unannotated secreted peptide database .
+
+click here for file
+
+ additional file 19
+figure s <dig>  a typical rice crp mis-annonated in oryspssp.
+
+click here for file
+
+ additional file 20
+table s <dig>  evaluation of spada, auspd and oryspssp using the manually-curated test set.
+
+click here for file
+
+ additional file 21
+figure s <dig>  sub-class alignments of three arabidopsis ncrs with medicago ncrs. in each alignment the first sequence comes from arabidopsis and the rest all come from medicago.
+
+click here for file
+
+ acknowledgements
+we thank yong bao and diana trujillo for testing the program in soybean and other legume genomes. we thank roman briskine for the useful suggestions on software release and maintenance. finally, our special thanks go to the minnesota supercomputing institute for the hardware and software resources. work in ndy’a lab was supported by nsf project pgrp  <dig> and  <dig>  work in jdw’s lab was supported by grant 1r01-gm <dig> from the national institutes of health general medical sciences.

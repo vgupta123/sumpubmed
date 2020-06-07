@@ -1,0 +1,249 @@
+BACKGROUND
+the introduction of second-generation sequencing technologies has enabled inexpensive, high-throughput sequencing. these technologies typically produce millions of short dna sequences . these reads contain a non-trivial number of errors which complicate sequence assembly  <cit>  and other downstream projects which do not use a reference genome. the frequency and type of errors depends largely on the sequencing technology, but also on the composition of the target being sequenced. these errors complicate de novo assembly by hiding true contig and scaffold connections while enabling false connections. furthermore, they mislead analyses by creating an inaccurate or incomplete picture of the data.
+
+the error correction problem involves identifying and correcting errors in reads introduced during nucleotide sequencing. the number and type of errors in a set of reads depends primarily on the sequencing technology employed and the number of sequenced bases, but also on the true frequency of error prone regions such as homopolymers. the error types common to all methods are substitution, insertion, and deletion. a more specific sequencing error is a homopolymer region being miscalled in its length, resulting in spurious insertions or deletions of the repeated nucleotide. substitution, or mismatch, errors are single base errors where one base is replaced by another. insertion errors are erroneous bases inserted into the sequence, and are corrected by deleting the erroneous bases. conversely, deletion errors are bases removed from a sequence, and are corrected by inserting the removed bases back into the sequence. the error types and rates of illumina miseq, ion torrent pgm, and roche  <dig> are varied as a consequence of the differences in sequencing technology.
+
+illumina reads contain substitutions as the dominant error type. miseq has reported total error rates ranging from substitution rates of  <dig> % and indel rates of under  <dig> %  <cit> , to  <dig> % total error rate  <cit> . miseq errors are not uniformly distributed across the genome  <cit> , but appear to be more frequent around homopolymer runs  <cit> , ggc triplets  <cit> , or towards the 3’ ends of reads  <cit> . there appears to be a higher frequency of mismatches within  <dig> bases downstream of both a ggc triplet in the forward direction and its reverse complement  in the reverse direction. however, there seems to be no correlation between the ggc triplet and a higher mismatch rate if the following triplet is at-rich  <cit> . furthermore, these errors seem to represent as little as  <dig> % of bases  <cit> . interestingly, luo et al. report homopolymer associated indels with illumina genome analyzer ii in 1% of genes reported from assembly, suggesting homopolymers may introduce more errors in illumina data than previously expected.
+
+errors in roche  <dig> and ion torrent technologies are typically miscalled homopolymer run lengths. ion torrent pgm appears to have a higher error rate for calling homopolymers of any length than roche  <dig> gs junior  <cit> . ion torrent pgm has reported total error rates at  <dig> %  <cit>  and indel rates of  <dig> %  <cit> . the accuracy of pgm reads appears to steadily decrease towards the end of the read  <cit> . roche  <dig> gs junior has reported total error rates of  <dig> %  <cit>  and indel rates of  <dig> %  <cit> . luo et al. report a homopolymer error rate bias with roche  <dig> flx titanium reads within at-rich homopolymers. total homopolymer error rates were as high as 25% for homopolymers of length  <dig> and nearly 70% for homopolymers of length  <dig> 
+
+when considering the overall coverage of the sequencing project, illumina miseq appears to be largely unaffected by gc content while ion torrent pgm appears to have more uneven coverage  <cit> . pgm reads favour gc-rich content, and the effect is particularly severe when sequencing at-rich genomes. pgm sequencing of the at-rich p. falciparum resulted in no coverage for approximately 30% of the genome. the consequence of this is that ion torrent pgm read depths may have a greater deviation from a random sampling process than would be expected for illumina miseq. loman et al. assemble miseq, pgm, and gs junior e. coli reads and align contigs to a reference of the same e. coli isolate. they showed that gs junior reads align in the greatest proportion with  <dig> % of reads unaligned, followed by miseq at  <dig> % and pgm at  <dig> %.
+
+we introduce an error correction tool capable of correcting errors introduced by illumina, ion torrent, and roche  <dig> sequencing technologies. we approach the problem of error correction conservatively, removing little information and requiring a high degree of confidence to make a correction. our program pollux first scans across all reads, divides reads into k-mers of length  <dig> , and counts the number of occurrences of each observed k-mer. it then scans reads a second time, generates a k-mer depth profile for each read, and uses this information to correct the k-mer profile. specific k-mers are not flagged as erroneous as a result of occurring infrequently, but rather are explored when a discontinuity in k-mer frequencies is observed when transitioning from one k-mer to the next in a given read. the software is sensitive to low-coverage reads and does not favour high-coverage reads. in contrast to other methods  <cit> , we do not specifically use quality scores for error correction. however, the software updates the quality of corrected bases to reflect the improved confidence of a base after correction. the software can easily be integrated into a larger pipeline analysis. it improves the utility of reads and can improve hybrid assembly, as it can correct reads generated from a variety of sequencing technologies. it may also improve sequence analysis projects that may not require assembly, such as metagenome analysis  <cit> .
+
+implementation
+similar to other methods  <cit> , we approach the problem of error correction using k-mers, consecutive k-letter sequences identified in reads. however, our approach does not identify individual k-mers as erroneous, but rather compares the counts of adjacent k-mers within reads and identifies discontinuities. these discontinuities within reads are used to find error locations and evaluate correctness. we decompose a read into its k-mers and calculate their associated k-mer counts , which are the number of times a given k-mer has appeared in the entire set of reads. we use default k-mer lengths of  <dig>  which are slightly larger than typically used in assembly  <cit> . we choose to use longer k-mers because this lets us avoid common short repeats which might otherwise confound our correction procedure. we choose k =  <dig>  because it is the longest odd k that can be represented in a 64-bit word. we only record k-mers observed in the data set, so we maintain an extremely small subset of all possible k-mers of length  <dig>  a read that is not erroneous is assumed to have a k-mer count profile that is reflective of a random sampling process, given local coverage. in contrast, a read that contains an error is likely to have k-mer counts that deviate unexpectedly from this random process. a substitution error, located at least k bases away from the ends of the read, will result in kk-mer counts affected. if this error is unique within the read set, these counts will drop to  <dig>  a similarly defined insertion error will affect k+nk-mer counts and a deletion error will affect k−n counts, where n is the length of the indel. these unexpected drops in k-mer counts to a low depth are often erroneous, but we do not immediately make this assumption.the
+k
+-mer counts associated with an illumina miseq read containing two highlighted substitution errors. the k-mers are of length  <dig>  a data point corresponds to the number of times a left-anchored k-mer, starting at a given position within the sequence, has been observed in the entire read set. the first error is located near the middle of the read and affects the counts associated with  <dig> k-mers. the second error located only four positions in from the 3’ end of the read and affects only  <dig> k-mer counts.
+
+
+
+we recognize the boundaries of adjacent k-mers which deviate unexpectedly and identify nucleotide positions associated with the discrepancy. we then explore the space of possible corrections and evaluate the fitness of these corrections. we choose the correction that removes or minimizes the k-mer count discontinuity. if there exist multiple corrections which achieve this, we choose the correction that improves the most k-mer counts maximally beyond the current erroneous location. this is particularly important when correcting reads that contain multiple errors or within reads that may be corrected in multiple ways. we attempt to correct the read such that the k-mer counts associated with it are more reflective of changes in k-mer counts generated from a random sampling process. this approach allows for a sensitive error correction strategy regardless of local depth of sequencing for the read of interest. however, homopolymer errors are frequently not unique and require a special acceptance criteria as their correct k-mer counts after correction often still appear erroneous. pollux corrects each read independently and does not update recorded k-mer counts as a result of correction. the outcome of correction does not depend on the order of the reads.
+
+this approach to correction may be complicated by the boundaries of repeated regions, which may also create k-mer count discontinuities. these boundaries will initially be flagged as potential errors. however, exploration of the error site will often reveal that no such error exists and the boundary region will be ignored. there is the possibility of false positive corrections within very low coverage regions containing a single nucleotide polymorphism when there exists a high coverage alternative in the data set. these low coverage regions will sometimes be corrected to their high coverage alternative, but this is relatively rare.
+
+for implementation of the error correction procedure described above, we have made an effort to reduce execution times and memory requirements. for k-mer counting, we compress nucleotide information and operate within a two-bit alphabet. in combination with our hash-table strategy, this allows us to use relatively large k-mers. furthermore, we process reads in batches of adjustable size. as a result, the memory limitation is a consequence of the hash table when counting all k-mers. we attempt to reduce the size of the hash table by removing all unique k-mers before correction.
+
+another consideration is choosing a k-mer count evaluation window that balances true and false positives during error correction. an evaluation criteria that requires a single correction to improve all k-mer counts spanning the error location will avoid many false positives, but will often miss true positive corrections in reads containing multiple errors. on the other hand, an evaluation criteria which requires a correction to improve only one k-mer count will introduce many false positives by correcting errors inappropriately, such as correcting a substitution error with an insertion, which instead propagates the error forward. we use an evaluation window which considers the fewest amount of k-mers required to make a confident correction while avoiding error propagation. this requires evaluating multiple k-mers containing bases following the erroneous base to ensure our correction is appropriate. this allows pollux to correct multiple, although non-adjacent, errors in close proximity.
+
+error correction methodology
+a pseudocode of our error correction procedure is outlined in figure  <dig>  we begin with a basic preprocessing step which removes all leading and trailing ns. internal ns are replaced with either a, c, g, or t in a reproducible and evenly distributed manner. this allows us to operate within a four-character alphabet and treat internal ns as substitution errors. we then construct a hash table of all k-mers in the set of reads. this involves maintaining a count of all observed k-mers and their reverse complements as separate entries in a single hash-table.algorithm pseudocode. a pseudocode for the error correction algorithm.
+
+
+
+after aggregating k-mer information from all reads, we free significant amounts of memory by removing all unique k-mers from our hash table and implementing a policy of reporting a count of  <dig> whenever a k-mer is not found in our hash table. removing these k-mers significantly reduces memory requirements and improves execution times for the error correction procedure. in one e. coli data set  <cit> , 41% of illumina miseq, 85% of ion torrent pgm , and 46% of roche  <dig> gs junior  k-mers are unique. these k-mers contribute no additional information and can be safely removed using this strategy. the number of unique k-mers will depend on sequencing depth, technology, and the number of error prone regions.
+
+we construct a k-mer count array associated with each read and fill each entry with the count of the k-mer that is left-anchored at that index position in the sequence. r−k+ <dig> such counts associated with a given read, where r is the length of the read and k is the length of the k-mers. reads of length shorter than k are left uncorrected. we scan across the array and observe changes in k-mer counts. when we observe an unexpected change in counts between consecutive k-mer counts in a read, we locate the nucleotide position associated with the discrepancy and identify the position as a potential error source. we do not identify reads containing low k-mer counts to be erroneous if such counts appear to follow a random sampling process with no discontinuities in k-mer depth. a more detailed description of this procedure follows. we define consecutive k-mer counts to be potentially erroneous if their difference is larger than a specified threshold. this threshold requires consecutive k-mer counts to have a difference of greater than  <dig> and greater than 20% the larger count to be flagged as a possible error. this threshold is quite sensitive, and will identify discontinuities corresponding to homopolymer repeats as well as substitution and indel errors. it additionally works quite well for high coverage and medium coverage sequencing projects. the fixed-number component of the threshold operates when correcting low to medium coverage regions while the percent-based component operates during medium to high coverage correction. the thresholds are designed to be conservative in high coverage and operate well in moderate coverage. at low coverage the rate of recognizing errors is reduced, as less information is available for error calling. we found that when correcting the same e.coli miseq data set  <cit> , we were able to correct 94% of errors at 50x mean coverage but this was reduced to 65% of errors at 5x mean coverage.
+
+we determine the erroneous nucleotide position n to be n=d if we observe a low-to-high k-mer count discrepancy and n=d+k if we observe a high-to-low discrepancy, where d is the left index of the discrepancy. this is applicable for substitution, insertion, deletion, adjacent, and homopolymer errors. in the case of deletion errors, a low-to-high k-mer count discrepancy will point to the base immediately before the deletion and a high-to-low discrepancy will point to the base immediately following. with respect to homopolymers, the leftmost base in a homopolymer run is used as an anchor during correction and is found by scanning left from n+ <dig> in the case of a low-to-high discrepancy and n− <dig> with a high-to-low discrepancy. the exact position of a non-homopolymer adjacent error will depend on the type of adjacent errors. however, this procedure will locate the first problematic base adjacent to the high k-mer count region being considered.
+
+we choose to evaluate k-mer counts such that the evaluation k-mers overlap largely with the region of the read which appears to contain no errors. this approach allows us to perform multiple corrections within close proximity. the very first k-mer we choose to evaluate is the k-mer that entirely overlaps a trusted region of the read and borders the erroneous region. we define a region to be trusted if it contains no k-mer count discrepancies within it. additional evaluation k-mers extend into the erroneous region. in order for a correction to be accepted, it must improve the counts of multiple evaluation k-mers up to at least the k-mer which contains the first base immediately following the erroneous base. we require information about the region after the erroneous base to prevent propagating an error further down the read by performing misleading substitutions or insertions. however, we do not correct adjacent errors outside of homopolymer errors, which are evaluated separately. we simultaneously consider all possible substitution, insertion, and deletion corrections within a single read. the correction selected is the one that produces k-mer counts that improve the most evaluation k-mers. we note that our library of k-mer counts is not updated as a consequence of a correction so the order of correction has no effect. the correction procedure is repeated multiple times within a read until either there remains no detected errors which are correctable or we determine we have made too many corrections. in the later case, we revert all changes and do not correct the read.
+
+we observe the k-mer counts in a read after completing corrections and flag any reads containing more than 50% unique k-mers , as such reads are typically of poor quality. in the case of paired-end read corrections, we only flag reads if both pairs meet this criteria. this approach enables us to correct many unusable reads which might otherwise be discarded and remove reads which appear to contribute little information. we do not consider quality scores when making corrections or removing reads. however, we modify quality scores to be the average of the quality scores adjacent to corrected base to enable downstream processing. no assumptions are made about the accuracy of quality scores for different sequencing technologies. furthermore, one benefit of avoiding quality scores is our software is not affected by chimeric sequences or by reads which contain misleading quality scores.
+
+homopolymer corrections
+homopolymer errors differ from other error types in that they frequently coincide and often contain multiple adjacent errors. this causes the k-mer counts associated with a read containing an accurate homopolymer length to often appear discontinuous and k-mer count discontinuities associated with erroneous homopolymer lengths to often appear less severe than their counterparts. this is particularly common for very long homopolymers. we observe however that homopolymer errors tend to have a recognizable distribution of k-mer counts associated with varied homopolymer lengths. the accurate-length homopolymers tend to have the largest k-mer counts associated with them and as the deviation in length from the correct value increases, the associated k-mer counts tend to decrease. when we detect a possible homopolymer error, we explore a range of homopolymer lengths and select the length which maximizes a specific subset of k-mer counts. we evaluate the two k-mers that overlap primarily the trusted region, the entire homopolymer, and the two bases immediately following the homopolymer run. since we have observed homopolymers being erroneously reported as length  <dig>  we include the possibility of single nucleotide homopolymer errors . in all case, we consider possible lengths from one half to twice the initial length. pollux performs homopolymer corrections independently and only after all other correction possibilities have been exhausted. as the homopolyer correction algorithm is more forgiving, it would otherwise possible to mistake random noise as a slight improvement and miss the true correction.
+
+the majority of homopolymer corrections we make are adjustments that modify the length of the homopolymer by  <dig>  when we correct an e. coli data set  <cit> , we see that 85% of gs junior  and 92% of pgm  homopolymer corrections are adjustments of length  <dig>  ion torrent pgm had a higher rate of homopolymer-associated indels per base than roche  <dig> gs junior. we reported making  <dig>  indel corrections per base in pgm  and  <dig>  indels per base in gs junior . loman et al. report  <dig>  indels per base in pgm and  <dig>  indels per base in gs junior, which is consistent with our results.
+
+RESULTS
+we use data from the loman et al.  <cit>  benchtop sequencing comparison study to evaluate how well our software performs by mapping corrected and uncorrected reads to the corresponding reference genome. the data consists of read sets from roche  <dig> gs junior , ion torrent personal genome machine , and illumina miseq  technologies generated from the same e. coli o104:h <dig> isolate, which was the source of a food poisoning outbreak in germany in  <dig>  the authors provide a reference genome constructed from reads generated by a roche  <dig> gs flx+ system. these reads had a modal length of  <dig> bases and over 99% of sequenced bases were q <dig> bases. additionally, a paired end library with 8kb inserts was generated to assist with assembly.
+
+the reference e. coli genome consists of multiple scaffolds corresponding to the bacterial chromosome and two large plasmids. the authors note that the large plasmids and the shiga toxin-producing phage have significantly higher sequence coverage than the bacterial chromosome within the illumina and ion torrent data sets. in particular, there is 25-fold coverage of the chromosome and 625-fold coverage of the plasmids in the illumina data set. this amounts to approximately half the reads mapping to the large plasmids. this effect is much less pronounced in the ion torrent data sets.
+
+we use smalt  to align uncorrected and corrected reads to the reference scaffolds. a summary of our software’s reported corrections can be found in table  <dig>  as homopolymer repeat errors of two or more nucleotides are extremely infrequent in illumina data, we disable homopolymer corrections when correcting illumina data. this avoids introducing a small number of homopolymer associated errors. a total of 99% of the gs junior , 89% of the pgm , and 99% of the miseq reads are retained as high quality after correction. the filtered low information reads are corrected, but are separated from the high information reads. a custom python script is used to aggregate information from the smalt alignment about corrected, missed, and introduced errors. we observe whether a read is aligned or unaligned to the reference and whether the reference scaffold it is aligned with has changed. during the assessment procedure, we discard incomparable results such as read pairs which do not align to the same reference scaffold or have alignment starting positions further than twenty bases apart . similar to loman et al., we ignore soft-clipped alignment regions and we additionally ignore all aligned bases which are not contained within the mutual alignment interval of the pair of reads with respect to the reference. these removal processes leave us with 99% of the gs junior , 95% of the pgm , and 94% of the miseq aligned bases for analysis. we create a list of errors in both reads determined by their error type  and by their position with respect to the reference. we consider a single nucleotide alignment with an n to be erroneous when the n is located only within the read and not erroneous when located within the reference. when an error is found in an uncorrected read, but not in its corresponding corrected read, we report a corrected error. conversely, when an error is found in a corrected read, but there is no such error in the corresponding uncorrected read, we report an introduced error. if the same error appears in both the uncorrected and corrected reads, we report it as an uncorrected error. the results of the alignment comparisons are found in table  <dig> the number of corrections reported and low-information reads removed by pollux
+
+
+number
+total number
+corrections
+reads
+
+platform 
+of reads
+of bases
+mismatches
+insertions
+deletions
+homopolymers
+removed
+all reads are sequenced from the same o104:h <dig> e. coli isolate. substitution, insertion, deletion, and homopolymer corrections are performed on all data sets except for miseq, for which we do not perform homopolymer corrections. the percentage of reads which were removed as a consequence of more than 50% unique k-mers is provided under reads removed.
+alignment comparison of corresponding uncorrected and corrected reads against the reference genome
+
+
+corrected )
+introduced )
+
+platform 
+total
+mismatches
+insertions
+deletions
+total
+mismatches
+insertions
+deletions
+81%
+4%
+85%
+4%
+88%
+3%
+86%
+4%
+94%
+1%
+all reads are sequenced from the same o104:h <dig> e. coli isolate. corresponding uncorrected and corrected reads are aligned to the reference genome using smalt. incomparable alignments are removed. corrected errors reflect alignment errors which are found in uncorrected reads but not in corrected reads. similarly, introduced errors are a consequence of alignment errors found in corrected reads but not in uncorrected reads.
+
+
+
+we correct the majority of errors within all data sets and corrections are sequencing technology appropriate. additionally, we introduce very few errors with respect to the number of errors in the uncorrected reads. we correct 86% of insertion and 83% of deletion errors in the gs junior  data set while only introducing 2% more insertions and 6% more deletion errors; that is, we correct about  <dig> errors for every  <dig> error introduced. we correct 91% of insertion and 86% of deletion errors in the pgm  data set while introducing 2% more insertion and 5% more deletion errors. we report 95% of substitution errors corrected in our miseq  data set while introducing only 1% more of such errors. overall, we correct 85% gs junior , 88% pgm , 94% miseq errors, and introduce under 4% new errors in all data sets. we appear to have some difficulty correcting miseq insertion errors with only 10% of miseq insertion errors corrected. however, these insertion errors make up only  <dig> % of the total, and may also include insertion errors present within the  <dig> gs flx+ reference assembly. additionally, we introduce 15% more substitution errors in gs junior , but the overall number of errors introduced in the data set is 4%.
+
+there are a number of issues which should be considered when interpreting the results. the reference genome is sequenced using roche  <dig> gs flx+ and it will contain some errors. this will give the miseq data the appearance of having higher than expected amounts of uncorrected indel errors. additionally, a small number of corresponding uncorrected and corrected reads may produce equal-scoring alignments which differ only slightly. when these alignments contain an error which is resolved differently in each alignment, the error may appear to be corrected and reintroduced. however, we expect alignment noise to be minimal since we both the reads and the reference are sequenced from the same e. coli isolate and the reference is of high quality. furthermore, since our software attempts to find corrections which improve k-mer counts maximally, it is possible to report compound errors as an alternative error type. for example, a homopolymer with a single insertion adjacent to a homopolymer with a single deletion may appear as a mismatch and be corrected as such. this does not have an adverse affect on the correction itself, but may result in reporting more substitution corrections than expected.
+
+comparison
+we compare our software to several other error correctors. these include quake  <cit> , sga  <cit> , bless  <cit> , musket  <cit> , and racer  <cit> . we use the roche  <dig> gs junior , ion torrent pgm , and illumina miseq e. coli sequencing data sets available in the loman et al. comparison  <cit> . additionally, we include a s. aureus illumina genome analyzer ii data set  available in gage  <cit>  as well as l. pneumophila  and m. tuberculosis  illumina hiseq data used to previously benchmark error correction  <cit> . we evaluate the effect of correction in the same manner as described above. the results of this comparison are shown in table  <dig>  we use k =  <dig> for all software except quake, which uses k =  <dig> because of hardware memory limitations. however, we note quake specifies using k-mers of approximately this size  <cit> . we additionally note that quake, sga, and musket were intended to only correct illumina sequencing data. however, we include roche  <dig> and ion torrent corrections for completeness. pollux, gage, and sga perform read filtering whereas bless, musket, and racer do not filter reads.comparison of various error correction software
+
+
+illumina miseq - e. coli
+errors
+errors
+reads
+run
+
+software
+corrected 
+introduced 
+removed 
+time 
+ <dig> 
+illumina genome analyzer ii - s. aureus
+errors
+errors
+reads
+run
+
+software
+corrected 
+introduced 
+removed 
+time 
+ <dig> 
+illumina hiseq - l. pneumophila
+errors
+errors
+reads
+run
+
+software
+corrected 
+introduced 
+removed 
+time 
+ <dig> 
+illumina hiseq - m. tuberculosis
+errors
+errors
+reads
+run
+
+software
+corrected 
+introduced 
+removed 
+time 
+ <dig> 
+roche  <dig> gs junior - e. coli
+errors
+errors
+reads
+run
+
+software
+corrected 
+introduced 
+removed 
+time 
+ <dig> 
+ion torrent pgm - e. coli
+errors
+errors
+reads
+run
+
+software
+corrected 
+introduced 
+removed 
+time 
+ <dig> 
+the evaluation is performed by aligning corresponding uncorrected reads and corrected reads, which were not removed, against a reference genome using smalt. corrected errors are an aggregate of all alignment errors which are found in uncorrected reads but not in corrected reads. similarly, introduced errors are an aggregate of all alignment errors found in corrected reads but not in uncorrected reads and are relative to the sum of corrected and uncorrected errors. the percentage of reads removed by each software is noted. we note that quake, sga, and musket were intended to only correct illumina sequencing data.
+
+
+
+we find that pollux corrects the greatest percentage of errors in four of the six test sets and is second in the remaining two. pollux filters reads with similar aggressiveness as quake and sga. racer corrects the most errors within the gs junior data, corrects the majority of errors in the pgm data, and performs well on illumina data sets while filtering no reads. the amount of errors introduced by racer is comparable to pollux within the illumina data. however, racer introduces a significant number of errors within gs junior and pgm data. sga, bless, and musket correct and introduce similar amounts of errors within illumina data. these error correctors remove a significant number of errors while introducing extremely few errors. however, of these three, only bless performs well on gs junior and pgm data. quake performs exceptionally well on hiseq l. pneumophila, correcting  <dig> % of errors while introducing almost no additional errors. the effect of read filtering is significant within s. aureus data. pollux is able to obtain a high percentage of errors corrected in this data because of its ability to remove reads which do not contribute information. this is supported by the observation that an assembly generated from corrected s. aureus reads improves significantly following correction.
+
+mixed genome correction
+pollux is also intended for mixed genome data sets, such as those that would be obtained in a metagenomics study. we create a suitable high quality mixed reference data set for testing by incorporating two data sets from gage  <cit>  with the loman et al.e. coli reads  <cit> . this data set is comprised of uncorrected illumina data from e. coli   <cit> , s. aureus   <cit> , and r. sphaeroides   <cit>  and is used to evaluate our software’s ability to correct errors in a mixed genome environment. the e. coli reads are the same as above and were sequenced with illumina miseq. the s. aureus and r. sphaeroides reads were sequenced using an illumina genome analyzer ii. the e. coli reference was assembled from roche gs flx+ reads, while the s. aureus and r. sphaeroides references were assembled with reads generated from sanger sequencing. as our error correction and evaluation procedures ignore the order of reads, we concatenated all read sets into a single file and similarly concatenated all references into a single reference file. the mixed data set was comprised of 35% e. coli reads, 25% s. aureus, and 40% r. sphaeroides. we correct these mixed reads using k =  <dig> with homopolymer correction disabled and evaluate the effect using the same alignment procedure described above.
+
+an overall total of 82% of errors were reported corrected with only  <dig> % more errors introduced. specifically, our software corrected 82% of substitution errors, 70% of insertion errors, and 73% of deletion errors, with 98% of all of corrections being substitutions. a total of 19% of reads were removed using our k-mer removal criteria and not aligned. we evaluated 94% of aligned bases after discarding incomparable alignment locations and soft-clipped bases. while 19% seems substantial, we note that quake  <cit>  and the error correction procedure within allpaths-lg  <cit>  remove 37% and 36% of the s. aureus reads, respectively, and similarly removed 26% and 31% of the r. sphaeroides reads  <cit>  when correcting the data sets independently.
+
+assembly improvements
+we evaluate our error correction software as a preprocessing step before de novo assembly. the e. coli illumina miseq  <cit>  and s. aureus illumina genome analyzer ii  <cit>  read sets are used to evaluate the effect of our software on assembly when correcting paired reads with both short and long insert lengths. the e. coli reads are paired and have an average read length of  <dig>  the s. aureus data set consists of paired fragment reads of length  <dig> with average insert lengths of  <dig> and long-range paired-end reads of length  <dig> with average insert lengths of  <dig>  the paired reads are corrected together using our software’s paired-end correction. however, we choose not to remove any short-jump s. aureus reads as nearly half of short-jump reads were flagged as having more than 50% unique k-mers. removing these reads would have rendered much of the valuable short-jump information unusable.
+
+velvet  <cit>  is used to assemble the e. coli and s. aureus illumina data sets. we use assembler default settings  for the e. coli reads and assembly settings as described by gage  <cit>   for the s. aureus reads. the results of the assemblies can be found in table  <dig>  we compare the common assembly metrics number of scaffolds and n <dig> of assemblies using uncorrected and corrected reads. we additionally include nga <dig>  as calculated by quast  <cit> , which represents the contig length such that equal or greater length contigs account for at least 50% the length of the genome. this value is calculated after breaking misassembled contigs and additionally differs from the n <dig> in that it is with respect to the genome size and not the assembly length. there are fewer scaffolds and larger n <dig> values in the error corrected assemblies than there are in there uncorrected counterparts. the uncorrected e. coli assembly produces  <dig> scaffolds with an n <dig> of  <dig> kb and a maximum scaffold of size  <dig> kb. this improves to  <dig> scaffolds with an n <dig> of  <dig> kb and a maximum contig of size  <dig> kb. the nga <dig> improves slightly as well, increasing from  <dig> to  <dig> kb. the s. aureus assembly improves even more significantly. the uncorrected assembly produces  <dig> scaffolds with an n <dig> of  <dig> kb and a maximum scaffold size of  <dig> kb. the corrected assembly reduces the number of scaffold to  <dig> and has a n <dig> of  <dig> kb, which is the maximum scaffold size, and is longer than half the genome length. furthermore, the nga <dig> improves substantially after correction, increasing from  <dig> kb to  <dig> kb.comparison of
+de novo
+ assemblies using uncorrected and corrected reads
+
+
+uncorrected
+corrected
+
+assembly
+scaffolds
+n <dig> 
+nga <dig> 
+scaffolds
+n <dig> 
+nga <dig> 
+
+e. coli
+
+s. aureus
+assemblies of uncorrected and corrected reads using velvet. e. coli reads are paired and assembled using default parameters. s. aureus reads are comprised of paired fragment reads with average inserts of length  <dig> and short jump reads with average inserts of length  <dig>  these reads are assembled using parameterization as described in gage.
+
+
+
+performance
+pollux requires  <dig>   <dig>  and  <dig> minutes when correcting miseq, gs junior , and pgm  e. coli data sets, respectively, when executed on a  <dig> core linux machine with an intel core i7- <dig>  processor and  <dig> gb of memory . the ion torrent pgm e. coli data sets had significantly more errors reported than the similar miseq and gs junior data sets. pollux uses a maximum of  <dig> gb of memory when counting k-mers and correcting the illumina miseq data set  <cit>  containing 19m distinct k-mers and 250m bases. we conduct a further test of memory and execution time requirements by running pollux on the gage  <cit>  human chromosome  <dig> data set  consisting of  <dig>  million paired-end reads total. this correction requires  <dig>  hours and uses a peak of  <dig> gb of memory during k-mer counting and  <dig> gb of memory during correction.
+
+filtering
+we note that our approach to filtering reads based on unique k-mers is an improvement over a naive quality score approach. to verify this we compared the effect of removing reads using both our software’s unique k-mer approach with a simple quality score approach. the unique k-mer approach is accomplished using our error correction software. reads that contain more than 50% unique k-mers after attempting correction are removed. the quality score approach is accomplished using a custom python script. the script removes reads which contain more than 10% low quality bases, as reported by the sequencer. we define low quality bases to be a phred  <cit>  quality score of q <dig> or less. we then consider the reads which are removed by the quality score approach but not by the k-mer approach. these are reads that are designated as having poor quality scores, but which our error correction software considers valuable. we find that our error correction software is capable of correcting many of the errors in these reads despite having an abundance of low quality scores. the most notable difference is with respect to the ion torrent pgm  e. coli data set. we find that our software is able to correct 87% of the  <dig> m errors found in reads that would be discarded exclusively through a simple quality score approach. our software’s k-mer based removal approach can evaluate the usefulness of a read after attempting corrections, retaining more information than filtering using a simple quality based approach before correction.
+
+discussion
+the number and kinds of reported corrections, both by our error correction software and by our alignment evaluation procedure, corresponds with what we would expect to correct for the respective sequencing technologies and with the results reported by loman et al.. with the e. coli data set, pollux reports 98% of attempted miseq corrections as substitution, 90% of pgm as indel, and 92% of gs junior  as indel. similarly, our alignment evaluation procedure reports 99% of successful miseq corrections as substitution, 90% of pgm  as indel, and 93% of gs junior  as indel. with respect to gs junior  corrections, insertion corrections appear to be more frequent at 70% than deletions at 23%, as reported by our evaluation procedure. we report per base indel corrections at  <dig> % for pgm ,  <dig> % for gs junior , and  <dig> % for miseq. this agrees with loman et al. who report per base indels at  <dig> % for pgm ,  <dig> % for gs junior , and  <dig> % for miseq. similarly, we report per base substitution corrections at  <dig> % for miseq which agrees with loman et al. at  <dig> %.
+
+an example of the changes in k-mer counts before and after correction is provided in figure  <dig>  the effect is most noticeable when correcting ion torrent pgm reads. the k-mers associated with the uncorrected read reveal one of the difficulties with the data: errors are often not unique and instead frequently coincide, resulting in erroneous regions with k-mer counts that do not drop to one. this is problematic because a read containing an accurate length homopolymer will contain a k-mer count drop relative to the number of errors in other reads containing the same homopolymer region. we are therefore required to have a more forgiving correction procedure for homopolymers which allows for accurate length homopolymers that otherwise appear erroneous. when the k-mers are re-evaluated after all corrections, we discover the overall coverage of the read has increased significantly and k-mer counts across reads become more reflective of a random sampling of the genome, as many errors have been corrected. the average k-mer counts also increase in miseq and gs junior corrected reads. however, the effect is much less extreme.the
+k
+-mer counts associated with the uncorrected and corrected version of an ion torrent pgm read containing a highlighted deletion error. as is common with pgm data, the counts associated with the deletion error are not all reduced to one. this is a result of multiple similar deletion errors coinciding. the overall depth of the read increases after correction, suggesting a large number of errors are removed in other reads.
+
+
+
+while the current version of the software is effective, there are some areas that may be improved by future refinements. the number of corrected errors could be improved by targeting adjacent errors and other coincident errors that are not homopolymers. within the homopolymer correction algorithm, we do not correct errors other than homopolymer repeats and thereby ignore all other multinucleotide errors. correcting these errors would require exploring a larger space of correction possibilities. there is also room for improvement when correcting the rarer error types in sequencing technologies. for example, we appear to be slightly overcorrecting substitution errors in gs junior reads and potentially under-correcting indel errors in miseq reads. additionally, we have a somewhat lower success rate correcting deletion errors than insertion errors across all technologies. this may be a consequence of deletions resulting in fewer k-mer count evaluations and therefore simpler to correct. the running time and memory requirements may be improved by incorporating dedicated k-mer counting software, such as bfcounter  <cit> , turtle  <cit> , or kmc  <cit> .
+
+we believe that our success correcting a mixed data set lends evidence to our correction software’s ability to correct more complicated mixed data sets such as metagenomic data. this is supported by our successful correction of e. coli miseq data which contains 25-fold chromosome coverage and 625-fold phage coverage, suggesting our software is able to correct the majority of errors in the presence of highly variable coverage.
+
+CONCLUSIONS
+the k-mer count approach used by our software is highly effective at correcting errors across different sequencing platforms, including illumina miseq, roche  <dig> gs junior, and ion torrent pgm data sets. these corrections are sequencing technology appropriate and agree with published findings. our software is sensitive to low-depth sequencing regions and can correct errors in the presence of highly variable coverage while introducing few new errors. additionally, we find our software corrects the majority of errors in a mixed genome environment. we believe our software is a versatile tool that may be used in a variety of applications.
+
+availability
+the source code for pollux is distributed freely.project name: polluxproject home page:http://github.com/emarinier/polluxoperating system: unix-based 64-bit osprogramming language: cother requirements: nonelicense: gnu gplany restrictions to use by non-academics:non-academics may freely use this software.
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+em developed the software, performed all experiments, and drafted the manuscript. dgb and bjm participated in software and experiment design. all authors read and approved the final manuscript.
+

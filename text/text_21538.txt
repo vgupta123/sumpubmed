@@ -1,0 +1,252 @@
+BACKGROUND
+the flourishing of sequencing functional genomics assays has popularized the analysis of different chromatin features to understand regulatory aspects of gene expression. these assays measure, for example, the binding of transcription factors or histone modifications at chromosomal locations , dna methylation events , or chromatin accessibility . in all cases, analysis of these data returns potentially functional regions, defined by genomic coordinates, which must then be related to proximal genes in order to gain any biological meaning. how these regions regulate nearby genes depends on the type of experiment. for example, the transcription factor binding sites predicted using chip-seq experiments may be expected to be located in the transcription start site  and promoter regions of the gene being regulated or in distal enhancers depending whether they are cell-type specific or not, and users might want to have control of what association is relevant in their experiment. in the case of open chromatin sites obtained from dnase-seq experiments, the functional interpretation may differ depending if they are in a promoter, intronic, or downstream gene regions. therefore, it is not only important to associate genomic regions to the closest gene, but also to identify the specific area of the gene where the region is located  . the solution to this problem is not straightforward because it depends on the isoform of the gene being considered. in addition, regions may span multiple areas of the same gene  or fall at overlapping genes. moreover, regions at intergenic locations can be associated with upstream or downstream areas of different genes, and therefore a set of rules has to be established to decide which association should be kept.
+
+because current sequencing technologies predict thousands or even millions of genomic regions that must be mapped to other genomic locations such as genes or transcripts in order to perform integration studies, a computational algorithm is required to match these genomic regions to proximal features . moreover, it must take the considerations listed above into account, provide users flexibility to set the association criteria, and be easily integrated with broader analysis pipelines. although there is an increasing need for such algorithms, as far as we know, there are very few publicly-available tools which can perform this task. one such tool is part of the homer suite  <cit> , which matches each genomic region to the closest transcript and returns the area of the transcript overlapped by the midpoint of the region. this tool can be used with custom annotations, but other information like the overlapping of cpg islands, repeat elements, etc., is only returned for supported species. great  <cit>  is a web tool for predicting cis-regulatory regions which takes into account not only nearby genes, but also distal binding events. however, the main drawback of great is its lack of support for species other than human, mouse, and zebrafish. cisgenome  <cit>  is one of the first tools that appeared to deal with chip-seq data. among other utilities, it associates regions to proximal genes but does not provide the location of the region within the gene. this tool can either be used via a graphical interface in windows operating systems or by command line in osx and linux. seq2pathway  <cit>  and chipseeker  <cit>  are two different r packages that also contain functions for associating genomic regions with genes and annotate the location of the region within the gene. seq2pathway follows a similar approach to great but its main limitation is, again, that it only supports two species . in contrast, chipseeker is a more complete tool that supports any species, and which associates regions with the closest gene in a similar way to homer.
+
+in this work we review the main characteristics and drawbacks of some of these tools and present a novel algorithm, rgmatch, to associate genomic regions with proximal features whilst maintaining the flexibility for researchers to set specific match criteria. rgmatch is implemented in python so it can either be used as a standalone application or incorporated into any omics analysis pipeline. one advantage of rgmatch is its ability to return associations at the gene, transcript, or exon level. the user can deal with the problem of genomic regions overlapping more than one area of a gene , by instructing the algorithm to report all the overlapped gene areas  or by reporting only one association per transcript or per gene, based on a pre-established set of rules. importantly, these rules, as well as the width of the tss, promoter, transcription termination site , or upstream areas, can be modified to meet the researcher’s needs.
+
+methods
+rgmatch is rule-based python software designed to associate genomic regions to genes, transcripts, or exons that also reports the area of the gene where the region overlaps. it requires two essential input files: the genome annotation in gtf format  and the chromatin locations of the genomic regions in bed format . rgmatch associates each genomic region with the closest gene . the distance is computed as the number of bases from the region midpoint to the transcript tss or tts. to annotate the area of the transcript where the region falls, we defined eight default disjoint areas : tss, tts, 1st exon, promoter, intron, gene body, upstream, and downstream. these areas are defined as follows:tss: intergenic area adjacent to the tss point of the gene with a length of t .
+
+promoter: intergenic area upstream of the tss with a length of p .
+
+upstream: intergenic area upstream of the promoter area, hence more than t + pbp from the tss point of the gene. this length is limited by the maximum distance, q, allowed by the user, to associate a region with a gene .
+
+1st_exon: the whole of the first exon of the gene.
+
+intron: the whole area between two consecutive exons of a gene.
+
+gene_body: the whole area of any exon other than the first exon of the gene.
+
+tts: intergenic area adjacent to the tts point of the gene with a length of s .
+
+downstream: the intergenic area downstream of the tts area, hence more than sbp from the tts point of the gene. the length of this area is limited by the maximum distance, q, allowed by the user, between the region and the gene .
+
+
+fig.  <dig> definition of the areas of a gene used by the rgmatch algorithm
+
+
+
+
+there are two different cases in which a region could be associated with more than one gene: when two or more genes overlap  or when two  genes are so close  that the region falls in the overlapping areas of the two genes .fig.  <dig> examples of two different situations that would result in a region being associated with more than one gene. a two overlapped genes with different isoforms. b two different genes with common areas overlapping the region 
+
+
+
+
+when the region overlaps several areas of a gene but the user needs to choose a single area per gene or transcript to annotate the association, a set of rules has to be defined in order to select the most appropriate one. the rules defined by rgmatch are based on the percentage of the region overlapping each area of the gene , the percentage of each gene area that is overlapped by the region , and a rank of priorities for the areas to be used in the case of any ties . as summarized in fig.  <dig>  if there is an area for which percregion ≥ w , this area will be the annotation for that region-transcript association. otherwise, the algorithm uses the area with percarea ≥ v .fig.  <dig> flowchart describing the rules used by rgmatch to decide the gene area to annotate the region-transcript association 
+
+
+
+
+when several areas meet this condition, the one with highest percregion is selected. in the case of ties, the selected area is determined according to the list of priorities. the default percentages to apply the rules  and the default area priorities can be easily modified by the user.
+
+one of the main advantages of rgmatch is its ability to report the associations at different aggregation levels . by default, it reports all possible associations to the different areas of the exons. when choosing the report at the ‘transcript aggregation level’, the algorithm applies the set of previously-defined rules in order to return a single area per region and transcript. the same rules apply when reporting at the ‘gene aggregation level’, but in this case, if the region is located in different areas for each transcript of a given gene, the rank of priorities will be used to annotate the association to only one of them.
+
+rgmatch generates a tabular text output file with the following columns:
+region: identifier  of the region being associated. this id is generated by rgmatch and consists of the chromosome, start, and end position, separated by an underscore .
+
+
+midpoint: midpoint of the region being associated.
+
+
+gene: gene id for the gene that has been associated to the region.
+
+
+transcript: transcript id for the transcript that has been associated to the region. when reporting at the gene aggregation level the algorithm will report all the possible transcripts in the case of internal ties.
+
+
+exon: exon number of the exon associated to the region. in the case of transcript ties, when reporting at gene aggregation level, the value reported will be - <dig> 
+
+
+area: area of the gene  where the region falls.
+
+
+distance: distance from the tss or tts to the midpoint of the region. when the region overlaps a gene, the distance reported is  <dig> 
+
+
+percregion: percentage of the region that overlaps the area of the gene reported.
+
+
+percarea: percentage of the reported area overlapped by the region.
+
+if the input bed file had more columns than the three mandatory ones, these columns are attached in the output file after the percarea column.
+
+
+
+
+the associations rendered by rgmatchat the three different aggregation levels for the two examples shown in fig.  <dig>  according to the rules described and using the default parameters, are shown in table  <dig>  and to illustrate how the algorithm works some of them are also described below.table  <dig> table showing the results at the exon level for the example shown in fig. 2
+
+
+
+
+
+region  <dig>  from fig. 2a overlaps gene  <dig> and gene  <dig>  gene  <dig> has two different transcripts. if we report at the exon level, rgmatch returns all the areas of the different genes overlapped by the region. in this example, region  <dig> overlaps the entire ‘tss’  and part of the ‘1st_exon’  of both transcripts of gene  <dig>  and part of the ‘gene_body’ and ‘intron’ areas of gene  <dig>  rgmatch reports the different overlap percentages, except for introns . of the total length of region  <dig>  66 % overlaps the ‘tss’ of gene  <dig>  and the ‘intron’ of gene  <dig>  according to the previously described rules, given that this percentage is higher than the 50 % set as the threshold, these areas will be returned when reporting at the transcript level. in the gene-level report, both gene <dig> and gene <dig> are associated with region  <dig> . for gene <dig>  the association is annotated to ‘tss’ since both transcripts had the same annotation.
+
+region  <dig> from fig. 2b overlaps gene  <dig> and gene  <dig>  and has a percentage of overlap of  <dig> ,  <dig> ,  <dig> , and  <dig>  % with the ‘tss’, ‘promoter’, ‘1st_exon’, and ‘intron’ regions of gene  <dig>  respectively. when reporting at the transcript or gene aggregation levels, since these overlap percentages do not exceed 50 % in any case, we have to look at the percentage of each gene area overlapped by the region. two different areas  are completely overlapped with a percentage higher than 90 %, and so they are tied. in this case the algorithm returns the area with the highest percentage of the region overlapping it, which corresponds to the tss . the same procedure also has to be applied to gene  <dig>  this process results in the same tss annotation. therefore, region  <dig> will have two associated genes reported with the ‘tss’ annotation .
+
+rgmatch provides many configuration options and the user can modify the priorities and rules followed to associate a region with a gene area. the following arguments can be optionally set by the user:
+report: argument to select the aggregation level for the report. by default, it is set to ‘exon’ and all possible associations to all the different areas of a gene or genes where the region overlaps will be reported. when it is set to ‘transcript’ or ‘gene’ the rules explained above are applied.
+
+
+distance: by default, a region will be associated with a gene if it is closer than  <dig> kbp.
+
+
+tss: area starting at the transcription start site of a gene and finishing t bp upstream from that point. by default, t =  <dig> 
+
+
+tts: intergenic area starting at the transcription termination site of a gene with a length of s bp. by default, s =  <dig>  so this area is not considered unless this parameter is modified by the user.
+
+
+promoter: area starting one nucleotide after the predefined tss area and extending up to p bp upstream from that point. by default, p =  <dig> 
+
+
+percarea: threshold for the percentage of the gene area overlapped by the region, used in the selection rules . by default, this is set at 90 %.
+
+
+percregion: threshold for the percentage of the region overlapping the gene area, used in the selection rules . by default, this is set at 50 %.
+
+
+rules: in case of ties after following the rules shown in fig.  <dig>  the algorithm will decide the area to annotate the association to according to a rank of priorities, by default this is: tss, 1st_exon, promoter, tts, intron, gene_body, upstream, and downstream. to modify these priorities, a string containing the eight disjoint areas must be introduced.
+
+
+gene: tag indicating which gene identifier from the gtf annotation file is to be reported. by default ‘gene_id’ is used.
+
+
+transcript: tag indicating which transcript identifier from the gtf annotation file is to be reported. by default ‘transcript_id’ is used.
+
+
+gtf: mandatory input. gtf annotation file. files compressed with gzip are also accepted.
+
+
+bed: mandatory input. bed file with the set of genomic regions to be matched. files compressed with gzip are also accepted.
+
+
+output: mandatory input. full path and name of the file where the output will be written.
+
+
+
+
+RESULTS
+in order to show the functionalities and main advantages of rgmatch, we compared it to the other methods available: homer, great, cisgenome, seq2pathway, and chipseeker. comparisons are difficult because, on the one hand, there is no gold-standard data set of true associations between the genomic regions and the genes and, on the other hand, the goal of the different methods is not always exactly the same. for instance, great and seq2pathway do not only return the closest gene but also other distal genes by following an approach that is completely different to the other methods. great assigns a ‘regulatory domain’ for each gene, so if any region lies within the regulatory domain, it is assumed to regulate the gene. there are three options to define this regulatory domain. the default option , called the ‘basal plus extension’, assigns a ‘basal regulatory region’ that extends  <dig> kbp upstream and  <dig> kbp downstream of the tss, irrespective of the presence of any neighboring genes. based on a similar approach, seq2pathway takes the functional impact of coding and non-coding genes into account to make associations. in the following sections we provide both qualitative and quantitative comparisons based on the results obtained with a publicly available set of genomic regions.
+
+qualitative comparison to the state of the art methods
+in this section, we highlight the characteristics of rgmatch that make it different from any of the other approaches , and which therefore support the need to make this novel tool available to the research community.table  <dig> comparison of the functionalities of the different algorithms
+
+
+ahomer and cisgenome can be integrated in analysis pipelines, although the process to obtain the annotations and parse these results is not as straightforward as with rgmatch. seq2pathway and chipseeker can also be integrated with additional scripting
+
+
+bit supports all species, provided the input format is a txdb r object. this format can be obtained from a gtf file by using the maketxdbfromgff function in the genomicfeatures package
+
+
+
+
+user-friendly
+rgmatch and homer are easy-to-use command line algorithms that can be run locally on any computer and in any operating system provided python or perl interpreters are installed. great is accessible via their website, which makes it user-friendly on any operating system, but it cannot be used locally. cisgenome can also be used in any operating system via command line and has a graphical interface, but only for windows. on the contrary, chipseeker and seq2pathway are both r packages that can be easily used if the r interpreter is installed. however, we had problems using seq2pathway on the linux platform because the association function did not work.
+
+adaptable to pipelines
+all methods except great, which is a web tool, can be easily integrated into any analysis pipeline. homer is a suite of tools, and the whole suite has to be installed for the method to work. as for all r packages, chipseeker and seq2pathway, can also be integrated into any analysis pipeline, although some additional scripting is required. in contrast, rgmatch can be directly used in any pipeline and does not require additional steps or modules to work.
+
+input format
+rgmatch, great, homer, and chipseeker take a bed file containing the regions to be associated as input. cisgenome and seq2pathway require the bed file to be converted into their own formats. great accepts a 3-column bed file. the other methods accept bed files containing information other than genome coordinates, but only rgmatch and chipseeker return the additional columns in the output file.
+
+association resolution
+a unique feature of rgmatch is its ability to report associations at the exon, transcript, or gene level. great, cisgenome, and seq2pathway only report associations at the gene level, whereas homer and chipseeker can report associations at the gene or transcript level.
+
+location of the region
+rgmatch, homer, seq2pathway, and chipseeker report the area of the gene where the region overlaps for each association. neither great nor cisgenome return this information.
+
+flexibility
+rgmatch, cisgenome, seq2pathway, and great let users modify the basic parameters  used to associate a region to a gene. homer, on the contrary, always associates the region to a gene no matter how far it is. rgmatch and chipseeker also allow the user to modify the length of some gene areas, as well as the priorities for annotating the association with the gene area. in addition, rgmatch offers a flexible definition of the association rules, while this is not possible in homer or seq2pathway.
+
+supported species
+rgmatch, homer, and chipseeker work with any organism as long as the user provides the gtf annotation file. however, the annotations must be converted to txdb r objects for chipseeker to function. great, seq2pathway, and cisgenome only work with the species list they provide; at the moment, great and seq2pathway support four species assemblies each, , and cisgenome supports  <dig> different species.
+
+output
+all of the algorithms compared return a tabulated file containing the region-gene associations and some additional information. only rgmatch and chipseeker preserve the original columns in the bed file when more than the three mandatory columns containing the genomic positions are provided . rgmatch also allows the user to choose the gene identifier to be reported among all the identifiers in the gtf file. in homer and chipseeker, the user can choose between gene and transcript ids, cisgenome reports the gene id, and great returns gene names. all the methods except cisgenome report the distance between the gene and the region. rgmatch, homer, chipseeker, and seq2pathway return the area of the gene overlapped by the region. the gene area definitions are similar forhomer, chipseeker, and rgmatch, or at least they can be made almost equivalent by tuning the rgmatch parameters. however, the column containing the gene area in the homer and chipseeker outputs also contains additional information so this column cannot be directly used in further analyses where a categorical classification of the gene areas is needed . another unique feature of rgmatch and seq2pathway is that if a region can be associated with two or more overlapping genes, all of them are reported as different rows in the output file, while the other methods only provide one associated gene in these cases.
+
+quantitative comparison
+to quantitatively assess the functionality of our approach, we compared rgmatch to homer and cisgenome using a public set of genomic regions. we discarded great and seq2pathway from the comparison because they follow a completely different approach to associate chromatin regions, meaning that the results are not directly comparable. we also decided not to include chipseeker because it is very similar to homer. the public set of genomic regions, containing  <dig> regions, comes from a human chip-seq experiment, and was downloaded from the sequence read archive  with accession number gse <dig>  the annotation  was downloaded from ensembl grch <dig> .
+
+in order to make the outputs comparable between the methods, the rgmatch report was performed at the gene aggregation level, the maximum distance for reporting associations was set to  <dig> kbp to allow at least one association per region, the promoter length was set to  <dig>  and the tss area was set to 1kbp. the rest of the parameters were left at their default values. we used the default parameters for homer. to run cisgenome, first the gtf was converted to refflat format using the gtftogenepred tool from the university of california santa cruz genomics institute, and then the bed file was converted to cod format using the file_bed2cod tool provided by cisgenome. cisgenome was then run setting the distance limits to  <dig> kbp and leaving the rest of the parameters at their default values. regions corresponding to chromosomes x and y were removed from the bed file used for all of the algorithms because cisgenome does not take them into account, which left a total of  <dig> regions.
+
+each of the final  <dig> regions was associated with a single gene by homer and cisgenome. rgmatch returned  <dig> associations due to overlapping and quasi-overlapping genes. the percentage of common associations reported by the three methods was high . almost 100 % of the associations called by rgmatch were also reported by homer and/or cisgenome. however, rgmatch reported  <dig> associations that were not called by the other two methods. most of them  were due to the fact that rgmatch can associate regions to two different genes, so one of the two genes is reported by the other two methods, but the second gene is only reported by rgmatch. the reason for the remaining  <dig> associations, that were exclusively detected by rgmatch, was because rgmatch associated the region to the closest gene , while homer associated it to a more distal gene in an upstream area. there is no clear reason why cisgenome returned a different association for these cases. the associations that were common to rgmatch and only one of the other two methods were generally also due to rgmatch associating the region to two overlapping  genes whereas homer reported one of the two associations and cisgenome reported the other.fig.  <dig> venn diagram showing the number of region-gene associations obtained with the homer, rgmatch, and cisgenome methods
+
+
+
+
+we also observed that, in some cases where the methods returned different results, the associated region was far away from the genes. rgmatch associated the region to the closest gene, even if the region was downstream from the gene. in these cases, cisgenome tends to associate the region to a gene with an upstream annotation , while homer either does the same or chooses a downstream annotation but to the second closest gene.
+
+rgmatch and homer also report the area of the gene where the region overlaps. however, the definition of the gene areas reported by these two methods is not exactly the same. homer defines their ‘promoter-tss’ as the region comprising −1kbp to +100 bp and the ‘tts’ as from −100 bp to +1kbp. in order to cover the same areas, we defined our ‘tss’ area as −1kbp to −1 bp and removed the ‘promoter’ area. this way, homer’s tss area was equivalent to ours plus the first 100 bps from our ‘1st_exon’ area, and our ‘downstream’ area was equivalent to homer’s tts and intergenic area, etc. .table  <dig> equivalences between the gene areas defined by rgmatch and homer
+
+
+
+
+table  <dig> shows the number of associations reported by homer and rgmatch with equivalent annotations for the region location , accounting for the vast majority . associations where the gene area did not agree are indicated in red. discrepancies are due to regions overlapping several areas of the gene. in such cases, the true location of the region in the gene is unclear. while homer chooses the area overlapping the midpoint of the region, the rgmatch annotation is based on the overlap percentage and on the priorities chosen by the user, allowing them to fine-tune the association results depending on their analysis goals.table  <dig> annotations for the region location within the gene returned by rgmatch  and homer 
+
+associations with equal or equivalent annotations in both methods are shown in green, and associations with different annotations are shown in red
+
+
+
+
+in summary, the association results from rgmatch are comparable to the results provided by other methods. nevertheless, rgmatch is more flexible than other approaches because it allows the rules used to compute the associations, and annotate them with the region location within the gene, to be defined by the user. moreover, it returns all the possible associations when the region overlaps more than one gene , and the output is easier for the user to understand and re-use.
+
+to check the efficiency of the algorithms, we compared the computation time and memory used when running the algorithms on the full human chip-seq example  with the human reference genome annotation gtf file. rgmatch took 32 s to obtain the results and required 1 gb of ram memory. in contrast, homer took 1 min and 30 s and required up to 3 gb of ram. cisgenome was almost instantaneous, since some prior extra work had been performed. these calculations were performed on an intel xeon cpu e3-1225 v <dig> @  <dig> ghz machine.
+
+rgmatch has been designed in order to check only the proximal annotations for each region. this implies that it is highly scalable despite having a large number of regions. in our tests, rgmatch obtained results in 15 s using a file with ~ <dig>  regions, 50 s with ~ <dig>  regions and 122 s with ~ <dig>  regions in a  <dig>  ghz intel core i <dig>  the slowest step is the internal ordering of the regions and annotations, but the association step is really straightforward.
+
+CONCLUSIONS
+as sequencing technologies evolve and studies that integrate gene expression with chromatin features become more common, the need to associate genomic regions to genes in order to understand regulatory mechanisms has increased. although there are a number of publicly-available tools to perform this task, most of them have limitations in terms of flexibility or usability.
+
+in this work, we present rgmatch, a user-friendly tool for matching genomic regions and genes , which reports the area of the gene where the region overlaps. rgmatch supports all species as long as the user provides the gtf file with the reference genome annotation. the tool is a freely accessible python script, which promotes integration into broader analysis pipelines. rgmatch is a valuable resource for facilitating analysis in multi-omics experiments involving gene expression and different types of chromatin features.
+
+the main advantages of rgmatch, when compared to the state-of-the-art methods, are its flexibility for the user to define its association rules, gene areas, gene identifiers to be reported, and priorities for the gene area annotation when the region overlaps different areas of the gene, as well as its ability to report associations at different aggregation levels. in addition, when a genomic region overlaps several genes, all the associations are returned. hence rgmatch provides a biologically meaningful set of rules and parameters that can be tuned by users to adapt the associations to their preferences or needs.
+
+additional file
+
+additional file 1: examples of the output files for some of the compared algorithms. 
+
+
+
+
+abbreviations
+atac-seqassay for transposase-accessible chromatin with high-throughput sequencing
+
+chip-seqchromatin immune precipitation sequencing
+
+dnase-seqdnase i hypersensitive sites sequencing
+
+greatgenomic regions enrichment of annotations tool
+
+homerhypergeometric optimization of motif enrichment
+
+ididentifier
+
+methyl-seqmethylation sequencing
+
+srasequence read archive
+
+tsstranscription start site
+
+ttstranscription termination site
+
+declarations
+this article has been published as part of bmc bioinformatics volume  <dig> supplement  <dig>  2016: proceedings of statistical methods for omics data integration and analysis  <dig>  the full contents of the supplement are available online at http://bmcbioinformatics.biomedcentral.com/articles/supplements/volume-17-supplement- <dig> 
+
+funding
+the research leading to these results has received funding from the european union seventh framework programme fp7/2007– <dig> under the grant agreement  <dig> and the mineco  bio2012- <dig> grant.
+
+availability of data and materials
+rgmatch is available from the bitbucket repository at https://bitbucket.org/pfurio/rgmatch. the tool works on every operating system as long as a python interpreter is installed.
+
+authors’ contributions
+pft developed the tool and helped to draft the manuscript. st and ac participated in its design and coordination and helped to draft the manuscript. all the authors read and approved the final manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+not applicable.

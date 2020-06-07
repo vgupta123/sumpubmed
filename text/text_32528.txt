@@ -1,0 +1,134 @@
+BACKGROUND
+the complete sequence of the human genome has left scientists with rich and extensive information resources. the bloom of bioinformatics, and hence the wide availability of software, has improved the possibility to access and process genomic data. genome-wide association  studies, using a dense map of snps, have become one of the standard approaches for unraveling the basis of complex genetic diseases  <cit> . despite their success, only a modest proportion of currently available heritability estimates can be explained by gwa studies discovered loci  <cit> . commonly performed gwa studies usually oversimplify the underlying complex problem, in that usually no account is made for the existence of multiple “small”associations and non-snp polymorphisms, nor epigenetic effects, genetic pathways, gene-environment and gene-gene interactions  <cit> .
+
+a lot of methods and software tools exist to perform large-scale epistasis studies  <cit> . these genome-wide association interaction  studies typically involve balancing between achieving sufficient power, reducing the computational burden and controlling type i error rates. here, we present a new software tool to perform large-scale epistasis studies, using the mb-mdr methodology  <cit> . mb-mdr is a non-parametric data mining method  that is able to identify interaction effects for a variety of epistasis models in a powerful way. it is able to distinguish between multiple pure interaction effects and interaction effects induced by important main effects through efficient main effects correction strategies. apart from identifying multiple sets of significant gene-gene interactions, mb-mdr can also be used to highlight gene-environment interactions in relation to a trait of interest, while efficiently controlling type i error rates. for now, the trait can either be expressed on a binary or continuous scale, or as a censored trait. extensions to accommodate multivariate outcomes are underway. here, we mainly focus on second-order gene-gene interactions using bi-allelic genetic markers. however, our software can also handle multi-allelic data and categorical environmental exposure variables, as will be shown in the implementation section. our c++ software greatly enhances mb-mdr’s first implementation as an r-package  <cit> , both in terms of flexibility and efficiency.
+
+implementation
+input/output
+the essence of the mb-mdr methodology is to identify sets of gene-gene interactions via a series of association tests, which may or may not be fully non-parametric, while reducing dimensionality. significance of the explored interactions is assessed using the maxt method  <cit>  which provides adjusted p-values by controlling for the multiple correlated tests. then, mb-mdr prioritizes  the explored interactions via the adjusted p-values. in practical applications, there is an abundance of p-values close or equal to  <dig> and only a few p-values will point towards interesting multi-locus genotype combination to pursue. with this in mind, we adapt the maxt method so that it still calculates the test-statistics for all snp pairs, but only calculates the p-values of the n best pairs, i.e. the ones with the n lowest p-values. we show that our method produces the exact same p-values as with the original maxt implementation, however using many fewer resources. when interaction signals are expected to be strong in the light of an improved study design  or in the context of replicating earlier epistasis findings, the value of n should be set sufficiently large by the user, in order not to lose signals in the final output. however, when epistasis is tested for in a hypotheses-free way, it is highly unlikely that more than  <dig> significant epistatic pairs will be identified . figure  <dig> gives a description of the input and output formats of the program.
+
+new implementation of maxt
+in this section, we present van lishout’s implementation of maxt and prove that it requires a memory proportional to n  memory), whereas the classical implementation of maxt requires o memory. here, m and n refer to the number of snp pairs and the number of top pairs to retain in the output, respectively.
+
+the different steps of the original maxt algorithm can be decomposed as follows : 
+
+ <dig>  compute the test-statistics for all pairs of snps  and sort them. the result is the real data vector of figure  <dig> where t <dig> ≥t <dig> ≥…≥t <dig> m.
+
+ <dig>  generate b random permutations of the trait column. for each permutation i= <dig> …,b, compute the test-statistics ti,j for all pairs of snps  in the order defined by the real data vector. force the monotonicity of the rows: for j=m− <dig> …, <dig> replace ti,j by ti,j+ <dig> if ti,j<ti,j+ <dig> 
+
+ <dig>  for each pair of snps j= <dig> …,m compute the number aj of ti,j values such that ti,j≥t <dig> j, for i= <dig> …,b.
+
+ <dig>  compute the p-values using the equation pj=ajb+ <dig> for each pair of snps. force the monotonicity of the p-values: for j= <dig> …,m− <dig> replace pj+ <dig> by pj if pj+1<pj.
+
+note that the intuition behind the monotonicity enforcing procedure at step  <dig> is to correct the test-statistics that are obviously too pessimistic: the test-statistic of a pair p <dig> should not be lower than the test-statistic of a less significant pair p <dig>  replacing the test-statistic computed for p <dig> by the one computed for p <dig> is therefore a better estimation of the significance of p <dig>  the amount of false-negative results would be higher without this procedure. similarily, the purpose of the monotonicity enforcing procedure at step  <dig> is to correct p-values that are obviously too optimistic: the p-value of p <dig> should not be lower than the p-value of p <dig>  replacing the p-value computed for p <dig> by the one computed for p <dig> is therefore a better estimation of the significance of p <dig>  the amount of false-positive results would be higher without this final step.
+
+from a memory point of view, it is best to implement the aforementioned algorithm in a slightly different way. indeed, the current description implies all permutation vectors of figure  <dig> to be in memory at the same time. this requires o memory. in fact, a memory of o can be achieved by adopting a different approach. the idea is that the aj values calculated at step  <dig>  can already be calculated on-the-fly. a vector a-values of all aj values can be created from scratch and initialized with 1’s values. indeed, note that at step  <dig> the original sample series counts as  <dig> of b+ <dig> available samples to assess significance. for i= <dig> t <dig> j≥t <dig> j and hence aj= <dig> ∀j= <dig> …,m. the elements of the a-values vector can then be updated at the end of each iteration i= <dig> …,b of step  <dig> by incrementing the aj values corresponding to the ti,j≥t <dig> j by one. in this way, all ithti,j values can be removed from memory at the end of the ith iteration since they are no longer of any use. hence, only a single permutation vector is stored instead of b vectors. in fact, applying step  <dig> to the a-values vector obtained at the end of this procedure readily leads to the final p-values vector.
+
+this proves that this algorithm requires o memory. obviously, if m denotes the number of snps, m is given by the formula m=m/ <dig>  the memory usage of the classical implementation thus rises quadratically with the number of snps, whereas we will now see that our method is independent of it.
+
+the monotonicity enforcing process executed at the end of step  <dig>  implies that we need to calculate all ti,j values, even if we are only interested in the first n p-values. however, not all of these ti,j values have to be stored in memory. for our purpose, only ti,j and mi, the maximum of the  elements, are required. in other words, there is no need to explicitly propagate mi to position n+ <dig>  it suffices to compute mi and to replace ti,n by mi if and only if mi>ti,n. the monotonicity enforcement continues from positions n− <dig> through  <dig> 
+
+the different steps of our algorithm, exploiting all ideas presented so far, are given below: 
+
+ <dig>  compute the test-statistics for all pairs but store only the n highest ones. the result is a real data vector where t <dig> ≥t <dig> ≥…≥t <dig> n.
+
+ <dig>  initialize a vector a of size n with 1’s.
+
+ <dig>  perform the following operations for i= <dig> …,b: 
+
+ generate a random permutation of the trait column.
+
+ compute the test-statistics ti, <dig> …,ti,n and store them in a permutationi vector.
+
+ compute the maximum mi of the test-statistics values ti,n+ <dig> …,ti,m.
+
+ replace ti,n by mi if ti,n<mi.
+
+ force the monotonicity of the permutationi vector: for j=n− <dig> …, <dig> replace ti,j by ti,j+ <dig> if ti,j<ti,j+ <dig> 
+
+ for each j= <dig> …,n, if ti,j≥t <dig> j increment aj by one.
+
+ <dig>  divide all values of vector a by b+ <dig> to obtain the p-values vector p. force monotonicity as follows: for j= <dig> …,n− <dig>  replace pj+ <dig> by pj if pj+1<pj.
+
+two remarks are in place:
+
+first, the main idea of the sorting by insertion algorithm  <cit>  can be recycled to perform step  <dig> using o memory. the real data vector is first initialized with the first n computed test-statistics and sorted using the quick sort algorithm  <cit> . then, at each iteration, the next test-statistic is calculated and compared with the smallest value of the vector. if it is smaller or equal nothing has to be done. otherwise, the smallest value is removed and the new one is inserted in order to preserve the sorting. this insertion requires n <dig> operations on average. this method works particularly well on large-scale problems, where m>>n. intuitively, the probability of having to insert will decrease at each iteration and tend to zero because the real data vector will contain higher and higher values. this algorithm will take o time on average, but could degenerate in o, which is still linear.
+
+second, it should be noted that step  <dig> and  <dig> can be merged into a single step. the idea is to create first a hash table containing the indexes of the n best pairs, resolving collision by separate chaining  <cit> . the test-statistics ti,j can then be computed in any convenient order. at each iteration, the hash table is used to decide  if the current value corresponds to one of the n best pairs or not, and perform either step  <dig> or step  <dig> accordingly.
+
+parallel workflow
+since the memory used by van lishout’s implementation of maxt is independent from the number of snps, memory is no longer a problem. however, the remaining concern is time. since all iterations of the 3rd step in the new maxt implementation are independent from each other, it is possible to simultaneously run the computations of the permutations on different machines. figure  <dig> describes the three steps of the parallel workflow that we use to solve large-scale problems: 
+
+ <dig>  compute the test-statistics for all pairs on one machine and save the n highest ones into a file topfile.txt. this file should be saved at a location on which each machine has read access. it will contain the information of the real data vector of figure  <dig> and have thus a size of only o.
+
+ <dig>  split the computation of the permutations homogeneously between the z machines. on each machine z=1…z, perform the following operations: 
+
+ read the file topfile.txt
+
+ initialize a vector p of size n with 0’s.
+
+ execute step  <dig> of van lishout’s maxt algorithm for each permutation assigned to z .
+
+ save the p vector into a file permutationz.txt.
+
+ <dig>  when all machines have terminated their work, sum all vectors of the files permutation <dig> txt…permutationz.txt to obtain a vector p. perform step  <dig> of van lishout’s maxt algorithm on this vector.
+
+however, the main feature that makes our software fast is not parallelization, but speed of the test-statistic computations. indeed, we have seen that the maxt algorithm computes b×mti,j values. solving b= <dig> permutations with a dataset of m= <dig>  snps, i.e. m=o pairs of snps, means thus o computations to perform. it is obvious that the computation of the test-statistic ti,j has to be very fast and that each improvement can have a dramatic influence on the final computing time. we show in the next section how we achieve this goal.
+
+test-statistic computation
+this section presents the implementation of the computation of the ti,j values, capturing the degree of association between the jth pair of snps  and the ith permutation of the trait traiti. let m+ <dig>  be the number of possible values for snplj . in practice, most of the studies concern bi-allelic genetic markers and m=n= <dig>  however, our program automatically detects the exact values of m and n, so that multi-allelic variables are also covered. furthermore, categorical environment variables can also be handled, as long as they are coded  <dig>   <dig> ... m .
+
+since we are interested in solving large-scale problems, we must realize that the part of the code that reads the dataset at the start of the program cannot store it in cache because of its size. accessing to the trait and snp values is thus slow and must be avoided as much as possible. for this reason, the three columns of interest  will be passed by value and not by reference to the function. in this way, an explicit local copy of them will be performed, on which the function will be able to work faster.
+
+different options are implemented at the different steps of the computation of ti,j, depending on the nature of the trait . figure  <dig> illustrates the three main steps involved in the statistics computations, in the case of a case-control or cohort design and a binary  trait, without adjusting for main effect, speeding up the computation time. similar mechanisms hold for other mb-mdr eligible scenario’s. 
+
+ <dig>  generation of the affected-subjects and unaffected-subjects matrices. these matrices are easily obtained by performing a loop over the subjects of the dataset: for a= <dig> …n, if ca= <dig> increment a cell of the affected-subjects matrix, else a cell of the unaffected-subjects matrix. the cell to be incremented depends on the genotype: galj indicates which row of the matrix has to be incremented and garj which column.
+
+ <dig>  generation of the hlo-matrix from the two matrices generated at step  <dig>  the value of each rmn elements depends on a test for association between the trait and the genotype . this can be a χ <dig> test with one degree of freedom in the case of a binary trait, an f-test in the case of a continuous trait, a log-rank test in the case of survival data. however, the architecture of the software makes it easy to implement other test statistics that are appropriate for the data at hand. for binary traits, the implemented test statistic is defined by <dig>  where a and b refer to the number of affected and unaffected subjects having the genotype  and c and d refer to the number of affected and unaffected subjects having a different genotype. this statistic follows a χ <dig> distribution. if we define na and nu to be the total number of affected and unaffected subjects, those values are easy to compute: a = amn,b = umn,c = na−amn and d = nu−umn. at this point, if either a+b or c+d is below a threshold that is a parameter of the program  then the test is not performed at all, since it would not be statistically significant. in this case the value of rmn will be set to “o”, to indicate the absence of evidence that the subset of individuals with multilocus genotype  has neither a high nor a low risk for disease. otherwise, the test is performed. when the computed χ <dig> value is not significant based on a liberal significance threshold of  <dig>  , the value of rmn will be set to “o”, to indicate that we cannot reject the independence hypothesis. otherwise, rmn will be set to either “h” if > <dig>  to indicate that the population whose genotype is  has a high risk of having the trait, or to “l” if < <dig>  to indicate a low risk for this event.
+
+ <dig>  computation of ti,j from the three matrices generated at step  <dig> and  <dig>  it consists in performing two χ <dig> tests with one degree of freedom and returning the maximum of both. the first one tests association between the trait and the belonging to the “h” category versus the “l” or “o” category. the second one tests association between the trait and the belonging to the “l” category versus the “h” or “o” category. in the first  case, a and b are respectively the number of affected and unaffected subjects belonging to the “h”  category and c and d to the “l”  or “o” category. computing this can be easily achieved by initializing a,b,c and d to zero, and for each rmn adding amn to a and umn to b if rmn = “h”  and amn to c and umn to d otherwise.
+
+in summary, this paragraph shows that to make this methodology fast, reading the data of the subjects only once during step  <dig> to create the affected-subjects and unaffected-subjects matrices is a key. in this way, the test statistic computation function can quickly start to work on a very small part of memory that is in cache. the keys that make step  <dig> and  <dig> fast are respectively the fact that computing an rmn value does not require any loop and the fact that a single loop of nine iterations  allows to calculate all the numbers needed in the χ <dig> formula.
+
+RESULTS
+here we present results for both simulated data and real-life data.
+
+simulated data
+in order to assess the speed performances of our c++ software mbmdr- <dig> . <dig>  we created  <dig> different datasets with  <dig>  individuals each, of respectively  <dig> snps,  <dig>  snps,  <dig>  snps and  <dig>  snps. to assess significance of mb-mdr results, the number of permutations was set to b= <dig>  each dataset was constructed to contain a strong signal for the functional pair . table  <dig> states the two-locus penetrance table used to generate the data. a balanced number of cases and controls is sampled. the minor allele frequencies of the functional snps were fixed at  <dig>  and those of the non-functional snps were generated randomly from a uniform distribution on . this corresponds to the first of six purely epistatic models discussed in  <cit> . a similar strategy was used to construct another set of  <dig> datasets, containing the same number of individuals and snps as before, but expressing the trait on a continuous scale instead of a binary one. mbmdr- <dig> . <dig> finds the strong signal in all datasets. table  <dig> gives the execution times. since the parallel workflow of mbmdr- <dig> . <dig> was tested on a cluster composed of  <dig> blades, containing each four quad-core amd opteron processor  <dig>  <dig>  ghz, the computation of the permutations was split between 10×4×4= <dig> cores for this experiment. table  <dig> shows that our software is about two times faster for solving datasets for which the trait is expressed on a binary scale, compared to datasets where the trait is expressed on a continuous one. finally, the results in table  <dig> also show that the execution time is approximately multiplied by  <dig> when the number of snps is multiplied by  <dig>  this is logical, since the computation time mainly depends on how many test-statistics are computed, which in turn depends on the quantity of pairs of snps, which is proportional to the squared number of snps.
+
+the parallel workflow was tested on a cluster composed of  <dig> blades, containing each four quad-core amd opteron processor  <dig>  <dig>  ghz. the sequential executions were performed on a single core of this cluster. the results prefixed by the symbol “ ≈” are extrapolated.
+
+crohn’s disease data
+we apply our software to real-life data on crohn’s disease  <cit>  <cit> . here, caucasian crohn’s disease patients and healthy controls are genotyped using illumina humanhap. quality control tests are performed on these data excluding snps and individuals with more than 5% missing genotypes. individuals with mean heterozygosity outside the range of 31% to 38% are discarded. the gender of the individuals is predicted from the mean homozygosity on x markers and samples with contradiction between the estimated and the recorded gender are excluded. snps violating hardy-weinberg principle are discarded using aχ p-value threshold of 10− <dig>  related individuals are identified using pairwise ibs tests and discarded as well. the cleansing process give rise to a set of  <dig> unrelated caucasians  and  <dig>  snps.
+
+for the purpose of this study, we use biofilter. <dig> . <dig>  <cit>  as an additional data preparation step. it uses a knowledge-driven approach to prioritize genetic markers in gene-gene interaction screening while reducing the search space. in particular, biofilter allows the explicit detection and modeling of interactions between a large set of snps based on biological information about gene-gene relationships and gene-disease relationships. the knowledge-based support for the models is attributed by implication index, which is simply a number of data sources that provide evidence of gene-gene interaction or gene-disease relationship, and is calculated by summing the number of data sources supporting each of the two genes and the connection between them . in practice, to make the prioritization procedure in biofilter more focused on cd, we apply a list of candidate genes for cd  and  <dig> groups . using this approach/analysis we ended up with  <dig>  snps that we further analyze in mb-mdr.
+
+locations obtained by genomebuild  <dig> .
+
+discussion
+several studies have suggested that different signals exist in il23r, conferring risk or protection to crohn’s disease. a study by taylor et al <cit> , where they aimed to estimate the total contribution of the il23r gene to cd risk using a haplotype approach, showed that the population attributable risk for these haplotypes was substantially larger than that estimated for the il23r arg381gln variant alone. mbmdr- <dig> . <dig> identified several “epistatic” signals from pairs of snps located in the il23r gene. it should be noted though that epistasis signals on snps in ld are considered to be non-synergetic. the mb-mdr discoveries on crohn’s disease also seem to give us a new working hypothesis to expand on the current knowledge . indeed, histone deacetylation results in a compact chromatin structure commonly associated with repressed gene transcription , and hereby plays a critical role in transcriptional regulation, cell cycle progression and developmental events. although not known to physically interact directly, il23r and hdac <dig> could be linked trough mapk1/stat <dig> signaling: mapk <dig> has been shown to associate with phosphorylate hdac <dig>  <cit> . protein phosphorylation regulates the corepressor activity of the deacetylase. mapk <dig> also acts as an important activator of stat <dig>  which is an essential regulator of immune-mediated inflammation. in addition, the il23/il23r pathway modulates stat <dig> transcriptional activity, and recently it has been shown that cd8+ t cells from arg381gln il23r carriers showed decreased stat <dig> activation compared with wt cd8+ t cells  <cit> . it can thus be hypothesized that a balanced action between the hdac1/mapk <dig> and il23/il23r pathways, converging on stat <dig> signaling, are important for cd pathogenesis. the fact that no significant snp pairs remain, following an adjustment of the mb-mdr screen for main effects  seems to suggest that the significant results for the snp pairs of table  <dig> are mainly induced by important main effect players.
+
+mbmdr- <dig> . <dig> can accommodate a variety of study designs and outcome types, can correct for important lower order effects and satisfactory deals with the computational burden induced by highly-dimensional complex data. in order to upscale the applicability of the mb-mdr methodology towards genome-wide association interaction analyzes, the method was implemented in c++ and a new version of the maxt algorithm was incorporated. this version requires an amount of memory that is independent from the number of genetic effects to be investigated. we were able to further reduce the execution time, first by parallelizing the processes and second by optimizing the test-statistic function capturing the degree of association between a pair of snps and a trait. all of these features, available in mbmdr- <dig> . <dig>  are promising in the light of gwai studies. alternative approaches to deal with execution time are proposed, for example gpu  <cit>  and cloud computing  <cit> . used in conjunction with mb-mdr, those methods could lead to very fast software tool to solve gwai studies problems.
+
+CONCLUSIONS
+in this paper we have presented the epistasis screening software mbmdr- <dig> . <dig>  it is based on a new implementation of maxt. the main advantage of this improvement, is that it solves memory problems for any kind of analysis by becoming independent from the number of snps, without loss of power. we have also presented a fast implementation of a test-statistic function indicating the association between the trait and a pair of snps.
+
+we have tested our program on simulated datasets of increasing size. the parallel workflow was tested on a cluster composed of  <dig> blades, containing each four quad-core amd opteron processor  <dig>  <dig>  ghz and is able to analyze all pairwise gene-gene interactions with a dataset of  <dig>  snps typed on  <dig> individuals within  <dig> days and  <dig> hours, using  <dig> permutations of the trait to assess statistical significance.
+
+availability and requirements
+•project name: mb-mdr
+
+•project home page:http://www.statgen.ulg.ac.be
+
+•operating system: mac os x and linux
+
+•programming language: c++
+
+•restrictions on use by non-academics: no limitations
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+fvl had the original idea of the new maxt algorithm and lw helped actively on its formalization. fvl is the developer of all versions of our c++ software, from mbmdr- <dig> . <dig> to mbmdr- <dig> . <dig> and the principal author of the manuscript. vu and jm took an active role in the analysis part of the software development. jm and eg tested the program intensively on both simulated and real-life datasets. et and bc performed the quality control of the crohn’s disease real-life dataset and eg used biofilter to select a subset of interesting snps from it. ic is the main contributor of the discussion paragraph on the crohn’s disease results. kvs, mc and vu were engaged in all stages of the project. all authors read and approved the final manuscript.
+

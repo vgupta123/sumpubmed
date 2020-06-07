@@ -1,0 +1,141 @@
+BACKGROUND
+the classification of genes according to evolutionary relations is essential for many aspects of comparative and functional genomics. evolutionary relations are often described as pairwise relations. two genes that share a common ancestor are defined as homologs, while genes that are similar in sequence without a common origin are termed analogs. homologs can be divided into several classes  <cit> : orthologs, which originate from a speciation event; paralogs, which originate from gene duplication; and xenologs, which originate from horizontal gene transfer. orthologs are valuable in numerous analyses, including reconstruction of species phylogenies, protein function inference, database annotation, and genomic context analysis.
+
+evolutionary relations can also be defined with respect to a third gene. paralogs are classified as out-paralogs or in-paralogs  <cit> . in-paralogs are genes that diverged by a duplication that occurred after a speciation event of reference. the term co-orthologs is used occasionally to describe the same scenario from the perspective of a third gene that is orthologous to both genes. in contrast, out-paralogs are paralogs that diverged before a particular speciation event of reference.
+
+to address the need for reliable sources of orthologs, several initiatives have been created for better orthologs prediction commonly, there are two classes of prediction methods: phylogeny based methods, which compare gene trees with species trees  and pairwise based methods, which perform homology search with  subsequent clustering .
+
+in  <dig>  we introduced the oma orthology prediction project with the goal to classify all orthologs in completely sequenced genomes  <cit> . oma is a pairwise based method with a number of distinctive features: alignments are performed using an efficient implementation of full smith-waterman dynamic programming  <cit>  , confidence intervals explicitly consider estimation uncertainty, and exclusion of paralogs is achieved using sequences in third-party genomes as "witnesses of non-orthology"  <cit> .
+
+since then, we have substantially improved the oma algorithm. orthology is now inferred on the basis of evolutionary distances rather than alignment scores, the predicted orthologs are no longer limited to one-to-one orthologs. we build groups of orthologs using a maximum-weight clique algorithm. a web interface now enables interactive exploration of the predictions  <cit> . in addition, the number of complete genomes under analysis has increased to over  <dig>  which requires efficient solutions regarding computation speed and memory consumption.
+
+in this paper, we describe the current oma algorithm in detail, motivate our parameter selection, and offer a discussion about the method and results.
+
+methods
+the algorithm of oma takes as input a set of complete genomes and outputs pairs of orthologous genes that are optionally clustered into orthologous groups. the algorithm follows four steps :
+
+step 1: to find homology, we compute pairwise alignments between all pairs of sequences for all genes in all genomes. pairs with significant alignment scores are retained as candidate pairs.
+
+step 2: orthologs are usually the closest genes in two genomes, because they started diverging at speciation, whereas paralogs started diverging at a duplication prior to speciation. genes across genomes that are mutually the most closely related sequences, taking into account inference uncertainty, are upgraded to stable pairs.
+
+step 3: in cases where an ortholog is missing, we seek to avoid erroneous classification of paralogs as orthologs  by verifying stable pairs with sequences in a third genome that can act as witness of evolution. pairs that pass the verification step are upgraded to verified pairs, and pairs that do not pass are paralogs and referred to as broken pairs.
+
+step 4: for some applications, such as species tree reconstruction, it is advantageous to cluster orthologs into orthologous groups. pairs of sequences in such groups are termed group pairs.
+
+in the following, we describe each of the four steps, and motivate all parameter choices.
+
+all-against-all alignments
+the goal of the first step of the process is homology detection. all pairs of protein sequences from complete genomes are aligned using full dynamic programming. there are several advantages of using protein sequences rather than using dna sequences. very distant homologies are difficult to find at the dna level, and protein sequences suffer less from convergence due to mutational biases. also, the length of a protein is one third of that of the corresponding dna sequence, a considerable advantage given that the time complexity of aligning sequences is quadratic with respect to length. the disadvantage to using protein sequences instead of dna is that complications arising from multiple gene products must be handled explicitly by selecting the longest splice variant as well as isoforms with at least 10% non-redundant positions. the sequences used by oma are from public databases  and all data are checked for consistency and quality.
+
+homology is established in two sub-steps. first, alignments between all sequences are performed using full, local dynamic programming with a fixed pam matrix to find all homologous sequences  <cit> . second, significant alignments  are refined by searching among all pam distances the scoring matrix that maximizes the alignment score. since scores are the log of odd ratios, the pam number of this matrix corresponds to the maximum likelihood of evolutionary distance. empirically, we observed that with a mixture of homologous and non-homologous pairs of sequences as input, the pam- <dig> matrix yields alignment scores that are on average closest to the ones obtained in the refinement part. thus, this is the fixed matrix that we use in the first part. refined alignments with scores above  <dig>  are considered significant. with scores below this value, the proportion of candidate pairs that end up being predicted as orthologs decreases rapidly .
+
+the all-against-all step is computationally expensive, and the run time increases quadratically with the total number of amino acids in a protein sequence. the use of a heuristic-based algorithm such as blast could potentially increase the speed of the homology search, but modern implementations of smith-waterman using simd instructions are almost as fast as blast  <cit> . moreover, most of the time is consumed by estimating evolutionary distances.
+
+since we consider entire proteins as the basic evolutionary unit, why then not use global alignments? protein ends are often variable, and thus, it is reasonable to ignore them by using local alignments. to guarantee that a significant fraction of a sequence is aligned, we use a length tolerance criterion. the length of the shorter aligned sequence must be at least the fraction ℓ of the longest sequence. that is
+
+ min  > ℓ·max 
+
+where a <dig> and a <dig> are the lengths of the aligned subsequences of s <dig> and s <dig>  alignments that pass both the length and score criteria are upgraded to candidate pairs .
+
+parameter selection and validation
+the parameter ℓ is determined by two tests. the first test, the triangle inequality test, is performed over all candidate pairs. under a time-reversible markovian model, the evolutionary distances between homologous sequences should obey the triangle inequality condition which requires that in a triplet of sequences, any distance between two sequences be less than or equal to the sum of the other two distances. because these distances are estimates, this property is expected only to hold within a confidence interval.
+
+ dxz ≤ dxy + dxz 
+
+for example, this condition may not be met if the sequences x and y share one domain and sequences y and z share another domain, but sequences x and z are not related. the triangle inequality test detects such violations, which are likely to arise when inconsistent sequences parts are matched. with increasing  length criteria, a larger fraction of candidate pairs pass the triangle inequality test .
+
+many proteins consists of several domains originating from gene fusions, deletions, and internal repetitions. the majority of multi-domain proteins have evolved by the stepwise insertions of single domains  <cit> . in the second test, candidate pairs are verified by testing the assumption that the number of domains for orthologous sequences are in agreement, including identical domains . domain information is obtained from the pfam database and consists of conserved protein regions and domains  <cit> . the amount of proteins with the same number of domains increase with stricter length tolerance, but a "plateau" is observed for  <dig>  < ℓ <  <dig>  .
+
+formation of stable pairs
+in the second step of the algorithm, potential orthologs are detected by the identification of sequences in two genomes that are more closely related to each other than to any other sequence in the other sequence. we term these sequences stable pairs . this name was chosen due to its close association with the stable marriage problem in computer science.
+
+to measure the relatedness of sequences, either similarity scores or evolutionary distances can be used. most methods employ the similarity score , because it is directly obtained by the alignment process and the highest scoring sequence is usually the most closely related sequence. however, scores do not constitute a direct measure of relatedness. in particular, they depend on protein lengths. evolutionary distances such as pam units, though more expensive to compute, constitute a sounder measure of relatedness, because distances are additive in their expected value  and have well characterized statistical properties.
+
+a tolerance interval is used to allow the inclusion of more than one potential ortholog, as this becomes necessary when a gene duplication event occurred after speciation. the tolerance threshold can be defined by including similarity scores in an interval below the top score, or by using variance of distance estimates to compute a confidence interval.
+
+consequently, orthology assignment methods based on pairwise sequence comparison can be classified in four categories . bidirectional best hits  is the most common approach and uses scores with no tolerance . reciprocal-best-blast-hits  is based on blast scores and uses a tolerance by including all hits within a p-value  <cit> . the reciprocal smallest distance algorithm  use evolutionary distances without a tolerance  <cit> . the stable pair method of oma use distance to measure relatedness between genes and their variances as a tolerance criterion.
+
+as mentioned above, the use of confidence intervals is necessary to account for many-to-many orthologous relations, which arise when duplications occurred after speciation. additionally, distance estimation is subject to inference uncertainty and, thus, true orthologs may not have the shortest estimated distance.
+
+formally, a pair of sequences  from genomes x and y is considered a stable pair if and only if, for all xi ∈ x, xi ≠ x, and for all yj ∈ y, yj ≠ y:
+
+ dxyj−dxy>kσ <dig> 
+
+and
+
+ dxiy−dxy>kσ <dig> 
+
+where d is a pairwise maximum likelihood distance estimate and k, the tolerance parameter of the standard deviation between the two distances, where σ2=σ2+σ2− <dig>  an estimate of the variance is obtained by the distance estimation, while efficient estimation of covariance for this case was previously shown  <cit> .
+
+parameter selection and validation
+the tolerance parameter k controls the balance between sensitivity  and selectivity . the optimal value of k for our purpose is determined using the out-paralog test.
+
+the out-paralog test is designed to discriminate cases of one-to-many orthology from cases of out-paralogy. more precisely, it determines whether the divergence of sequences x, y <dig> and y <dig>  illustrated in figure 4a, is due to a speciation or a duplication event. this is evaluated by finding on which branch to place the root. if the root is located on the branches leading to y <dig> or y <dig>  this suggests that the divergence is a speciation and that the sequence y <dig> is an out-paralog . in contrast, if the root is on the branch leading to x, the divergence is a duplication and both sequences in y are orthologous to x . to find a suitable out-group z to place the root, the information of a trusted phylogenetic topology is used . the sequence z is selected to be the gene closest to x in the out-group genome z that is closest to the divergence of x and y. figure 4d shows the quartet that is the result of y <dig> and y <dig> being in paralogs. if the length of the internal branch d for the given topology  is greater than zero, the sequences are accepted.
+
+ d=dzy1+dzy2+dxy1+dxy2−2dzx−2dy1y24> <dig> 
+
+to evaluate the parameter k, the fraction of sp that passes the test is measured. figure  <dig> depicts the decreasing fraction of passing stable pairs with increasing stable pair tolerance at different length criteria. again, the problem is to reduce the amount of conflicting out-paralogs while not discarding interesting many-to-many relationships. in this implementation, the required distance for a more distant stable pair must be within k =  <dig>  of the closest stable pair.
+
+verification of stable pairs
+although the construction of stable pairs is likely to identify the corresponding ortholog of each sequence, at least one special case exists in which systematic failure will occur: differential gene loss. this problem affects all pairwise approaches, and is shown in figure 6a. an ancient duplication event is followed by two speciation events resulting in three species x, y, and z. in two of these species, each of the duplicates is lost , and as a result, when comparing species x and y, x <dig> and y <dig> are the highest scoring match. in such a case, , although paralogs, form a stable pair.
+
+the purpose of the third step is to detect such stable pairs corresponding to non-orthology. the presence of a third genome z, which has retained both copies z <dig> and z <dig> of the duplication event, acts as a witness of non-orthology. we previously described the details of this procedure  <cit> , and the idea is illustrated in figure 6b. if dx1z <dig> is significantly shorter than dx1z <dig> and dy2z <dig> is significantly shorter than dy2z <dig>  there is evidence that x <dig> and y <dig> may not be orthologs. figure 6c depicts the most likely quartet predicted from the data provided in figure 6a. this approach can also be viewed as a tree-reconciliation that is based on quartets without assuming any species tree topology.
+
+each stable pair is verified by comparison to all other genomes. stable pairs for which no witness of non-orthology could be found are termed verified pairs  and are likely to be orthologs. furthermore, stable pairs that are not verified were defined as broken pairs  and are likely to correspond to paralogs.
+
+such cases of differential gene losses are not uncommon in nature. among yeasts for instance, approximately 5% of stable pairs are detected as non-orthologous using the procedure described above.
+
+parameter selection and validation
+the procedure again uses a tolerance parameter to tune the width of the confidence intervals required to detect non-orthologs. to optimize the parameter, we use the out-paralog test . we select the vp tolerance value such that the fraction of verified pairs that pass the test is maximized. in figure  <dig>  the fraction of passing vps as a function of the vp tolerance is charted. in terms of the trade-off between vp- and the sp-tolerance, increasing the vp-tolerance has little effect when the sp-tolerance is low . the decrease in the amount of vps with stricter vp-tolerance is much less than with stricter sp-tolerance. hence, it is reasonable to have a stricter vp-tolerance than sp-tolerance to maximize coverage. from the plot, a vp-tolerance of k =  <dig>  visibly constitutes a reasonable trade-off.
+
+note that although both the verification of the sp step and the out-paralogy test detect non-orthologs, the test requires knowledge of the species tree. to keep the orthology prediction independent from such  knowledge, we only used the out-paralogy test for parameter fitting, and only in cases where the species topology is undisputed.
+
+ortholog clustering
+the final step of the algorithm creates groups of orthologs. such grouping is non-trivial, because orthology is defined over pairs of sequences and is not necessarily a transitive relation. for instance, a sequence in one genome may form several verified pairs with sequences in another genomes, corresponding to several orthologous relations . these in turn cannot be orthologous to each other. in oma, we address this problem by making available both pairwise orthologous relations  and groups of genes in which all pairs are orthologs. though the oma groups leave out orthologous relations, they are useful for some applications, such as species tree inference.
+
+we use a clique algorithm to search for maximal, completely connected subgraphs in a graph, where the vertices are genes and the edges are verified pairs. to compute cliques, algorithms exist to maximize either the size of the clique  or the total weight of cliques . figure 8a shows a graph with edges between all vertices except  and , which are paralogous relations. the highest scoring partition is {w <dig>  x <dig>  z1}, {y <dig>  z2}, with the total sum of edge weights of  <dig> +  <dig> +  <dig> +  <dig> =  <dig>  the score is higher than the highest scoring maximum size clique {w <dig>  x <dig>  y <dig>  z2}, {z1}, where the sum of the scores is 200+300+400+500+800+ <dig> =  <dig>  hence, a smaller clique is chosen due to higher edge weights, which correctly assigns orthologs according to the hypothetical evolutionary scenario in figure 8b, where the duplication give subscripts that correspond to functionality. finding cliques is a np-complete problem and the implementations used here are based on an approximation of the vertex cover problem  <cit> . each clique constitutes an orthologous group, where the sequence pairs in an orthologous group are denoted group pairs , corresponding to close orthologs.
+scoring partition of the graph is {w <dig>  x <dig>  z1}, {y <dig>  z2}. b a possible evolutionary scenario corresponding to the graph.
+
+parameter selection and validation
+to validate our methods and to compare different algorithms for clique construction, a species tree is built from the orthologous groups produced by each algorithm, and the fit of the data to the tree is measured using the dimensionless index  <cit> . this technique assumes that if the groups inferred by the clique algorithms correctly predict orthology, the data will have a better fit to the species tree.
+
+for verification,  <dig> trials using various genomes and different taxa are computed using four different clique versions. maximum size clique chose the largest clique in the graph starting with the highest scoring edge . maximum size score clique is an extension that uses the sum of the edge weights and selects the higher scoring clique from several maximum cliques of same size. the above described algorithm, maximum edge weight clique, is used twice, first with the scores and then with the distances complement as edge weights.
+
+in general, the maximum edge weight clique algorithms perform better than the maximum size cliques , as shown in table  <dig>  this result supports the argument of the hypothetical example in figure  <dig>  to build maximum edge weight clique we chose scores as edge weights, over distances, because scores provides better fits of the data to the constructed species trees twice as often.
+
+evaluation of the quality of the trees built from orthologous groups using different clustering methods. the quality of trees is measured using the dimensionless index  <cit> .
+
+RESULTS
+assigning evolutionary relationships
+the goal of the oma project is to detect all orthologous sequence relationships among sequenced genomes. considering that orthology is a pairwise relation, the starting point is all  sequence pairs that successively filter through several steps to yield pairs of orthology . table  <dig> lists the names of shrinking subsets and their meaning in terms of the corresponding evolutionary relationships. the first step of the method, the all-against-all alignment, removes the majority of pairs and leaves only a small fraction of candidate pairs. these are further filtered in subsequent steps, and the decrease of the relative number of pairs after each step is depicted in figure  <dig>  a substantial reduction occurs with the classification of stable pairs from candidate pairs and serves to reduce the complexity of the verification step. the reduction of stable pairs to verified pairs is comparatively small, but nevertheless important, since this crucial step removes non-orthologs and explicitly indicates cases of paralogy . finally, group pairs are the fewest in number, because all but the most similar orthologous relationships have been removed.
+
+verified pairs
+verified pairs represent a useful resource that describe many-to-many orthology while pseudo-orthologs from differential gene loss have been removed. in other words, the most similar sequences may not be orthologous, and for this reason, all stable pairs are verified using a third genome as a witness of non-orthology. a critical assumption in the verification of stable pairs is that in at least some genomes both copies of a duplication event are present. it is possible that no duplicates remain and that paralogy cannot be detected by sequence similarity. however, the increasing number of completed genomes also increases the chance of observing duplicates in a genome. both paralogs are often present in multiple genomes. for example, when predicting orthologs for the subset of firmicutes,  75% of broken pairs had more than one witness of non-orthology.
+
+lateral gene transfer  events of homologous sequences  are difficult to distinguish from duplication events. two genes may appear to be duplicates when in fact, they are not. this issue affects most orthology prediction methods. in the case of oma, the verification step helps reducing the adverse impact of lgt; furthermore, we are investigating reliable ways of excluding the most obvious cases of lgt.
+
+fusion-fission events
+two genes that in one organism may be truly orthologous to one fused genes in another organism. oma considers the entire protein, rather than domains, to be the basic evolutionary unit. users interested in gene fusion-fission events, or in domain evolution, may view this as a limitation. we have chosen to exclude such scenarios, due to the difficulty to separate these events from the cases where the domains in proteins arose form different evolutionary unrelated domains. although part of the sequence may have diverged through speciation, another part is clearly non-homologous. if orthology is defined at the domain level, a gene could be orthologous to two or more sequences that are completely unrelated. in terms of function, which is often inferred from orthology, genes with different domains are unlikely to be similar. finally, restricting potential orthology to genes with a majority of homologous positions presents the advantage of not only avoiding these problems, but also reducing computational complexity.
+
+orthologous groups
+in oma, orthologous groups consist of close orthologs, which are useful to build species trees. the results of grouping close orthologs is represented by an ortholog matrix. in this matrix, rows correspond to groups of orthologous genes, and columns correspond to genomes. a non-empty element in mi,j indicates that a genome j has a member in an orthologous group i. the members of a group possess at most one close ortholog in each genome.
+
+in cases where duplication events occurred after a speciation event, several orthologous relationships exist and are often referred to as co-orthologs or in-paralogs  <cit> . we group orthologs such that the most similar protein sequence belong together using maximum edge weight cliques. it should be noted that the most similar sequences do not necessarily have the most similar function  <cit> .
+
+using cliques to construct groups is a strict requirement, because if an edge is missing , the group gets split. for applications where this is problematic, users can devise their own grouping strategy from the orthologous pairs, which we also make available.
+
+the distribution of group sizes for different sets of genomes is displayed in figure  <dig>  the average size of the orthologous groups  is relatively small in comparison to other methods . more small groups exist rather than large groups, which is expected based on the occurrence of duplications throughout evolution. large groups commonly consist of highly conserved genes, such as ribosomal proteins.
+
+exhaustive sequence alignments
+the all-against-all step is computationally expensive, and the time complexity is o2) where nk represents the number of sequences in the kth genome. as of november  <dig>  we have computed nearly  <dig> trillion sequence alignments. a total of approximately  <dig> hexaflop or roughly  <dig> years of cpu time. of these alignments,  <dig>  billion were considered significant . this dataset constitutes a valuable resource for comparative studies and is available upon request. the subsequent steps of the algorithm are comparatively fast.
+
+comparison to other projects
+the performances of oma are compared to other projects in a separate article  <cit> . the study includes cog, kog, eggnog, inparanoid, orthomcl, ensembl, homologene, and roundup. the study tests ortholog predictions on the basis of phylogeny  and on the basis of function conservation . the results of oma are among the best in the phylogenetic tests. in functional tests, it also performs well where high functional specificity is required, at the expense of a lower recall than projects such as orthomcl or eggnog.
+
+in terms of size and with  <dig> genomes analyzed, oma is by a wide margin the largest orthologs inference effort . our website is regularly updated as new species get included.
+
+CONCLUSIONS
+orthology is interesting for a wide range of bioinformatics analyses, including functional annotation, phylogenetic inference, or genome evolution. this paper describes and motivates the algorithm of oma for predicting orthologous relationships among complete genomes. the algorithm takes a pairwise approach, thus neither requiring tree reconstruction nor reconciliation, and offers the following improvements over the standard bidirectional best hit approach: i) the use of evolutionary distance instead of score, ii) a tolerance that allows the inclusion of one-to-many and many-to-many orthologs, iii) consideration of uncertainty in distance estimations, iv) detection of potential differential gene losses. the algorithm is characterized by four parameters that are optimized using independent tests. the current status of the project and the project results, including phylogenetic trees derived from the data, are available online  <cit> .
+
+authors' contributions
+gg initiated the project, devised and implemented the algorithm. later refinements were performed by all three authors. ar and cd designed the tests for parameter selection. ar implemented the tests and performed the analyses. ar and cd wrote the manuscript.

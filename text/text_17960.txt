@@ -1,0 +1,237 @@
+BACKGROUND
+cells receive and interpret information through complex signaling networks. the correct processing of signals is essential and frequently altered in diseases
+ <cit> . signaling networks arise from the highly dynamic and context specific assembly of a large variety of molecular species
+ <cit> . it is increasingly recognised that including these features is essential to take our understanding of the functionality of signaling pathways to the next level
+ <cit> . knowledge about signaling networks has accumulated over the years in databases and literature
+ <cit> . the vast majority of this information is static and not context-specific, and provides limited insight into the system’s response to perturbations such as ligand stimulation or drug treatments
+ <cit> .
+
+gathering medium to high-throughput signaling data is becoming more feasible as proteomic technologies are getting more mature
+ <cit> . perturbation data  can be used to generate network models using reverse engineering methods
+ <cit> . these methods typically consider all possible topologies. thus, they require large amounts of data and scale-up poorly. furthermore, the resulting networks are limited to interactions between perturbed and measured nodes. these are typically only a subset of the nodes involved in a pathway. therefore, such models are not as biologically interpretable as a networks based on prior knowledge from literature and other sources.
+
+we recently introduced a method that integrates literature and perturbation data to overcome the shortcomings of both
+ <cit> . by training prior knowledge networks  against experimental data, this method produces models shown to achieve significantly better predictive power than untrained models. the model building process is implemented through the use of a logic formalism. logic models have the ability to capture cause-effect relationships while staying conceptually and computationally simple, thereby allowing for appreciable scalability
+ <cit> . in its simplest implementation, boolean logic
+ <cit> , species are described as either on or off. relationships between species are described using logic gates that specify the state of each node given the state of its parents
+ <cit> . this captures dependencies between components in a system without the requirement of detailed mechanistic knowledge
+ <cit> . logic models have been shown to be useful tools to study signaling and regulatory networks
+ <cit> . a number of tools exist to manipulate, create and simulate such models
+ <cit> , and the approach described in
+ <cit>  complements them by automatically generating models trained to data. this allows researchers to generate models of signaling that can answer biological questions in their specific system of interest. however, the method in
+ <cit>  was limited to boolean logic steady state representation of the system under investigation, and was only available in a closed-source package for the matlab environment.
+
+we present here a tool that implements the methods in
+ <cit>  in an open source r/bioconductor package . cellnoptr extends the methods presented in
+ <cit>  to various published and unpublished logic formalisms through a suite of additional r packages that are integrated with the cellnoptr package. these logic formalisms include boolean steady-state, boolean multiple steady-state, boolean discrete time, steady-state fuzzy logic and logic-derived ordinary differential equation  representations of the system. this set of packages forms an integrated, open source, robust and easily extendable platform for training logic models of signaling networks. cellnoptr can also be used via a graphical user interface through the cytoscape plugin cytocopter. we illustrate the application of cellnoptr to a simulated example showing the advantages of having multiple logic formalisms available. we then show how the package can be used to study early and late response of a human hepatocellular carcinoma cell line to several cytokines.
+
+implementation
+the cellnoptr approach
+cellnoptr  implements the method introduced in
+ <cit>  in the r language, as a bioconductor
+ <cit>  package. this method derives a boolean logic model from a “prior knowledge network”  and trains it against perturbation data. a cellnoptr analysis comprises the following steps :  import of the network and data,  processing of the network,  training, and  reporting the results of the analysis.
+ <cit> ,  a dataset in the midas format . the package then maps the data onto the pkn, processes the network and trains the resulting model. cellnoptr outputs a series of html pages containing the summary of the analysis, hyperlinked to diagnostic graphs, and the trained networks. multiple logic formalisms can be used for the training. the cellnoptr package implements most of the workflow and the simplest boolean logic steady-state  approach. b. only steps that are specific to a particular logic formalism are coded in add-on packages. cnorfuzzy implements a constrained fuzzy logic steady-state approach
+ <cit> . cnordt fits time course data using a boolean representation of the states of nodes and a synchronous update simulation scheme. cnorode fits detailed time course data by deriving and training continuous logic-based ordinary differential equations. c. the choice of a logic formalism depends on the data at hand and the modeling goals: with no time course data, the user can choose between the two steady-state implementations  based on the size of the network, richness of data and suspected impact of partial effects. if very limited time course data is available, users can use the boolean  <dig> steady-states implementation in cellnoptr. with detailed time course data, one can choose between the boolean discrete time implementation in cnordt and the continuous ode based implementation in cnorode, mainly based on the complexity of the network and the richness of the data. for the networks, the following color conventions are used: for nodes: green=stimulated, red=inhibited, blue=measured, dashed=compressed; edges : green=present at time  <dig>  blue=present at time  <dig>  grey=absent, dashed edge=compressed.
+
+import of network and data
+cellnoptr takes as input two flat text files. the first one is a prior knowledge network  describing signed and directed interactions between proteins as a graph  format, which can be opened in cytoscape). the second file contains biochemical data relating to the changes in the modification state  of proteins following stimulation under various conditions. by “conditions” we refer to combinations of stimuli and inhibitors targeting nodes in the network. this data is represented in the simple tabular midas  format introduced in
+ <cit>  .
+
+the package then performs normalisation of the data for logic modeling, a feature described in
+ <cit>  and previously implemented in a separate matlab package, datarail
+ <cit> . briefly, the data is normalised between  <dig> and  <dig> by computing a fold change relative to a control. this fold change is transformed through a hill function and multiplied by a penalty for signals close to background. the penalty is the ratio of each value to the maximum measurement for the readout considered, transformed through a saturation function. it is important to note that the data is not discretized but just normalised between  <dig> and  <dig> 
+
+processing of the network
+the network is converted into logic models for training with two pre-processing steps :  compression and  expansion. in the compression step, species that are neither measured nor perturbed are removed if the logical consistency of the network is not impaired, resulting in a simplified network for training. this step is performed because such nodes are not necessary for the correct training of the model. however, starting from a pkn facilitates: i) identifying and preserving nodes whose presence is necessary to maintain the logical consistency of the network, ii) mapping the trained model back onto the starting network  and iii) restricting the search to a set of interactions that are feasible based on prior knowledge. in the expansion step, interactions are converted into all possible logic gates. for example, if there is an edge from node b to a and node c to a, the following gates are created:  b and c → a,  b or c → a,  b → a,  c → a. the rationale behind this step is that, although databases record a potentially functional interaction between a and b and a and c, it is rarely recorded whether these interactions are independent or not , or even if any of them are active in the specific context under investigation. therefore, cellnoptr generates all these options in the scaffold model  and uses the training to data to discriminate among them.
+
+training
+next, the model is trained to data by searching for models  that minimize a bipartite optimisation function. the optimisation function weights the fit to data  and model size, according to equation  <dig>  
+
+  θ=θf+α.θs 
+
+  θf=1ng∑k=1s∑l=1m∑t=1n <dig> 
+
+  θs=1ves∑e=1rvepe 
+
+in equation  <dig>  p is a vector of length r  with a  <dig> when an interaction is included and a  <dig> if it is not. θf  is the mean squared deviation between model prediction  and data  across the m readouts, n time points and sexperimental conditions . θs  penalises the model size by summing across the number of inputs  of each edge selected in model p and dividing by the total number of inputs across all edges . αis a tunable parameter that balances the fit and size terms. the size penalty ensures that redundant or unnecessary edges are not included in the final model, such that simpler models are preferred over more complicated models if they explain the data equally well. note that the data does not need to be discretized to compute the optimization function. instead, the data can be normalized between  <dig> and  <dig> , resulting in a penalty that depends on how close the normalized data is to the boolean state predicted by the model. thus, measurements that have intermediate values  have a smaller weight on the penalty associated with a mismatch with the boolean output of the model. the search through model space is performed using a built-in genetic algorithm. it is possible for the user to choose which edges they want to be included in the search  but by default all edges are included in the search space. cellnoptr keeps track of all models explored during the search and reports a family of models within a tolerance  of a value of the objective function θ. indeed, multiple models with the same or very similar scores are typically found, which cannot be discriminated given the experimental evidence
+ <cit> . the choice of a tolerance level is non-trivial and depends largely on the experimental error. indeed, as our confidence in the data increases, our tolerance regarding how closely the model have to reproduce the data decreases. given a chosen tolerance level, cellnoptr reports, for each edge, the frequency of models within the tolerance limits that include the edge. this allows users to investigate the effect of the tolerance on the solution models, given the data at hand.
+
+report
+finally, the results of the training are mapped to both the prior knowledge and the scaffold network. the information relating to the analysis run is then plotted, written to file and condensed in a html report hyperlinked to the various diagnostic plots. networks are output in graphviz dot format as well as sif files with corresponding attributes representing the status of nodes  and the frequency with which edges are selected in the family of solution models.
+
+simulation variants
+this general approach is extended through a series of add-on r packages that use parts of the cellnoptr method but differ in their ability to handle time course data with different levels of sophistication. cellnoptr implements the simplest logic framework, where a boolean steady state approximation is used for simulation. cellnoptr also contains a boolean  <dig> steady-states method, applicable when limited time resolved data is available and one wishes to capture mechanisms acting on different time scales. in addition, we offer three packages  that plug into the cellnoptr approach and perform model training based on:  single pseudo-steady state data and a continuous representation of the state of nodes using a constrained fuzzy logic approach 
+ <cit> ,  coarse grained time resolved data and a discrete time simulation using a boolean synchronous update scheme , and  time course data and a continuous state and time simulation using ordinary differential equations derived from a logic model 
+ <cit> . functions in the add-on packages implement alternatives for core functions or additional steps whenever the handling of a more elaborate logic formalism requires it .
+
+languages and dependencies
+all of our packages are written in r. in order to improve computational efficiency, the core of cnorode is written in c, using the standard r api as an interface. the simulation engine of cnorode uses the cvodes library. no compilation or code generation is required beyond the building of the package. for the model and parameter space search in cnorode, we give the option to use the r package genalg
+ <cit>  or an r implementation of scatter search
+ <cit>  . we provide a user-friendly evaluation function that allows users to easily plug in alternative search methods. we also provide python wrappers so that cellnopr can be run directly from python . finally, we provide a graphical user interface via cytocopter, a cytoscape
+ <cit>  plugin. cytocopter uses the cyrface  cytoscape plugin to interface with r and call our methods from cytoscape.
+
+RESULTS
+various simulation schemes allow to capture different features of a system
+within the scope of logic models, various formalisms can be used to represent relationships between nodes and simulate a model. the choice of which logic formalism to use depends on the data set and the system to be modeled . in the next sections, we present the different formalisms that are implemented in the cellnoptr framework. we illustrate their advantages and limitations on a simulated data set obtained from a realistic toy example from macnamara et al.
+ <cit>  that schematically represents the effect of tumor necrosis factor α and epidermal growth factor  on the canonical p <dig>  erk, and nfκb pathways. the model used to generate the simulated data  contains a slow negative feedback from erk to sos- <dig>  leading to a transient activation of erk. this could for example represent the expression of a phosphatase that dephosphorylates sos- <dig> and whose expression depends on the activation of erk. this model also includes a negative feedback from nfκb to its inhibitor iκb, leading to oscillations of nfκb. this captures the observed oscillations of nuclear nfκb, where the transcription factor is known to be maintained in the cytoplasm by its inhibitor whose expression is activated by nfκb itself. finally, a partial activation of p <dig> is observed when both egf and tnfαstimulations are applied to the model.
+ <cit> , used to generate simulated data . we show a subset of the results of training this model to data using each of the logic formalisms available through our packages . the model contains canonical pathways downstream of egf and tnfα. the data includes:  a slow negative feedback from erk to sos- <dig> leading to a transient activation of erk,  a feedback from nfκb to its inhibitor iκb, leading to oscillations of nfκb, and  a partial activation of p <dig> under combined egf-tnfa stimulations. the cellnoptr simulation scheme  captures the activation of erk upon egf stimulation  but not its transient nature. the boolean with two steady states version does capture the transient erk activation  but not the nfkb oscillations and p <dig> partial activation. with the discrete time updating scheme with boolean state from cnordt, we capture both the transient activation of erk and the nfκb oscillations but not the partial activation of p <dig>  cnorfuzzy implements a continuous representation of states but with a single steady state. thus, it captures the partial activation of p <dig>  but not the behaviors of erk and nfκb. cnorode is based on a continuous representation of both time and state, which captures the behaviors of erk, p <dig> and nfκb . depending on the available data and the suspected behaviors to capture, different logic formalisms are more appropriate. dashed lines=time points used for steady states. color of model edges: black=captured by all approaches, blue = cellnoptr, orange = cnordt, pink=cnorfuzzy, green=cnorode.
+
+cellnoptr: boolean logic at steady-state
+the default cellnoptr method as described in
+ <cit>  is based on a discrete representation of time and state. for the observed data, measurements are therefore acquired at the rest state as well as at a characteristic time after perturbation . the states of nodes in the model are represented as boolean values . for simulation, we use a synchronous updating scheme until all nodes have reached a steady state. we compute the state of each node at time t+ <dig> as a function of the state of its parents at time t , and check whether this new state is the same as the one at time t. 
+
+  xi=bi,xi <dig> …,xi1)ε{ <dig> },i= <dig> ,…,n 
+
+in equation  <dig>  the state of each species xi at time t +  <dig> is computed as a boolean function b of the states at time t of all nodes xin upon which xi depends. equation  <dig> is applied simultaneously to all nodes in the model until all xi = xi or a maximum number of iterations has been reached. nodes that oscillate  never reach the steady state and are therefore penalized as mismatches to experimental data. as can be seen in figure
+ <dig>  this means that the basic cellnoptr method is unable to capture the nfκb oscillations, as well as the partial activation of p <dig>  because it only considers one time point, the model is also unable to capture the transient activation of erk. consequently, although it will detect an activating edge between sos- <dig> and erk, it will not detect the negative feedback between erk and sos- <dig>  nonetheless, provided that the pseudo-steady state time point is appropriately chosen, this very simple and computationally efficient approach captures most of the links in this network.
+
+cellnoptr: boolean logic at  <dig> steady-states
+if, however, we wish to capture the transient activation of erk, we can do so using a previously unpublished modification of the boolean steady-state method which is available in cellnoptr. this modified version uses data collected at two separate time points , which are assumed to represent logical pseudo steady states, resulting from mechanisms that operate at different time scales. for example, this method could be used to model immediate and fast receptor activation by post-translational modification followed by propagation of the signal and receptor desensitization depending on de novo protein expression. assuming two different time scales allows us to train the model to the  <dig> pseudo-steady states independently, thereby keeping the method computationally efficient.
+
+using this method we first train the model using the data at the first time  point just as above. in a second training step, we assume that some edges only become active at the second time point , and therefore search through the space of edges not included in the optimal model at τ <dig>  we simulate the model using the steady state of τ <dig> as an initial state, with the added constraint that nodes receiving the input of a τ <dig> edge are locked to the state defined by that edge. this is to avoid nodes in a negative feedback loop never reaching a boolean steady state, e.g. if protein a activates protein b and b represses a, then when a is active b is turned on, which turns a off and then turns b off and re-establishes the on state for a, etc. with this modified simulation procedure, in this example a would turn b on at τ <dig>  then the negative feedback between b and a would become active at τ <dig> and lock a permanently to the off state . as we can see on figure
+ <dig>  this method captures the slow negative feedback between erk and sos- <dig>  with very limited additional computation cost.
+
+cnordt: boolean logic for time course data
+steady state and multiple steady states methods are useful first approximations to capture the dynamic behavior of a system when limited time resolved data is available. however, when time courses are available, we can get further insight by using methods that can fit such data. cnordt  fits time course data using a synchronous updating scheme for the simulation , together with an additional model parameter, which defines the time step of the boolean synchronous simulation. in a synchronous updating scheme, all nodes are updated simultaneously at each iteration of the simulation algorithm, such that the state of each node at time t depends only on the state of its parents at time t-1
+ <cit> . the scaling parameter stretches the time courses obtained by boolean synchronous update simulation to match the data as closely as possible. this approach captures behaviors such as oscillations, transients and feedbacks, provided that they can be fitted with a single scaling parameter across all reactions. looking at our toy example , we can see that cnordt accurately reproduces the transient behavior of erk activation and the oscillatory behavior of nfκb. since cnordt still trains a boolean logic model , with only one additional parameter, the training stays relatively simple and computationally efficient.
+
+cnorfuzzy: constrained fuzzy logic at steady-state
+a main limitation of boolean logic models is that they are limited to on/off representations of the activation levels of species in a model. this means that subtle effects and partial activations such as the activation of p <dig> in figure
+ <dig> cannot be captured. such phenomena require a continuous representation of nodes states, which is possible using fuzzy logic models as introduced in
+ <cit>  and implemented in the matlab package cellnopt-cfl. in cnorfuzzy, the relationships between nodes are defined as transfer functions linking continuous values of the inputs of each gate to continuous values of the outputs of each gate: 
+
+  xi=bi^,xi <dig> …,xi1)ε <cit> ,i= <dig> ,…,n 
+
+in eq.  <dig>  the boolean function from eq.  <dig> is replaced by a transfer function
+bi^ that maps the continuous value  of input nodes at time t to continuous values of an output node xi at time t +  <dig>  in our implementation, transfer functions are limited to a defined set of hill functions, hence the use of the term “constrained” fuzzy logic. using normalized hill functions ensures the consistency between the fuzzy logic values and the boolean logic values when species are set to the extreme values of 0/ <dig>  and limits the number of parameters to be trained for each gate
+ <cit> . training and simulation of the model in cnorfuzzy is very similar to the boolean steady state optimization in cellnoptr. the difference is that we need to train both the topology of the model and the parameters of the transfer function associated with each gate. given the added complexity of the optimization step, it is followed by refinement and reduction steps that fine-tune the parameters of the transfer functions and reduce the complexity of the model topology . as we can see on figure
+ <dig>  cnorfuzzy accurately captures the partial activation of p <dig>  as well as the activation of erk and, to some extent, the activation of nfκb. however, being a steady-state method, it is unable to capture erk inactivation and nfκb oscillations.
+
+cnorode: logic-based ordinary differential equations
+cnorode  further refines the handling of time and state through a continuous representation of both variables. this is achieved by deriving a set of ordinary differential equations  for each model species: 
+
+  x˙i=1τi−xi1)ε <cit> ,i= <dig> ,…,n 
+
+in equation  <dig>  the boolean updating function is replaced by a continuous activation function
+b¯i for the production of xi and a first order decay term, divided by a time constant τi. for each species in the boolean logic network, the ode derived satisfies the condition that if the input of the gate to that species are boolean , then the ode for the species considered returns a value that is consistent with the value returned by the corresponding boolean logic gate. the formalism used to derive the logic based odes was developed by
+ <cit>  and is also implemented in the matlab toolbox odefy
+ <cit> . for the optimization, cnorode generates a file that takes both discrete inputs that define the structure  and continuous input values that correspond to the parameters of the odes . cnorode then trains the parameters of the equations to fit the data, using a choice of two stochastic, global optimization algorithms . we can see in figure
+ <dig> that cnorode accurately captures all of the dynamic features of the system at hand, i.e. the negative feedback between erk and sos- <dig>  the negative feedback loop between nfκb and iκb, and the partial activation of p <dig> upon egf and tnfαcombined stimulations.
+
+however, compared to the methods previously mentioned, this method requires:  the optimization of more parameters, therefore limiting the scalability, and  the availability of detailed time resolved data.
+
+case study: application of cellnoptr to a study of signaling in liver cancer
+we illustrate the boolean  <dig> steady-states cellnoptr method by applying it to a real data set. we use phosphorylation measurements  obtained from a human hepatocellular carcinoma cell line  at  <dig> and  <dig> hours after perturbation with combinations of selected small molecule inhibitors. the experiment was designed to study the early and late response of to multiple inducers of inflammation, innate immunity and proliferation . we use one of the variants of the prior knowledge networks  that was used to analyze the data from
+ <cit>  at  <dig> minutes in
+ <cit> . we extend the previous analysis
+ <cit>  to include the data from
+ <cit>  at  <dig> hours .
+
+as described, cellnoptr first pre-processed the pkn according to the data. once compressed and expanded, the model contains  <dig> interactions. after training at τ <dig>  between  <dig> and  <dig> edges are selected , leading to an average training score of  <dig>  . in this case, the empty model performs better than the starting pkn-derived model because many data points are close to  <dig>  implying that many edges from the starting network are probably not functional in the context under investigation. therefore, not turning any node ’on’ actually achieves a better score than including all the edges . after training at τ <dig>  between  <dig> and  <dig> additional edges are selected, leading to an average optimization score of  <dig>  . additional file
+4: figure s <dig> contains an example of a trained model and the corresponding data fit. we observe that the training does improve the fit of the model to data significantly at both time points compared to the starting pkn . the improvement at τ <dig> is not as drastic as the one at τ <dig>  likely because the pkn was designed for early events and therefore might not include all necessary prior knowledge edges to capture events happening at later times.
+
+nonetheless, the resulting trained models recapitulate some important behaviors. for example, it correctly captures a context-specific decrease in creb at τ <dig> . the creb measurements increase at τ <dig> upon il1a stimulation but this stimulated state is sustained at τ <dig> only if the signals going through ks6a <dig>  and ks6a4/ks6a <dig>  are both present . if there is an inhibition in either of these branches, creb does get activated at τ <dig> but then decreases at τ <dig>  this means that for the creb signal to be maintained at τ <dig>  the presence of both ks6a <dig> and ks6a4/ks6a <dig> is required. such a behavior could, for example, be explained by a constitutive dephosphorylation of creb that can only be counteracted by the presence of both signals from ks6a <dig> and ks6a4/ks6a <dig>  sustained versus transient phosphorylation of creb following stimulation of the same receptor  was observed in neurons and was shown to depend on the activity of the phosphatase calcineurin
+ <cit> . this type of behavior is particularly relevant when studying diseases such as cancer. indeed, sustained activation of transcription factors such as creb which are normally tightly regulated through transient phosphorylation has been proposed to play a role in oncogenesis
+ <cit> . this illustrates how our method captures dynamics occurring at different time scales, using relatively large scale models and only two time points. these features could not be captured by a one time point steady-state approach.
+ <cit> . this figure shows a simplified version of a small subset of the trained model , along with the data associated with the creb node , overlaid with the simulation results  for a selected set of conditions. the background color indicates the goodness of fit of simulation results to data. we can see that the model captures the behavior of creb accurately: creb increases at τ <dig> if either mp2k2/mp2k <dig> or p <dig> are activated . this activation is maintained if both mp2k2/mp2k <dig> and p <dig> are activated, and is lost at τ <dig>  if only one of them is activated . this behavior is captured in the model by selecting an or gate from mp2k2/mp2k <dig> and p <dig> to creb at τ <dig>  and an and gate at time τ <dig> 
+
+providing a user friendly interface with cytocopter
+researchers who generate the kind of biochemical data that is amenable to logic modeling might not be familiar with r. hence, we provide an intuitive and easy to learn graphical user interface  to our methods through a cytoscape plugin, cytocopter. this results in a point and click interface to our methods where users can run the same steps as they would using an r script but without having to write any code . given that this is a front-end to the r algorithms, consistency is ensured between the results obtained through the gui and those obtained through corresponding scripts. this arrangement also enables continued development of the methods and implementation in a single platform .
+
+strengths of the cellnoptr modelling platform
+a range of tools exists for manipulating, creating and simulating logic models . cellnoptr differs in that it focuses on providing a method to systematically train models to data. this is an essential feature because, by leveraging imperfect and incomplete prior knowledge and dedicated signaling data, it builds and simulates models that are fitted to the data  and achieves a higher predictive power
+ <cit> . this has proven useful, for example, to obtain cell specific models that reveal different wiring between cell-types, by training a network separately to data from different cell types
+ <cit> . because this is achieved with a simple modeling framework, one can investigate large networks with relatively sparse data compared to other formalisms for modeling of signaling networks
+ <cit> . the mechanistic insight that can be gained is higher than in purely data driven models, which can only capture relationships between perturbed and observed variables .
+ <cit> . metareg
+ <cit>  defines the prior knowledge of a system as a multi-state probabilistic model that can be simulated and visualized. booleannet
+ <cit>  allows for synchronous and asynchronous simulations  and can also facilitate piecewise linear differential equations for a more detailed time resolution. boolnet
+ <cit>  also allows for synchronous and asynchronous simulations, and includes functionalities to deal with probabilistic boolean networks where multiple transition functions can be chosen for each node. chemchains is a software suite that allows for synchronous and asynchronous updating
+ <cit> . ginsim offers a suite of simulations methods that incorporates a graph editor as well as various tools to explore state transitions
+ <cit> . squad
+ <cit>  and odefy
+ <cit>  create continuous systems from logic models. genetic network analyzer is a platform for modeling genetic regulatory networks, using piecewise linear models to model continuous processes
+ <cit> . cellnoptr and its extensions  cover steady state discrete and continuous modeling in both state and time. note that because multi-state is a generalization of binary, in principle all methods that handle multi-states also handle binary.
+
+the method described in
+ <cit> , i.e. the boolean single steady-state implementation, was previously implemented in a matlab toolbox, cellnopt. cellnopt was also extended to constrained fuzzy logic as described in
+ <cit> . however, the boolean  <dig> steady-states, discrete time and logic ode variants are unique to the r implementation presented here. this extension is an essential strength of cellnoptr since the toolkit presented here uniquely covers a wide variety of different logic modeling methods adapted to different experimental scenarios and modeling goals, all available within the same training framework.
+
+future developments
+we consider the existing version of cellnoptr as a robust and flexible starting point for multiple developments. for example, we are exploring alternative methods for data normalization. the core of cellnopt is the training to data, and we are exploring multiple strategies for this, including deterministic methods such as integer linear programming
+ <cit>  and answer set programming
+ <cit> , metaheuristics
+ <cit> , and probabilistic frameworks
+ <cit> .
+
+while cellnopt already covers multiple logic formalisms, we are exploring other variants, in particular asynchronous simulation schemes for the cnordt extension. this could lead to different results to those obtained with the synchronous scheme, which could be particularly insightful when handling single cell time course data. given the stochastic nature of an asynchronous update scheme, when using population averaged data  one needs to run the simulation many times to generate a set of trajectories from which a consensus can be obtained. this is considerably more demanding computationally, and is not likely to provide additional insight in most simple cases. in the case of the example toy model from figure
+ <dig>  asynchronous simulation where activation rules are fired at random did not provide additional information . different conclusions might be obtained when using larger networks with more complicated feedback, or when information is available regarding the order of firing of different activation rules. we are therefore currently working on making alternative simulation schemes available, as well as faster versions of those .
+
+another main area of development is the integration of data-driven reverse engineering tools to find links missing in the starting network
+ <cit> . a main strength of cellnoptr is also one of its weaknesses: the optimization is constrained by the pkn. to address this limitation, the plugin cnofeeder allows to propose candidate links based on areas of the data that are poorly captured by the trained model, using multiple reverse engineering methods
+ <cit> .
+
+finally, we are working to make communication and exchange of data and models to and from cellnoptr both easy and consistent. a requirement towards this goal is compliance to standards. we are currently working on using the systems biology graphical notation  for visualization of models using a standard set of symbols. towards this end, we have developed the cytoscape plugin cysbgn , that we plan to integrate with cytocopter. furthermore, we are developing, as part of the colomoto initiative  a qualitative extension for sbml , sbml-qual. this extension will allow not only a smooth exchange of our models with other logic modeling tools with complementary features, but also automatic access to resources for prior knowledge information that are compliant with it, such as path2models . the cellnoptr project is in continuous development and users can find updates on the project website .
+
+CONCLUSIONS
+understanding signal processing in cells is an essential goal of biological research, not only for fundamental reasons but also for its implications and potential applications in disease contexts. modeling approaches are particularly suited to this task because  signaling networks are complex systems assembled from the dynamic and context-dependent interactions of many components, and  obtaining predictive as well as mechanistic insights is extremely valuable in this context. cellnoptr makes use of the complementarity between rich context specific biochemical data and imperfect/incomplete accumulated knowledge to build and train logic models.
+
+cellnoptr models are constrained by previous knowledge but trained to data, making them both context and cell line specific, thereby providing enhanced predictive and mechanistic insights. a key strength of the toolkit formed by cellnoptr, cnordt, cnorode and cnorfuzzy is that it covers multiple logic modeling formalisms . this allows users to choose between those formalisms to best match the richness of their data and their modeling goals. we believe that this choice is greatly simplified by the availability of these methods in a common framework. one can also combine formalisms: for example, train a large network to data using the efficient multiple pseudo steady state method, and then convert the resulting sparser model into an ode model and train it to time course data using cnorode.
+
+our toolkit is implemented in the free and open source r language and cytoscape platform which benefit from a large user community and already come with a wide range of packages for biological data processing and analysis. users should therefore be able to use cellnoptr as part of their own data processing pipeline, taking advantage of existing r/bioconductor packages  and developing their own custom-made functions as required. finally, in order to make our methods more accessible to non-programmers, we provide a cytoscape interface to the r implementation as a plugin, cytocopter.
+
+availability and requirements
+the main cellnoptr package is available on bioconductor  as well as the cnordt, cnorode and cnorfuzzy add-on packages. the cytocopter cytoscape plugin is available on
+http://www.cellnopt.org and from the cytoscape plugin manager. the simplest cellnoptr method  and the fuzzy logic methods are available in a matlab version of the toolbox, also available at
+http://www.cellnopt.org.
+
+more details: 
+
+- software name:cellnoptr , with plug in packages cnordt , cnorode  and cnorfuzzy , and cytoscape plug in interface cytocopter.
+
+- project home page:http://www.cellnopt.org
+
+- operating system: platform independent
+
+- programming languages: r
+
+- other requirements: r , cytoscape  <dig> x
+
+- license: gnu-gpl, version  <dig> except cnorfuzzy which is gnu-gpl version  <dig> 
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+ct and tc wrote the cellnoptr package, am wrote the cnordt package, mkm and tc wrote the cnorfuzzy package, dh wrote the cnorode package, eg and mvi wrote the cytocopter plugin, jsr designed the project, and together with dal provided guidance for the implementation. ct and jsr wrote most of the manuscript, with contributions from the other authors. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+experimental setting for the hepg <dig> analysis. hepg <dig> cells were stimulated with the above stimuli in combination with the above-mentioned inhibitors in different combinations. the  <dig> species mentioned here were then measured using a luminex assay at  <dig> minutes and  <dig> hours post stimulation, leading to a total of  <dig> samples. all species are mentioned with their uniprot identifiers  or common name where applicable .
+
+click here for file
+
+ additional file 2
+summary of results from  <dig> independent trainings for the hepg <dig> example. frequency of selection of each edge in the scaffold model, across all models with a score within 10% of the best scoring model, summarized across  <dig> independent training runs. the top panel shows the summary for the edges at time 1and the bottom panel shows the equivalent for time  <dig>  for time  <dig>   <dig> edges are consistently selected across most  of the best performing model, and  <dig> edges are picked in over 60% of the trained models. a partial redundancy in the effect of some edges explains that a different combination of edges can be picked across different models with limited impact on their scores. at time  <dig> ,  <dig> edges are consistently selected across over 50% of the best scoring models. these lower numbers reflect the fact that the training at time  <dig> relies on a single trained model as a starting point for both the simulation and the edge search space. therefore, the family of trained models obtained for each of the training runs explore different search spaces and have different initial conditions.
+
+click here for file
+
+ additional file 3
+technical aspects of the hepg <dig> analysis. this file provides additional information regarding this analysis, such as the parameters used etc.
+
+click here for file
+
+ additional file 4
+example of results for the hepg <dig> real data application. a. previous knowledge network used for this analysis. b. example of a trained model obtained in one of the optimization round, with a subset of the simulation results obtained with this network . for the networks the color codes are as follows: nodes: green=stimulated, red=inhibited, blue=measured, blue with red stroke=measured and inhibited, dashed stroke=compressed; edges : green=selected at time  <dig>  blue=selected at time  <dig>  grey=not selected in the trained model. in panel c, black continuous lines=data, dashed blue lines=simulation results obtained with the model in b. the background color reflects the goodness of fit of the model to data: green= the chosen boolean value is closer to the data than the opposite boolean value , red= the chosen boolean value is further from the data than the opposite boolean value .
+
+click here for file
+
+ additional file 5
+exploration of an asynchronous updating scheme for the cnordt extension. this figure shows the results obtained by training the toy model to data as in figure
+ <dig> but using an asynchronous updating scheme with random firing order of the activation rules, in development for the cnordt extension. we can see that asynchronous updating adds no new information that is applicable to training the model to data, in this case. for the same conditions as figure
+ <dig>  the asynchronous plots show the fraction of simulations  where each specified node is switched on  after each update of the network . the error bars show ±  <dig> standard deviation of the  <dig> simulations at each iteration . in the case of the above model, negative feedback causes oscillations and oscillating nodes average ∼  <dig> . all other nodes stabilize at 0/ <dig>  the synchronous plots use the same simulator described in the main text under cnordt, where all nodes are updated at the same time t according to the state of their input nodes at t- <dig> 
+
+click here for file
+
+ acknowledgements
+the authors thank j. banga, j. egea, e. balsa for help with optimisation routines, b. penalver, i. pertsovskaya and f. eduati for testing and feedback, r.f. schwarz for reading and commenting the manuscript, and funding of the institute for collaborative biotechnologies , eu-7fp-biopredyn and the embl eipod program.

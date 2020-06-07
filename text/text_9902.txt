@@ -1,0 +1,157 @@
+BACKGROUND
+dna methylation involves the covalent modification of cytosine bases and serves to epigenetically regulate a large variety of biological properties, from imprinting to development and its dysregulation is associated with diseases such as cancer
+ <cit> . while there are a number of methods currently available to probe dna methylation , the gold-standard for single-base resolution is bisulfite sequencing, sometimes referred to as bs-seq. here, dna is treated with bisulfite, which results in the conversion of unmethylated cytosine  to uracil ), leaving methylated cs unconverted.
+
+mapping of bisulfite-converted short reads, such as those commonly produced by the illumina hiseq, creates a number of difficulties. firstly, if both cs and ts in reads can map to cs in the genome, then methylation metrics will be systematically skewed, as methylated reads will map preferentially, given that they contain more information. the alternative is to in silico convert both the reads and the genome prior to alignment, thereby producing unbiased, but less efficiently mapped, alignments. this creates a second difficulty in that the two dna strands are no longer complementary, requiring them to be treated separately. finally, pcr amplification during library preparation results in the creation of an additional two dna strands, complementary to the original bisulfite converted strands. the presence of multiple non-complementary strands is a situation for which standard short-read aligners are generally unequipped.
+
+for these reasons, a number of bisulfite aligners have recently been created, the most popular of which is bismark
+ <cit>  . bismark, like bsmooth
+ <cit>  and bs-seeker2
+ <cit> , exploits the short-read aligners bowtie or bowtie2
+ <cit>  to perform alignments. while these aligners generally produce good results, they are quite slow, due to running up to  <dig> instances of bowtie simultaneously on the same computer as well as other implementation issues. bismark and bs-seeker <dig>  in particular, have a higher than necessary false-positive rate due to not producing alignments with associated mapping qualities , which could otherwise be used to filter out methylation calls from alignments with too high a probability of being wrong, and how they decide which alignment to report. similarly, while bsmooth produces alignments with mapq scores, they are based only on alignment to a single strand, so a read aligning equally well to multiple strands will have an aberrantly high mapq score. as an example, given a read that aligns with a mapq score of  <dig> to one strand and  <dig> to another, bsmooth will output the alignment with a mapq score of  <dig> and leave that mapq score unchanged. had this mapq score instead been calculated in a context within which the alternative  alignment was known, the resulting mapq score would have appropriately been much lower. bsmap
+ <cit> , an older aligner, has previously been reported to require a similar amount of time as bismark to run but, because it uses its own aligner, produces somewhat better coverage
+ <cit> . other recent bisulfite aligners, e.g. gnumap-bs
+ <cit> , purport to have higher speed and accuracy at the expense of significantly increased memory requirements. in practice, though, the speed increase is marginal and accuracy increases are non-existent. as the alignment step is simply an intermediate between receiving raw data and actual statistical analysis, this creates an unnecessary experimental impediment.
+
+to combat these issues, we have developed a novel bisulfite aligner, bison , written in c that exploits the increasing prevalence of computer-clusters to rapidly align bs-seq reads. bison can utilize either  <dig> or  <dig> nodes, a master node to process alignments and one worker node per dna strand for aligning reads. we also provide a second version, bison_herd, which scales to run on a semi-arbitrary number of cluster nodes, rather than being limited to 3– <dig> nodes, depending on library type. like bismark, bsmooth and bs-seeker <dig>  bison utilizes bowtie <dig> to perform actual alignments, but produces alignments with recalculated mapq scores . because bison can simultaneously use multiple nodes it requires less memory per-node. furthermore, as the algorithm used by bison to judge the best alignment is different from that used by the other aligners, its false-positive rate is decreased to that of bowtie <dig>  even when using identical resources, bison performs its alignments in a fraction of the time required by all of the other compared aligners, except bsmap. bison produces more accurate results than all of the other compared aligners on simulated datasets. unlike most other bs-seq aligners, bison_herd does not create temporary files, decreasing both i/o and space requirements. to easily facilitate statistical analysis, bison comes with methylation extraction and conversion programs. bison also provides the facility for easy quality control of aligned data and it can compute methylation metrics dependent upon these quality control results. finally, bison is accompanied by a helper program that, unlike similar programs, uses both alignment position and methylation calls to mark likely pcr duplicates, which are then ignored during the methylation extraction and quality control process.table  <dig> 
+feature comparison of the various compared aligners
+
+
+
+
+implementation
+the general workflow is depicted in figure 
+ <dig>  with recommended steps external to bison/bison_herd noted. as with other aligners, an index of the genome is created to facilitate faster mapping. this step needs to be performed only once. two temporary copies of the genome are created, one c- > t and the other g- > a in silico converted. prior to alignment, low quality bases and incorporated adapter sequences should be removed, as previously recommended
+ <cit> . we recommend trim galore! , as it is tailored toward bisulfite-converted reads and supports paired-end reads. an alternative to trimming is using local alignment. while bison is capable of producing local alignments, the likelihood of incorrect methylation calls due to partial adapter alignment has caused us to default to producing end-to-end alignments. for the same reason, the comparisons included below contain only trimmed datasets.figure  <dig> 
+standard bisulfite-seq processing workflow. programs and steps for which bison provides solutions are on a blue background.
+
+
+
+both bison and bison_herd accept the resulting trimmed fastq files, which may also be compressed to save space. bison_herd can also process a list of single or paired-end files, writing results to individual files. this is particularly convenient when processing multiple samples, as the genome and its indices only need to be read from disk and loaded into memory once. bison in silico converts these reads on the master node as appropriate and writes the results to a file or files. the number and nature of the conversion is dependent upon whether the libraries were directional or non-directional and run single or paired-end. these converted reads are then aligned as appropriate by bowtie <dig> on the worker nodes. in bison_herd, the process is similar, except reads are sent unconverted via mpi from the master node to the worker nodes, where they are converted prior to being given via named-pipes to bowtie <dig> 
+
+as each worker node creates alignments, they are sent via mpi to the master node. there, the alignments are collated and a best alignment is selected . subsequently, the methylation state of each base in each read is determined. if a read contains a mismatch, the methylation state of that base is set to ‘.’, to denote "not applicable". the results are then written to a bam file using the samtools c api
+ <cit> . unmapped reads may optionally be written to fastq files.
+
+after performing quality control , methylation metrics are normally extracted and written in bedgraph format. for paired-end reads, overlapping portions of each pair are processed as a unit so to not double-count methylation calls. it sometimes occurs that reads in a pair disagree on a methylation call, either because one read contains an n at a given position, or because both reads simply contain different high quality base calls. in the former case, bison will always use the methylation call of the read not containing an n at the position in question. in the latter case, neither methylation call is used. the resulting methylation metrics are written for every c in a cpg, chg, or chh context to separate bedgraph files. a helper program is also included to merge metrics from both c’s in a cpg context. other auxiliary scripts are provided to produce various metrics , merge bedgraph files from technical replicates, and convert files for easy input into r for processing by methylkit
+ <cit> , bsseq
+ <cit> , biseq
+ <cit> , beat
+ <cit>  and methylseekr
+ <cit> .
+
+determining the best alignment and mapq recalculation
+like bismark, bison uses the alignment score  of each alignment from each strand to determine the correct alignment to output. as mentioned above, if multiple strands produce equally good alignments for a read then that read is marked as being unmapped. this is in contrast to bismark, which will declare the first alignment in its list as being best in these cases. for paired-end reads, the alignment scores are summed. when multiple valid alignments are found with one of them having a single highest score, the xs tag for that alignment is set to the highest alignment score of the other alignments. in cases where the best alignment already has a secondary alignment and that score is higher than those produced by alignment to other strands then the xs tag is unmodified. this modification of the xs tag allows for recalculation of the alignment mapping quality , which greatly increases the reliability of the resulting alignments .
+
+as in bowtie <dig>  bison calculates mapq scores using the aforementioned as and xs values. as these values are set using alignments from all strands, the resulting mapq score will be more accurate than simply passing through the value calculated by bowtie <dig> . the actual algorithm used is a heuristic based on the percentile score of an alignment’s as score after normalizing for the minimum valid and maximum possible such score. the higher this percentile, the higher the resulting mapq score. the difference between the as and xs values further alters this score, where a smaller difference results in a lower mapq score.
+
+marking duplicates
+as is also the case in snp calling, the presence of pcr duplicates can vastly inflate the coverage of a given region, resulting in false-positive findings in downstream analyses. because of this, bison also comes with a helper program, bison_markduplicates, to mark likely pcr duplicates. bison will consider two alignments to be pcr duplicates if they align to the same strand of the same chromosome/contig and have identical 5’ coordinates. furthermore, the methylation calls of the reads or read pairs are also compared and must match. for this, only methylation calls resulting from bases with phred scores of at least  <dig> are included, to decrease errors due to a low quality base in one read/pair. in cases where a methylation call is made in one read/pair and not the other , the reads are declared to not differ at that position. this method, then, is somewhat conservative, though less so than if methylation calls were not included in determining duplicates. as paired-end reads are considered as a unit, rather than each read being considered separately, a duplicate can only occur if another pair of reads has these identical properties. the read or pair with the highest sum of base-call phred scores is kept unmarked ). like picard markduplicates, bison_markduplicates also incorporates soft-clipped bases when determining the 5’ coordinate.
+
+quality control
+aside from adapter and quality trimming, the most important quality control step in bs-seq involves the creation of an m-bias plot , first introduced in
+ <cit> . while the reliability of the methylation calls should be constant across the length of the reads, there are often biases at both the 5’ and 3’ ends. this can be due to end-repair and decreasing read quality, among other reasons. for this reason, the methylated-c percentage of cpgs is calculated per read position and then plotted. as different strands may produce different biases, these metrics are calculated per strand. likewise, the first and second read in each pair of paired-end reads often have different biases, so they are handled separately. the program used to compute m-bias metrics in bison also performs filtering according to mapq and base phred score in a manner identical to that in the methylation extractor.when bias, such as that seen in figure 
+ <dig>  is found in a dataset, the methylation extractor that accompanies bison can be instructed to ignore the affected portions of reads. as above, this ignored portion can depend on the strand to which a read aligns and, in the case of paired-end reads, on whether the read was the first or second in the pair. the program that produces the m-bias graphs prints suggested regions to ignore to the command line and labels the regions on the resulting graphs.figure  <dig> 
+m-bias plots are useful for quality control. the methylation level averaged per position in the reads should be nearly constant, but often shows bias at the 5′ and/or 3′ end of reads. the first  and second  read in each pair is plotted separately. likewise, results of reads mapping to the original top  strand and original bottom  are kept separate. when a non-directional library is used, graphs for the complementary to original top  and complementary to original bottom  are also produced. vertical lines indicate the suggested bounds of the region for inclusion during methylation extraction.
+
+
+
+RESULTS
+to compare the performance of bison/bison_herd against bismark , bsmooth , bsmap , bs-seeker <dig>  and gnumap-bs , we simulated  <dig> million 50 bp paired-end reads from a directional library with typical error profiles using sherman . as these reads originated from known locations, we were able to assess not just the speed and resource requirements of each of the aligners, but also their accuracy. the results are presented in tables 
+ <dig> and
+ <dig> and figure 
+ <dig>  as the output of bison_herd is identical to that of bison, only bison is included in table 
+ <dig>  using only reads that aligned with mapq scores of at least  <dig>  as only these would be used for methylation calculations by default, bison produced more correct and fewer incorrect alignments than bismark. while bsmooth produced more correct alignments than bison, it produced an equivalent increase in incorrect mappings, due to not recalculating mapq scores after determining to which strand each read  aligns. other differences to bsmooth are due to bison excluding from output reads that map equally well to multiple strands, as such alignments are highly inaccurate. differences between the alignment accuracy of bison and bismark are due not only to recalculation of mapq scores by bison, but also to incorporation of base quality scores in the calculation of alignment scores and bismark’s more conservative threshold for calling an alignment valid. bsmap produced a similar percentage of correct alignments to bison, but had higher numbers of incorrect alignments even after filtering non-uniquely aligned reads. bs-seeker <dig> performed similarly to bsmap when only uniquely aligned reads were output. while gnumap-bs purports to have higher accuracy than bismark or bsmooth, this is an artifact of it producing multiple alignments for each read. if a read produces multiple equally good alignments, only the first of these is counted here, since including all of them, as was presumably done by the gnumap-bs authors, would produce meaningless metrics . a violin plot of the correct and incorrect mappings produced by each program as a function of mapq is show in figure 
+ <dig>  with the correct and incorrect metrics scaled independently. table 
+ <dig> illustrates how both bison and bison_herd have much higher performance than any of the other tested aligners, except for bsmap, even when limited to the same hardware and using the same version of bowtie <dig> with similar settings and identical numbers of threads. while earlier versions of bsmap had a similar alignment rate to bismark, more recent versions seem vastly faster than any of the aligners when using the same hardware, though there is a notable commensurate decrease in accuracy.table  <dig> 
+alignment comparison of bison with a variety of other aligners on the simulated dataset
+
+
+numbers in parentheses are metrics when only alignments with mapq > = <dig> are included, expect for bsmap, where they indicate metrics using only uniquely aligned reads .
+time requirement for each program with a variable number of available nodes to align the simulated dataset
+
+
+*all cores in the master node are used for the calculation, even though they will not all be in use. values are generally ~ <dig> read pairs per core per second if this is not done.
+bison produces more accurate results than bsmooth or gnumap-bs. the mapq density of correctly  and incorrectly  aligned reads from the test dataset for alignments performed by bison, bsmooth, and gnumap-bs. bismark, bsmap and bs-seeker <dig> are not shown as they do not produce alignments with mapq scores. scaling of the correct and incorrect metrics is performed separately, as the incorrect density would otherwise not be visible.
+
+
+
+the accuracy of alignments produced by bison and bison_herd are consistent with varying read lengths, figure 
+4a and table 
+ <dig>  it should be noted that the number of errors per read in these simulated datasets increases with read length, explaining the increase in discarded reads in the  <dig> and 150 bp datasets. the time required for alignments scales linearly with read length and is fairly stable with increasing numbers of available nodes, though this can become limited by the underlying mpi implementation and network architecture of the cluster, figure 
+4b.figure  <dig> 
+bison’s accuracy is consistent across read-length and its speed is generally consistent with increasing nodes. sherman was used to generate simulated directional datasets of variable length, as described above. the accuracy of the resulting alignments is consistent regardless of read-length, a. the percentages in parentheses under each read-length label are the total percentage of aligned reads . the speed with which bison_herd produces alignments decreases with increasing read-length, b. this rate, however, is generally consistent when increasing numbers of cluster nodes are used. note that in the test dataset, the mpi overhead required to use  <dig> nodes with shorter reads was sufficient to over-tax the mpi implementation and network. when this will occur will vary by cluster.
+
+
+bison produces consistently accurate alignments across read lengths
+
+
+numbers in parentheses are metrics when only alignments with mapq > = <dig> are included.
+
+we compared the various aligners on three publicly available datasets. err <dig> is a whole-genome bisulfite sequencing  dataset using dna from e <dig>  mouse epiblasts and has 100 bp paired-end reads from a directional library
+ <cit> . srr <dig> is a human wgbs dataset using dna from human sperm and has 100 bp paired-end reads from a directional library
+ <cit> . err <dig> is a reduced-representation bisulfite sequencing  dataset, using dna from mouse sperm and has 40 bp paired-end reads from a non-directional library
+ <cit> . each of these datasets was quality and adapter trimmed prior to alignment. for the whole-genome datasets, bison had a higher alignment speed  than the other aligners except for bsmap, tables 
+ <dig> and
+ <dig>  further, bison aligned a higher percentage of reads than all but bsmooth, however, the latter output inaccurate alignments that can originate from either strand. we looked at how concordant the alignments produced by bison are to those produced by the other aligners. here, a pair of alignments is termed concordant if both have the same start coordinate. as can be seen in figures 
+ <dig> and
+ <dig>  the overwhelming majority of alignments are concordant between bison and the other aligners. discordant alignments are typically those bison gives a low mapq, indicating that they would normally be ignored by it during methylation level calculation. as many of the other aligners do not produce alignments with mapq scores, they would include these likely incorrect alignments in this process. alignments produced only by the other aligners would generally have very low mapq scores if they had been output by bison, again due to mapping equally well to multiple strands.table  <dig> 
+alignment comparison for the err <dig> dataset
+
+
+*numbers in parentheses are metrics when only reads with mapq > = <dig> are included.
+alignment comparison for the srr <dig> dataset
+
+
+*numbers in parentheses are metrics when only reads with mapq > = <dig> are included.
+mapq distribution of concordant, discordant, and unique alignments produced by bison and the other compared aligners on the mouse wgbs dataset. reads from err <dig> were aligned by both bison and the other compared aligners  and the resulting alignments compared according to the mapq score given to them by bison. for alignments not reported by bison, the mapq scores are what they would have been had bison reported them. alignments are considered concordant if both programs aligned them to the same position. otherwise, they are considered discordant. percentages below the labels are the percent of total mapped reads falling into each category.
+mapq distribution on the human wgbs dataset. reads from srr <dig> were aligned by bison and the other compared aligners  and the resulting alignments compared as in figure 
+ <dig> 
+
+
+
+for the mouse wgbs dataset, we marked duplicates using bison_markduplicates and removed duplicates using bismark’s deduplicate_bismark program to compare how bison’s duplicate finding method compares to that of bismark. bismark found  <dig> , <dig> pairs of duplicate alignments from the err <dig> alignment produced by bismark. bison’s method marked  <dig> , <dig> pairs of duplicate alignments from the same original file. the approximately  <dig> million fewer alignments marked as duplicates by bison’s method are due to differences in methylation state within the reads.
+
+for rrbs datasets, bison, bsmap and bs-seeker <dig> offer the possibility to map to an in silico generated reduced representation genome. the time requirements, mapping rate and percentage alignment of the various aligners is presented in table 
+ <dig>  for rrbs, a typical question is not just what the alignment rate is, but also how cpg coverage varies by aligner. as indicated in table 
+ <dig>  bison, bismark and bsmooth can produce methylation-bias graphs and information from these was incorporated when calculating methylation levels from alignments produced by these aligners. similarly, both bison and bsmooth allow filtering methylation calls by both base phred score and alignment mapq and both of those were utilized . cpg coverage metrics are plotted in figure 
+ <dig> and shown in table 
+ <dig>  for reference, there are  <dig> , <dig> cpgs in the mm <dig> mouse reference genome sequence. bison generally produces higher cpg coverage than the other aligners. bs-seeker <dig> produces higher coverage than bison, though this is likely due to it not filtering methylation calls by mapq and phred score. it should be noted that gnumap-bs spreads fractional methylation calls arising from a single read across multiple positions, inflating its coverage metrics. the pearson’s correlation of the methylation percentage and coverage produced by each aligner is shown in figure 
+ <dig>  only cpgs covered by both aligners are included in each comparison. the bowtie2-based aligners produce the most similar results, unsurprisingly. bs-seeker <dig> and gnumap-bs are notable outliers, likely due to their low percentage alignment.table  <dig> 
+alignment comparison with rrbs dataset err034786
+
+
+*numbers in parentheses are metrics when only reads with mapq > = <dig> are included.
+methylation percentage and coverage comparison using the rrbs dataset. the pearson’s correlation coefficients of the per-cpg estimated methylation percentages produced by each aligner are generally high, a, upper triangle. the correspondence between gnumap-bs and bs-seeker <dig> and the other aligners, however, is notably lower, possibly due to their lower alignment rate. the pearson’s correlation coefficients of the per-cpg coverage, a, lower triangle, is also generally high. the number of cpgs with a given coverage decreases rapidly as a function of coverage regardless of aligner, b. note that cpgs with  <dig> or greater methylation calls are binned together. this binning produces the large spike at 251x coverage, which is likely due to pcr duplication.
+
+
+number of cpgs with a given coverage from the rrbs dataset
+
+
+while bison produces alignments more quickly than the other tested aligners, except for bsmap, and had higher accuracy in the simulated dataset, there are still cases for which its use is less ideal. bison does not handle color-space reads, which bismark, for example, can handle easily. as bison uses bowtie <dig> for alignment, its accuracy and speed are limited to that afforded by bowtie <dig>  furthermore, as bison utilizes mpi and requires compilation, its setup is more complicated than aligners like bismark or bsmooth, making it a less attractive option for small-scale or one-off experiments. finally, while bison can process targeted bisulfite sequencing datasets , the alignment process is not optimized to exploit the expected strand-bias of these datasets.
+
+CONCLUSIONS
+bison and bison_herd enable rapid and accurate alignment of bs-seq reads, such as those produced by the illumina hiseq. both have equivalent to superior accuracy when compared to many previously published aligners. these programs also make performing quality control of the resulting mapped reads simple. as computer clusters are becoming increasingly prevalent in research settings, the speed of these tools removes the time-burden of alignment and simplifies the process of creating alignment pipelines, allowing the researcher to begin statistically analyzing experiments in a fraction of the time previously required. the open source nature of these programs and their usage of standard formats enable further adaptation and extension by end-users.
+
+availability and requirements
+project name: bison
+
+project home page:http://sourceforge.net/projects/dna-bison/
+
+operating systems: linux, mac os
+
+programming languages: c, python, r
+
+other requirements: gcc, bowtie <dig>  mpi, pthreads, samtools
+
+license: modified mit-style license, see license file for details
+
+any restrictions to use by non-academics: license required
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+dpr conceived and implemented the program. de provided oversight and resources. both authors read and approved the final manuscript.
+

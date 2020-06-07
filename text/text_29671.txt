@@ -1,0 +1,255 @@
+BACKGROUND
+clustering of sequences  is a common and basic analysis in bioinformatics that underlies many biological analyses. clustering can be used to reveal underlying natural groupings of data. clustering can also be used to simply reduce the size of a large dataset, such that a slower, more accurate, analysis can be applied  <cit> . the results of the slower analysis can then be carried over to the rest of the sequences. in this paper we focus on one application of dna sequence clustering; namely the analysis of 16s ribosomal rna  data. the algorithms and principles underlying our tool should, however, be applicable to a wider range of sequence clustering tasks.
+
+sequence analysis of the 16s rrna is one of the most commonly used methods for measuring microbial diversity and taxonomic composition of an environment. there are two complementary approaches to the analysis of 16s data: comparative classification, and unsupervised clustering. in the comparative approach, the taxonomic identity of a new sequence can be determined if it is similar to some of the sequences present in a curated database  <cit> . this approach, however, can not be reliably used for the analysis of novel sequences, thus scientists frequently rely on methods based on the unsupervised clustering of sequences  <cit> . our work is specifically targeted at unsupervised methods. note, however, that clustering of 16s sequences can be used as a pre-processing step even in the case of database-based methods in order to reduce the size of the datasets being analyzed and to speed up the classification process.
+
+the traditional approach for clustering 16s rrna sequences involves building a multiple sequence alignment  of all sequences, computing a pairwise distance matrix based on the msa and clustering the resulting matrix  <cit> . the clustering algorithm is often a greedy hierarchical clustering algorithm which produces a rooted tree. the tree is then cut at some level, based on a specified similarity threshold, in order to construct a collection of clusters. alternatively, if the taxonomic annotation of some of the sequences is known, the tree can be used in a more elaborate semi-supervised clustering algorithm  <cit> .
+
+since the latest dna sequencing technologies have become faster and cheaper, we are now faced with very large volumes of sequence data. newer generations of sequencing technologies, e.g.,  <dig> life sciences sequencing machines, can generate millions of sequences per run, each of which has a length of hundreds of base pairs. such datasets cannot be easily clustered using the traditional approach outlined above.
+
+first of all, finding the best multiple sequence alignment is computationally intractable - this problem falls into the category of np-hard problems, i.e. problems that can only be solved by exploring an exponential number of possible solutions. multiple sequence alignment tools rely on heuristic alignment algorithms that are not guaranteed to generate an optimal alignment .
+
+the most common heuristic involves building a guide tree  that then guides the construction of the multiple alignment. often, the guide tree is constructed from a preliminary distance matrix constructed from pairwise alignments of the sequences - for large data this matrix is impractical . furthermore, determining a guide tree is difficult for large datasets since there could be many trees that fit the distance matrix equally well.
+
+an alternative to the traditional clustering approaches that rely on multiple alignments, is a simple, yet effective, greedy clustering strategy. the process starts by selecting a sequence as a "seed" for a cluster. additional sequences are added to this cluster if they fall within a certain distance from the seed. the process continues by selecting an unclustered sequence as the seed for a new cluster, and so on until all sequences have been clustered. this basic approach is employed by the programs cd-hit  <cit> ,
+
+uclust  <cit> , and our own work. the main difference between these programs is in the way the clusters are constructed, specifically, how a program identifies all sequences that are nearby a cluster seed. as we will describe in more detail below, both cd-hit and uclust search each sequence against a database of all previously constructed clusters. if the sequence does not have a good match against any of the existing clusters, it forms the seed for a new cluster.
+
+the approach we present in this paper involves searching each cluster seed against a database of all unclustered sequences, thereby "recruiting" a set of sequences to the newly created cluster. we will show that this approach allows us to leverage an efficient search data structure to rapidly cluster large sets of sequences. our approach is particularly well suited for high-stringency clustering , intended to remove redundancy in the dataset by co-clustering sequences that are identical or whose differences are primarily due to sequencing errors. representative sequences from each cluster can then be used as input to more computationally intensive analyses.
+
+related work
+there are two popular tools designed for clustering large number of sequences: cd-hit and uclust. cd-hit  <cit>  has been widely used in practice and is cited by hundreds of scientific articles. uclust  <cit>  is a newer clustering tool. uclust is based on a fast sequence search algorithm , and can be more than an order of magnitude faster than cd-hit. in the following we briefly review the algorithms used by these tools.
+
+cd-hit
+cd-hit uses a greedy incremental clustering algorithm. first the sequences are sorted in non-increasing order of their lengths. the first sequence becomes the first cluster representative. each consecutive sequence is compared to all previously discovered cluster representatives, and is added to a cluster if it is within a user-selected distance threshold from the corresponding representative. otherwise the sequence becomes the seed for a new cluster.
+
+cd-hit uses a "short word filtering" heuristic to avoid computing many of the costly pairwise alignments. specifically, each sequence is represented as a k-mer spectrum , and the initial comparison between sequences is performed between the corresponding spectra. if the k-mer counts differ significantly, it is unlikely that the sequences match each other well. cd-hit relies on a statistical analysis to estimate the minimum number of k-mers that two sequences are expected to have in common, assuming they have a certain similarity to each other.
+
+this filtering approach can be computationally expensive as it requires counting the number of k-mers shared by each sequence and all previously selected cluster representatives.
+
+uclust
+uclust follows virtually the same algorithm as cd-hit, with two major exceptions:  sequences can be sorted in different ways, rather than simply by length ;  the mapping of sequences to existing cluster representatives is performed with a new search heuristic called usearch.
+
+by default, uclust operates in an inexact mode. in the inexact mode each sequence is not aligned to all cluster centers found so far. instead uclust sorts the cluster centers based on the number of "words" they have in common with the query. each query sequence is thus aligned only with a few of the cluster representatives , which are presumed most likely to be close to it. in the exact mode uclust operates more or less like cd-hit, i.e. each query sequence is aligned to all cluster centers found so far. in this mode the word based filter is not used.
+
+the inexact heuristic guarantees that the number of pairwise alignments is linear . in practice, this approximation could result in many more clusters than the exact mode, however the extent of this "blow-up" depends on the stringency of the clustering.
+
+RESULTS
+we describe the algorithms used by our tool in the following section. in the testing section we evaluate the performance and quality of our implementation.
+
+algorithm
+the main goal in the design of our algorithms is computational efficiency and scalability. in this section we present a simple greedy clustering algorithm which avoids most of the pairwise comparisons in practice. the clustering algorithm uses an alignment search algorithm and a k-mer based filter which are also described in this section. some definitions and general concepts are covered first.
+
+definitions
+distance measure
+clustering is intimately interconnected with the definition of the distance or similarity measure used to compare the objects being clustered. several distance measures have been commonly used to compare sequence data, including edit distance  - a measure that counts the minimum number of insertions, deletions, or substitutions that are required to transform a sequence into the other; k-mer distance - a measure of the number of substrings of length k that are shared  between two sequences; and evolutionary distance - an estimate of the number of evolutionary events  that explain the differences between two sequences. in many cases more than one distance measure is used during clustering, e.g. a k-mer approach can be used to quickly discard sequences that should not belong to a same cluster, then a more precise, but slow, algorithm is applied .
+
+our approach defines the distance between two sequences to be the corresponding edit-distance where the cost function is simply unit cost for each gap or mismatch, and zero cost for matches. in the case of sequences of different lengths, we may want to allow gaps at the end and/or the beginning of the shorter sequence in the alignment, without penalty. this type of alignment is referred to as semi-global alignment. the default behavior of dnaclust is to allow gaps at the end of a sequence but not at the beginning , however other alignment policies can be selected through command-line parameters.
+
+clustering parameters
+we define the diameter of a cluster as the maximum distance between any two sequences in the cluster. our algorithm  returns one sequence per cluster as cluster representative. there is another related but slightly different concept of the cluster center, usually picked in such a manner that the maximum or average distance from it to the rest of the items in the cluster is minimized. in the following we sometimes loosely use the term cluster center to refer to the cluster representative. given a cluster representative, the cluster radius can be defined as the maximum distance from the cluster representative to any sequence in that cluster. given that the edit distance measure is a metric  we also guarantee that the cluster diameter is at most twice the cluster radius.
+
+sequence similarity and sequence identity
+the criterion used by uclust and cd-hit to evaluate distance between sequences is the amount of sequence "identity", i.e. the fraction of characters that match exactly between the two sequences being aligned. this measure also defines the clustering stringency, e.g. a clustering threshold of 99% implies that the sequences within a cluster have 99% or higher identity. in an evolutionary sense identity is a natural definition of the similarity between two sequences, primarily because insertions and deletions are difficult to fit within evolutionary models - dnadist  <cit>  usually ignores any gaps when computing the distance matrix. the identity measure, however, can lead to unintuitive alignments, especially when comparing sequences of different lengths. in addition, identity is not a transitive measure, i.e. the fact that sequence a and b are identical , and sequences b and c are identical, does not imply that sequences a and c are also identical. more generally, identity does not follow triangle inequality  + dist ≤ dist), implying that even though the cluster radius is small the cluster diameter may be high, i.e. while the distance between all the sequences in the cluster and the cluster representative is small, individual sequences may differ significantly from each other. as a result, the cluster is not as "tight" as would be implied by the distance threshold used. furthermore, the resulting multiple alignment is of lower quality. 
+
+to avoid these problems we rely on a different measure of distance between sequences: the global alignment score. in this context, the "similarity" between two sequences can be defined as:  
+
+here the "length of the shorter sequence" refers to the length before alignment and does not include the gaps induced by the alignment.
+
+note, however, that due to the different definitions of distance, the clusterings produced by dnaclust, cd-hit, or uclust cannot be directly compared at a given clustering threshold.
+
+clustering properties
+the clustering problem that we study in this work has the following form: given a set of sequences and a threshold on the cluster radius, group these sequences into clusters, and identify one sequence within each cluster as the cluster representative.
+
+given a metric distance between a set of items, any clustering of these items can have one or more of the following properties:
+
+ <dig>  the radius of every cluster is less than or equal to the specified threshold.
+
+ <dig>  the distance between any two cluster centers is strictly greater than the threshold.
+
+ <dig>  the distance between any clustered item and any cluster center  is strictly greater than the threshold. this implies that the closest center to any item is the center of its cluster.
+
+a clustering is valid if it satisfies property  <dig>  a valid clustering with the minimum number of clusters is called an optimal clustering. unfortunately, finding an optimal clustering  is np-hard  <cit> . a clustering that satisfies property  <dig> in addition to  <dig> is called an exact clustering. our search and filter algorithms are designed to be able to create exact clusterings.
+
+a clustering that satisfies property  <dig> is called a well-separated clustering.  note that an exact clustering does not guarantee that the clusters are well separated. also it is not always possible to cluster all of the items into well separated clusters. below, we will describe an algorithm  that provides well-separated clusterings.
+
+clustering algorithm
+the foundation of dnaclust is a simple greedy clustering algorithm, which is similar to the algorithms used by cd-hit and uclust.
+
+in practice, the sequences are first sorted based on their length in a non-increasing order. then at each iteration the longest remaining sequence is picked as the new cluster center. we form the largest possible cluster with this cluster center by searching through the set of unclustered sequences for all sequences that are less than a user-selected distance threshold from the cluster center. the clustered sequences are marked and are not taken into consideration any longer. 
+
+picking the longest unclustered sequence as the cluster center is necessary to ensure the correctness of clustering when the lengths of the sequences are not equal. specifically if two sequences, both of which are longer than the cluster center, are clustered together, it is not possible to guarantee that they align well to each other, i.e. these sequences could be incorrectly placed in the same cluster even if they differ significantly.
+
+in the case that all the sequences have  the same length, it has been proposed that ordering the sequences by abundance results in a better clustering  <cit> , especially in the presence of sequencing errors. the abundant sequences can be inferred to be the correct molecules that are surrounded by a "cloud" of imperfect sequences due to sequencing errors. this approach makes most sense if the data contain high coverage and relatively well separated sequences . in diverse communities, however, it can be difficult to distinguish between experimental noise and true genomic variation. in addition, determining "abundance" requires some form of clustering, either exact , or by allowing a small amount of error. dnaclust is specifically targeted at such high stringency clustering applications, and, thus, could be used as an initial step in a more elaborate clustering scheme that takes abundance into account.
+
+note, however, that a full evaluation of the phylogenetic interpretation of clustering strategies is beyond the scope of our work. our main goal was to develop an efficient and mathematically well-defined clustering approach. more complex analyses of the data that, e.g., take into account phylogenetic signal, can be performed by post-processing the output of our software. in order to generate an exact clustering, the search step must find all the unclustered sequences that are within the specified radius from the cluster center. in this context we refer to the cluster center as the query sequence. the distance measure can be based on either global alignment cost, or semi-global alignment cost, in which case the gap costs at one or both ends of the shorter sequence are ignored. either of these policies can be picked by the user using the command line options. this search is the most time consuming step of the algorithm, and is described in more detail in the next section.
+
+this algorithm can be easily modified to construct well separated clusters  as follows. each time a new cluster of radius r is constructed, we also flag every unclustered sequence within distance 2r from the center of the new cluster. the flagged sequences can not be picked as cluster centers in subsequent iterations of the greedy algorithm, but may be included in a cluster constructed around an unflagged cluster center. this approach ensures that the distance between two cluster centers can not be less than two times the cluster radius. in order to implement this algorithm all we need to do is to double the search radius but only cluster the sequences that fall within the clustering threshold.
+
+alignment search algorithm
+our alignment search algorithm is designed to find all good  global alignments of the query sequence to a large set of sequences simultaneously. the main speed up is achieved by taking advantage of the fact that we are only interested in alignments that are high-quality: have a cost which is less than or equal to a certain threshold.
+
+it is easier to explain this algorithm if we assume that all the sequences are stored in a trie data structure  <cit> . we traverse the trie using a depth first search  algorithm. at each internal node of the trie we compute the cost of best alignment of the query sequence  to the sequence corresponding to the path from root to the current internal node in the trie  <cit> . this corresponds to simultaneously matching the  prefixes of all the sequences sorted in the trie within the subtree rooted at the current node with the query.
+
+the pairwise alignment and the cost are computed using a dynamic programming algorithm, a variation of the needleman-wunsch algorithm  <cit> .
+
+first we describe the alignment algorithm for two complete sequences. assume we are trying to align two sequences s <dig> and s <dig> of lengths n <dig> and n <dig>  we fill an n <dig> × n <dig> table of numbers, such that the element at position  of the table - t - contains the score  of the "best" alignment of the first i characters of s <dig> to the first j characters of s <dig>  in our case, the types of differences that are allowed are insertions, deletions and substitutions, and t depends on only three other elements of the table:  
+
+if the table is filled row-by-row , the total amount of computation needed to fill this table  is proportional to n <dig> × n <dig> 
+
+the table is initialized as follows: if we are interested in a semi-global alignment  the first row is initialized to all zeros. on the other hand, if we assume all the sequences start at the same position  the first row of the dynamic programming table is initialized with the cost of gaps required at the beginning of the alignment. the first column is always initialized with the cost of the required gaps.
+
+since we are trying to simultaneously align a query sequence to a set of sequences, we think of one of the sequences as growing  as we backtrack through the common prefixes of sequences in a suffix trie, and update the table as necessary. on the horizontal axis of the dynamic programming table  the query sequence is fixed. on the vertical axis we have the prefixes of the sequences in the trie. as we go deeper in the trie, the dynamic programming table is filled one row at a time. each time the depth-first search of the trie traverses an edge, we only need to update one row of the table, namely the current top row. also note that at each point the cost of the best semi-global alignment of the current path to the query is the minimum value on the top row.
+
+also, assuming unit cost for each gap , we do not even have to update all of the cells on the current row in the dynamic programming table after traversing an edge in the trie  <cit> . as is shown in figure  <dig>  the dynamic programming table updates need be performed only for the cells whose bottom-left neighbor contains a value no larger than the specified cluster radius.
+
+this is due to the fact that for any two sequences s <dig> and s <dig>  and any i and j, dist ≥ dist where dist() is the edit distance.
+
+the main heuristic that speeds up this algorithm relies on the observation that it is not always necessary to compute the alignments of the query to all paths in the trie all the way to each leaf. instead, during the depth-first search, if at any point the alignment cost of the prefix is too high, the recursive search terminates without further exploring the children of the current node in the trie.
+
+the trie data structure described above is not explicitly built in our implementation. instead we keep a list of the sequences in lexicographically sorted order. as we proceed to align one of the sequences  to the query we are also implicitly aligning all adjacent sequences that share a common prefix with s. in other words, each internal node of the virtual trie corresponds to a unique consecutive sub-list of the sorted list of sequences, in which the shared prefix of the sequences corresponds to the path from the root of the trie to that internal node.
+
+effectively we first try to align the first sequence to the query . if the alignment is good then the first sequence is added to the search results. when aligning the second sequence, and so on, we can avoid re-aligning its common prefix with the previously aligned sequence, thereby reducing the cost of computation. note that if we fail to align the first say α characters of sequence i , and the common prefix of sequence i and sequence i +  <dig> is longer than α, we do not need to try to align sequence i +  <dig> at all. the search algorithm is very similar to the algorithm in  <cit> , except that the backtracking threshold is fixed as the given radius of the clusters. we use the ternary quick sort algorithm  <cit>  once, in the beginning, to sort the sequences lexicographically. the time spent for sorting the sequences is, however, much less than the time spent during clustering.
+
+star multiple sequence alignment
+one valuable output of a sequence clustering algorithm is a multiple sequence alignment representing the global relationship between the sequences present in the cluster. such a multiple alignment can be used by users to manually inspect the quality of the clustering, and can also represent the substrate for more complex analyses .
+
+we rely on a "star" multiple alignment heuristic that computes the multiple alignment from the pairwise alignments between each of the sequences and the cluster representative. the pairwise alignments between the sequences and the representative are a byproduct of our search algorithm. to construct the multiple alignment we reconcile the differences between these pairwise alignments by inserting gap characters as necessary. 
+
+this approach guarantees that the pairwise distance between any two sequences in the alignment is at most twice the cluster radius .
+
+word-based filter
+finding the best pairwise alignment of two sequences using dynamic programming is computationally intensive. it requires quadratic time in the length of the input sequences, in the general case. in our clustering application, however, it is possible to avoid calculating a pairwise alignment altogether, if we are certain that no good alignment exists. we use k-mer based filtering  <cit>  to speed up the search for sequences with good alignment.
+
+given a sequence s of length n , a k-mer is a substring of s of length k, where k is chosen to be much smaller than n. sequence s contains n - k +  <dig> overlapping k-mers, some of which may be identical.
+
+the filter is based on the key intuition that if two sequences are within a small edit distance from each other, they must share most of their k-mers. in the following we formalize this idea.
+
+let us assign numbers from  <dig> to 4k to the possible k-mers. given a sequence s, by counting how many times each one of the 4k k-mers appears in the sequence we obtain a vector of non-negative integers of dimension 4k . namely the ith element of this vector, vi , counts the number of times that k-mer number i appears in s. we call this vector the k-mer spectrum of the sequence s, and it is is denoted by spectrumk .
+
+given a vector of integer numbers, v, define pos to be the sum of the positive values in the vector. similarly define neg to be the sum of the negative values. for example, for any sequence s of length n, we have pos) = n - k +  <dig> and neg) =  <dig> 
+
+consider two sequences, s <dig> and s <dig>  that are close to each other. the following observation bounds the maximum difference between their k-mer spectra.
+
+observation  <dig>  if s <dig> has edit distance d from s <dig>  then, for all k, pos - spectrumk ) ≤ k × d and neg - spectrumk ) ≥ -k × d.
+
+proof. see part  <dig> of additional file  <dig>  □
+
+since we want to be able to report sequences that might have a good semi-global alignment to the query sequence, we have to consider the case in which one sequence is within a small edit distance from a substring of the other sequence. the following observation helps the handling of this case.
+
+observation  <dig>  if a sequence s <dig> is a substring of s <dig>  then, for all k, neg - spectrumk ) =  <dig> 
+
+lemma  <dig>  if s <dig> has edit distance d from s* and s* is a substring of s <dig>  then, for all k, pos  - spectrumk) ≤ k × d.
+
+proof. see part  <dig> of additional file  <dig>  □
+
+using lemma  <dig>  given a query sequence q, a sequence s, and a distance threshold d, if for any k we have  
+
+then we can be certain that no semi-global alignment of s to q exists which corresponds to a distance less than or equal to d.
+
+lemma  <dig> can be extended to quickly determine whether none of the sequences in a collection has a good alignment to the query sequence. we build a binary search tree of the sequences, and using their k-mer counts can quickly discard subtrees that do not have any sequence close to the query. 
+
+testing
+in this section we compare clustering speed of dnaclust with other clustering tools on different datasets. we also evaluate the quality of the multiple sequence alignment that dnaclust can produce for each cluster.
+
+speed
+dnaclust and uclust can produce exact or approximate  clusterings.  creating an exact clustering takes more time. for these tools we have measured the running time in both settings.
+
+we have created clusterings at different similarity/identity thresholds for each tool and each setting.  the radius of the clusters created range from  <dig>  up to  <dig>  similarity. 
+
+in order to evaluate and compare the performance of our program, we use two publicly available datasets. the first dataset is from the gut microbiome of  <dig> individuals. these data were generated as part of a project to evaluate the differences in the gut microbiome of obese and lean twins  <cit> . the dataset contains  <dig>  million pyrosequencing reads from the v <dig> region of the 16s rrna gene. the reads have an average length of  <dig> base pairs. we refer to this dataset as the twins dataset. the running time of various clustering tools using different setting and cluster radii on the twins dataset is shown in figure  <dig>  the number of clusters generated for each setting is shown in table  <dig> 
+
+the number of clusters produced by dnaclust, uclust and cd-hit at various identity/similarity thresholds, on the twins dataset. since each tool uses slightly different distance measures, the number of clusters can not be directly compared between different tools. . instead we compare the change in the number of clusters when switching between the exact and inexact modes of each tool - a smaller change indicating better performance.
+
+in exact mode the running time of uclust increases rapidly as the radius of the clusters is decreased. this is because a smaller cluster radius results in a large number of clusters . in addition, for highly-similar sequences, the search heuristic used by uclust becomes less efficient. dnaclust in exact mode is faster than uclust for any similarity threshold above  <dig> .
+
+uclust in inexact mode is much faster than in exact mode, and thus faster than dnaclust in most cases. in inexact mode dnaclust is faster than uclust only for similarity thresholds greater than or equal to  <dig> . both dnaclust and uclust in inexact mode are roughly an order of magnitude faster than cd-hit.
+
+as seen in table  <dig> the switch from exact to inexact mode leads to a significant change in the number of clusters generated by uclust, leading to up to 75% more clusters at the same similarity threshold. in other words, the improvement in speed comes at the cost of reduced cluster quality. in comparison, our k-mer filtering strategy  leads to only a small increase in the number of clusters , i.e. our inexact heuristic is more effective in terms of speeding up the algorithm without significantly affecting the results of the clustering.
+
+the second dataset contains all full 16s rrna sequences from the ribosomal database project  <cit> . we picked all of the sequences which were between  <dig> and  <dig> base pairs, covering almost the full length of the gene .
+
+this test is meant to evaluate the performance of our algorithm on long sequences such as those that may be generated by future sequencing technologies. the running times of dnaclust and uclust on the rdp dataset are shown in table  <dig> 
+
+the running times  of dnaclust and uclust with various similarity thresholds on the rdp dataset.
+
+the running times were measured on a single  <dig> ghz processor of an amd <dig> linux workstation. the command line options were:
+
+dnaclust infile.fasta -l -s  <dig> x -k  <dig>  > outfile.cluster uclust --input infile-sorted.fasta --uc outfile.cluster --id  <dig> x 
+
+the sequences in the rdp dataset are almost three times longer than the earlier dataset, allowing us to evaluate how our approach scales with anticipated increases in read length. the alignment algorithm is slower on these data since, at the same level of similarity/identity between sequences, the total number of differences is higher. the trends in the performance are, however, consistent with the results observed on the twins dataset. dnaclust still outperforms uclust for tighter clustering thresholds : uclust in the exact mode takes more than  <dig> hours to cluster this dataset, in contrast to just over  <dig> hours for dnaclust.
+
+please note that the results shown above ignore any connection between clusters and actual biological entities, i.e. we are primarily concerned with whether the clustering is mathematically consistent instead of whether clustering captures some underlying biological truth. in general, no fixed clustering threshold adequately captures the taxonomic structure in the data  <cit> , in part because "biological truth" is not a well defined concept . additionally, sequencing errors can blow up the number of clusters especially if the sequencing error rate is of roughly the same order of magnitude as the clustering threshold.
+
+to estimate the true taxonomic composition of a dataset we recommend a two step process that starts by building tight clusters  with dnaclust, then uses the cluster representatives  as input for a more sophisticated but slower algorithm which could not otherwise be applied to the original dataset.
+
+multiple sequence alignment
+in the following we compare the quality of the multiple sequence alignment  produced by dnaclust and commonly-used multiple alignment algorithms. we are defining the quality of a multiple sequence alignment in a very strict sense, specific to the analysis of 16s rrna data: we measure how well the distance matrix computed by dnadist  matches the clustering criteria: i.e. if the clustering threshold  is 99% identity, we expect the largest value in the distance matrix  to be lower than 2%.
+
+to evaluate the quality of the multiple sequence alignment produced by our program we compare it to two of the most popular msa tools, clustalw  <cit>  and muscle  <cit> . neither of these tools can handle as many sequences as our largest clusters contain . both of these tools crash when they fail to allocate enough memory for an n × n matrix to store the pairwise distances, where n denotes the number of input sequences.
+
+for n ≥  <dig>   <dig> clustalw, and for n ≥  <dig>   <dig> muscle could not run on a machine with  <dig> gb of ram. note that larger datasets could be aligned using muscle given additional ram or by specifying the main memory limit . the total memory requirements, however, grow quadratically as a function of the number of sequences being aligned, ultimately limiting the size of datasets that can be analyzed on commodity hardware.
+
+to compare the multiple alignment routines, we selected one of the clusters produced by dnaclust within the twins dataset. this cluster was constructed with a 95% similarity threshold , and contained  <dig> sequences. these sequences were aligned using muscle and clustalw , resulting in three multiple sequence alignments. we compared these "traditional" msas to those generated by dnaclust and uclust. a pairwise distance matrix was obtained based on each msa using dnadist  <cit> . the maximum distance between any pair of the sequences was then reported, which corresponds to the diameter of the cluster in terms of evolutionary distances inferred from the corresponding msa. the running time and the inferred cluster diameter for different msa tools are shown in table  <dig> 
+
+time spent building a multiple sequence alignment of a sample cluster using different tools, and the diameter of the msa produced, as reported by dnadist. the diameter is expected to be less that or equal to  <dig> .
+
+this experiment validates the clusters and corresponding msas produced by dnaclust using an independent tool for measuring evolutionary distance between dna sequences. the dnadist distance matrices are the underlying data used in the "traditional" 16s rrna clustering approaches. the results also demonstrate that commonly used multiple sequence alignment tools are not well suited for the alignment of a large number of sequences.
+
+dnaclust and uclust rely on a star-alignment heuristic, and use the cluster representative as the one sequence against which all the other sequences are aligned. this approach guarantees that the distance between any pair of sequences within the msa is at most twice the radius of the cluster. furthermore, this approach is efficient: building a star msa only requires time linear in the number of sequences, in contrast to the quadratic time needed to construct the guide tree in most traditional multiple alignment approaches. we further compared multiple sequence alignments produced by dnaclust and uclust. we built clusterings using both programs  from the twins dataset at the thresholds 95%, 97% and 99% . since computing pairwise distances is computationally intensive especially for large clusters, from each clustering we randomly selected  <dig> clusters containing between  <dig> and  <dig> sequences. for each cluster we also built a multiple alignment using clustalw.
+
+we generated the pairwise distance matrix for each alignment using dnadist, then computed the average pairwise distance of the aligned sequences. figure  <dig> show the distribution  of the alignments based on their average pairwise distance for each threshold. the clusters produced by dnaclust are tighter than the clusters produced by uclust at the same threshold because of the more stringent definition of distance between sequences . closer examination of the multiple sequence alignments produced by uclust shows that they tend to contain more gaps . average frequencies of gaps in multiple sequence alignments produced by dnaclust and uclust at various thresholds are shown in table  <dig>  note that the gaps do not affect the pairwise distance computation, as they are not penalized by dnadist.
+
+the average frequency of gaps in multiple sequence alignments for sampled clusters at various similarity thresholds. for each msa, the frequency of gaps is the number of gaps divided by the total number of characters in the msa. gaps before the beginning and after the end of each sequence are excluded. note that since an insertion in one sequence results in a gap in all other sequences in the msa, the ratio of gaps may be higher than the clustering threshold. since the sequence identity measure used by uclust does not take gaps into account the number of gaps in uclust msas are higher than the gaps in dnaclust msas, specially at more stringent thresholds.
+
+our results also show that the traditional approach for computing multiple alignments  results in an overestimate of the distances between the aligned sequences , confirming the observation that the star alignment strategy is more appropriate for large sets of highly similar sequences.
+
+availability and requirements
+project name: dnaclust
+
+project home page: http://dnaclust.sourceforge.net/
+
+operating system: linux - x86/x86-64
+
+programming language: c++
+
+other requirements: boost c++ libraries  <dig>  or higher
+
+license: gnu gpl
+
+discussion
+clustering is a basic problem in computational biology and other sciences. it is, however, a difficult problem. finding the optimal solution, even in very simple models, is computationally prohibitive. considering the fact that the amount of data created by sequencing machines is growing at a rapid pace , efficient algorithms for clustering are needed.
+
+in this paper we have focused on a simple greedy clustering approach. our algorithm's running time depends on the data and the cluster radius threshold, and is particularly effective at high clustering thresholds. the efficiency of our algorithm is due to a new k-mer filtering approach, and to an efficient search strategy that allows us to quickly recruit sequences that could be assigned to a cluster. the software implementation is open-source and competitive with other commonly used clustering tools.
+
+it should be noted that our focus has been simplicity, generality and performance. we do not claim to discover the underlying biological "truth". such analysis require more sophisticated algorithms and are much more computationally intensive. our tool can help in reducing the size of the data so that these, more intensive, analyses can be applied. what we provide is a mathematically well defined clustering, which is the best we can hope for given that the biological truth has yet to be unambiguously characterized in mathematical terms.
+
+we have compared our tool to state of the art software for clustering large numbers of sequences. an interesting observation is that the running time of dnaclust decreases as the radius of the cluster is decreased, whereas the running time of uclust increases. our search algorithm is more effective at higher stringencies, while the heuristics used by uclust are more effective when sequences are more dissimilar. this suggests that a faster algorithm could be developed that combines the best properties of both approaches.
+
+our k-mer based filter and alignment search algorithms can also be used for searching against databases that contain a large number of short sequences. in this scenario, the fact that our filter is completely sensitive is very useful. if the sequence database is static, our search data structures can be built once and stored on the disk for subsequent queries. we hope to add this functionality in future versions.
+
+finally, it is important to point out that there is still the need for even faster clustering tools. for very large datasets , such as the ones produced by human microbiome project, all available tools take more than a few days to run. higher performance can possibly be achieved through parallel computation, and we intend to explore such approaches in future versions of our software.
+
+CONCLUSIONS
+the datasets analyzed by biologists are rapidly increasing in size and efficient clustering algorithms are necessary to help reduce the effective size of these datasets. here we presented a novel approach for sequence clustering that is particularly well suited for high-stringency clustering, outperforming other state of the art clustering tools in this context. while our focus has been the analysis of 16s rrna sequences, the algorithms we describe can be applied in other contexts as well, e.g. to identify duplicates in high-throughput sequencing data.
+
+while more relaxed clustering thresholds are often used in metagenomic studies , using any fixed threshold is not a good approach for creating biologically meaningful clusters  <cit> . here we have focused on creating rigorously defined, tight clusters. the representatives of these clusters can be used in further analysis , in effect reducing the size of the original dataset.
+
+the software implementing our clustering approach is freely available under an open-source license.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+mg and mp designed the algorithms. mg developed the program. bl evaluated uclust. mg and mp wrote the manuscript. all authors have read and approved the manuscript.
+
+supplementary material
+additional file 1
+additional information. proofs of the lemmas, details of the k-mer filter algorithm, pseudocode, illustrations and description of the program arguments are provided in the additional information.
+
+click here for file
+
+ acknowledgements
+we thank theodore gibbons for helpful discussion and a careful review of a draft of this manuscript, and robert edgar for valuable input on the characteristics and algorithms underlying the uclust program. we also thank the anonymous reviewers who helped us clarify and improve this manuscript.
+
+this work was supported by the national institutes of health ; the national science foundation ; and the bill and melinda gates foundation .

@@ -1,0 +1,214 @@
+BACKGROUND
+the number of genome sequencing projects has grown exponentially, in parallel with a drastic reduction in the cost of sequencing. for example, at the turn of the millennium the cost of sequencing  <dig> mbp of genomic dna  was about  <dig> thousand us dollars, compared to around  <dig> us cents at the time of writing  <cit> . scientists are continuing to develop faster and cheaper methods that will allow the routine sequencing of individual patient genomes, thus truly ushering in the era of genetics-based personalised medicine.
+
+the human genome is not the only one of interest to the research community, and the progression of sequencing technology also has huge consequences for studies involving the genomes of other organisms. at present, hundreds of different organisms, from all living kingdoms, have been sequenced and thousands more projects are on-going. these developments have put comparative genomics into the spotlight in order to provide the tools for studying relationships within this flood of data.
+
+pairwise sequence comparison algorithms have been implemented since the early days of bioinformatics. original algorithms for global  <cit>  and local alignments  <cit>  were designed using dynamic programming techniques that result in quadratic calculation time and memory consumption proportional to the product of the total number of bases analysed.
+
+when sequence analysis jumped from individual genes and proteins to full genomes, new software appeared, such as megablast  <cit> , mummer  <cit>  and gepard  <cit> , the latter of which has been reported to be able to compare more than  <dig> mbp of human chromosome- <dig> in approximately  <dig> h  <cit> . these software adopted some ideas introduced by the heuristic sequence database searching algorithms fasta  <cit> , and later blast  <cit> . these algorithms introduced a computational space reduction strategy based on the fast identification of matching points  that are in turn used as seed points for the extension of local alignments. in fasta, these matching points are perfect matches between k-mers  from each sequence, while blast allows certain mismatches, thus enhancing its sensitivity. other computational space reduction strategies confine the search to the most probable matching space , or limit seed extension to regions with a minimal concentration of hits .
+
+additionally, some of the previous software adopted other ideas coming from the string matching field such as the generalized suffix trees and suffix array data structures  <cit>  which reduce significantly the computational complexity but still involves the use of significant memory resources . in order to overcome the mentioned memory issue, a number of disk-based implementations were developed . despite using customised strategies to minimize the i/o operation overhead, they reported higher execution times for indexing the human genome  compared to  <dig> h for our proposed indexing strategy.
+
+in general, the reference software was designed to deal with genes, proteins and small genome sequences and since are now used for much larger datasets than they were originally designed for, they are now reaching their limit in terms of memory capacity and efficient computation on single-cpu systems. consequently, there is a pressing need to design new software that tackles the memory consumption problem caused by the analysis of very large genome sequence datasets. a good strategy to deal with this problem is to move data that does not fit into internal memory to external memory , following what is known as an out-of-core strategy  <cit> . however, since there is a difference of several orders of magnitude in access time between the two memory layers, special care must be taken in order to avoid performance degradation. some of these approaches have previously been applied to bioinformatics  <cit> , but not specifically for pairwise genome comparison.
+
+in this document we report on gecko , a modular application designed to identify collections of hsps by pairwise genome comparison procedures, that can then be used to obtain gapped fragments. our work improves on previous methods by introducing controlled memory usage and a modular design that allows further comparisons to be performed without the need to recalculate intermediate results and thus without sacrificing performance. we have benchmarked the application in terms of both performance and results quality. we designed experiments with datasets ranging from short sequences in the kilobase range to larger sequences up to  <dig> mbp in length in order to compare gecko against the best currently available software under both unfavourable and favourable conditions respectively. in addition, we performed a massive comparison exercise between mammalian chromosome sequences in order to test one of the key improvements of the application: the avoidance of intermediate result re-calculation. in the tests with short sequences, gecko was slower compared to existing software, but with long sequences, the results were comparable or superior in terms of performance. the results quality in both cases  was superior. binaries are available from http://bitlab-es.com/gecko/. source code is available from: https://sourceforge.net/projects/gecko-aligner/.
+
+methods
+to overcome the limitations of existing sequence comparison methods we focused firstly on the application-specific reduction of main memory and computational space usage, and secondly on modularising the process using classical software engineering concepts. in the next sections, we explain how we reduce memory usage using an out-of-core strategy designed to manage data structures that are too large to fit into main memory at one time. naturally, memory management could be delegated to the operating system using virtual memory concepts; however poorer data locality can result in performance degradation in memory intensive applications such as large-scale sequence analyses. in addition, we explain the strategies applied to the design of gecko :  dictionary calculation,  hits determination,  hsp detection, and  hsp post-processing.
+fig.  <dig> summary of gecko’s modular design. the branches on the top represent dictionary computation using the binary tree for each sequence. once the dictionaries are calculated, perfect matches between words produce a set of seed points . afterwards, hits are sorted  and filtered. finally, the hits are extended to generate a set of hsps . an additional figure with a real example is provided in section  <dig>  of the additional file 1
+
+
+
+
+memory consumption and computational space reduction
+this section describes our approaches for dealing with the memory usage problem with an out-of-core solution, while compensating for the slower access time of secondary storage devices in several ways:
+sensitivity studies involve obtaining results for different k values  and require computing word dictionaries for each value. it is easy to realise that a collection of words of length k contains all the prefixes with k′<k . regardless of word length, the number of words is practically the same . therefore the dictionary is calculated only once using a large k value . it is important to note that although k is calculated with a value of  <dig>  the value of k′ is selected by the user at the seed points step, based on their knowledge of the sequences’ similarity.
+
+words are compressed on disk with a compression rate of  <dig> by using  <dig> bits per letter. this is possible because the k-mers are strictly composed of the {a, c, g, t} symbols of the dna alphabet.
+
+larger k values produce a lower number of word matches between sequences, mainly due to less frequent repetitions, and result in a greatly decreased number of potential seed points from which to extend the alignment. on-the-fly dictionary analysis of stored words  help users select the most appropriate k value. in some circumstances low complexity regions  can result in an excessive number of seed points or hits that can severely affect performance. gecko includes a sampling procedure that limits the maximum number of hits analysed in a given area according to a user defined parameter. this effectively limits the number of hits in repetitive regions to a number of equally spaced “samples”, thus reducing the processing impact of lcrs without affecting normal sequences.
+
+it is possible to further reduce the number of selected hits by using a proximity criterion, whereby additional seed points must be separated by a minimum distance parameter from other hits in order to be extended.
+
+the computed k-word dictionaries remain available for subsequent processing when comparing genomes, which significantly reduces i/o load.
+
+
+
+to reduce computational space usage we followed a similar strategy to that used by some existing solutions, which depends on the identification of common k-mers present in both sequences that are then used as seed points for local alignments.
+
+modular design
+as mentioned above, the second major improvement of our design was to modularise the process. the application is designed to be used for multiple genome data analysis, allowing for parameter sensitive studies as well as all-versus-all comparisons of genome collections. with the aim of reducing dependencies and repetitive actions, we organised the application workflow as follows :
+one-off creation of a k-mer dictionary for each genome or sequence. the dictionary is stored on disk as a hash table, containing the words that appear in the sequence together with their positions.
+
+once calculated, k-mer dictionaries are then used to identify starting points  that will be used to obtain the hsps. these seed points correspond to all possible matches produced between dictionary words. it is worth noting that the k value is parameterised at this point, with smaller k values derived as prefixes from the same dictionary.
+
+next, the application produces a local alignment  based on the calculated starting points, extending them in forward and reverse directions. from this point, all hits covered by a valid hsp are not analysed further.
+
+to illustrate possible post-processing steps, several accessory modules have been developed such as hsp visualisation ; data format converters to allow the use of other visualisation software packages and further data analysis tools such as the k-mer frequency analysis program.
+
+
+
+with minimal performance losses several software development features have been incorporated into gecko to enable the development of a set of multi-platform applications. examples include the usage of generic data types with the same representations in  <dig> and  <dig> bit architectures, the implementation of data access functions to read/write binary files in order to avoid endianness problems and buffering strategies to minimise i/o operations and improve performance.
+
+in the following sections we go into the details of each step performed by the gecko application in chronological order.
+
+dictionary calculation
+the dictionary calculation is based on the well-known binary tree in computer sciences. each tree node contains a word  and its list of occurrences . following the behaviour of a binary tree, left hand side nodes of a given tree come lexicographically before nodes on the right hand side. to avoid memory consumption problems caused by the huge number of possible words , we decided to split the calculation in p steps , thus reducing the amount of memory used by the program by a factor of p . to split the dictionary and conserve its lexicographical order, a prefix of length log4p is used. this strategy requires us to iterate p times over the whole sequence, using a different lexicographically-organized prefix each time to preserve word order. to avoid memory allocation requests for each node, a single memory pool is reserved at the beginning of the process. new memory pools are then only reserved once the currently reserved memory is used up. to obtain the final result we traverse the tree in order, storing the word contained in the node together with the list of occurrences. we considered other strategies for this step, such as a prefix tree and a suffix array, but found that they experience memory consumption issues similar to the problems faced by existing software approaches.
+
+hits determination
+the second section of the workflow corresponds to the identification of the starting points or seeds for the local alignment. if a word wi appears n times in the first sequence at positions pj; and the same word wi appears m times in the second sequence at positions pk, a hit will occur in all  coordinates producing the following set h={,...,,...,,...}. all these hits are then considered starting positions for possible local alignments. depending on how similar the sequences are and also on the k value used, the number of resulting hits could be very high. it is highly recommended to mask low complexity regions in order to reduce the hits produced by repetitive sequences. to reduce the number of hits further we have applied a proximity approach, by which those hits on the same diagonal, defined as d=, and at a predefined distance are combined. this can be achieved quickly and easily by sorting hits by diagonal , what is performed using a threaded version of the quicksort algorithm, and then combining the hits that are within the distance parameter value.
+
+hsp detection
+the last calculation step consists of producing a set of ungapped hsps that conform to a local alignment. an hsp is defined as a substring matching sequence whose positive accumulated score cannot be increased by extending the fragment at either of its extremes . the score is calculated either by adding or subtracting a given weight value  depending on if a match or mismatch is given, respectively. the fragment starts from a hit with a positive score , and is extended along the sequence modifying the overall hsp score until it becomes negative or the end of one of the sequences is reached . fragment boundaries are positions that give the highest accumulated score at both ends as hsps are extended in both directions along the sequence . the algorithm continues searching for hsps within the next hit in the diagonal or the first one of the next diagonal. if the next hit in the same diagonal has been covered by extension of the previous hsp, it would not be used because it will result in a redundant sub-hsp within the previous one. gecko outputs a set of identified hsps that are defined by starting and ending coordinates in both sequences, together with hsp length, score and identity levels.
+
+hsp post-processing
+almost all existing methods provide a way of graphically representing local alignments after computation. gecko incorporates its own visualisation procedure that generates a png file as well as the ability to output its analyses in formats that can be processed by the visualisation methods included with existing analysis programs. in addition, gecko includes post-processing applications that enable tasks such as the ability to apply additional filters to hsp collections or generate gapped alignment constructions based on ungapped ones.
+
+RESULTS
+dataset
+the selected test dataset contains sequences of different sizes in order to thoroughly compare gecko with other state-of-the-art methods under both favourable  and unfavourable  situations. specifically, the dataset is composed of short , medium , and large  sequences . the large mammalian sequences will also be used for an all-versus-all experiment.
+
+
+infrastructure and reference software
+gecko performance will be compared against equivalent state-of-the-art applications such as gepard  <cit> , mummer  <cit> , mauve  <cit> , lastz  <cit>  and last . either the source code or pre-compiled binaries were downloaded from the sources provided in the corresponding manuscripts. gecko was compiled using gnu c compiler  version  <dig> . <dig>  with “-o3” and “-d_file_offset_bits=64” compiling options . all the reference software was used in their command line versions in order to do a fair comparison with gecko which is also executed through the command line .
+
+the tests reported in this document were performed using an openstack cloud instance configured with  <dig> intel xeon e312xx   <dig> ghz equivalent cores, 8gb of ram and the ubuntu  <dig>  lts 64-bit operating system. for storage, a 300gb openstack volume was used. the underlying physical disks of the openstack setup were conventional ones . the cloud instance was deployed within the risc software gmbh cloud facilities in hagenberg, austria. due to the inability of some current software to run in the mentioned infrastructure with large sequences , we additionally used picasso shared memory multiprocessor located at the university of málaga . it contains  <dig> nodes, each with eight intel e7- <dig> processors which delivers  <dig> gflop/s each, giving a peak performance of  <dig> tflop/s. each node has  <dig> tb of ram giving an aggregate memory of  <dig> tb.
+ <dig> 
+2800
+ <dig> 
+11100
+79212
+7
+0
+8
+4
+.
+0
+0
+∗1
+ <dig> 
+ <dig> 
+ <dig> 
+190448
+ <dig> 
+1564816
+
+
+results shown in this section  correspond to sequential  execution of each module except for the hit sorting method that used  <dig> threads running on one  <dig> core cpu. further benchmarks using diverse collections of additional data are available in the additional file  <dig> 
+
+pairwise tests
+multiple tests of the proposed out-of-core implementation have been designed within the simple pairwise comparison framework to evaluate memory consumption as a function of sequence length.
+
+multiple comparison tests
+this exercise was designed to test the advantages of saving intermediate results to disk. the test involves comparing human  chromosome  <dig> against the same chromosome in several other species. figure  <dig> displays the visualisation of the resulting hsps for p. troglodytes, m. mulatta, p. abelii, g. gorilla, m. musculus, r. norvegicus, b. taurus, c. familiaris and s. scrofa. it is worth noting, that only execution times of some methods are shown, due to the inability of the rest to run these tests in the mentioned infrastructure.
+fig.  <dig> separate dotplot-like representations of human chromosome  <dig>  compared to equivalent chromosomes from several other mammalian species:  pan troglodytes,  macaca mulata,  pongo abelii,  gorilla gorilla,  mus musculus,  rattus norvegicus,  bos taurus,  canis familiaris and  sus scrofa. red colour indicates forward strand fragments and black the reverse strand ones. plots indicate that there are closely-related  and remotely-related  sequences. this is caused by the fact of that chromosome numbering was based on their length and not their content. for example, human chromosome  <dig> is present in several chromosomes of bos taurus . an image with the first five sub-plots projected over one sequence is provided in the additional file 1
+
+
+
+
+in all cases, we took into account the execution time of the full pipeline, as this test was designed to evaluate the worst-case situation. as explained in the methods section, gecko only needed to obtain the dictionaries once for the previous set of comparisons. for the sake of understanding the impact of this step and to aid comparisons with other methods, gecko dictionary calculation times are shown in table  <dig> and the total time is shown in table  <dig> 
+
+
+results quality
+although the performance aspects of gecko’s design are crucial, the production of high quality results is equally important. in this section we explain how we evaluated the quality of the results produced by our algorithm versus the other applications using the same parameters. the rationale behind our evaluation was to compare the coverage of the hsps detected by each algorithm. to avoid biases in the evaluation we decide to obtain a consensus set of reference hsps. this set is composed of those hsps reported by at least half of the reference algorithms. the hsps produced by gecko were then mapped over the reference hsps and the percentage of coverage recorded as a measurement of result quality. this means that matching positions reported by the consensus hsp reference and not reported by gecko will push down the quality and vice versa. there are more sophisticated ways of comparing the results, such as only considering coding regions, or by qualifying and weighting matches depending on sequence type or section. however, we decided not to use these methods as they can incorporate noise or biases into the evaluation.
+
+following this procedure, we performed quality evaluation on sets of both closely- and remotely-related sequences in order to thoroughly study the results of gecko. in the case of closely-related sequences, our evaluation determined that gecko detected  <dig> % more hsps than the consensus set. moreover, gecko obtained a larger dataset while maintaining identity values over  <dig> %, thus representing the identification of additional statistically-significant hsps. for both short and long remotely-related sequences, gecko again obtained an average of  <dig> % more hsps with identity values above  <dig> %. in addition to the coverage study, we also evaluated the identity values of the hsps reported by gecko compared to those of lastz. this test produced similar results for the two methods albeit with slightly better values reported by gecko .
+
+visualisation
+strictly speaking gecko is not intended for dotplot-like visualisation. however, we provide two alternatives:  two different programs able to generate 2d representations, one for single pairwise comparison results, capable of analysing forward and reverse hsps ; and the second for multiple comparisons whereby all comparisons are projected over one of the sequences selected as the reference. obviously, any of the compared sequences can be used as the reference;  small plugins that allow gecko results to be converted into formats compatible with commonly used visualisation methods.
+
+discussion
+considering that gecko’s implementation was designed primarily for very large sequence comparisons, it compares surprisingly well with the reference software packages when analysing short sequences. it is as fast as gepard even when the dictionaries were not pre-calculated. gepard reports  <dig> s for  <dig> mbp genomes, compared with  <dig> s for our implementation. in the cases of mummer, last and lastz, our execution time was greater, due to the different strategy we are following compared to the suffix array indexing they are using, but still the difference is acceptable since the execution time is not that high. however, for longer sequences, our method strongly outperforms existing methods. gecko needed less than  <dig> h in average to compare chromosome  <dig> from different species  against the  <dig> h and a half in average of gepard and mummer and the  <dig> h of lastz . since all the reference software packages manage data structures in core memory, their good performance with short sequences was predictable, but this also means that their performance degrades as sequence size grows, entering into starvation when no more computational resources are available. this is due in part to the use of the suffix array data structure which in one side reduces the computational complexity but in the other increases the memory consumption up to  <dig> times the length of the input sequence in the most efficient implementations. for comparison purposes and to prove the mentioned suffix array memory consumption, we implemented a suffix array version of the program which significantly reduces the computation time compared with our actual dictionary strategy, but as mentioned is using more memory . the results of these comparisons are shown in table  <dig>  and more details are available in the additional file  <dig> at section  <dig> .
+
+gecko’s implementation showed real-world performance gains ranging from  <dig> % versus gepard for tylcv comparison, to  <dig> % versus last in the case of drosophila comparison .
+
+in- or out-of-core implementations and modularity
+traditionally, bioinformatics programs, in common with conventional software development practices, are designed to perform calculations with the data loaded in main memory. this is in order to take advantage of the difference in access time between main and external memory, which is in the range of several orders of magnitude. however, the growth rate of available data has been even greater than the growth of the typical amount of ram memory available. although some specialised infrastructures offer tb quantities of ram, such facilities are not yet routinely available to the global research community, while the quantity of available sequence data continues to spiral.
+
+clearly, in the era of big data it is increasingly impractical to keep all the data in core. consequently there is a pressing need to re-design trusted software packages, as well as to develop brand new software strategies to tackle this problem. it is valid to exploit the particular data flow of each specific application, but generic solutions that can be applied to new problems as they emerge should ideally be the final target of developers. in this sense, our work here explores how both approaches can be combined to better exploit their advantages. the out-of-core implementation used in gecko has the following advantages:
+it removes any dependence on k-mer size, giving rise to the possibility of using small prefixes for short sequences and bigger values for larger ones. we have identified  <dig> as a maximum k value that gives the exact matches that are useful for this type of application, especially while comparing distantly-related sequences. greater k values did not produce enough seed points for a meaningful comparison .
+
+working in disk allows word dictionaries computed by previous program instances to be preserved in secondary storage, thus reducing the time required for multiple comparison studies. as can be seen in tables  <dig> and  <dig>  the time saved by dictionary pre-calculation is around  <dig> % of total elapsed time for remotely related sequences and  <dig> % for closely related ones. for all-versus-all studies, with n∗/ <dig> comparisons, the time reduction is even greater since we save repeating dictionary-recalculation n− <dig> times. this is one of the drawbacks of current methods. it is important to note, that the time to access the dictionary from disk is less than the combined time to access the sequence from disk and re-build the dictionary, what confirms the improvement of storing it in disk.
+
+the modular implementation of gecko stores intermediate results to disk, which facilitates the development of small and simple software components that allow the exhaustive analysis of the program’s final output, as well as intermediate data such as word frequencies, word structure, comparative studies, extreme frequency analysis, functional genomics annotation and data visualisation. this method for organising execution even allows interactive analysis, with the possibility of re-executing specific parts of the analysis with different parameters.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+k-mer size parameter
+it is not difficult to deduce from all of the above that the time needed to complete each analysis is determined by word size , and strongly affected by both noise and the algorithm’s seed point detection sensitivity. k-mers are stored as k =  <dig> to avoid having a large collection of dictionaries for each k value. k =  <dig> contains all the k-mers for k′<k with no additional processing, values that are especially useful to obtain enough exact matches for distant sequences. the software is designed such that it can be used with k values greater than  <dig> in case that future sequences and/or applications require such a change. using an incorrect k value will degrade performance due to the large number of k-mers repetitions. to avoid starvation gecko uses a sampling scheme for very common repetitions.
+
+parallel execution
+although this work did not specifically address the issue of parallel execution, it is interesting to make some observations concerning this topic. most of the processes described in the procedure are appropriate for parallel execution. a simple dataset-splitting process would allow the distribution of partial components from computation by different processors, followed by the collection and reassembly of results. for instance, it would be possible to distribute the processing of k-mers by the first program by sending words starting with a given prefix to different processors. each process would produce a partial dictionary of words with a given prefix that can then be used by separate processes to calculate the seed points sharing the same prefix. for example, there are  <dig> different 3-letter prefixes, assuming a 4-letter dna alphabet, which would produce  <dig> sub-dictionaries for each sequence and  <dig> comparisons to calculate seed points.
+
+although the processing times achieved by gecko for the test analyses reported here were acceptable even when calculated using a single processor core, there are clear advantages to developing sequence analysis algorithms that take advantage of multi-core systems. in the context of ever increasing sequence dataset sizes, the development of parallel-processing implementations of sequence analysis software will be particularly important for multiple genome comparison studies.
+
+CONCLUSIONS
+this document presents gecko, a pairwise genome comparison application based on an enhanced reduction of memory consumption and computational space, combined with a modular out-of-core implementation with several important advantages, including k value independence, complexity reduction, high performance and high results accuracy.
+
+additionally, software components can be easily added to this application to extend its capabilities in the spirit of software developer collaboration. new modules can be added without needing any change to the current architecture. example programs currently available include: k-mer frequency calculation, analysis of over- and under-represented word sets, pre-visualisation monitoring tools and full construction of local ungapped fragments including their alignment.
+
+a set of benchmarks demonstrates the effectiveness of gecko’s implementation, even on a single cpu machine.
+
+gecko does not require custom software or libraries to run. it can be executed within a variety of computing environments, from simple desktop pcs to more complex architectures such as clusters.
+
+this software aims to facilitate massive comparisons of genome-sized sequences, as well as more complex evolutionary studies. currently the output provided by this program is being used to identify evolutionary events such as inversions, transpositions and gene duplications. these studies have already provided new insights into evolutionary models of populations and species  <cit> , as well as comparative metagenomic studies  <cit> .
+
+ongoing work is focused on three main lines. the first is to develop additional modules to improve and extend the results generated by gecko. the second is the parallelisation of the full pipeline and the last is to provide user-friendly environments on desktop and mobile platforms to make using gecko as easy and accessible as possible.
+
+additional file
+additional file  <dig> 
+supplementary material. 
+
+ competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+otrelles initiated the work by developing an initial prototype and also supervised the work. otorreno started from the developed prototype and has contributed in code refactoring, with new ideas for the pre-processing calculation step, as well as general code improvements in terms of functionality and performance. both authors contributed to the manuscript’s preparation. both authors read and approved the final manuscript.
+

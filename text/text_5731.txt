@@ -1,0 +1,128 @@
+BACKGROUND
+correction of short biological sequencing reads is a very critical task. many algorithmic techniques to correct short reads generated from ngs platforms can be found in the current literature. based on the techniques used in correcting errors we can classify them into three types: k-spectrum based, suffix tree/array based, and multiple sequence alignment -based. in k-spectrum based techniques the reads are at first decomposed into overlapping substrings of length k. each substring is called a k-mer and the set of all k-mers is termed as k-spectrum  <cit> . the first k-spectrum based error correction algorithm has been built into the assembly tool euler sr  <cit> . it uses a spectral alignment method where it deduces a spectrum of trusted  k-mers from the input data and then corrects each read in such a way that every read contains only sequences from the spectrum. according to  <cit>  a k-mer is considered solid if its multiplicity exceeds a predefined threshold and insolid otherwise. reads containing insolid k-mers are then transformed to solid k-mers using a minimum number of edit operations.  <cit>  follows a variant of this mechanism to correct erroneous reads.  <cit>  presents a parallel algorithm to correct erroneous reads. this algorithm is based on spectral alignment proposed by  <cit>  and  <cit>  and uses the cuda programming model. quake  <cit>  applies the same k-mer spectrum framework as described above. in addition, it introduces quality values and rates of specific miscalls computed from each sequencing project. it calculates an appropriate coverage cutoff between trusted and erroneous k-mers. it is based on calculating the weight of a k-mer as the weighted sum of all its instances, i.e., bases using the quality values assigned to each base.
+
+reptile  <cit>  also incorporates the k-mer spectrum approach and exploits quality information of bases when available. it corrects errors by simultaneously examining possibilities to correct erroneous reads employing a hamming distance-based approach and contextual information between neighboring reads. the algorithmic approach of  <cit>  is very similar to reptile. at first it sorts the k-mers to find the set of distinct k-mers and also the multiplicity of each distinct k-mer. it then constructs the hamming graph and then finds the connected components from the graph. each connected component is termed as a cluster. each cluster is then processed to find a consensus string and erroneous reads are corrected based on the consensus string. musket  <cit>  is an efficient multi-stage k-mer based corrector for illumina short-read data. it employs bloom filter to count the number of occurrences of all non-unique k-mers. to correct errors musket employs three mechanisms namely two-sided conservative correction, one-sided aggressive correction, and voting-based refinement. another k-spectrum based error correction tool is racer  <cit> . in racer a predefined threshold t is introduced to correct errors. a nucleotide a following a k-mer is assumed correct if the count of the k-mer is ≥ t and erroneous otherwise.
+
+in the alignment approach, multiple alignments are computed for the probable aligned reads. the errors are then detected and corrected based on the columns of the alignment. some of the early error correction tools using multiple alignments include mised  <cit>  and arachne  <cit> . coral  <cit>  and echo  <cit>  are two of the most recently developed multiple alignments based techniques. coral starts by indexing all the k-mers and their reverse complements. it records each k-mer and a list of reads associated with the k-mer by creating a hash table. after indexing, each read is taken as a base read and is aligned with other reads that share at least one k-mer with the base read. needleman-wunsch algorithm is used for alignment. a problem with any alignment-based approach is that it is a computationally very expensive procedure. shrec  <cit>  and hitec  <cit>  avoid the computation of multiple alignments by traversing a suffix tree/array data structure. shrec is based on the generalized suffix tree. on the contrary, hitec is based on a more space efficient suffix array data structure. one of the variants of shrec is hybrid-shrec  <cit> .
+
+materials and methods
+any read r can be corrected using reads that sufficiently overlap with r. these overlapping reads can be aligned to r and each character in r can then be corrected using consensus. if the number of overlapping reads is large and the error rate is low, one would expect that the number of incorrect characters in any column in the alignment will be very small and hence the consensus will indeed be the correct character. to identify overlapping reads, we employ hashing based on k-mers . next we describe our error correcting algorithm ec. there are  <dig> main basic steps of ec:
+
+candidate neighbors generation
+at the beginning, for each read we identify a set of reads coming from the same genomic region with a high confidence. this is done by employing a hashing scheme. specifically, we generate k-mers in each of the reads and hash the reads using the k-mers. as a consequence, we can expect that similar reads fall into the same hash bucket. in this approach any read r will be hashed into at most r - k +  <dig> entries  of the hash table where r = |r|, the length of the read. for every read r we collect reads from the buckets that r falls into. reads from the same buckets where at least one k-mer of r falls will be candidate neighbors of r.
+
+true neighbors selection
+since candidate neighbors of each read r are identified by considering at least one identical k-mer shared between r and its candidate neighbors, some of those neighbors may not come from the same genomic region. in this step we discard those candidate neighbors that are not likely to be true neighbors of r. true neighbors are those candidate neighbors of r that come from the same genomic region with high probability. this is the most time consuming step in the ec algorithm. let r be any read and let r' be the candidate neighbor that has a sufficient overlap with r. in this elimination step we compute the hamming distance between the two reads in the overlapping region. if this distance is greater than a threshold, we eliminate r' from the neighbor list of r. if not, we keep r' as a true neighbor of r. it is to be noted that the two reads from the same genomic region might fall into more than one buckets together. in this case we identify and use the largest overlap between the pair.
+
+alignment and correction
+if r is any read and t  is the list of true neighbors of r, we correct r using t . we align every r' ) with r using our greedy alignment algorithm  <cit> . after aligning the reads in t  with r, we correct r using consensus. specifically, let i be any position of r. we observe the characters in the reads of t  that occur in the same position and from out of these characters we pick the consensus . the consensus character is used to correct the character in position i of r. note that in this step both corrected and uncorrected reads are used to perform the correction. a corrected read is called perfect if the correction procedure could not find any incorrect bases. specifically, let r be any read. then t  will have both corrected and uncorrected reads. we align all the reads of t  with r. since we can be more confident that the perfect reads are error free, we give a larger weight for perfect reads than other reads while correcting r. for example, while correcting a specific position of r, we look at all the characters in the reads of t  that occur in the same position. from out of these characters, any character from a read which is not perfect will be given a weight of  <dig> and any character from a perfect read will be given a weight of w , while calculating the consensus character for this position. when the coverage is high we choose a smaller value for w than when the coverage is low. steps of the algorithm are shown in algorithm  <dig> 
+
+algorithm 1: ec
+
+input: a set s of reads
+
+output: a set s' of corrected reads
+
+ <dig>     generate k-mers of each read and hash the reads based on these k-mers. equal k-mers fall into the same bucket. if r is any read, any other read that falls into at least one of the buckets that r falls into is treated as a candidate neighbor of r. for every read r create a list c of candidate neighbors.
+
+ <dig>     let r be any read. align every read in c with r. let r' be any read in c. if r and r' overlap sufficiently and if in the overlapping region the hamming distance between r and r' is small, then we treat r' as a true neighbor of r. for every read r construct a list t  of neighbors of r in this fashion.
+
+ <dig>     let r be any read. r is corrected using the reads in t . greedily align r' with r for every r' ∈ t. r is corrected by taking a consensus across every column in the alignment. perform this step for every read r.
+
+complexity analysis
+in this section we analyze the time complexity of ec. let n be the number of reads, r be the read length, and c be the coverage. in the first step of ec, we build hash tables and generate the candidate neighbors. the number of k-mers generated from each read is r - k +  <dig>  let h be the has function employed. we think of the hash table as an array of buckets . each bucket has an integer as its index. if the size of the array is n, then the index of any bucket is an integer in the range . the expected size of each bucket is nn=ornn. the total time spent in building the hash table is o. after constructing the hash table we find candidate neighbors of each read. a read falls into at most r - k +  <dig> <r buckets and hence the expected number of candidate neighbors for each read is or2nn. for every bucket we spend an expected ornn <dig> time. thus the total time spent in finding candidate neighbors has an expected value of or2n2n.
+
+in steps  <dig> and  <dig> we find true neighbors and align reads. specifically, if r is any read and c is the list of candidate neighbors of r, then the expected size of c is or2nn. for every read r' ∈ c, we align r' with r and compute the hamming distance between r and r' in the overlapping region. thus for every r' ∈ c we spend o time. as a result, the total time spent in step  <dig> for each read is expected to be or3nn. summing this over all the reads, the total expected time spent in step  <dig> and  <dig> is or3n2n.
+
+in summary, the expected run time of ec is orn+r3n2n.
+
+probabilistic analysis
+in this section we provide a probabilistic analysis for the effectiveness of ec. consider a random model for the genomic sequence. such models have been employed by others in their analyses as well. see e.g.,  <cit> . in particular, assume that each character of the genome g has been uniformly and randomly picked from {g, c, t, a}. when we hash a read r based on its k-mers, all the neighbors of r should also fall into the same buckets. also, the number of reads that are not neighbors of r and that fall into the same bucket as r should be small.
+
+let x be a k-mer of r. let r' be any read that is not a neighbor of r. let y be any k-mer in r'. we can compute the probability that r and r' fall into the same bucket as follows. if x and y are two random k-mers, probability that they are equal is 14k. the probability that x is the same as one of the k-mers of r' is thus ≤ r14k. also, the probability that r and r' will share at least one k-mer is ≤ r214k. here we have assumed that the hash function is one-to-one.
+
+note that in each read, errors are introduced with an error rate of ∈ in the sequencing process. even when we incorporate these errors, the above analysis will remain the same since if we have two random bases a and b and each is either kept the same or changed to another random base with probability ∈, the probability that these two bases are equal will remain the same as 1/ <dig> 
+
+example: if r =  <dig> and k =  <dig>  then the above probability is ≤  <dig>  × 10− <dig>  for the same value of r, if k =  <dig>  then this probability is ≤  <dig>  × 10− <dig> 
+
+in summary, if we choose k to be large enough then, for any read, the size of c will be very nearly the same as that of t .
+
+we also have to ensure that for any read r, each neighbor r' of r will fall into at least one bucket that r falls into. in other words, we have to show that r and r′ will share at least one k-mer. let the length of the overlapping region between r and r' be w. there are w - k +  <dig> k-mers in this region for each of r and r'. let x and y be any such k-mers of r and r', respectively. probability that x and y are the same is p=2+13∈2k. prob =  <dig> - p. probability that x is not the same as any k-mer in the overlapping region in r' is w-k+ <dig>  clearly, this statement assumes independence among the k-mers in the same read which may not hold. such analyses have proven to yield some good guidelines in practice . the probability that no k-mer in the overlapping region of r is the same as any k-mer in the overlapping region of r' is  <dig>  as a result, the probability that r and r' share at least one k-mer in the overlapping region is 1- <dig>  this probability can be made very large by choosing an appropriate value for k. if we do so, then for every read r, we will be able to identify a large fraction of its neighbors.
+
+example: consider the case where r =  <dig>  w =  <dig>  ∈ =  <dig> , and k =  <dig>  the value of p =  <dig> . probability that r and r' share at least one k-mer in the overlapping region is ≥  <dig> -  <dig>  × 10− <dig>  if r =  <dig>  w =  <dig> ∈ =  <dig> , and k =  <dig>  then this probability is ≥  <dig> -  <dig>  × 10− <dig> 
+
+once we align the potential neighbors of r with r and prune those that are not likely to be neighbors and keep only valid neighbors, we perform error correction. if the number of neighbors we have identified for any read is large enough then the error correction will be effective. let q be the number of neighbors available for a specific position of the read r. then the number e of errors occurring in this position across all the neighbors is binomially distributed with parameters q and ∈. we want the number of errors to be strictly less than q <dig>  using chernoff bounds, prob≤exp, for any fixed α >  <dig>  for a choice of α= <dig> ∈- <dig>  we get:
+
+ prob≤exp- <dig> ∈-12q∈ <dig>  
+
+example: consider the example of q =  <dig> and ∈ =  <dig> . the expected number of errors is  <dig>  probability that the number of errors is  <dig> or more is ∑i=102020i∈i20-i= <dig> ×10- <dig> 
+
+RESULTS
+the effectiveness of our algorithm ec has been evaluated by comparing it with some of the state-of-the-art algorithms in this domain, namely, racer, musket, coral, and reptile. we have evaluated ec on a number of illumina/solexa datasets and compared the results with the aforementioned error correction algorithms. the simulation results show that our proposed algorithm is indeed very effective and competitive. more details follow.
+
+datasets
+we have employed both real and synthetic datasets in our evaluation. real datasets used are illumina-generated short reads of various lengths . the six experimental datasets listed in table  <dig> have been taken from sequence and read archive  at ncbi. reference genomes are sanger assembled bacterial genomes of various kinds. although our error correction procedure is entirely de novo, the reference genome is necessary for evaluating the effectiveness of any error correction method. synthetic datasets have been generated as follows. we have used various reference genomes for this purpose. we have generated reads from each reference genome. specifically, each read was generated starting from a random position in the genome . to introduce errors in these synthetic datasets, we have changed each base in any read to some other base with error probabilities of 2%. a read length of  <dig> and a coverage of  <dig> have been used in d7-d <dig>  please note that gr, |g|, |r|, and |r| refer to accession number of the reference genome, genome length, total number of reads, and read length, respectively.
+
+gr
+gr
+experimental setup
+all the experiments were done on an intel westmere compute node with  <dig> intel xeon x <dig> westmere cores and  <dig> gb of ram. the operating system running was red hat enterprise linux server release  <dig>  . to compile the c++ source code we used the g++ compiler  with the -o <dig> option. time was measured by taking the cpu clock time which gives the instruction level elapsed time a program takes.
+
+evaluation metrics
+to determine the effectiveness of any short read error correction algorithm, the corrected reads are mapped to the genome and the number of mismatches is counted. this is a procedure that is routinely used . although this procedure has some drawbacks , this is the best possible way to infer the accuracy of the error correction methods. in this context, we have used rmap  by  <cit> . it aligns short reads with a known genomic sequence by minimizing mismatches. for testing the accuracy we need to align as many corrected reads as possible so that the result will be correct with a high confidence. keeping this in mind, we have allowed up to  <dig> mismatches per read for all of the datasets listed in table  <dig>  in brief: at first the error correction methods of interest are given the whole set of reads. after correction we align the reads over the genome of interest using rmap within  <dig> mismatches and compute the performance metrics based on this alignment. note that if we employ synthetic datasets, there is no need for mapping since we have information about true reads and erroneous reads.
+
+a number of measures have been introduced in the literature for judging the performance of any error correction altorithm. true positives  is a measure of how many erroneous bases have been corrected while false positives  is the number of true bases that have been changed incorrectly. true negatives  shows how many true bases remain unchanged while false negatives  is the number of erroneous bases that have not been detected by the algorithm. using these statistics we can define the following evaluation metrics:
+
+ <dig> sensitivity: sensitivity  measures the proportion of actual positives which are correctly identified as such . in this context sensitivity is defined as: sensitivity=tptp+fn.
+
+ <dig> specificity: specificity  measures the proportion of negatives which are correctly identified as such . so, the specificity is: specificity=tntn+fp.
+
+ <dig> accuracy: accuracy indicates the fraction of errors effectively removed from the experimental dataset. we can define it as follows: accuracy=tp-fptp=fn. it is evident from the above definition that if the accuracy of an algorithm is large, then it is very effective in correcting errors. a negative value of accuracy indicates that the method of interest introduces more errors than it corrects.
+
+ <dig> erroneous base assignment : eba is proposed in  <cit> . let be be the number of erroneous bases that are identified correctly by the error correction method but it replaces the erroneous bases with wrong bases. eba is defined as follows: eba=betp+be. clearly, eba reflects an algorithm's efficiency in correcting a base when it identifies this base to be erroneous. the lower this value the better is the algorithm.
+
+ <dig> cumulative hamming distance : after aligning a read ri onto the genomic sequence, we calculate the hamming distance di between the aligned read and the corresponding sequence in genome. adding all such di for all the reads ri, we get cdh. it reflects how close the corrected reads are to a genomic sequence of the same species in terms of substitution errors.
+
+ <dig> % mapped reads: the fraction of reads from the entire space of reads aligned onto the reference genome with up to d mismatches.
+
+parameters configuration
+an algorithm always should tune its parameters with respect to a given dataset. our algorithm has a set of parameters that are tuned automatically. keeping this in mind we took the default parameter values for the different error correction methods that we have used for comparison:
+
+• reptile: standard parameters.
+
+• coral: standard parameters.
+
+• racer: appropriate genome length of interest.
+
+• musket: standard parameters.
+
+• ec: no parameters to be selected. parameters are empirically estimated based on an analysis of the input data. for example k varies from  <dig> to  <dig>  hamming distance ranges from  <dig> to  <dig>  etc. the method has an interface where parameters can be fine tuned by the users if they are not satisfied with the results.
+
+outcome
+we have compared our algorithm with  <dig> other state-of-the-art algorithms based on both real and simulated reads. we have done extensive and rigorous experiments to realize that ec is indeed an effective and competitive error correction tool. real sequencing data are taken from sequence read archive  as described above. the results for the real sequencing datasets listed in table  <dig> can be found in table  <dig>  the results for the synthetic datasets listed in table  <dig> can be found in table  <dig>  we include erroneous base assignment  and cumulative hamming distance  measures as well. as mentioned previously, for simulated reads there is no need to consider the alignment of reads using any alignment.
+
+best results are shown in bold.
+
+best results are shown in bold.
+
+discussion
+consider the results shown in table  <dig> for real sequencing datasets. in d <dig> dataset, racer performs better than all other algorithms including ec in terms of sensitivity and accuracy. although the fraction of the mapped reads produced by masket is better and also it takes less time to correct reads, its sensitivity and accuracy are very poor compared to racer and ec. ec is comparable with racer in d <dig> dataset and performs better than the rest of the algorithms. although ec's accuracy and fraction of the mapped reads are slightly less than racer, it clearly beats all the algorithms in terms of sensitivity and computation time. for d3-d <dig> datasets ec clearly performs better than all the algorithms including racer with respect to sensitivity and accuracy. its fraction of the mapped reads is slightly lower than racer in d <dig> dataset. in d <dig> dataset ec's computation time is slightly greater than racer. overall ec is clearly the winner on d3-d <dig> datasets. on d <dig> dataset racer beats every algorithm including ec. please note that reptile was not able to output corrected reads on d3-d <dig> datasets. please see figure  <dig> and  <dig> for a visual comparison of the algorithms on real sequencing datasets.
+
+now consider the results shown in table  <dig> for synthetic datasets. on datasets d <dig> through d <dig>  ec performs better than all the algorithms in terms of accuracy and chd except for datasets d <dig> and d <dig>  its execution times are also comparable with racer except for dataset d <dig>  although musket performs better than all other algorithms in terms of eba in most of the datasets, it performs poorly in terms of sensitivity, accuracy, etc. except for dataset d <dig>  on d <dig> dataset, musket performs better than the rest with respect to accuracy, eba, chd, and execution time. reptile could not be run on the simulated datasets as it needs quality information of the bases. please see figure  <dig> and  <dig> for a visual comparison of the algorithms on simulated datasets.
+
+CONCLUSIONS
+in this article we have proposed an efficient, scalable, and robust error correction algorithm for correcting short reads. the steps of ec can be broken into three independent tasks. at first it builds k-mers and hashes the k-mers into hash tables. using these hash tables it finds the neighbors of each of the reads. each read is then corrected using the neighbors of the read. we have introduced a number of techniques to correct reads more effectively. we have compared our algorithm with four state-of-the-art algorithms based on both real and simulated reads. our experiments reveal that ec is indeed effective and competitive. at this time ec can only handle substitution errors. in future we plan to develop similar techniques to handle insertion and deletion errors also.
+
+competing interests
+the authors declare that they have no competing interests.
+
+funding
+this work has been supported in part by the following grants: nih r01-lm <dig> and nsf  <dig> 
+
+authors' contributions
+sr and ss have developed the algorithms. ss has implemented the algorithms. results have been analyzed by ss and sr. the paper has been written by sr and ss.
+
+declarations
+publication of this article was funded by the university of connecticut.
+
+this article has been published as part of bmc bioinformatics volume  <dig> supplement  <dig>  2015: selected articles from the fourth ieee international conference on computational advances in bio and medical sciences : bioinformatics. the full contents of the supplement are available online at http://www.biomedcentral.com/bmcbioinformatics/supplements/16/s <dig> 

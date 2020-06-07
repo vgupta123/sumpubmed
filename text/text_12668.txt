@@ -1,0 +1,141 @@
+BACKGROUND
+there is an increasing interest in using bayesian statistics for the analysis of computational models in biology . with bayesian statistics, the unknown parameters of a computational model are assigned a probability distribution describing their uncertainty. this distribution can be updated from prior information to give the posterior probability distribution, using bayes’ theorem:  <dig> pθ|x,ℳ=px|θ,ℳpθ|ℳpx|ℳ where Θ represents the parameters, x the measurement data and ℳ the computational model. furthermore, the marginal likelihood, or evidence, can be used to discriminate between different computational models. it can be calculated by marginalizing the parameters:  <dig> px|ℳ=∫px|θ,ℳpθ|ℳdθ 
+
+
+typically, neither the posterior probability nor the marginal likelihood can be calculated directly, but sampling algorithms can be used to estimate them . these sampling algorithms are computationally demanding, especially when the number of parameters is large and when the computational model is expensive to simulate. typical models in systems biology indeed carry many parameters and are expensive to simulate  <cit> . additionally, the posterior probability distributions arising from such models are usually complex, containing multiple modes and ridges that are difficult to traverse  <cit> . bayesian analysis of such systems biology models thus requires the use of advanced sampling algorithms. since these sampling algorithms each have unique characteristics and can be more or less suitable for a particular task, it would be beneficial to have various algorithm easily available.
+
+bcm, a toolkit for the bayesian analysis of computational models using samplers, provides efficient, multithreaded implementations of eleven algorithms for calculating posterior probabilities and marginal likelihoods.
+
+the bcm toolkit focuses on computational models that involve simulations or extensive calculations. examples of such computational models are systems of ordinary differential equations describing biochemical reactions; or steady-state signaling networks, where the activity levels may be calculated in diverse ways. these computational models are in contrast to statistical models that can be specified in the bugs or stan languages. for such statistical models, excellent software packages already exist  <cit> . for the computational models that are targeted by bcm, several alternative software packages also exist . however, each of these packages implements only a single type of sampling algorithm and most of them focus on one particular type of computational model. in contrast, with bcm the user can choose from eleven sampling algorithms and the plugin architecture allows diverse types of models. thus, bcm represents a one-stop-shop for bayesian analysis of systems biology models, where the user has a high chance of finding a suitable algorithm for the analysis of the user-defined model.
+
+implementation
+bcm consists of three components: an inference tool, a model parsing tool and an r script for further analysis and visualization .fig.  <dig> overview of bcm. a the inference tool is the main component of bcm, providing three classes of algorithms for generating samples from posterior probability distributions and calculating estimates of the marginal likelihood. the parsing tool can optionally be used to generate the prior and likelihood files from a model description file and data. b excerpt of a model description file. the model parsing tool can parse this file, load the relevant data, and output c++ source code for a dynamic library that evaluates the likelihood function. in this example, the “simulate()” function still has to be implemented by the user with a desired simulation method
+
+
+
+
+the inference tool  is the main component of bcm. it uses a specified sampling algorithm to generate samples from the posterior probability distribution and to calculate a marginal likelihood estimate. error bounds for the marginal likelihood estimate are also provided, which are calculated directly from the samples using a method suitable for the particular algorithm used to calculate the marginal likelihood. as input, the inference tool requires three parts: a configuration file, an xml file specifying the prior, and a dynamic library that evaluates the likelihood function. for constructing the dynamic library that evaluates the likelihood function, bcm provides cross-platform boilerplate code, such that custom model simulation code can be easily adapted for use with bcm. alternatively, the model parsing tool can be used as described further below.
+
+the inference tool implements three classes of sampling algorithms: markov chain monte carlo   <cit> , sequential monte carlo   <cit>  and nested sampling  <cit> . for each class of sampling algorithms, bcm includes several options for proposal distributions, as well as extensions that can increase the sampling efficiency when dealing with complex inference problems, giving a total of eleven different sampling algorithms .table  <dig> sampling algorithms and extensions implemented in bcm
+
+
+
+
+care has been taken to create efficient, multithreaded implementations of each algorithm. firstly, the inference tool has been written in c++ and performance bottlenecks have been profiled and optimized. secondly, each algorithm has been parallelized with a multithreading strategy suitable for that algorithm: for mcmc, multiple chains are distributed across threads, for smc, particles are distributed in batches across threads, and for nested sampling, a batch of samples is generated at each iteration by all threads which are then re-used in subsequent nested sampling iterations.
+
+the model parsing tool  is the second component of bcm. it can be used to generate the prior and likelihood files for the inference tool. the parsing tool reads a model description file that specifies the model, comprising the prior, likelihood and data references, and it outputs c++ source code for a dynamic library that evaluates the prior and likelihood function with the relevant data. this c++ code can then be used as a basis for further modification; or it can be directly compiled into a dynamic library. the input model description file uses a custom format with an easy-to-read syntax. an excerpt of a model description file is shown in fig. 1b. the use of the model parsing tool is optional and it is meant as an aid in model specification rather than as a comprehensive tool capable of fully specifying all types of models.
+
+finally, a script is provided to load the output of the inference tool into r for further analysis and for visualization of the results. this script can be used to display kernel density estimates of the posterior probability distribution of the sampled variables, as well as to make plots for visual posterior predictive checking; examples of both of these are shown in figs.  <dig> and  <dig>  basic functionality for convergence diagnostics is included as well, including autocorrelation functions and trace plots. functions for conversion of the results to coda objects  <cit>  and to ggmcmc objects  <cit> , two r packages for mcmc convergence diagnostics and output analysis, are also provided.
+
+RESULTS
+analytically tractable example
+to showcase bcm, and to explore how each class of algorithms deals with increasing dimensionality and complex distributions, we first analyzed a problem which is analytically tractable: the gaussian shells problem described in  <cit> . while this example is not directly relevant for systems biology, its likelihood function is multimodal and ridge-shaped, resembling the likelihoods often encountered in systems biology models. the likelihood function for this gaussian shells problem is given by  <dig> pθ=∑i=1212πw2exp−|θ−ci|−r22w <dig> where r =  <dig>  w =  <dig> , and Θ and c
+i are n-dimensional vectors. Θ is the vector of variables which are to be sampled and c
+i are two constant vectors describing the centers of the two peaks and are assigned the values c
+ <dig> x =  <dig> , c
+ <dig> x = − <dig>  and  <dig> in the other dimensions. this likelihood function is then composed of two narrow, well-separated, ring-shaped peaks , which is a challenging sampling problem.fig.  <dig> gaussian shells example. a likelihood of the gaussian shells problem in the 2-dimensional case. b samples generated from the likelihood by three sampling algorithms. in each case, the samples are well-distributed throughout each mode, and the two modes are sampled in approximately equal proportions
+
+
+
+
+we tested three sampling algorithms on this problem, one from each class of sampling algorithms: feedback-optimized parallel-tempered markov chain monte carlo   <cit> , sequential monte carlo   <cit>  with the automated temperature schedule selection of  <cit>  but without using approximate bayesian computation, and multinest  <cit> .
+
+as shown in table  <dig>  all three algorithms give the correct estimate for the marginal likelihood within the error bounds. when the number of dimensions is  <dig> or fewer, multinest is extremely efficient: it requires the fewest likelihood evaluations while achieving the tightest error bound. when the number of dimensions is increased beyond  <dig> however, multinest becomes very inefficient. at this point the exponential scaling of the algorithm becomes apparent. in the higher-dimensional setting, the smc algorithm deals with this problem most efficiently. foptmc is least efficient: it requires the largest number of likelihood evaluations and has the largest error bound. foptmc can still effectively explore the posterior distribution , however, the temperature schedule of the parallel chains in foptmc is optimized for exploration of the posterior rather than for estimation of the marginal likelihood and as a result there is an increasingly large error in the marginal likelihood estimate at higher dimensionality.table  <dig> performance of three sampling algorithms in calculating the marginal likelihood of an analytically tractable example
+
+the following algorithms were used: foptmc feedback-optimized parallel-tempered markov chain monte carlo  <cit> , smc automated-temperature sequential monte carlo but without abc approximation  <cit> , and multinest  <cit> . the column ‘analytical’ gives the marginal likelihood value calculated analytically.  indicates that the computation time exceeded the maximal time of 1 h; the other calculations required at most 5 min
+
+
+
+
+kinetic ordinary differential equation model
+having explored the behavior of several sampling algorithms in an analytically tractable example, we now illustrate the use of bcm for analyzing biological computational models. as an example of this, we investigated the inference of the parameters of a model based on a system of ordinary differential equations . the 6-variable cell cycle model of tyson  <cit>  was used, as downloaded from biomodels  <cit> . a graphical representation of this model is shown in fig. 3a.fig.  <dig> analysis of an ode-based model of the cell cycle. a graphical representation of the cell cycle model of tyson  <cit> . b posterior distribution of the two observables; phosphorylated cdc <dig> and the total amount of cyclin, and of two unobserved species, phosphorylated and unphosphorylated cyclin. the black crosses represent the generated data which are used for the inference. the shaded blue area represents the posterior 95 % confidence interval of the mean of the observables. c the prior and posterior probability distributions of each of the  <dig> parameters. the blue lines indicate the prior, the red lines the estimated posterior, and the dashed grey lines indicate the values that were used to generate the data. the densities are estimated from the posterior samples using kernel density estimation with sheather-jones bandwidth selection
+
+
+
+
+to recreate a typical setting in biology, data was generated from the model at six time points for two observables with three replicates . then bcm was used to infer all  <dig> parameters of the model  from these  <dig> data points. the priors for the kinetic parameters were set to a uniform distribution spanning an order of magnitude on either side of the parameter values that were used to generate the data, and the priors for the initial conditions were set to a uniform distribution between  <dig> and  <dig> . the likelihood function was set equal to the one that generated the data, that is, a normal distribution with standard deviation  <dig> .
+
+despite the small size of the model, this inference problem is challenging. firstly, the ode system is stiff, and even with the use of an implicit ode solver it is costly to simulate. secondly, there are multiple distinct ways in which the model can fit the data, leading to sub-optimal modes in the posterior distribution. thus, a sampler must be able to escape these local optima, and it must be able to converge to the correct posterior distribution with a limited number of likelihood evaluations due to the computational cost of the simulations.
+
+four sampling algorithms were tested on this problem: smc, multinest, foptmc , and additionally nested sampling with mcmc proposals  was added as an alternative nested sampling strategy. in this inference task, foptmc with automated parameter blocking was most efficient, requiring 14 h to generate  <dig> samples from the posterior. smc required 19 h, while nested-mcmc required 30 h and multinest had to be discontinued as the acceptance rate quickly dropped to essentially zero. the tests were performed using  <dig> threads on an intel xeon e5- <dig> processor.
+
+the bayesian estimates of the parameters and the trajectories of the species can be used to study the uncertainty in the model. figure 3b shows the posterior distribution of the two observables, as well as of two inferred species for which no observable data was generated, as estimated by foptmc. we can see that the data are sufficient to constrain the trajectories of the observed species. for the unobserved species phosphorylated cyclin, the overall trajectory can also be inferred. nevertheless, for this unobserved species, the second peak is more variable – here the data is insufficient to constrain the precise magnitude of the peak. for the other unobserved species, unphosphorylated cyclin, we see that there is greater uncertainty. the posterior distribution indicates only that the average levels are low, but the precise levels cannot be inferred from these data.
+
+figure 3c shows the marginal posterior probability distributions of the parameters. it can be seen that for all parameters, the values used to generate the data fall within areas of non-zero probability of the posterior. in most cases the data-generation values also have maximum posterior probability, but interestingly this is not true for all parameters, such as for the activation and deactivation of cdc <dig>  furthermore, some parameters are not identifiable, for example the rates of phosphorylation and desphosphorylation of cdc <dig> cannot be determined from the data. in general, such lack of identifiability could be for structural reasons, that is, the parameters cannot be inferred in theory given the observed species, due to a redundant parameterization. alternatively, the parameters may be identifiable in theory, but the data may provide insufficient information to constrain the parameters in practice.
+
+overall, the bayesian estimates provide useful measures of the uncertainty in parameter values, model fit and model predictions.
+
+comparison with existing software packages
+there are several software packages which can perform bayesian inference of the parameters of ode-based models: biobayes  <cit> , abc-sysbio  <cit> , sysbions  <cit>  and stan  <cit> . biobayes uses parallel-tempered markov chain monte carlo, abc-sysbio uses sequential monte carlo sampling in combination with approximate bayesian computation, sysbions uses nested sampling, and stan uses hamiltonian monte carlo and the no-u-turn sampler .
+
+to compare bcm with these software packages, a simplified version of the previous inference problem was used. instead of inferring all  <dig> parameters, the initial conditions and  <dig> of the  <dig> kinetic parameters were fixed to the values used to generate the data, leaving  <dig> parameters to be inferred. figure 4a shows the marginal posterior probability distributions of the simplified problem, as estimated by bcm using foptmc . the other software packages were optimized for this problem as much as possible to give a fair comparison .fig.  <dig> performance comparison of bcm with existing software packages. a prior and posterior probability distributions of the  <dig> parameters of the simplified inference problem. b time required for generating  <dig> samples from the posterior using bcm, sysbions, biobayes, abc-sysbio and stan, with several different sampling algorithm. the sampling was terminated if it had not converged after 7 days
+
+
+
+
+figure 4b shows the time required to generate  <dig> samples from the posterior with each software package and algorithm, using eight threads on an intel xeon e5- <dig> processor. it is clear that bcm is significantly faster than the other software packages. in particular the multinest algorithm in bcm is extremely efficient in this low-dimensional setting, requiring only 75 s. the other algorithms in bcm required between  <dig> and 50 min, except for ellipsoidal nested sampling which required three hours. from the other software packages, only sysbions and stan were able to solve this inference problem in a reasonable amount of time. sysbions required five hours using nested-mcmc, which is approximately six times longer than bcm with the same algorithm. for stan, using the nuts algorithm, the sampling with a chain does not always converge as the nuts algorithm does not have a means to escape sub-optimal modes. this problem was addressed by starting eight separate chains in parallel, in which case most of the chains were sampling the correct, optimal mode. in this case, stan required approximately six hours to generate the requested samples. biobayes was able to reach apparent convergence in  <dig>  days. for abc-sysbio, and sysbions using ellipsoidal sampling, the samplers did not reach convergence in 7 days .
+
+CONCLUSIONS
+the bcm toolkit provides efficient, multithreaded implementations of eleven sampling algorithms for generating posterior samples and calculating marginal likelihoods. additional tools are included which facilitate the process of specifying models and visualizing the sampling output. this toolkit can be used for analyzing the uncertainty in the parameters and the predictions of computational models using bayesian statistics.
+
+the examples show that it depends on the problem which sampling algorithm will perform well. in the gaussian shells example, where the focus was on marginal likelihood estimation, multinest performed best in a low-dimensional setting, and in the medium- to high dimensional setting sequential monte carlo was most efficient. in the cell cycle example, where the focus was on parameter inference, parallel-tempered markov chain monte carlo was more efficient than sequential monte carlo. there are various aspects of the posterior probability distribution which affect the performance of the different algorithms; for example the number of modes, how well the shapes of the modes are approximated by the proposal distributions, and the location and volume of the posterior modes with respect to the prior. these features of the posterior probability distribution will typically not be known for the problem of interest before starting the analysis, and it is then unclear which algorithm might be most suitable. the availability of various algorithms in bcm will therefore be useful in the bayesian analysis of diverse models.
+
+in the second example, we have shown that bcm can be used to infer the parameters of an ode-based model of the cell cycle. bcm is significantly more efficient in this task than existing software packages. this increase in efficiency was possible due to the parallelization of the sampling algorithms in combination with the use of optimized c++ as programming language. due to the higher efficiency, bcm allows the analysis of larger or more challenging computational models than was previously feasible. in previous cases where bayesian analysis of complex biological computational models was done, such as in  <cit> , sampling algorithms were newly implemented for each project. the availability of bcm as an efficient, reusable software package can help in streamlining such projects in the future.
+
+availability and requirements
+
+project name: bcm – toolkit for bayesian analysis of computational models using samplers
+
+
+project home page: http://ccb.nki.nl/software/bcm/
+
+
+
+operating systems: windows, linux, mac
+
+
+programming language: c++ and r
+
+
+dependencies: boost c++ libraries , cmake .
+
+
+license: mozilla public license  <dig> 
+
+additional files
+
+additional file 1: supplementary information. description: supplementary information describing the methodological details and all settings that were used for each inference. 
+
+
+additional file 2: figure s <dig>  description: overview of the sampling results of each inference of the comparison with existing software packages. 
+
+
+
+
+abbreviations
+abcapproximate bayesian computation
+
+bcmtoolkit for bayesian analysis of computational models using samplers
+
+foptmcfeedback-optimized parallel-tempered markov chain monte carlo
+
+mcmcmarkov chain monte carlo
+
+nutsno-u-turn sampler
+
+smcsequential monte carlo
+
+funding
+this work was performed within the cancer genomics netherlands program supported by the gravitation program of the netherlands organization for scientific research .
+
+authors’ contributions
+bt wrote the software and performed the analysis. td, th and lw supervised the project. bt wrote the manuscript with extensive input from td, th and lw. all authors read and approved the final manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+not applicable.

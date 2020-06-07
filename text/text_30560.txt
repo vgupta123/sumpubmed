@@ -1,0 +1,296 @@
+BACKGROUND
+the advent of high-performance next-generation sequencing  technologies has improved the analysis of differential expression of genes, by investigating both the nature and the quantity of expressed mrnas and increasing the spectrum of applications of sequencing.
+
+increasingly faster mapping algorithms and more complex statistical analyses have been developed to address all the issues introduced by rna-seq data, but the discussion about the best workflows is still open.
+
+a typical differential expression  analysis workflow is composed by three main steps:  read mapping,  gene expression computation and  identification of noticeable differences between the samples. the results are generally output as a list of genes showing a statistically significant variation in expression between different experimental conditions. the confidence of the result is usually defined through fold change values and p-values obtained with statistical hypothesis testing.
+
+despite the continuous improvement of the sequencing techniques, the results of de analyses are not yet fully reliable. the variations in gene expression discovered from rna-seq data must be confirmed with laboratory assays, such as qpcr and these validations often reveal the presence of false positives in the bioinformatics analysis results  <cit> . in order to obtain more accurate results, the second and third steps of de analysis workflow have been deeply examined in the last years, also taking advantages from the experience gained with the use of microarrays. several normalization techniques  and de analysis models  have been designed for sequence count data.
+
+more recently some attention has been focused on an issue that arises in the first step of de analysis workflow, i.e. the problem of multireads, which are those reads that map to more than one transcript/genomic location in the reference sequences and cause uncertainty in gene counts.
+
+the main source of mapping ambiguity is the presence of genes with similar sequences  and, since the sequenced reads do not span entire transcripts, alignment algorithms are sometimes unable to uniquely determine the gene from which they are derived. in addition, polymorphisms, inaccurate reference sequences and sequencing errors require mismatches and indels to be allowed in read alignments, lowering out the quality of the mapping process.
+
+when the number of multireads is small, many researchers simply choose to exclude such reads from the analysis, counting only uniquely mapping reads  <cit> , but this option always leads to an underestimation of the read counts and it is not possible to a priori know if the removed reads were relevant for the de results.
+
+another approach is to estimate the real number of read counts: the simplest way is to assign multireads to genes proportionally to the expression of uniquely mapping reads   <cit> ; some more complex techniques compute an estimation of the read counts using probabilistic models, such as isoem  <cit> , rsem  <cit> , rcount  <cit> , tetranscript  <cit> , mmr  <cit> . these methods, starting from some assumptions on the distribution of the data, model the generation of multireads and estimate the final read counts. from each method we obtain different estimated counts, and their confidence value, when provided, is not considered by the actual de analysis tools and it cannot be used to evaluate the results. in a recent work, robert and watson  <cit>  propose a two stage analysis: in stage  <dig>  reads are assigned uniquely to genes; in stage  <dig>  reads that map to multiple genes are assigned uniquely to multi-map groups, but  <dig> % of such groups contains two or more genes. the expression variation of a single gene could either be hidden in the group, or it could require a laboratory validation of all the genes in the group.
+
+in this paper, starting from an approach for dealing with multireads that preserves uncertainty information, we present a novel de analysis workflow. the main aim of our work is to extract the results with high possibility of being true positives, and hence to highlight those results that risk to be false positives, since their count values are influenced by the presence of multireads. the whole workflow we describe is based on fuzzy set theory.
+
+fuzzy sets were introduced by zadeh as a mean to model imprecisely defined concepts in  <dig>  <cit> , by handling partial truth with the concept of gradual membership to a set. fuzzy logic is a generalization of classical logic based on fuzzy set theory. a fuzzy set could be used to restrict the possible values a variable can assume, thus providing a possibility distribution for the variable  <cit> .
+
+possibility theory is the theory of handling possibility distributions; it was introduced by zadeh and further developed by dubois and prade  <cit> . possibility theory and probability theory are only loosely related, and the former seems more suitable to model uncertainty deriving from imprecision or lack of information.
+
+the approach used in this paper is compliant with the work of zadeh  <cit> , who proposed possibility distributions as suitable interpretations of fuzzy sets. the possibility measure used in this paper follows the notation introduced by pedrycz  <cit> .
+
+the method has been tested on public rna-seq data and discussed by comparing the obtained results with other bioinformatics tools. the read count estimations have been computed with tophat and bowtie mappings and with rsem. the de analyses were performed on the counts with cuffdiff, deseq <dig>  edger and with fisher’s exact test adjusted by false discovery rate .
+
+methods
+our workflow starts with the quantification of gene expressions in presence of multireads through the definition of fuzzy read count. it applies fuzzy sets to build a granular representation of read counts for each gene. a whole new workflow is then introduced to extend de analysis to this expression measure.
+
+for this purpose, we define the fuzzy fold change, the possibility of over or under-expression and the possibility of same-expression, that is useful to evaluate the presence of false positives in the de events. the output of the workflow is a list of de events with the additional information about uncertainty correlated to multiread presence.
+
+fuzzy description of count data
+when the ngs reads are compared to a database of reference sequences such as genes or transcripts, we obtain a list of results as summarized by table  <dig>  the mappings among reads and genes are provided one by row and the multiread events are represented by multiple rows identified by the same read. if mismatches and indels are allowed in the mapping results we can obtain, for the same read, matches that differ in mapping accuracy.table  <dig> example of mapping results with multireads
+
+for gene-1: one uniquely mapping read ; two reads having only gene- <dig> as best match ; three reads having gene- <dig> as best match ; five reads mapping on gene- <dig>  even if not as best match 
+
+
+
+
+in our approach, we start from the assumption that the higher is the accuracy of the mapping, the higher is the possibility that read actually originates from such gene. therefore, if a read maps to two genes with the same accuracy, we consider – without any statistical assumption – that it is equally possible for the read to originate from any of such genes. on the other hand, if a read is more similar to a gene than to another, then it is more possible that the read originates from the former than from the latter, yet without excluding this eventuality .
+
+we easily introduce these concepts in our method by exploiting the possibility distribution emerging from the representation of read count through fuzzy sets. if we can define a numerical score to evaluate the accuracy of the mapping results and if we can scale it between  <dig> and  <dig>  we can exploit it as description of the possibility of reconstructing the right mapping. for example, in ncbi blast results  <cit> , the numerical score could be defined by the identity of the mapping or by the product of identity and coverage ; in a sam file the 5th column, which represents the mapping quality between  <dig> and  <dig>  can be scaled and used as a possibility value. after this computation of possibilities, we obtain a table like table  <dig>  in which a possibility value is associated to each mapping.table  <dig> possibility values of mappings
+
+in this example the possibility values are computed by scaling the product of identity and coverage obtained in table  <dig> in a value from  <dig> to 1
+
+
+
+
+for each gene, we can now compute the possibility of having a given read count. for example, the possibility of having a read count =  <dig> for gene- <dig> is the best possibility of having one read as true match and all the others as false match. in this way, we compute for gene- <dig> the possibility distribution shown in fig.  <dig>  this figure is a fuzzy set, and its interpretation is that the real read count for the gene can possibly be  <dig> or  <dig>  but it has also an intermediate possibility of being  <dig>   <dig> or  <dig>  this is just a representation of what we observe from mapping results, without assumptions on the shape of the distribution and without probability evaluation. the computation of such a fuzzy set is cumbersome; however some general considerations can be drawn to obtain an effective approximation.fig.  <dig> discrete possibility distribution of read counts. for each gene  can be represented with a trapezoidal fuzzy set 
+
+
+
+
+in fact, we can observe that the lowest possible value – denoted with an a in fig.  <dig> – is the number of reads uniquely mapping to gene- <dig> and the highest value  is the total number of reads that map to that gene . the plateau with highest possibility is delimited by two other values: the first  is the number of reads having the gene as unique best match, the second  is the number of reads having that gene as non unique best match .
+
+we also observe that the possibility value always increases between a and b and decreases between c and d. we can use these four parameters to obtain a simplified representation of the granular read count through a trapezoidal fuzzy set, exemplified in fig.  <dig> and formally defined as:  <dig> tra',b,c,d'x= <dig> x≤a'∨x≥d'x‐a'b‐a',a'<x≤b <dig> b<x<cx‐d'c‐d',c≤x<d' 
+
+
+where a′ = a- <dig> and d′ = d +  <dig> to give non-null possibility to counts a and d respectively. the support of the fuzzy set  quantifies the uncertainty in the evaluation of the expression value, which in turn generates uncertainty in differential expression evaluation. the core of the fuzzy set  represents the interval with the maximum possibility of containing the real read count.
+
+this kind of representation summarizes the computation of the read count possibility distribution, and it allows to define the fuzzy read counts for each gene with the only computation of parameters a, b, c and d.
+
+comparing two conditions
+the aim of de analysis is comparing two or more experimental conditions in order to highlight events in which gene expression presents significant variations, correlated to the experiment. here we will consider the most common de analysis, the case–control study, in which the experiment is built assuming that the different conditions between case and control influences only a minority of genes.
+
+figure  <dig> shows a graphical interpretation of comparing fuzzy read counts for the same gene in a case versus control study. two trapezoids representing the expression of the same gene in different samples can be plotted on a 3-dimensional graph, which is useful to fully understand the use of fuzzy sets and the related possibility distributions. the count values for the two experimental samples are drawn on the x-axis and y-axis respectively, while the possibility degrees are represented on the z-axis. as shown in fig.  <dig>  the cartesian product of two trapezoidal fuzzy sets, representing the expression of the same gene in different samples, yields a 3d fuzzy relation with the shape of a truncated pyramid. the z-value of the pyramid is the possibility degree that the first sample has x reads and the second sample has y reads for the gene under consideration. we are assuming that the two read counts are non-interacting, i.e. the actual count in the case does not modify the possibility distribution of counts in the control. this enables the representation of the joint possibility distribution by a cartesian product.fig.  <dig> graphical interpretation of the fuzzy sets and their comparison for differential expression evaluation. the joint possibility distribution of the same gene in two samples is represented by a cartesian product . the projections on a 2-dimensional plots can be exploited to evaluate the results . the green gene  has same-expression possibility = 1; the yellow gene  has under-expression possibility =  <dig>  same-expression possibility < 1; the red gene  has over-expression possibility =  <dig>  same-expression possibility = 0
+
+
+
+
+figure  <dig> shows that the tridimensional figure can be summarized by projecting the two rectangles that contain the support and the core of the fuzzy relation. larger rectangles represent wider uncertainty, small rectangles  represent more definite results. the position of the rectangle with respect to the bisector line is indicative of the differential expression result in the case–control comparison, but a computational method is required for the analysis of a whole dataset.
+
+first of all, we include in our method the fold change , a widely used metric for de analysis. the fc is computed as the logarithmic ratio between case and control expression, and it gives an intuitive value of how much the expression has changed between the conditions, independently of the type of normalization applied to the counts.
+
+through the application of the extension principle, we can extend the definition of fc to granular read counts. for ease of computation we approximate the fuzzy fc by a trapezoidal fuzzy set defined as:  <dig> tr 
+
+
+the shape of this fuzzy set gives information about de of the gene: the wider the range of the trapezoid, the more uncertain is the result; the farther the fuzzy set from fc =  <dig>  the more significant is the de event.
+
+however, the fc alone is not adequate for the study of de because it is a ratio, and it is influenced by the magnitude of its terms. the variability observed on gene expression values is amplified by the fc measure for the smaller counts.
+
+this trend can be studied by analyzing fig.  <dig>  if we compare two sequencing runs performed on the same sample, namely two technical replicates, we obtain the plot in fig.  <dig>  the scatter plot has on the x-axis the logarithmic mean expression value of each gene in the two samples and on the y-axis its logarithmic fc value. logarithm is used on the x-axis to draw a more compact image. for ease of representation, only a centroid is represented for uncertain read counts, while the real figure for them would be a kind of tridimensional truncated pyramid. the resulting distribution of data has a roughly rhomboidal aspect: the left part of the rhomboid is shaped by counts near  <dig>  while the right part encloses an area in which the fc reveals a high variability that decreases, as expected, with the increase of mean gene expression. figure  <dig> shows the same scatter plot for a true case-comparison study: here the de events are visibly outside the rhomboidal figure.fig.  <dig> variation of fold change results correlated to the expression value. the scatter plots show the variability of log <dig> fold change results for low expression values, in the comparison between two technical replicates of the same sample  and between two samples in a case-control study
+
+
+
+
+extraction of de events
+the de analysis method proposed for the fuzzy read counts takes in account all the aspects described so far. we estimate the borders of the left part of the rhomboid by fitting on the data two hyperbolas . they act as a fuzzy threshold for the significance of the fold change, which is as smaller as the mean expression value increases. each point in the plot corresponds to a gene with a certain mean expression between case and control and the computed fc value. by projecting the point on the x-axis, we intersect the two hyperbolas on two symmetric fc values. we use this two values as thresholds points for the definition of three fuzzy concepts for de: over-expression, under-expression and same-expression. for this purpose, given a mean expression value, we define two sigmoidal and one gaussian membership functions on the z-axis, covering the fc values in order to intersect the two threshold points with membership degree  <dig>  . the gaussian fuzzy set defines the possibility distribution that a gene is not differentially expressed between case and control . the sigmoidal functions describe the possibility of a gene to be over-expressed or under-expressed. the gaussian and the sigmoidal functions were chosen because they have an infinite support and they are able to describe a gradual increase/decrease of possibility for the fc. in fact, the only aim of these functions is to convert the boundaries defined by the hyperbolas into fuzzy boundaries for the evaluation of the fc values.fig.  <dig> the delimiters for fold change variability. we estimate the borders of the left part of the rhomboid by fitting on the data two hyperbolas. in the comparison between two technical replicates, the curves enclose almost all the points , while between two samples in a case-control study, the differentially expressed genes fall outside the boundaries. these curves act as a fuzzy threshold for the significance de events
+
+
+fig.  <dig> fuzzy sets for over/same/under-expression possibility. in these examples, we compute the three values of expression possibilities for two points with the same fold change and a different mean expression value. the intersections of the fuzzy sets are defined by the projection of the points on the curves defined in the previous figure, and a lower expression value corresponds to a wider same-expression fuzzy set 
+
+
+
+
+when the expression of a gene does not involve multireads, it coincides to a point in the scatter plot of fcs, and its punctual fc value can be directly matched with possibility values from the three fuzzy de sets corresponding to its mean expression value ). on varying the mean expression value, the  <dig>  thresholds are defined on different fc values, following the hyperbolas and the three fuzzy de sets draw three surfaces in the tridimensional space that are visible in fig.  <dig> fig.  <dig> the sigmoidals and gaussian fuzzy sets and their surfaces. given a mean expression value, two sigmoidal and one gaussian fuzzy sets are defined as in figure . on varying the mean expression value, the membership functions draw three surfaces in the 3-dimensional space 
+
+
+
+
+when the expression of a gene is defined through the fuzzy read count representation, it defines a more complex fuzzy relation on the scatter plot, with a shape similar to a truncated pyramid. in this case the three possibility values of the gene – of under/same/over expression – are obtained by intersecting the tridimensional fuzzy relation of an uncertain gene expression with each of the three surfaces representing the de possibilities for that gene. the intersection is implemented by the min operator and the resulting de possibility value is the max value obtained in the intersection.
+
+once computed the three de possibility values, we can evaluate the variation of expression of a gene. a gene with a relevant change in expression will show a high possibility of over or under-expression, but when this result is accompanied by a high possibility of same-expression, we are facing with the eventuality of a false positive result. this de analysis method is proposed only for case-comparison studies, but it can be applied both in absence and in presence of biological replicates. in the latter case, the set of gaussian and sigmoidal functions still holds, while the introduction of replicates is included in the fuzzy read count model .
+
+result table
+the three de possibility values described are the main output of the proposed method. as a result of the computation we obtain the following values for each gene:fuzzy read counts for case ,  <dig> values defining a,b,c and d points of the trapezoid;
+
+fuzzy read counts for control ,  <dig> values;
+
+fuzzy fold change,  <dig> values;
+
+de possibilities of under/same/over expression,  <dig> values;
+
+centroids of the fuzzy sets .
+
+
+
+
+in order to provide the user also with a punctual estimation of gene expression in presence of multireads , we also provide our computation of the centroid of fuzzy sets. for the fuzzy read counts, such values are computed with our “rescue-like” method, a technique based on a modified version of the rescue method  <cit> : while the original model assigns multireads to genes proportionally to the expression of uniquely mapping reads, we assign them proportionally to the score obtained in the mapping. this ensures us to obtain an estimation that is properly centered in our trapezoid, and that respects the proportions of reads of the sample . finally, we provide a punctual fold change value computed on the centroids.
+
+normalization
+in order to compare two or more samples, we need to normalize the expression values. many type of normalization have been proposed for rna-seq data, and here we adopt the normalization proposed by deseq <dig>  <cit> , in which each sample is scaled according to a model based on the geometric mean of values obtained for each gene across all the samples. applying this type of normalization requires punctual values, so we can consider the genes with only unique matches if multireads are sporadic. if the presence of multireads is important, we can compute a centroid of fuzzy read counts  and use such values for the normalization. once the scaling factor has been computed for each sample, we can normalize the fuzzy sets by dividing the four defining points of the trapezoids by the scaling factor.
+
+introduction of biological and technical replicates
+technical replicates must be merged and considered as a single experiment. as in classic read counting, the technical replicates can be merged before or after the mapping step, and the counts can be merged by sum. this can be done also with fuzzy gene counts, by simply summing the four values obtained for each gene:  <dig> tr 
+
+
+where tr and tr are fuzzy read count for the same gene in two technical replicates.
+
+biological replicates are different samples belonging to the same condition. this case requires a more reasoned approach, but, as a preliminary method, we propose to merge the fuzzy sets in order to cover all the possible values:  <dig> trmina',a'',minb',b'',maxc',c'',maxd',d'' 
+
+
+where tr and tr are fuzzy read count for the same gene in two biological replicates. when the two fuzzy read counts overlap, the resulting trapezoid includes all the values, by widening its uncertainty range. when the two fuzzy read counts are disjoint, we propose to consider as totally possible even all the intermediate values lying between the observed values. this proposal is based on the following biological interpretation of the data.
+
+the expression of a gene is something that can vary in time. if in the same cell the expression of a gene varies from n to m between t <dig> and t <dig>  its variation is not instantaneous , but it changes gradually as the copies of the gene are produced . this means that between t <dig> and t <dig> we have a maximum possibility of observing the intermediate values between n and m. this is true for the same cell and it can be extended to non-independent cells like the ones representing the same condition, as the biological replicates do.
+
+RESULTS
+the method described has been tested on public datasets and compared with other existing tools for gene counts estimations and de analysis. we have used rna-seq experiments produced with illumina and  <dig> roche sequencers and we have mapped the reads against the ensembl’s vega database  <cit> , evaluating the gene expression. two preliminary studies have been performed in order to better understand the nature of multireads: an evaluation of the presence of overlapping portions among the genes and an examination of the variability of fold change results correlated to the magnitude of gene expression. all the parameters used to run the different tools are described in supplementary information .
+
+gene overlapping
+the first preliminary study has been performed on human reference sequences in order to inspect the presence of overlappings and similarities among genes. each gene has been mapped against all the other genes present in vega database. since a local alignment has been adopted, a 100 % coverage would mean that the queried gene is totally included in another gene. as summarized by fig.  <dig>  the overlappings are widely present. for example we notice that 50 % of the genes has at least a portion of 45 % of their length in common with at least another gene. in an rna-seq experiment, the percentage of multireads is not constant, but it depends on the set of genes involved in the expression profile of the sample and on the accuracy of the sequenced reads.fig.  <dig> gene to genes mapping. the result of mapping all the genes against each other reveals that the 50 % of genes of vega reference database has at least a portion of 45 % of their length in common with at least another gene. the 100 % of genes have a 9 % of their sequence in common with at least another gene
+
+
+
+
+fold change evaluation
+the second preliminary study has been performed with the aim of analyzing the range of variability of the fold changes correlated to the mean gene expression value, and the corresponding variation in the number of multireads. this study has been performed through the comparison of two technical replicates obtained by sequencing the same sample two times with the roche  <dig> sequencer. we have already shown in fig.  <dig> the plot of the data for this experiment: the fold change has a wider variation on low expression value that decreases with the increase of expression values. since this result has been obtained on technical replicates, this means that such variation of the fold change is primarily due to the technical variability of sequencing data.
+
+if we apply our fuzzy method to this data, we can compare the identified trapezoids of fuzzy read counts, with the aim of analyzing if the multiread presence is affected by the technical variability of sequencing data. we notice that 83 % of  <dig>  identified genes have a variation in the width of the plateau  of less than  <dig> reads, while only  <dig> genes have a variation of more than  <dig> reads. this means that the multiread presence seems stable across the genes between two technical replicates and then it does not depend on the technical variability, while it is influenced by the experimental conditions and by the set of expressed genes.
+
+multiple sclerosis dataset
+the method presented in this work has been tested on public rna-seq data and discussed by comparing the obtained results with other bioinformatics tools. the read count estimations have been computed with tophat  and with rsem . we have also considered the centroids of the fuzzy read counts and the number of uniquely mapping reads only, obtained with bowtie mappings, just to compare rsem values with other punctual read count estimations.
+
+the de analyses were performed on the counts with cuffdiff  <cit> , deseq <dig>  <cit> , edger  <cit> , and with fisher’s exact test adjusted by false discovery rate   <cit> .
+
+the tests were performed on illumina hiseq  <dig> data, downloaded from the study srp <dig>  <cit>  of the sra repository  <cit> , grouped in two different trials. in the first trial we have used only one sample for condition , and in the second trial we have selected four biological replicates present in the sra study, for each condition .
+
+first trial
+the main aim of this test is to analyze the influence of multireads in read count estimations and in de analysis results. read counts have been evaluated by using tophat mappings, the rsem estimations, the centroids of the fuzzy read counts, and the uniquely mapping reads obtained with bowtie.
+
+for the de analysis, cuffdiff was used only with tophat mappings, because these tools are parts of a unique workflow. tophat’s read counts are not provided as output, but cuffdiff provides the fpkms , while deseq <dig> requires in input the raw read counts. the other estimations of read counts have been analyzed with deseq <dig>  but the tool does not provide statistically significant differentially expressed genes because of the lack of replicates . we have then applied the fisher’s exact test to the counts and we have adjusted the obtained p-values for multiple comparisons with fdr.
+
+the mapping identified  <dig>  genes, 36 % of reads were multireads and 82 % of gene counts were influenced by multireads. for each de analysis performed, we have selected the results with p-value <  <dig>  and abs >  <dig>  and evaluated the uncertainty of the results with same-expression fuzzy set.
+
+the results are summarized by fig.  <dig> and table  <dig>  the figure plots the possibility of same-expression for the genes evaluated as differentially expressed by each analysis. the higher the possibility of same-expression, the more uncertain is the result of the gene, because of the presence of multireads.fig.  <dig> same-expression possibility in the results of the first trial. in this trial the results obtained with tophat show a rapidly increasing same-expression possibility. they have an high possibility of representing false positive results. the plot shows a wide presence of uncertainty in all the results and the grey line of same-expression possibility, by lying below all the other lines, reveals the presence of other differentially expressed genes less influenced by multireads, which have not been discovered by the other tools
+
+
+17
+13
+7170
+4897
+2159
+each cell represents the number of de genes in common between two methods specified in the corresponding row and column. despite the fisher’s test with fdr extracts a very large list of de genes, all the results do not agree on at least one gene. the values on the diagonal  are the results obtained from each method
+
+
+
+
+the uncertainty highlighted in the differentially expressed genes is confirmed by an overall lack of concordance among the de analyses results, summarized by table  <dig>  in this table, each cell represents the number of de genes selected by the two methods specified in the corresponding row and column. table  <dig> lists some examples of certain and uncertain results. for each gene in the table we list all the read counts estimations  and the results of the applied methods.table  <dig> examples of results of the first trial
+
+the first gene, hla-drb <dig>  despite the abundant presence of multireads in its read counts, shows a certain result, with an maximum under-expression possibility and very low same-expression possibility. this results is not confirmed by cuffdiff, evenif it computes a high fc. the second gene, ttty <dig> result is not reliable because it has low read counts, but it is considered as a de result by all the tools. our method higlights the result as false positive, with a high same-expression value, because of the low mean expression values obtained. the third example, the igj gene, is a possible false positive. its counts are quite low and its fuzzy read counts are mostly overlapping. the pvalues obtained by the other tools are confirmed by a high under-expression possibility, but the risk of having a false positive is pointed out by a high same-expression possibility
+
+
+
+
+second trial
+the same test described for a case-control study with just one sample per condition has been performed introducing biological replicates, downloaded from the same sra study. we have used four replicates for case and four replicates of healthy controls. in this case the application of deseq <dig> to the data gave no warnings and significant de results, so we have used it for the p-value computation of rsem and rescue-like estimations. also edger has been applied, thanks to the presence of replicates.
+
+the mapping identified  <dig>  genes, 35 % of reads were multireads and 88 % of gene counts were influenced by multireads. the results of the analyses are summarized by fig.  <dig> and table  <dig>  in this case, the presence of biological replicates increases the same-expression possibility of the selected results, and despite the presence of biological replicates, there is still a very low concordance among the various de analysis results. multiple sclerosis is a complex and multi-factorial disease and the introduction of biological variation in this experimentation makes it difficult to extract significant differential expression events. the list of genes selected by at least two workflows, their possibility values and their estimated read counts are showed in supplementary information .fig.  <dig> same-expression possibility in the results of the second trial. in this case, there is less difference in the same-expression evaluation of the results obtained with all the tools. the lower value of same-expression obtained on the best result is  <dig> 
+
+
+56
+36
+9
+19
+12
+1
+1
+4
+1
+even in this case, the comparison of de analyses show a significant disagreement on the selection of de genes. the values on the diagonal  are the results obtained from each method
+
+
+
+
+simulation study
+since it is impossible to find experiments with information about the real varied and unchanged reads, we have set a simple simulation study to compare the proposed method with other existing tools. we have used wgsim by samtools  <cit>  to simulate  <dig> experimental conditions with  <dig> biological replicates, by introducing  <dig> over-expressed  and  <dig> under-expressed genes . the simulated fastq files have been processed with tophat, cuffdiff, rsem, deseq <dig>  edger and with our fuzzy method. some examples of the read counts obtained with rsem and our method are showed in the supplementary information .
+
+the results obtained are summarized by table  <dig>  cuffdiff with tophat and deseq <dig> applied on the centroids of the fuzzy trapezoids output no significant results . deseq <dig> applied on rsem estimation allows to obtain the best sensitivity, while the best recall is obtained by edger applied on the centroids. since our method only ranks the genes, we cannot compare its results in terms of sensitivity and specificity , and then we will compare the different ranking obtained by all the methods. anyway, it is interesting to see that, while only  <dig> genes have a same-expression possibility <  <dig>  and all the listed genes have an over- or under-expression possibility very close to  <dig>  the fold change obtained on the centroid values is useful to further evaluate the results. in fact, the expected log <dig> fold changes of about + <dig>  and about − <dig>  is correctly computed only by our method and by edger. deseq <dig> always underestimates the fold change. also cuffdiff computes a correct fold change for our varied genes, even if it does not consider them significant. the last evaluation is made by comparing the gene ordering given by the same-expression possibility with the sorting of results obtained by the p-values of the other workflows. the aim of this evaluation is to see which workflows are able to put the most reliable results in the top of their gene ranking .table  <dig> comparisons of the results obtained on simulated data
+
+
+tp
+true positives
+
+tn
+true negatives
+
+fp
+false positives
+
+fn
+false negatives
+
+tp/
+sensitivity 
+
+tn/
+specificity
+
+tp/
+precision
+this table lists the results obtained on  <dig> over-expressed and  <dig> under-expressed genes. five more genes are involved as false positives. some workflows select the genes as significant de events only by the p-value , while others compute also the correct fc . the first two workflows are not able to select significant p-values. ten genes have a low uncertainty  and ten genes have a high uncertainty due to their multireads. the five false positive events have a same-expression possibility close to  <dig> and a non significant fc. even in this case, there is an overall disagreement in the selection of de genes. the last  <dig> rows of the table show some evaluation metrics about the results 
+
+
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+false positive
+in order to highlight the true positives, the other genes are hidden by a “false positive” label
+
+
+
+
+the worst result is obtained by cuffdiff on tophat’s mappings, because it puts a false positive gene at the first position in the ranking. the best result is surprisingly obtained by deseq <dig> applied on the centroids of the fuzzy read counts. this workflow did not output significant results but it properly orders the genes, and it puts the first false positive in the 20th position. the second best result is obtained while ranking by same-expression possibility. here the first false positive result is in the 16th position. anyway, the good performance obtained by the centroids with deseq <dig> can be exploited also to enhance the ranking of the method proposed in this paper. in fact, if we filter the results by fold changes  >  <dig> , we cleanse the list and we obtain the first false positive in the 20th position.
+
+discussion
+the tests performed on the selected ngs experiments revealed a high percentage of multireads – 36 % of reads were multireads – that influenced over 83 % of expressed genes. the different approaches used to estimate the read counts have influenced the de analysis, and all the obtained lists of differentially expressed genes showed some significant differences in the results. in this situation, it is very difficult to perform the choice of a subset of de events to be confirmed with laboratory assays, such as qpcr. moreover, since it is impossible to establish which is the right mapping for a multiread, it is also difficult to evaluate the better choice for the estimation of read counts.
+
+our method is not designed to propose a further estimation of read counts, but it provides a solution for managing the uncertainty in read counts and in de analysis results due to the presence of multireads. furthermore, the quantification of under/same/over-expression possibility can be useful in the selection of the more reliable de events, in order to improve the following laboratory work. the three possibility values can be used just to evaluate the uncertainty of the results of a de analysis tool, or they can be used in place of it. in fact, a gene with a relevant change in expression will show a high possibility of over or under-expression, and when this result is accompanied by a null possibility of same-expression, we are sure that the multireads are not influencing the result.
+
+the possibility values can be used to properly sort the genes, and we do not propose to apply some thresholds on them, but for an easier interpretation of the results, one could consider an appropriate cut for the discretization of the possibility values and the selection of significant de events. for instance, by applying a cut of possibility =  <dig>  in the results of the first trial of multiple sclerosis dataset, we could select  <dig> de genes, with the worst same-expression possibility <  <dig> . in the analysis of biological replicates of the same datasest, the same-expression possibility is quite high for all the genes. as highlighted by fig.  <dig>  the lowest same-expression possibility is  <dig> . this result can be due to the large amount of multireads found in the experiment, but it might be also caused by the rule that we have chosen to merge the fuzzy read counts of the same gene coming from biological replicates – described in the methods section – that will be matter of subsequent studies.
+
+CONCLUSIONS
+in this paper we have presented a method for dealing with the problem of multireads without statistical assumptions and probability estimations. the method exploits fuzzy sets to describe the presence of uncertainty in read counts estimation and in de analysis results, whenever the evaluation of the expression of a gene is influenced by multireads.
+
+we have described the trapezoidal fuzzy read counts and fuzzy fold change, and we have modeled the de events with three fuzzy concepts: over-expression, same-expression and under-expression. the result of the computation is a list of de events that can be sorted by the possibility of having a change in expression. the de events are enriched with an evaluation of the possibility of same-expression, that describes the uncertainty of the result due to the presence of multireads mapping to each gene.
+
+in fact, the main aim of this work was to highlight the most reliable de events and to warn about the more uncertain others, in order to exclude possible false positives from the laboratory assays that follow the bioinformatics analyses.
+
+we have tested the method on some public datasets, and the results revealed that 36 % of the mapped reads were multireads and over 83 % of expressed genes were influenced in their read count by the mapping uncertainty. we have not proved how many de events that showed high uncertainty are really false positives, because it is very difficult to obtain public dataset in which all de events have been validated via qpcr, especially because false positive results are not published, usually. some studies have compared rna-seq data with microarray data, but none of the two technologies have been showed to be more reliable than the other on all the genes  <cit> .
+
+in order to give an example of how the multireads influence the discovery of true positive de events, we have tested the method on a simulated dataset with  <dig> over-expressed and  <dig> under-expressed genes. the results showed an overall disagreement in the selection of de genes, but the proposed method is able to properly rank the most reliable results.
+
+the problem of multireads is frequent in high throughput data analysis and even with longer reads it does not decrease as expected, because there is a high overlapping across genetic portions. we have noticed that in a gene reference database, 50 % of the genes have at most one read that covers a portion of 45 % of their length. the same problem is present in other studies involving read mapping against a reference database. in this paper we have applied our method to gene expression evaluation, but the same concepts can be applied to other studies, such as isoform expression evaluation, ncrna identification and genomic or metagenomic classification of dna-seq reads.
+
+as a future development, we plan to improve the merging of biological replicates step and we will compare our method to other emerging tools. for example, several alignment-free transcript quantification pipelines  have recently been proposed. these incorporate multi-mapping reads and provide uncertainty estimates for gene counts using bootstrap sampling. moreover, the same-expression possibility could be directly compared to the output of the de analysis tool sleuth  <cit> , which evaluates the de events by considering also the confidence values computed by kallisto.
+
+additional file
+
+additional file 1: supplementary information about the proposed method and the experimentations performed are provided in “additional file  <dig> pdf”. the file is a pdf document and it contains the parameters used for the analyses, the description of the hyperbolic fuzzy boundaries, some additional results on multiple sclerosis dataset and simulated dataset. 
+
+
+
+
+abbreviations
+dedifferential expression
+
+fcfold change
+
+fpkmfragments per kilobase per million mapped read
+
+ngsnext-generation sequencing
+

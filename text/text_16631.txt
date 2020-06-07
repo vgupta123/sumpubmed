@@ -1,0 +1,157 @@
+BACKGROUND
+mass spectrometry has become the analytical method of choice in metabolomics research  <cit> . various ionisation methods are commonly used, such as electron impact  used with gas chromatography , or the soft electrospray ionisation , which is employed in lc/esi-ms systems. the main bottleneck in the interpretation of metabolomics experiments is the identification of compounds. in addition to the exact mass, tandem ms spectra provide additional structural hints, providing a fingerprint of the measured molecule. in tandem ms, the molecules are interacting with a collision gas at specified kinetic energies, hence the name collision induced dissociation. large spectral libraries of measured reference spectra exist for gc/ms, such as the commercial nist library ' <dig>  or the gmd  <cit> , but for esi-tandem ms spectral libraries are still few and comparably small  <cit> . a different approach towards identification is the interpretation of the measured spectra, usually with regard to the known  molecular structure.
+
+fragmenter with a rule set like the commercial tools acd fragmenter  <cit>  and mass frontier  <cit>  generate fragments based on cleavage rules known from the literature, in both cases the algorithmic details are not published. for some compounds, massfrontier  <dig> is not able to identify any fragments in negative mode  <cit> . hill et al. used mass frontier  <dig> to predict the tandem ms spectra of  <dig> test compounds, which were analysed using a micromass q-tof ii in positive mode, to identify the measured compound and its structure. candidate compounds were retrieved from pubchem using the exact mass. massfrontier used those structures as input and generated spectra which were compared to the measured spectra. finally, the compounds were ranked according to the peaks common to both the predicted and measured spectra  <cit> . combinatorial fragmenter such as fragment identificator  proposed by heinonen et al.  <cit>  try to predict the fragmentation tree given both a metabolite's molecular structure and its tandem mass spectrum. due to high computational complexity, even for a single medium sized compound  runtimes can reach several hours. another approach is the systematic bond disconnection method without a rule set as described in  <cit> . the resulting product ions from a single precursor structure are matched against the peaks measured with a high-resolution mass spectrometer. the software epic was tested against two hand annotated spectra from the literature and is not publicly available. the runtime was reported to be around  <dig> minute to process 1--1h-indol-3-yl)propyl)-4-ethyl)piperazine .
+
+metfrag is a combinatorial fragmenter using the bond disconnection approach, which is fast enough to screen dozens to thousands of candidates retrieved from e.g. kegg, pubchem or chemspider compound databases. we do not attempt to create a mechanistically correct prediction of the fragmentation processes. instead, we want to perform a search in compound libraries using the measured fragments as additional structural hints.
+
+the paper is structured as follows: in the next section we describe the architecture and the in silico fragmentation algorithm, including heuristics to speed up calculations and to account for molecular rearrangements upon fragmentation. afterwards, we explain the scoring function. in the results section we evaluate metfrag on a set of  <dig> spectra from  <dig> compounds. the paper finishes with our conclusions. all detailed results are available as additional files.
+
+implementation
+the workflow implemented in metfrag is shown in figure  <dig>  and covered in detail in the following sections. metfrag is implemented in java and uses the chemistry development kit  <cit> , an open source java library. the cdk provides algorithms and data structures for structural chemo- and bioinformatics and is able to read and write common formats such as mdl, cml, inchi, and many more.
+
+retrieval of candidates from compound libraries
+first we perform a search in a general purpose compound database for candidate molecules based on the exact mass  of the neutral and intact molecule. currently three compound databases can be queried: kegg compound   <cit> , pubchem   <cit>  and chemspider   <cit> . optionally, the search can be restricted to compounds containing only the elements chnops, commonly occurring in natural products.
+
+alternatively, the compound databases can be searched with the elemental composition if this has been derived from e.g. exact mass and isotopic pattern of the precursor. finally, the set of candidates can be supplied by simply enumerating all database ids to be processed, e.g. obtained by an independent search for metabolites of a pathway. to query other  libraries, a custom wrapper can be added which contains the search logic.
+
+the results usually contain dozens to thousands of hits with a similar  mass. the databases are accessed via their webservice interface and the resulting candidate compounds are downloaded automatically. hydrogens are added explicitly to the structure where necessary.
+
+in silico fragmentation of candidates
+metfrag generates all possible topological fragments of a candidate compound in order to match the fragment mass with the measured peaks. the problem of enumerating all possible molecular fragments can be solved by creating a fragmentation tree. the root consists of the intact molecule, and each node represents a fragment, obtained by splitting the molecule at a given bond. we implemented this as an iterative, breadth-first algorithm. one major speed determining factor is the number of fragments generated, because of the combinatorial nature of the algorithm. thus, the maximum tree depth was introduced to improve the performance and specificity. we perform additional application-specific steps to prune the search space and take care of molecular rearrangements, see below. for each candidate structure the fragments are generated in the following way :
+
+initially the candidate structure is pushed into an "unprocessed" queue. the candidate structure is preprocessed using a  set of rules, which describe molecular rearrangements during the cid fragmentation that can not be accounted for by the simple bond disconnection approach. each application of these rules results in one or more derived fragments which are added to the "unprocessed" queue. the actual rules will be described later in this paper.
+
+then a structure is dequeued and its molecular graph is traversed to collect all bonds to be split. a linear bond  only needs to be cleaved and results in two new fragments. within a ring system two bonds have to be split simultaneously, to create the new fragments. only the fragments larger than the peak with the smallest mass are created, since smaller fragments can not explain an experimental peak.
+
+before proceeding to the next fragment, a redundancy check is performed to eliminate duplicate fragments. redundancy occurs if a fragment a is part of both parent fragments ab and abc, or the fragment a appears in different places of the molecule, as in aba. in both cases the redundant structures would cause longer runtimes and higher memory consumption without gaining any information. in addition to full  graph isomorphism checks we describe simpler heuristics later in this paper.
+
+finally, the in silico fragments are matched against the query peaklist. the measured peaks correspond to the charged fragments, so the matching function adds  or removes  a proton  to the fragment mass. in a few cases, fragment ions can have an intrinsic charge, where one of the heteroatoms is charged. in this case the fragment mass is used as-is, but a penalty is added to the bond dissociation energy of this fragment .
+
+the accuracy of a mass measured by an ms instrument is typically expressed relatively in ppm. in practice we found that especially for low masses, an additional  deviation has to be considered. hence metfrag uses two values mzppm and mzabs respectively, to calculate the mass error used for fragment matching.
+
+peaks that have such an explanation are subsequently removed from the query peaklist and the fragment-peak pair is saved for the final scoring. if the peak with the smallest mass has been explained, this will raise the minimal-mass cut-off, resulting in even fewer fragments that need to be considered. the "unprocessed" queue is then populated with the created and filtered fragments and processed as described above. the fragmentation terminates if the queue is empty or the maximum tree depth has been reached. the candidate is then scored based on all matched fragment-peak pairs as explained in the following section.
+
+scoring candidates based on fragments explaining the measured peaks
+the score is an extension of a simple peak count: si of a candidate compound i is calculated based on all fragments fi that explain peaks in the measured spectrum and the bond dissociation energy  calculated during the in silico fragmentation:   
+
+where  
+
+in general a peak with a high mass and intensity is more characteristic than peaks with lower mass and intensity. this is reflected by the weighted peak count wi, as already proposed by  <cit> . the exponents m =  <dig>  and n =  <dig> we use are taken from the literature  <cit> . the weights wi are scaled by max such that it is between  <dig> and  <dig>  we also take the bond dissociation energy  into account, the higher the bde, the less likely we consider a fragment. we use the standard enthalpy change upon bond fragmentation from literature, see e.g.  <cit> . for each candidate f we sum up bdeb for all bonds bf cleaved along the fragmentation tree for the explained fragments fi. afterwards, for each candidate the arithmetic mean ei of these bdes is scaled by  <dig> max such that it is between  <dig> and  <dig> .
+
+neutral loss rules account for rearrangements
+the ionised molecules typically have a single charge. after the fragmentation, the charge remains with either of the resulting fragments, the other is neutral. because only charged ions can be measured, the mass difference between the two charged ions before and after the fragmentation is referred to as the "neutral loss"  <cit> .
+
+one example of a common neutral loss is h2o, which is not a true substructure of any molecule. instead, h2o is formed after a hydroxyl group  and a single h are split off at different  positions . because individual h atoms are not considered during the in silico fragmentation, the resulting fragment would never be found without special treatment. metfrag is checking for structural patterns that can lead to such a non-topological fragmentation. we check within a specified topological distance of the oh-group for another hydrogen and remove both oh and h.
+
+this non-topological fragmentation is handled by the rules shown in table  <dig>  other neutral losses are covered by the bond-disconnection approach. rules can be added easily, e.g. if the compounds measured belong to unusual compound classes. metfrag reads these during start up and applies the rules to the initial candidates, resulting in new  candidate molecules.
+
+these rules are applied to the initial candidate structures to account for rearrangements during the tandem ms fragmentation, i.e. neutral losses of unconnected fragments: aionisation mode where this rule can be applied, bexact mass in da of the neutral loss, cmolecular formula of the characteristic fragment, dall atoms that are removed, e maximum number of bonds traversed to match neutral loss.
+
+elimination of redundant fragments
+we implemented three alternative structure redundancy checks. intuitively, a proper graph isomorphism check is the best approach to eliminate structures with the same molecular connectivity. in practice, graph isomorphism checks are not fast enough to process thousands of structures in reasonable time.
+
+alternatively we implemented an atom based redundancy check: each atom is labelled with a unique identifier and resulting fragments are compared to others based on atom ids. this method will not detect the redundancy as in aba mentioned above, because the atoms in the two identical substructures a carry different ids. this method showed the same identification rate at much lower runtime requirements. to reduce the complexity of the test even further, the molecular formula redundancy check was introduced, which compares fragments based only on their elemental composition. this check will detect the aba redundancy, but will produce false positives if two structures have the same elemental composition, but with different bond structure, i.e. connectivity. if two fragments have the same molecular formula, the one that requires the lower bond dissociation energy is chosen. this way the fragments which are more likely to occur are considered. the molecular formula redundancy check is used by default, because the results are comparable at considerably reduced runtime.
+
+structure clustering
+depending on the upstream database, the metfrag result list can contain many similar structures or stereo isomers which have identical metfrag scores. therefore, we cluster the hits with tied ranks using the pairwise tanimoto  <cit>  distance of the molecular fingerprints, as implemented in the cdk  <cit> . all hits with a pairwise similarity ≥  <dig>  are collapsed into one cluster.
+
+user interface and available apis
+our metfrag application features an user friendly web interface, http://msbi.ipb-halle.de/metfrag/. the required input includes the tandem ms peaklist with intensities , selection of the upstream compound database and respective search parameters . alternatively, a list of database ids can be provided explicitly. this allows e.g. to select the candidates based on their occurrence in specific pathways. figure  <dig> also shows the results browser. a feedback form allows to store all input data, user rating of the hypotheses, and further comments. this helps to collect user-provided test- and training data. spectra will not be saved unless explicitly granted. the web interface is based on java server faces   <cit> , using the apache myfaces  <cit>  implementation, icefaces  <cit>   in an apache tomcat  <cit>  servlet container. thus, metfrag is platform independent and accessible using most javascript enabled browsers.
+
+we also provide a biomoby  <cit>  web service, which can be called from other software, including the taverna workflow engine. finally, the actual metfrag algorithms are available as java library, which can be used to perform batch searches and evaluation.
+
+RESULTS
+in this section we give an example of metfrag results for an exemplary compound, and describe the full test data sets and evaluation criteria. we evaluate metfrag on two data sets, measured on different instruments, using either kegg or pubchem as compound library.
+
+for the evaluation we use the merged spectra from different collision energies of compounds where the database id is known. if metfrag returns multiple hypotheses with tied ranks, we report the most pessimistic position: even if the correct solution has the highest observed score, if  <dig> other candidates also have the same score, then we assign rank  <dig> 
+
+in addition to the worst case rank we report the cluster rank. clusters of compounds having a structural tanimoto similarity ≥  <dig>  are collapsed and treated as one compound cluster. again, this measure is quite conservative, because ranks are collapsed only within results having identical scores, and still the worst case cluster rank is reported. the standard deviation of both the raw and cluster ranks for a larger benchmark data set can be quite high, therefore we report not only the average rank, but also the median and 75% quantile.
+
+example: spectrum of naringenin
+as an example we show the analysis of a tandem ms spectrum of naringenin  with metfrag. using kegg as compound library with a realistic  <dig> ppm window around the exact mass of  <dig>  da will return  <dig> hits. each candidate structure is retrieved and fragmented as described in the previous section.
+
+after scoring each structure, the first three results can be seen in figure  <dig>  the details window shows the fragments that can be explained by the spectrum. the same query in pubchem yields  <dig> candidates, and figure  <dig> shows the  <dig> top ranked solutions, including the correct compound at worst case rank  <dig>  the similarity would collapse the isomers into two clusters, resulting in a cluster rank  <dig> 
+
+benchmark data sets
+two data sets were used for evaluation, together consisting of  <dig> spectra of  <dig> known compounds. current instruments allow the acquisition of so called ramp spectra, which combine a range of collision energies in one measurement. in both data sets the compounds were measured at different collision energies. depending on the compound, informative fragmentation might occur only at higher energies. for other compounds, even low collision energies can lead to a very high degree of fragmentation. for this reason we use composite spectra: two peaks p <dig> and p <dig> from different collision energies are merged  = avg if |mz <dig> - mz2| ≤  <dig>  th, retaining the higher intensity max.
+
+data set i with compound library kegg
+the first data set consists of  <dig> spectra from  <dig> compounds obtained on the api qstar pulsar i in positive mode at several different collision energies, e.g.  <dig>   <dig>   <dig> and  <dig> ev. the spectra were measured at the ipb and are publicly available in the massbank database http://msbi.ipb-halle.de/massbank/, see additional file  <dig> for a list of accession numbers.
+
+metfrag was used to identify the compounds using the  <dig> composite spectra within kegg. fragments are generated until a tree depth of two is reached. the instrument specific deviation was set to mzabs =  <dig>  and mzppm =  <dig> 
+
+the initial list of candidates obtained from kegg contained on average  <dig>  compounds. the correct compound has a median of  <dig> in the metfrag result list.  <dig> of the correct compounds were ranked in the top  <dig> hits and  <dig> of these are ranked first. metfrag is a great improvement over a mass-only library search. with  <dig>  <dig> entries kegg is a comparably small library. however, the compounds are highly relevant to metabolomics research.
+
+data set ii searched against pubchem
+for the second data set we used the pubchem database, with a much larger collection of natural and synthetic compounds. a collection of  <dig> compounds with an average mass of  <dig>  da has been measured on a micromass q-tof ii in positive mode and published by hill et al. in  <cit> . each compound was measured at five different collision energies:  <dig>   <dig>   <dig>   <dig> and  <dig> ev, for an overall of  <dig> spectra. all spectra are available from massbank as well, see additional file  <dig> for a list of accession numbers. for the spectra from this instrument we used  <dig> ppm  as mass deviation and a maximum tree depth of two. based on a pubchem snapshot  we retrieved on average  <dig> candidate compounds.
+
+after the metfrag scoring, the correct candidate occurred at median rank  <dig> , with the structure clustering the median decreased to  <dig> . the complete results are shown in additional file  <dig> 
+
+we were also interested in the effect of a larger tree depth: raising the tree depth to three increases the average runtime 5-fold, and worse, the prediction accuracy decreases. the median of the correct compound degraded to  <dig> . this behaviour can be explained with the positive predictive value :  
+
+where  
+
+the more  fragments are generated, the more peaks can be matched, which leads to more false positive hits. this dependency is the reason to include the exponent  in the scoring function. the higher number of false positives results in a ppv of only  <dig>   versus  <dig>  using tree depth of two.
+
+similarly, we applied the neutral loss rules  to every generated fragment, not just the initial candidates. again, we obtained more matching fragments, and the ppv decreased from  <dig>  to  <dig> , with an even higher median of the correct compound cluster of  <dig> 
+
+another aspect of the evaluation was to use individual spectra instead of the composite spectra. metfrag showed a poor performance resulting in a median of  <dig> using  <dig> ppm. an interesting observation is that the median improved to  <dig>  if the allowed mass deviation is increased from  <dig> ppm to  <dig> ppm. because the merging  of peaks in the composite spectra usually results in a more accurate mass, some peaks in individual spectra with a deviation beyond  <dig> ppm are only matched after relaxing the allowed error window to  <dig> ppm.
+
+finally, we interpreted some of the cases where metfrag did not return good results. table  <dig> shows many top  <dig> hits, but also several cases where metfrag is not able to rank the correct compound even among the top  <dig>  some of the problematic compounds are ormetoprim, strychnine n-oxide and tetramisole. one reason is the high number of very similar candidate structures, and the difficulty to distinguish them based on the predicted spectra. another example where many similar structures occur is tetracycline, but here the rather high rank decreased from  <dig> to cluster rank  <dig>  even these large result lists with many similar entries will still give a very good estimation of the possible compound class, which simplifies the subsequent  interpretation and identification.
+
+the results on the left were reported in  <cit> . the corresponding metfrag results are on the right where the candidate search was restricted to the pubchem as of february  <dig> . only the best  <dig> and eight worst metfrag results are shown, the full table is given as additional file  <dig> 
+
+we also evaluated data set i  against pubchem  <dig>  because this older mass spectrometer has a much lower mass accuracy than the micromass q-tof ii, both the candidate search and the scoring found more false positive matches. within the  <dig>  candidates, the median of the correct solution is only  <dig>  this leads to the conclusion that a good mass accuracy of ≤ <dig> ppm is required. almost all current qtof instruments are specified at  <dig> ppm or less, and even higher accuracies are available from orbitrap or fticr-ms instruments.
+
+comparison between metfrag and massfrontier
+in their paper  <cit>  hill et al. evaluate the prediction performance of massfrontier  <dig>  with an approach similar to metfrag, using pubchem  as compound database. we added a constraint to our candidate search to include only compounds added in or before february  <dig>  our simulated pubchem snapshot returns on average  <dig> candidates, the previous study only  <dig> structures. nevertheless, we use following results to compare metfrag and massfrontier. both metfrag and the search procedure by hill consider only compounds containing the elements chnops and ignore molecules which consist of c, h only. the previous study reports two separate evaluation strategies: the first combines the automatic ranking with the manual a-posteriori selection of the best spectrum, obtaining the correct result on a median rank  <dig> . in practice, this knowledge will not be readily available. the more realistic results are presented in the supplementary material of  <cit> , where a heuristic was used to select one spectrum per compound. the heuristic rule chooses the spectrum with the lowest collision energy which has at most 22% of the precursor ion intensity. in this case the median drops to  <dig> .
+
+the median for metfrag is  <dig> , and decreases to  <dig>  if the 95% similarity criterion is used. if the results are compared in more detail, this improvement is significant , tested with a one-tailed, paired wilcoxon signed rank test. the results for both systems are available as additional file  <dig> 
+
+it would be interesting to evaluate the massfrontier approach with composite or ramp spectra, where neither automatic nor manual spectra selection would be required.
+
+empirical runtime evaluation
+the naïve and recursive bond-disconnection approach has very high theoretical complexity. we evaluated the real-world runtime by sampling  <dig> compounds  from pubchem with a mass between  <dig> and  <dig> da. in metabolomics research, only few compounds exceed a mass of  <dig>  each compound was fragmented  to a given tree depth of two and three. figure  <dig> shows the runtime of metfrag on a pc with intel q <dig> cpu at  <dig>  ghz and  <dig> gb ram with ubuntu  <dig> , and jvm sun java  <dig> .0_16-b <dig>  each point shows the time needed to compute all fragments above  <dig> da. the yellow and red lines show the non-linear runtime for tree depth two  or three , respectively. in practice a tree depth of two has the best prediction accuracy  and is fast enough to analyse compounds on demand, even with masses up to  <dig> da.
+
+CONCLUSIONS
+we have presented an algorithm which is able to identify small molecules from tandem ms measurements among a large set of candidate structures. the scoring function does not require a set of fragmentation reactions or an actual simulation of the fragmentation process. metfrag is able to query kegg, pubchem and chemspider, and local databases can be integrated with little effort.
+
+in comparison to the system described in  <cit>  , metfrag achieves better results than massfrontier.
+
+for dedicated metabolite databases such as kegg, the correct identification is generally among the first few candidates. given the sheer size of generic compound libraries such as pubchem, it is no surprise that the result lists contain many structurally highly similar compounds. hence, an unambiguous identification is generally not possible, but usually the compound class can be derived from the results. a principal limitation is the inability to distinguish stereoisomers which is not possible from ms data alone. the final identification according to msi recommendations  <cit>  requires the comparison against spectra of authentic standards, or even complementary analysis methods such as nmr.
+
+our tool metfrag improves the identification of unknown substances from tandem ms spectra. it is fast enough to be used in the interactive web application, and has a user-friendly interface and result browser.
+
+availability and requirements
+• project home page: http://metware.org/
+
+• operating system: platform independent
+
+• programming language: java
+
+• other requirements: java ≥  <dig> , tomcat ≥  <dig> 
+
+• license: gnu lgpl v <dig> 
+
+authors' contributions
+sw implemented the metfrag application, web interface and performed the evaluation. ss provided the ms expertise, mm-h and sn provided input for the requirements, the algorithmic design and architecture. all authors contributed to, read and approved the final manuscript.
+
+supplementary material
+additional file 1
+massbank_kegg_results. full list of mass spectra and compounds used in section "data set i searched against kegg". this includes accession numbers in the massbank system. for each compound the number of candidates and the rank of the correct solution is given.
+
+click here for file
+
+ additional file 2
+hilldata_pubchem <dig>  full list of mass spectra and compounds used in section "data set ii searched against pubchem". this includes accession numbers in the massbank system. for each compound the number of candidates and the rank of the correct solution is given.
+
+click here for file
+
+ additional file 3
+comparison_massfrontier_metfrag_pubchem <dig>  this file includes the full results from table  <dig> in section "data set ii searched against pubchem". the candidate search was restricted to the pubchem as of february  <dig>  for convenience, we also include the results reported in  <cit> .
+
+click here for file
+
+ acknowledgements
+we thank the cdk team  for this cheminformatics library, and michael gerlich, carsten kuhl and ralf tautenhahn for helpful discussions. ss is funded by the bmbf .

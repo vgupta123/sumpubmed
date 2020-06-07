@@ -1,0 +1,174 @@
+BACKGROUND
+next generation sequencing technologies hold great promise for biology in general  <cit> . they may be used to identify snps, pursue metagenomics, analyse dna-protein interactions, and to discover non-coding rna  <cit> . furthermore, they may also be used for the analysis of the transcriptome  <cit>  supplementing the microarray technology. compared to microarrays, sequencing based analysis of the transcriptome allows to tackle new biological problems such as the identification of allele specific gene expression, absolute measurement of gene expression, identification of structural variation, identification of alternative splicing sites and cross species comparison of gene expression.
+
+we developed pangea – the comprehensive  gene expression analyzer – to enable a fast and user-friendly analysis of allele specific gene expression using the  <dig> technology. pangea can be used for quantification of gene expression, the identification of snps and the quantification of allele specific gene expression. additionally, pangea implements a modification of the smith-waterman algorithm which deals with incorrect estimates of homopolymer length as occuring in the  <dig> technology.
+
+pangea and the accompanying console applications have been mainly developed for windows but also work in linux and mac osx. pangea is distributed under the mozilla public licence and can be obtained from  .
+
+implementation
+pangea-blastn
+to map ests to genes or whole genomes we developed pangea-blastn. similarly to blast  <cit> , pangea-blastn uses an heuristic algorithm to find approximate hits between the database and the query sequence and then extends these hits with dynamic programming. pangea-blastn is well-suited for mapping of est reads obtained from next-generation sequencing technologies for the following reasons:
+
+• the seeding  has been optimized. pairwise alignments will only be created for the best seeds, which reduces the number of dynamic programming steps and thus computation time
+
+• the necessity to map ests unambiguously is explicitly addressed
+
+• the dynamic programming algorithm has been modified to deal with uncertainty of homopolymer length as occurring in the 454-technology or in the helicos system  <cit> 
+
+• several modifications have been implemented which allow for introns in the est sequences
+
+the mapping algorithm of pangea-blastn, initially builds a hash-table of the database sequence and subsequently scans for approximate hits between the query and the database sequence . computation time is reduced by the identification of the best candidates for the highest scoring hit from the longest diagonals, i.e. longest succession of shared words between the query and the database sequence. only the longest diagonals will be subjected to dynamic programming. in addition to the classic smith-waterman algorithm pangea-blastn provides a modified smith-waterman algorithm which is especially adapted to uncertainty of homopolymer length estimates occurring in several next-generation sequencing technologies  <cit> . we also implemented improvements in the dynamic programming algorithm to increase computation efficiency gotoh  <cit> . unambiguously mapped ests are identified by comparing the scores of pairwise alignments. if the score difference between the best and the second best hit exceeds a minimum threshold, a mapping result is considered unambiguous. ambiguous results are reported into a separate output file. pangea-blastn also offers an intron-mode in which introns are already considered during seeding. putative exons, separated by an intron, are individually aligned by dynamic programming  and subsequently aggregated into a composite alignment. partial alignments, representing putative exons, are frequently overlapping with respect to the query sequence. for example, 'exon a' covering the bases  <dig> –  <dig> of a query sequence overlaps with 'exon b' which covers the bases  <dig> –  <dig>  these overlaps are biologically not meaningful and have to be resolved. therefore, pangea-blastn calculates the alignment scores for each overlap individually and removes the overlap with the lowest score.
+
+in contrast to other blast-like approaches, insignificant hits cannot be filtered by specification of a minimum alignment score. rather, spurious hits can be filtered after a pangea-blastn search with the option 'manage pairwise alignments', by specifying a minimum similarity, alignment length and read coverage . this has the advantage that performing a separate pangea-blastn search for each different setting is not necessary. instead, a pangea-blastn search is conducted only once and the optimal parameters can subsequently be quickly estimated. the total length of the database sequences is only limited by the amount of available ram, an analysis using the d. melanogaster genome as database sequence  typically requires about  <dig> mb of ram. no upper limit exists for the number of query sequences as pangea-blastn operates in batch mode. pangea-blastn is available as a stand-alone console application and embedded into a user-friendly gui in the software pangea.
+
+seeding
+identification of approximate hits between the database and the query sequence, i.e seeding, provides the starting point for subsequent dynamic programming steps. since the most time consuming processes during mapping of ests is dynamic programming, minimizing the number of dynamic programming steps could considerably improve computational efficiency. for est mapping to genes or genomes the primary interest is the identification of the corresponding genes, thus only a single best hit is expected for each est. this particular requirement can be used to design an efficient est-mapping-algorithm by searching, already during seeding, for best-hit-candidates and subsequently aligning only those with dynamic programming. in contrast to blast which aligns each approximate hit between a database and a query sequence  <cit> , pangea-blastn only aligns the best-hit-candidates. best-hit-candidates are identified by searching for the longest diagonals between a database and a query sequence  <cit> . briefly, a hash table is built, containing each non-overlapping word of length k in the database sequences. each word holds information about the index of the database sequence  and the position within the database sequence . words having a low information content, i.e. occur several-fold more often than expected by chance , are removed from the hash table. the maximum number of occurrences nmax for words of length k in database sequences having the total length ld can be calculated as
+
+  
+
+where c denotes the low complexity cutoff specified by the user. after building a hash table, the query sequences are scanned. for each overlapping word of length k in the query sequence the corresponding matches in the hash table are identified. for these words, a shift  is calculated s = j - t where j is the position of the word in the database sequence and t the position in the query sequence. subsequently, these words are sorted and parsed by searching for consecutive words with identical index  and identical  shift   <cit> . a consecutive series of n identical indexes and shifts form a diagonal with length n. the algorithm searches for the longest diagonal, having the length nlongest, and passes all diagonals with a length n ≥ nlongest -  <dig> as seeds to the dynamic programming algorithm . the main difference to the algorithm of ning et al.  <cit>  is that pangea-blastn uses the diagonals merely as seeds for dynamic programming. in addition to this, pangea-blastn provides an optional modification to account for the presence of introns in the reads being mapped against genomic sequences. consecutive diagonals of length n ≥  <dig> may be concatenated thus forming cumulative diagonals . these cumulative diagonals allow for introns in the ests already during seeding. a maximum distance between the individual diagonals may be specified by the user.
+
+homopolymer adapted dynamic programming
+several next-generation sequencing technologies, for example the 454-platform or the helicos system introduce new types of sequencing errors  <cit> . most notably, the length of homopolymers is often estimated incorrectly  <cit> . these sequencing errors frequently cause the alignments of mismatching bases , which can lead to wrong estimates of the evolutionary distance between two sequences or may complicate the identification of snps in downstream applications. we developed a novel smith-waterman algorithm, which accounts for this uncertainty of homopolymer length by allowing for gaps preferentially in homopolymers.
+
+the basic idea of the algorithm is to adjust the gap-introduction penalty  dynamically to the "homopolymer-terrain" of a nucleotide sequence, i.e to use a position specific gap-introduction penalty, which decreases linearly within hompolymers. additionally, a reduced gap-introduction penalty should only be valid within the tract of a homopolymer, if a gap is to be extended beyond, the default gap-introduction penalty should be used.
+
+let the two dna sequences be d = d1d <dig> ..dn  and q = q1q <dig> ..qm . let imax further be the default  gap-introduction penalty, e the gap-extension penalty, s the hit score and pmm the mismatch penalty, then the minimum gap-introduction penalty imin can be calculated.
+
+  
+
+gap introduction penalties i <imin cause inconsistent alignments. now two position specific gap introduction matrices can be constructed id = id1id <dig> ..idn and iq = iq1iq <dig> ..iqm where each entry idi, iqk relates to an corresponding entry di, qk in d and q respectively, where  <dig> ≤ i ≤ n and  <dig> ≤ k ≤ m. the two matrices id and iq are instantiated with values for idi, iqk where imin = idi, iqk = imax. in the absence of homopolymers in sequences d and q, the corresponding values idi and iqk respectively, are set to imax whereas these values decrease linearly to imin within homopolymers.
+
+for gaps of length t the affine gap penalty pgt can be calculated  <cit> :
+
+  
+
+the homopolymer smith-waterman algorithm described here, additionally uses the homopolymer gap penalty pht for gaps of length t.
+
+  
+
+to restrict the introduced low-penalty-gaps to homopolymers, we introduced the homopolymer-transgression-penalty t, where x denotes the number of homopolymer transgressions. a homopolymer is transgressed each time qi ≠ qi+ <dig> for insertions and di ≠ di+ <dig> for deletions. a high value of t restricts low-penalty-gaps exclusively to homopolymer tracts, whereas t =  <dig> allows an extension of these gaps without imposing any restrictions. introduction of the homopolymer transgression penalty additionally has the advantage that this facilitates the implementation of the homopolymer smith-waterman algorithm in the important modification described by gotoh  <cit> .
+
+let s be the similarity between the two bases di and qk then a two dimensional matrix h can be constructed, similar as described by smith and waterman  <cit> .
+
+  
+
+fig  <dig> shows some pairwise alignments generated with the homopolymer smith-waterman algorithm compared to alignments generated by the classical smith-waterman implementation .
+
+we implemented this homopolymer smith-waterman algorithm together with the modification described by gotoh  <cit> , which reduces the required computation time from o to o where m and n is the length of the database and the query sequence respectively  <cit> . we simply used four one-dimensional arrays which keep track of the highest possible gap score  instead of the two originally described. an implementation of this homopolymer smith-waterman algorithm is available as the stand-alone application 'pangea-sw'.
+
+mapping statistics and management of pairwise alignments
+the mapped cdna sequence reads can be managed using the user-friendly gui of pangea. summary statistics for all ests mapping to the same gene are provided, such as the number of sense-ests mapping to the gene or the number of ests containing large gaps . subsets of the mapped reads can be displayed and exported by providing several quality criteria, such as ambiguity, minimum length of the alignment, minimum similarity, minimum coverage of the est, presence or absence of large gaps  or transcript orientation . the subsets may be exported and used for a subsequent analysis, for example snp identification.
+
+snp identification
+snps are identified from the pairwise alignments. if a list of validated snps is available, pangea provides the option to use only these snps for frequency estimates from the sequence reads. if no validated snps are available, pangea identifies snps from the sequence reads and provides several options to minimize the number of miscalled snps. pangea can account for the quality scores of the sequences, determining the sequence quality at the snp-site and its neighborhood.
+
+the strategy for snp-identification in pangea is to first identify snps using not-stringent parameters and to subsequently select a subset of these snps with the option 'manage snps' using stringent parameters. this has the main advantage that a separate snp-identification for each different parameters is not necessary, rather snps are identified only once and subsets can be flexible selected. this approach allows for an interactive fine-tuning of the selected snps and snp-alleles. to test the snp identification module we created extensive unit tests using nunit .
+
+the snp identification module is available as stand-alone console application 'pangea-snp' and has been integrated into the software pangea.
+
+identification of allele specific gene expression and visualisation of snps
+pangea provides two options to display the identified snps. either summary results are displayed for each snp-site  or for each database sequence . the summary statistics for each snp-site furthermore provide a convenient way to quantify allele specific gene expression by displaying the snp-allele frequencies at each snp-site . optionally, subsets of the snp-alleles can be displayed according to quality, direction of transcription  and minimum frequency. the quality of snp-alleles can be assessed by several criteria such as the minimum sequence quality of the snp, the minimum sequence quality in the neighborhood of the snp and the minimum distance from the alignment ends.
+
+methods for benchmarking
+we obtained the drosophila melanogaster genome , gene sequences  and the transcripts  from flybase . all benchmarks were carried out on a standard desktop computer with  <dig> gb of ram and an intel™core duo® <dig> ×  <dig>  ghz processor. for benchmarking, a set of  <dig>  <dig> 454-ests, with an average length of  <dig> bp, derived from the 3'-end of d. melanogaster transcripts, were downloaded from genbank . these 454-ests were mapped to the genes of d. melanogaster using stand-alone blast  <dig> . <dig> and pangea-blastn. both programs used only one of the two available processors. the following pangea-blastn settings were used: word length 11; minimum diagonal 2; low complexity threshold 10; hit score 3; mismatch penalty 5; gap introduction penalty 11; gap extension penalty 2; homopolymer transgression penalty 3; ambiguity threshold 10; homopolymer smith-waterman; intron mode was off; the defaults settings were used for ncbi-blastn, except the e-value was set to 10- <dig> and the tabular output format  was used. the pairwise alignments, resulting from the mapping of these  <dig>  <dig> 454-ests to the genes of d. melanogaster, were used for the subsequent identification of snps.
+
+to test the performance of pangea-blastn with the 454-platform in detail, we developed a console application which randomly excises  <dig> ests from the transcripts of d. melanogaster, randomly introduces pseudo-sequencing-errors  into these ests and maps them either to the genes or the whole genome of d. melanogaster using pangea-blastn. an est was considered correctly mapped to the genes, if the gene-id  matched the mapping result, whereas an est was considered correctly mapped to the whole genome, if the chromosome-id as well as the position within the chromosome  matched the mapping result.
+
+RESULTS
+influence of the mapping parameters used by pangea-blastn
+we evaluated the influence of the pangea-blastn parameters on the mapping accuracy and computation time by mapping  <dig> randomly generated  <dig> bp fragments from d. melanogaster transcripts  to the corresponding genes.
+
+first, we determined the influence of the low complexity cutoff , which reflects the maximum frequency of a word in a hash-table. words occurring c times more frequent than expected by chance were not considered. as expected the mapping accuracy increased with 'c' on the expense of computation time . nevertheless, the number of inaccurately mapped 454-ests was low  irrespective of the low complexity cutoff.
+
+next we calculated the influence of the ambiguity threshold, which measures the difference between the best and the second best hit. increasing the ambiguity threshold resulted in a moderate reduction for incorrectly mapped 454-ests. while <  <dig> % were mapped incorrectly when only the best hit  was considered, an ambiguity threshold of  <dig> had <  <dig> % incorrectly mapped 454-ests. the trade off of this increase in mapping accuracy was an increase of ambiguously mapped 454-ests. rather than 9% for the best hit, an ambiguity threshold of  <dig> resulted in 13% ambiguous hits . the ambiguity threshold only has a minor influence on computation time . on the other hand, increasing the word size dramatically reduces the computation time on the expense of the mapping accuracy . the last parameter evaluated was the 'minimum diagonal length'. similar to word size an increase in minimum diagonal length reduced the computational time on the expense of mapping accuracy .
+
+these results illustrate that optimal parameters represent a compromise between computation time, specificity and sensitivity.
+
+mapping performance of pangea-blastn
+to assess the performance pangea-blastn we compared pangea-blastn with ncbi-blastn. a set of more than  <dig>   <dig> ests  <cit> , with an average length of  <dig> bp were mapped to their gene sequences using pangea-blastn and ncbi-blastn. despite a considerable reduced computation time, pangea-blastn generated very similar results as ncbi-blastn , suggesting that the simplified search did not compromise the mapping efficiency.
+
+more than  <dig>  454-ests from d. melanogaster  <cit>  were mapped to their genes. ambiguity was reported if the score of the best hit differed from the score of the second best hit by less than  <dig> 
+
+1pangea ∩ ncbi, i.e mapping results in which both tools agree
+
+nevertheless, we noted some differences between pangea-blastn and ncbi-blastn. to evaluate the mapping efficiency of pangea-blastn, we computationally generated  <dig> 454-est-like sequences from d. melanogaster transcripts and mapped them either to gene sequences  or to the entire genome. to account for sequencing errors, we also introduced 5% and 10% mutations prior to mapping.
+
+the performance of pangea-blastn was assessed using the following criteria:  the number of ambiguous hits  the number of correct hits, including ambiguous hits containing the correct hit,  the number of wrong hits, including ambiguous hits not containing the correct hit  the number of not-mapped ests,  the number of identified large gaps  and finally  the required computation time.
+
+a very high proportion  of the ests was correctly mapped irrespectively of the sequence divergence . this mapping accuracy could be further improved by changing some of the parameters, such as word size . we noted a substantial discrepancy of unambiguously mapped reads for the gene sequences and genomic sequences. despite a higher complexity, fewer reads  were ambiguously mapped to the genome than to the gene sequences . the reason for this discrepancy are ovelapping/nested genes . most importantly, the mapping accuracy was not effected when the intron discovery mode was switched on. however, several large gaps  were discovered, emphasizing the need for the intron discovery mode. increasing the length of the 454-ests beyond  <dig> bp did not result in an increased mapping efficiency, suggesting that this length is sufficient for reliable mapping.
+
+values were calculated for mapping  <dig> randomly excised ests, either to the genes or to the whole genome of d. melanogaster
+
+ <dig> settings: word length 11; minimum diagonal 3; low complexity threshold 10; homopolymer smith-waterman algorithm; no maximum intron length
+
+ <dig> length of the tags in bp
+
+ <dig> similarity of the tag with the target sequence in percent
+
+ <dig> ambiguous mapping results; min score difference for unambiguous best hit 12
+
+ <dig> correctly mapped tags 
+
+ <dig> wrongly mapped tags 
+
+ <dig> no hit identified
+
+ <dig> number of long gaps , putative introns
+
+ <dig> mapping time in seconds, without the time required for constructing the word hash-table
+
+ <dig> settings as above, only the maximum intron length was set to  <dig> bp
+
+however, considering the benchmarks of table  <dig> we recommend the following settings for mapping of 454-ests, which are an attempt to optimize the antagonistic demands for efficiency, sensitivity and specificity: word length  <dig> , minimum diagonal length  <dig> , low complexity cutoff  <dig> ; intron mode on. these settings are used as defaults by pangea-blastn.
+
+discussion and 
+CONCLUSIONS
+pangea provides an important step towards the use of massively parallel sequencing for gene expression analysis. while it is currently not apparent which of the new sequencing technologies will provide the most appropriate tool for gene expression analysis, the software tool pangea allows an accurate quantification of allele specific gene expression.
+
+availability and requirements
+project name: pangea
+
+project home page: 
+
+operating system: windows, linux and mac os x
+
+programming language: c#
+
+other requirements: .net framework  <dig>  for windows; mono  <dig>  for mac os x and linux
+
+license: mozilla public license
+
+any restrictions to use by non-academics: none
+
+authors' contributions
+rk, ttt and cs conceived the project. rk did the programming. cs supervised the project. rk, ttt, tl and cs wrote the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+pangea  <dig> . a platform independent executable of pangea.
+
+click here for file
+
+ additional file 2
+pangea source code. the source code of pangea.
+
+click here for file
+
+ additional file 3
+comparison of alignments. compares the pairwise alignments created with the homopolymer smith-waterman algorithm to the classic smith-waterman algorithm.
+
+click here for file
+
+ additional file 4
+nunit test for the snp identification module. a zip file containing the unit text for the snp modification mudule as c# code.
+
+click here for file
+
+ additional file 5
+performance of pangea-blastn. provides detailed benchmarks for pangea-blastn.
+
+click here for file
+
+ acknowledgements
+this work was financially supported by the austrian science fund , p18414-b <dig> ) and a fellowship of the brazilian national council for scientific and technological development  to t.t.t. rk thanks thomas kofler for providing the web space and helpful comments on programming in c#.

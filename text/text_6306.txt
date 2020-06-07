@@ -1,0 +1,292 @@
+BACKGROUND
+advances in sequencing and gene-prediction technologies have led to the discovery of virtually complete sets of protein-coding sequences in many model systems. in contrast, how these coding sequences are controlled by the regulatory sequences to transform a single cell, through cell division and differentiation, into a complex multicellular organism remains largely unknown. in multicellular organisms, one of the primary purposes of gene control is execution of the genomic regulatory code to generate complex body plans during development
+ <cit> . this process critically depends on the right gene being activated in the right cell  at the right time . thus, analysis of spatiotemporal gene expression patterns provides a promising way for investigating the gene regulatory networks governing development.
+
+in developmental biology, the fruit fly drosophila melanogaster has long been established as a canonical model organism
+ <cit> . recent advances in high-throughput in situ hybridization  technologies have allowed scientists to produce spatiotemporal expression patterns for thousands of genes in drosophila <cit> . this wealth of data creates opportunities for studying the developmental regulatory networks. however, the sheer volume and complexity of these data preclude the traditional practice of manual analysis and make automated methods essential
+ <cit> .
+
+in this work, we develop a set of ish image computing and machine learning methods for the automated analysis of drosophila gene expression pattern images. specifically, we develop a mesh generation pipeline for mapping the expression patterns of many genes into the same geometric space
+ <cit> . this enables accurate comparative analysis of the spatial expression patterns of multiple genes and accounts for the differences in embryo morphology. we fit an ellipse to the boundary of each embryo using the least squares criterion. we then average the fitted ellipses for all images in the same stage range to obtain a generic ellipse. we automatically interpolate the boundary of this generic ellipse and use a delaunay mesh method
+ <cit>  to generate a triangulated mesh on this ellipse.
+
+we accurately capture the morphology of each embryo by employing a systematic procedure to deform the generic, meshed ellipse to each individual embryo. we first establish correspondences between vertices on the generic ellipse and those on the fitted ellipses. then the vertices on the fitted ellipses are deformed to the embryo boundary using the minimum distance criterion. finally, the coordinates of all the other vertices are computed by solving an elastic finite element problem.
+
+the mesh generation scheme allows us to organize the expression pattern images of many genes into a data matrix in which one dimension corresponds to genes and the other dimension corresponds to mesh elements as in the genomewide-expression-maps 
+ <cit> . to identify co-expressed embryonic domains and the associated genes, we develop a co-clustering formulation to cluster the mesh elements and the genes simultaneously. we formulate the co-clustering problem using a maximum likelihood formalism and employ an expectation-maximization algorithm to perform the parameter estimation.
+
+we apply the mesh generation and co-clustering methods to a set of gene expression pattern images in the flyexpress database
+ <cit> . our results show that our methods generate co-expressed domains that overlap with many embryonic structures. in addition, these results show that the proposed methods yield gene clusters that are functionally more enriched than those discovered in prior studies. more importantly, we show that the mesh and gene co-clusters correlate strongly with key developmental events during the stages of embryogenesis under investigation.
+
+methods
+mesh generation
+requirements
+let i <dig> …,i
+m
+ be a list of embryo images. the goal of this module of the pipeline is to overlay each of the embryo images with a triangular mesh, such that all meshes have the same number of triangles and connectivity. for a given image, all triangles we create are of approximately the same size, in terms of their area. let a stand for an upper bound on triangle area. then all triangles in a single mesh which we construct have area slightly less than a. let m
+j
+ be the mesh that we construct for image i
+j
+ that depends on area bound a. for simplicity we will omit the parameter a below.
+
+more precisely, let m
+j
+ = , where v
+j
+ is the list of vertices and t
+j
+ is the list of triangles. each vertex is defined by its two-dimensional coordinate, and each triangle is defined by a triple of vertex indices , 1 ≤ p <dig> p <dig> p3 ≤ |v
+j
+|. these meshes are expected to satisfy the following requirements: 
+
+• all of the t
+j
+ contain the same number of triangles, i.e., |t
+j
+| = |t
+i
+| for i,j =  <dig> …,m.
+
+• all of the t
+j
+ contain the same triples of vertex indices in the corresponding positions. as a result, we can omit the subscript and use t for all meshes m
+j
+, j =  <dig> …,m.
+
+• all of the v
+j
+ contain the same number of vertices: |v
+j
+| = |v
+i
+| for i,j =  <dig> …,m.
+
+• all vertices on the boundary of mesh m
+j
+ lie on the boundary of the embryo of image i
+j
+.
+
+• each triangle in m
+j
+ = m
+j
+ has area approximately equal to a.
+
+• all vertices in v
+j
+ are geometrically close to the vertices in the corresponding positions in v
+i
+ for all i,j =  <dig> …,m, with respect to their location within an embryo.
+
+construction and meshing of the average ellipse
+for each image i
+j
+, j =  <dig> …,m, we compute the parameters of the equation of the ellipse e
+j
+ that realizes the best fit to the boundary of the embryo in this image. we compute the best fitted ellipse using the least squares criterion to the set of the embryo’s boundary pixels. then we average the parameters of all ellipses to obtain the average ellipse e′.
+
+given a value of a, we construct a mesh of e′. first, we use linear interpolation to approximate the boundary of e′, and then use a delaunay mesh generator, triangle
+ <cit> , to mesh the interior of e′. delaunay refinement is our meshing method of choice since it is backed by proven theoretical guarantees
+ <cit>  that make it a push-button technology: its being able to guarantee termination with angle and area bounds allow for a guaranteed quality automatic pipeline.
+
+we interpolate the boundary of e′ by performing the following steps. first, we calculate the side length ℓ of an equilateral triangle with area a. then we use an iterative subdivision of the boundary of e′ with a set of vertices v <dig> …,v
+s
+ = v <dig> until all segment lengths |v
+i-1v
+i
+|, i =  <dig> …,s are approximately equal to ℓ. in other words, this is a uniform distribution of vertices with respect to the lengths of segments. the union of all these segments is a piecewise linear interpolation of the boundary of e′.
+
+to tessellate the interior of e′, we use triangle with the following parameters: 
+
+• a planar straight line graph  composed of the segments and the points interpolating the boundary of e′ plus one point in the center of e′. we instruct triangle to preserve this pslg and not to split the boundary segments, so that the discretization of the pslg appears as a subgraph of the final mesh.
+
+• the area bound a instructing triangle to produce all triangles with areas bounded from above by a. triangle starts with a coarse mesh and iteratively splits triangles until their areas fall below a, and therefore this is an approximate target area.
+
+• an angle bound of 25° which instructs triangle to enforce all angles in the final mesh to be 25° or above. theoretically, triangle guarantees only a minimum angle bound of  <dig> ° or below, however we found that in practice it can mesh an ellipse with a 25° angle bound, since it is a simple shape.
+
+let the mesh of the average ellipse be denoted as m′, and the list of radial angles corresponding to the subdivision vertices as
+θ1′,…,θs′.
+
+deformation of the mesh of the average ellipse
+for each ellipse e
+j
+, we use the angles
+θ1′,…,θs′ to find the vertices that discretize the boundary of e
+j
+. then we project these vertices onto the closest points from the boundary of the embryo in image i
+j
+. we define closeness in terms of the euclidean distance, and use the matlab’s euclidean distance transform function to find the nearest boundary pixels simultaneously for all pixels in the image. using the result of this function, we determine the required projections.
+
+for each image i
+j
+, we deform the mesh m′, such that the boundary vertices of m′ assume the coordinates of the corresponding vertices  on the boundary of the embryo in i
+j
+. the target coordinates of all the other vertices in v′ are computed by solving an elastic finite element problem
+ <cit> . as a result, the triangles of the generic mesh are deformed minimally and proportionally to their distance to the projected vertices on the boundary of the embryo in i
+j
+ and to the amount of the displacement at these boundary vertices.
+
+simultaneous clustering of mesh elements and genes
+for a mesh with n elements , we assume that the elements are numbered from  <dig> to n in an arbitrary but fixed order. following
+ <cit> , we extract the median of gray-level intensities from each mesh element and represent each image using an n-dimensional vector in which the ith component contains the median of intensities from the ith mesh element. then the expression patterns of m genes can be encoded into a data matrix
+a∈rm×n, in which each row corresponds to a gene, and each column corresponds to a mesh element. note that, to simplify the notation, we assume that the number of images and the number of genes are the same. when the expression pattern of a gene is captured by multiple images, we treat them separately.
+
+in
+ <cit> , two clustering methods are applied independently to identify clusters in the rows or the columns of the matrix a. in their case the row-wise  clustering requires the rows  in the same cluster to be similar with respect to all columns . however, a set of genes might be co-expressed only at certain local domain of the embryo corresponding to a subset of mesh elements. to identify the co-expressed embryonic domains and the associated genes, we employ a co-clustering method to cluster the rows and columns of the data matrix a simultaneously. this generates co-clusters consisting of a subset of genes that are co-expressed at a subset of mesh elements. note that entries of matrix a encode the expression intensities of genes and thus are nonnegative. an appealing property of our co-clustering method is that it is based on a probabilistic model and thus preserves the nonnegativity in the estimated parameters. it has been shown in
+ <cit>  that a variant of this model consistently outperforms other methods that do not preserve nonnegativity.
+
+a co-clustering formulation
+in our co-clustering model, the matrix a is represented as a bipartite graph in which the two set of vertices correspond to the rows  and columns , respectively, of the matrix a. the edge connecting the ith vertex in the first set to the jth vertex in the second set carries a weight of a
+ij
+. it follows that the adjacency matrix of the bipartite graph w can be expressed as
+
+  w=0aat <dig>  
+
+where the vertices in one set is ordered before vertices in the other set.
+
+we assume that the adjacency matrix w of the bipartite graph can be approximated by
+
+  w≈hh~, 
+
+where
+
+  h=p00q∈r×, 
+
+  h~=0qtpt0∈r×, 
+
+c is the number of co-clusters,
+p∈rm×c denotes the row cluster indicator matrix, and
+q∈rn×c denotes the column cluster indicator matrix. it follows that
+
+  hh~=0pqtpqtt <dig>  
+
+which matches the structure of w in eq. .
+
+following
+ <cit> , we assume that the data in a are generated via a multinomial distribution. this gives rise to the following log likelihood function of observing the adjacency matrix w:
+
+  l=logp=2∑i=1m∑j=1naijlogpqtij. 
+
+it can be shown
+ <cit>  that maximizing the log likelihood in eq.  is equivalent to minimizing the divergence loss of the approximation in eq. .
+
+an em algorithm
+we use an em algorithm to maximize the log likelihood in eq. . in the following, variables with hat are used to denote the values obtained from the previous iteration. in the e-step, we compute the expectation as
+
+  ϕijk=p^ikq^jkij. 
+
+in the m-step, we maximize the expectation of log likelihood with respect to 
+ijk
+ = ϕ
+ijk
+
+
+  eΦ=2×∑ijkϕijkaijlogpikqjk. 
+
+we impose the following normalization constraints to facilitate a probabilistic interpretation of the co-clustering results:
+
+ ∑i=1mpik= <dig> ∑j=1nqjk= <dig>  
+
+by using lagrange multipliers for these constraints, it can be shown that the following update rules will monotonically increase the expected log likelihood defined in eq. , thereby converging to a locally optimal solution
+ <cit> :
+
+ pik←2×∑jp^ikq^jkaijij,qjk←2×∑ip^ikq^jkaijij. 
+
+the results are then normalized such that ∑i p
+ik
+ =  <dig> and ∑j q
+jk
+ =  <dig>  the e-step and m-step are repeated until a locally optimal solution is obtained. then the matrices p and q can be used as row and column co-cluster indicator matrices, respectively, to obtain soft co-clustering results. a variant of this method has been shown to compare favorably with other approaches on a variety of data sets
+ <cit> .
+
+related work
+our work on mesh generation is motivated by the prior work in
+ <cit> . however, there are some substantial differences between our approach and the prior method. besides the expanded analysis based on meshes with a range of triangle sizes, for a given triangle size a our methodology also offers a number of significant improvements in the accuracy of capturing embryo shapes. frise et al. <cit>  define e′ as a predetermined ellipse of axial ratio 4: <dig>  while we compute e′ from the actual embryo shapes. as a result, we make sure that e′ is close to the particular set of shapes, since different sets of shapes can have different average ellipses. frise et al. <cit>  discretize the boundary of e′ based on approximately equal radial angles, while our discretization is based on approximately equal edge lengths. see figure
+ <dig>  for an illustration. frise et al. <cit>  project the discretization vertices from e
+j
+ onto the actual boundary of the embryo along the radial lines emanating from the center of e
+j
+, while we choose the closest points based on euclidean distance. see figure
+ <dig>  for an illustration.
+
+our work is related to the seminal work in
+ <cit> , where the gaussian mixture models  were applied to generate co-expression domains for the purpose of image comparison. our work is different from
+ <cit>  in both its objectives and approaches. in
+ <cit> , image pixels were considered directly as the basic elements of modeling while we use triangulated mesh to warp and discretize the embryos in order to account for the shape and morphological variations. it has been shown in prior work
+ <cit>  that the use of mesh leads to biologically significant results. in addition, gmm was used to cluster the pixels in
+ <cit> , while we use a co-clustering method to co-cluster the mesh elements and the genes simultaneously. since each domain is expected to be defined by only a subset of genes in the genome, co-clustering aims at identifying the domains and the associated genes simultaneously. as shown by our experimental results, co-clustering leads to more significant results.
+
+RESULTS
+we evaluate the proposed computational methods on a set of gene expression pattern images retrieved from the flyexpress database
+ <cit> . this database contains genome-wide, two-dimensional, standardized images obtained from multiple sources, including the berkeley drosophila genome project
+ <cit> . other databases provide three-dimensional images with higher resolution, but the data are not on the genome-scale
+ <cit> . following
+ <cit> , we focus on stages 4- <dig> and generate two data sets. the larger data set contains  <dig> images capturing the expression patterns of  <dig> genes, and the smaller one is a subset of  <dig> images corresponding to  <dig> genes with clearly defined expression boundaries. the images are preprocessed by a set of tools developed in
+ <cit>  before they are tesselated with our mesh generation tools. we apply the proposed mesh generation method to convert a set of images into a data matrix in which the rows correspond to genes and the columns correspond to mesh elements. we apply the co-clustering method to compute co-clusters of genes and mesh elements. we first study the mesh clusters and gene clusters separately in sections “clustering of mesh elements” and “clustering of genes”, respectively. we then correlate mesh and gene co-clusters with developmental events in section “co-clustering of mesh elements and genes.
+
+clustering of mesh elements
+the mesh elements represent localized spatial areas of the embryo, and can be used to discover distinct domains of developmental gene expression. we apply our mesh method to the data set of  <dig> stage 4- <dig> lateral embryos to gain insight into major developmental co-expression domains during this time. co-clustering with different numbers of co-clusters is applied to the data matrix. results are then mapped to the average ellipse and color-coded . to ensure that cluster boundaries are not the result of data processing artifacts, data is randomized at multiple points of the pipeline.
+ <cit> .
+
+figures
+ <dig> and
+ <dig> reveal the resulting clusters resemble the fate map of the developing embryo
+ <cit> . the clusters represent domains of high co-expression. they invariably form spatially contiguous regions, and are composed of rectangular shapes. further, the cluster boundaries are largely parallel to the anterior/posterior  and dorsal/ventral  axes of the embryo. as the number of co-clusters is increased , the rectangular cluster shape is often retained, with larger clusters subdivided into smaller ones. in our data set, this subdivision of clusters often occurred at the far a/p and d/v regions of the embryo. these increased subdivisions correlate with major developmental events during stages 4- <dig> of drosophila embryogenesis
+ <cit> . signals along the a/p and d/v axes drive this pattern formation
+ <cit> . during stage  <dig> gastrulation begins, and the ventral and cephalic furrows form. looking back at the clusters, we see a greater proportion of subdivisions along where these furrows form in the developing embryo. the general clustering patterns remain the same while the cluster boundaries become smoother as the number of mesh elements increases .
+
+clustering of genes
+co-clustering of the data matrix leads to clusters of genes. we use gene ontology 
+ <cit>  to evaluate the gene clusters and compare the results with those reported in
+ <cit> . our gene clusters are the combined results of the mesh generation and co-clustering methods. hence, we evaluate the effects of these two methods separately.
+
+first, we compare our mesh generation method with the approach described in
+ <cit> . we apply both methods to the set of  <dig> images, yielding two data matrices. we then apply the co-clustering method with different numbers of co-clusters to these two data matrices. since the same co-clustering method is used for both data matrices, the differences in the results should be contributed by differences in the mesh generation methods. we use the hypergeometric distribution to compute enriched go terms
+ <cit>  in order to evaluate the gene clusters generated from these two data matrices. the numbers of terms with p-values less than  <dig>  are reported in table
+ <dig>  we can see that these two methods give similar numbers of biological process terms when the number of clusters is relatively small . however, as the number of cluster increases, our new mesh generation method yields larger numbers of enriched terms. this result shows that the new mesh generation approach and pipeline tools we developed are more accurate and can produce statistically more significant results when the number of clusters is large. we also observe that these two methods give similar numbers of cellular component and molecular function terms in all cases. since the numbers of enriched terms in these two categories are relatively small, the differences in mesh generation methods might not be significant enough to be reflected in these two categories.
+
+the number of co-clusters is varied from  <dig> to  <dig>  in each case, the total number of enriched terms from all clusters are reported.
+
+we also compare our co-clustering approach with the affinity propagation method used in
+ <cit> . namely, we compare our em-based co-clustering method with the affinity propagation clustering by applying these two methods to the data matrix generated by our mesh using  <dig> images. the affinity propagation method automatically determines the number of clusters and yields  <dig> clusters on this data set
+ <cit> . we also apply our co-clustering method on this data set to generate  <dig> clusters. we then compute the number of enriched go terms for each cluster, and the results are depicted in figure
+ <dig>  we can see that our co-clustering method is able to generate gene clusters that are functionally more enriched than those by the affinity propagation approach.
+
+the significantly different results might be due to the fundamentally different approaches taken by the two studies. specifically, frise et al.
+ <cit>  used clustering method to group the genes into clusters based on all the mesh elements. in another word, clustering method measures the expression patterns of genes across the whole embryo. that is, for two genes to be in the same cluster, they need to have similar expression patterns over the entire embryo. in comparison, we propose to use a co-clustering method, which identifies gene and mesh co-clusters simultaneously. in our approach, two genes can be grouped into the same cluster if they share similar local expression patterns. note that co-clustering was mainly motivated from gene expression studies
+ <cit> , and our results show that co-clustering method yields statistically more significant results.
+
+co-clustering of mesh elements and genes
+we next evaluate the gene co-clusters, and correlate the results with major developmental events occurring during stages 4- <dig>  to accomplish this, we first apply our mesh generation and co-clustering methods to the data set of  <dig> images depicting gene expression in stage 4- <dig> laterally oriented embryos
+ <cit> . we set the number of co-clusters to  <dig> as in
+ <cit> . then, enriched go terms  are computed . a one-sided significance test is applied, and enriched terms with ≥90% significance were retained. of the  <dig> clusters,  <dig> are enriched in at least one term.
+
+the majority of enriched go biological process terms are related to gene regulation, embryo development, pattern formation, and cell fate specification . this makes biological sense, as during stages 4- <dig> cellularization and the start of gastrulation occur. at the beginning of gastrulation, major morphogenetic movements start and the ventral furrow begins to invaginate, ultimately forming the mesoderm as development progresses
+ <cit> . of  <dig> clusters, five  are enriched with terms related to mesodermal cell fate determination and specification, mesoderm development, mesoderm cell migration, and gastrulation.
+ <dig> 
+
+mapping the enriched go terms back onto the clusters reveals clusters enriched in similar terms are often located in close proximity to each other . for example, looking back at figure
+ <dig>  the majority of clusters enriched with terms related to mesoderm development are located in the ventral section of the developing embryo. this location corresponds to the ventral furrow, and many genes verified to be involved in mesoderm specification are expressed in these embryonic regions during stages 4-6
+ <cit> . this suggests uncharacterized genes expressed in these domains may be involved in similar developmental processes, and are candidates for experimental testing.
+ <dig>  each mesh element is labeled with its cluster membership, and the corresponding gene clusters are shown as columns in figure
+ <dig> 
+
+among the many genes showing expression in clusters located in the forming cephalic furrow, we find a subset of genes known to be involved in the mesodermal developmental network
+ <cit>  among the images in our data set. these include the transcription factors twist, snail, mes <dig>  brinker, and tinman. these genes exhibit high co-expression, and are expressed in the ventral region of the embryo during stages 4-6
+ <cit> . we obtain similar results when examining other clusters located in close proximity to each other, overall suggesting that the discovered gene and mesh co-clusters correlate well with major developmental events associated with the stage range.
+
+lastly, we examine the  <dig> clusters showing no go biological process enrichment in our stage 4- <dig> co-clustering. these include clusters  <dig>   <dig>   <dig>   <dig>  and  <dig>  looking back at the images, we find a lack of localized gene expression at these embryonic domains during stages 4- <dig>  these clusters initially form a single cluster in the interior region of embryo when the number of clusters is small . these regions are involved in later developmental processes and are not involved in the major developmental events occurring during stages 4- <dig> of drosophila embryogenesis.
+
+CONCLUSIONS
+in this study, we aim at identifying co-expressed embryonic domains and the associated genes simultaneously. we develop a mesh generation pipeline that maps the expression patterns of many genes into the same coordinate space. we then employ a co-clustering formulation to cluster the mesh elements and the genes. this identifies co-expressed genes and spatial embryonic domains simultaneously. experimental results show that the embryonic domains identified in this purely data-driven manner correspond to many embryonic structures. results also show that the gene and mesh co-clusters correlate with major developmental events during the stages we study.
+
+in the current mesh generation method, we only consider the shapes of embryos when deforming the generic ellipse to each embryo. a more accurate deformation method would take the intensity and texture information of images into account. we will develop more advanced mesh generation method in the future. in this work, we focus on a particular time period of development. we will extend our analysis to multiple stages and employ time-varying analysis in the future
+ <cit> .
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+sj conceived the project, wz, ac, nc, co, sk, and sj designed the methodology, wz, df, and rl performed the experiments, co, ck, sn, sk, and sj interpreted the results, wz, ac, nc, ck, sk, and sj drafted the manuscript. all authors have read and approved the final manuscript.
+

@@ -1,0 +1,135 @@
+BACKGROUND
+short read sequencing methods have rapidly increased the amount of genetic data that can be obtained in a cost effective manner  <cit> . the computational skills and time necessary to assemble genes from these short read datasets is quickly increasing. to assemble genomic datasets researchers must first create a genome assembly using either a de novo or reference-based approach, if a reference genome is available  <cit> . complete de novo genomic assemblies typically require a variety of dna sequencing libraries and the assemblies are computationally intensive. although reference-based assemblies can significantly reduce the computational time needed and be performed from a single dna sequencing library, such assemblies can be problematic or impossible for more divergent taxa  <cit> . for many studies however , researchers may not need a complete genome assembly; rather the analysis may only require homologous sequencing data that covers all of the taxa of interest, and not genomic assemblies. as more and more genomic data become available, the time associated with these assemblies will become more challenging particularly for projects with hundreds of taxa. approaches that target specific loci or genes from short read datasets will likely reduce the time necessary to assemble genetic datasets.
+
+a few target-based methods have been made available that are shown to work well for very closely related taxa  <cit> , rad-pe fragments  <cit>  and meta-genomic datasets  <cit> . however, a method is still needed that can target and assemble genes across highly divergent taxonomic datasets. in this article we describe atram, automated target restricted assembly method, a software package designed to rapidly assemble genes using a single paired-end genomic library from divergent taxa. the atram software is inspired by the target restricted assembly method  idea first outlined by johnson et al.  <cit> . tram used a targeted approach with local blast  <cit>  to assemble genes from short sequencing reads. the atram software is tram completely redesigned and fully automated including a number of optimizations to speed up gene assembly, as well as providing computational pipelines for multiple taxon datasets and downstream processing.
+
+the atram software distributes queries of the reads by using a mapreduce approach to parallelize indexing and searching of the short-read dataset. to assemble genes, atram uses a query sequence, searches the short read databases for matches to the gene of interest, finds the matching mates, and uses a de novo assembler to assemble those reads. the atram software then uses those contigs as the query sequence in the next iteration and repeats the process to completely assemble the locus of interest. we compare the results from atram to those assembled using reference-based and completely de novo assemblies. finally, we demonstrate the ability of atram to assemble genes from highly divergent taxa.
+
+implementation
+the atram package is downloadable from github,  and is written as a perl package that links together widely-cited programs in a novel way. these programs include blast  <cit> ; two alternate de novo assemblers, velvet  <cit>  and trinity  <cit> ; and two multiple sequence aligners, muscle  <cit>  and mafft  <cit> , atram was designed so that new assembly and alignment software can be added as they become available. atram has two components. the first component constructs an atram formatted blast database from the original paired-end fastq or fasta file and is performed once per sample. the second component is the search for a locus of interest, using an iterative approach atram queries all or a fraction of the constructed short read database for the locus of interest and performs a de novo assembly. the package also includes post-processing scripts for validation of the results and pipeline scripts that automate multiple gene alignments across a number of short-read datasets.
+
+database creation
+the atram software creates a database from a paired-end fasta or fastq sequence file using a mapreduce strategy  <cit> . because sequence names are unrelated to the genomic content of the reads, the mapreduce strategy speeds up subsequent searches by a hashing function to distribute the reads across many partitions, or shards. the sizes of the shards are approximately equal and each should contain a random sample of reads from the original run. searches can now be done more efficiently across a smaller subset of the whole dataset. for each shard, a blast database is constructed, corresponding to one end of each paired-end read in the shard. the mate of each read is placed in an easily searchable file . this sharding process allows atram to be parallelizable, because each shard can be searched independently on its own process. furthermore, because each shard contains a random sample of the full short read dataset, any number of shards can be searched in an atram run, allowing the user to vary the coverage depth used in the assembly and reducing computational time if genomic coverage is high.
+graphic of the atram method. a) formation of the atram database; dna is sequenced into a paired-end short read dataset . atram splits the srd into shards, creates a blast formatted database of the first pair and indexes the paired-end for the sequences in each shard. b) in iteration  <dig> a query sequence in either amino acid or dna format is queried against the atram formatted database using blast. the top-hits and their paired-ends are selected and assembled de novo. in the following iterations the contigs from the previous iteration are queried against the same database using blast, the top-hits and paired-ends selected and assembled de novo until the full locus is assembled.
+
+gene assembly
+the atram pipeline iteratively searches the formatted database to assemble the gene of interest. each shard is searched independently and the results are combined for de novo assembly. the target sequence is provided as either a dna or amino acid fasta file. for the first iteration, atram uses blast to search each shard for reads that are similar to the target sequence. the top hits and their mates are retrieved, combined across all shards, and used as input to a de novo assembler . the possibility exists for other de novo assemblers to be written into atram as plugins in the future  <cit> . the resulting contigs are then compared to the original target sequence using blast, and the most similar ones used as target sequences in the next iteration . because the subsequent iterations are using target sequences that were assembled directly from the short read database, further iterations will involve short reads that are not just similar but identical to the contig being assembled. the program stops when the total number of iterations determined by the user have been completed, or if the resulting contigs from any iteration matches exactly the contigs from the previous iteration. alternatively, an autocomplete flag can be set to end the search if one of the contigs has sequence matching both the beginning and the end of the query sequence, suggesting that the contig includes the entire target. as mentioned, atram can be adjusted to use a fraction of the available shards: the fraction should be calculated based on expected coverage of the target locus in the sequencing run, for example, a short read dataset that contains 5x coverage of the nuclear genome may contain 200x coverage of the ribosomal dna and 800x coverage of the chloroplast genome  <cit> . although 20-50x coverage may be optimal for many genes, it has been suggested that this method can work with coverage as low as 5x  <cit> .
+
+pipelines
+the atram package also includes ready-made pipelines for running atram on multiple samples for many target sequences. assemblypipeline runs atram on multiple target sequences for multiple samples; it is ideal for quickly producing a list of putatively orthologous genes from different species. alignmentpipeline produces a set of aligned homologous sequences for a set of genes and a set of samples, allowing straightforward production of multiple gene alignments for gene tree analyses.
+
+performance
+atram compared to other methods
+to compare the performance of atram to genome assembly based methods and verify similar results a dataset of  <dig>  single copy orthologs from pediculus schaeffi, the chimpanzee louse, was chosen. these genes were first assembled using a reference-based approach against the body louse genome p. humanus in johnson et al.  <cit> . their study used one lane of an illumina hiseq <dig> run, which resulted in 36 gb of data and over ~100x coverage of the genome . the authors used clc genomics workbench  to map paired-end reads to the reference genome and verified orthology using a reciprocal best-blast test . the same set of genes was assembled using atram and a completely de novo approach to compare the three sequence retrieval methods.
+
+an atram database was created from the same p. schaeffi paired-end library from johnson et al.  <cit>  taking a total of  <dig>  hours to format the 36 gb library. the  <dig>  reference p. humanus proteins were used as the target sequences for atram assembly. because the expected coverage of the genome for the complete illumina run was over 100x, atram was run using only 25% of the available shards, providing an estimated genomic coverage of ~25x. the program was set to run for five iterations using the autocomplete option. this run was performed on the institute for genomic biology's biocluster at the university of illinois, which uses two intel xeon e <dig>  <dig> ghz quad-core processors per node with 24 gb ram per node. both atram steps were run on one node with four processors.
+
+finally, the same p. schaeffi paired-end library was used to create a completely de novo assembly. the raw reads were trimmed for nucleotide bias at the 5′ end and for low-quality bases at the 3′ end using the fastx toolkit and error-corrected using quake  <cit>  with c =  <dig>  for 19-mers. paired-end reads were assembled in soapdenovo v <dig>   <cit>  using k =  <dig>  which is roughly half of the read lengths, and the optional gapcloser v <dig>  algorithm with a minimum overlap =  <dig>  finally, the  <dig>  genes were identified by creating a blast-formatted database of the de novo assembled contigs and using the p. humanus transcripts as targets for a blast search. the top hits were selected as the de novo contigs.
+
+the atram contigs, top hits from the de novo assembly, and the reference-based assembly sequences were each aligned against the original pediculus humanus reference dna sequences using mafft  <cit>  with the included post-processing percentcoverage script. uncorrected p-distances  were calculated using a custom perl script used originally in johnson et al.  <cit>  . orthology was verified for the atram and de novo contigs with the same reciprocal best-blast test that was previously used for the reference-based assemblies in johnson et al.  <cit> . because each method used blast for assembly the resultant contigs were then reciprocally compared to the entire pediculus humanus protein coding genome, and if the original query sequence was the top hit, the assembled gene was considered to be orthologous to the query gene. finally, the outputs from atram, the reference-based assembly, and de novo assembly were aligned to each other and uncorrected p-distances calculated to determine if the three methods produced the same sequence for each gene.
+
+atram and divergent taxa
+samples of six species of lice were sequenced on an illumina sequencer combining two species in a lane . four species were sucking lice from the suborder anoplura and thought to range from  <dig> –  <dig> million years divergent from the reference sequence p. humanus  <cit> . the other two species were chewing lice from the suborder ischnocera and thought to be ~  <dig> million years divergent from the reference species  <cit> . johnson et al.  <cit>  had previously identified a set of  <dig>  genes as single copy orthologs protein coding genes across nine insect genomes, including lice, using orthodb  <cit> . the amino acid sequences from p. humanus for these  <dig>  genes were used as query sequences in atram for each of the six louse species. each atram contig was compared to the entire p. humanus protein-coding genome using the reciprocal best-blast test for orthology. the orthologous contigs were then aligned back to the p. humanus genome and uncorrected p-distances were calculated. to determine if a dna query would also assemble genes across the divergent datasets, we ran  <dig> genes using the dna from the reference p. humanus, and only those from the congener pediculus schaeffi assembled. this suggests that atram can be limited by the success of the initial blast search , and as taxa become more divergent, amino acid sequences are the more optimal target sequence.
+
+RESULTS
+the atram software rapidly assembles genes of interest from short paired-end sequencing reads, even across divergent taxa by iteratively querying and assembling reads. the mapreduce strategy  <cit>  used in atram enables faster searching of large short read data files, by splitting the short – read database into shards. thus, the search is divided into many smaller parallelizable problems, speeding up computation time. this method also provides a means for further reducing computational time by allowing the user to search only a fraction of the short reads if genomic coverage is expected to be high.
+
+comparisons with reference and de novo assemblies
+using atram, we quickly assembled the sequences of  <dig>  putatively single copy genes from the pediculus schaeffi short read dataset. a total of 90% of the genes completely assembled before the fifth iteration, and 75% of those finished at the first iteration, taking a mean of 55 seconds per gene. assemblies of the other genes ranged from 3- <dig>  minutes. although  <dig> genes were not flagged as complete by the fifth iteration of atram, searching among the best contigs of these genes verified that many had the complete gene but were not flagged in the autocomplete process. these genes had a mean of  <dig> % of the gene assembled, with a median of  <dig> %. further investigation revealed three typical reasons the genes were not marked as complete: 1) some were missing one section of the gene, 2) some had high sequence divergences as compared to the reference, and 3) others had a small exon at one end of the gene. because the original query sequence only included exons and atram assemblies include introns, genes with a small exon at one or both ends are unlikely to have a high blast match of these small exons back to the original gene sequence. these results suggest that even though the gene may not be flagged as complete by the end of the iterations, the entire gene may still be assembled. furthermore, in our experience, as the assembled contig grows with each iteration adding more iterations allows the complete assembly of the locus of interest, this is particularly true for very large genes, where more iterations may be needed to completely assemble the gene.
+
+gene completeness
+when compared to the p. humanus reference sequence, atram assembled a greater fraction of the gene than either the reference-based or de novo approaches . one possible explanation is that compared to the reference based assembly, atram is more likely to assemble sequences at intron-exon junctions or at the 5′ and 3′ ends of genes.table  <dig> 
+results from assembling  <dig>  protein coding genes using atram, a reference-based and a de novo approach
+
+
+proportion 
+p-distance
+reciprocal best-blast
+
+
+
+
+atram
+
+reference
+
+de novo
+
+
+genetic distance to the reference
+the contigs returned from all three methods were similarly divergent when compared to their p. humanus orthologs, with the atram and the de novo contigs having a few genes with higher distances. the mean p-distance to p. humanus was lowest for the reference-based contigs, most likely because more divergent regions failed to assemble . the atram contigs had the next lowest p-distance, followed by the de novo contigs. all but four of the atram contigs passed the reciprocal best-blast test of orthology, whereas  <dig> of the de novo contigs did not pass the test . all of the reference-based contigs had previously passed the reciprocal best-blast test in johnson et al.  <cit>  and this resulted in the selection of the gene set used in our current comparisons.
+y axis is the ratio of the length of the contig assembled with atram by the length of the contig assembled with the reference based approach. points under the  <dig> line are longer with the reference based approach and those above the line are longer from atram assemblies. the x-axis indicates the uncorrected p-distance comparing the atram contigs to the reference dna sequence. the graph illustrates that atram assemblies tended to be longer and the longer genes tended to be the more divergent ones, suggesting that atram can assemble more divergent sections than a reference based approach.
+
+sequence similarity among methods
+finally, the sequences from all three methods were compared to each other to determine if they assembled the same sequence. the contigs from each method were identical in many cases; when they were not identical, atram contigs tended to be more similar to the reference-based contigs  than to the de novo contigs . the de novo contigs tended to be less similar to either of the other methods overall, suggesting that the de novo contigs were the least accurate of the three methods tested. this may be a function of the de novo assembly method and other assemblers may perform better. additionally, we aligned atram contigs to previously sanger-sequenced loci and found identical sequences for two of the three genes, the third gene was only different for two base pairs out of 241 bp and a single n in the sanger sequence . taken together, these results suggest that the contigs assembled by atram are of a similar  length and quality to those assembled using alternate methods, while taking a fraction of the time to assemble. the alignments from these methods have been made available from the dryad digital repository http://dx.doi.org/ <dig> .dryad.kh <dig> 
+
+assembling genes from divergent taxa
+finally, we used atram to assemble genes from highly divergent taxa from p. humanus. specifically, we assembled  <dig>  1: <dig> orthologous genes from lice ranging from 25– <dig> million years divergent from the reference sequence  <cit> . atram assembled nearly all of the genes from each of the six divergent taxa, ranging from 97% to 99% recovery . it is possible that some of genes that did not assemble were not present in the genomes of those taxa, having been lost over time. between 2% and 6% of the assembled contigs did not pass the reciprocal best-blast test of orthology, leaving well over  <dig>  genes for each species that did pass, suggesting these genes are orthologous to the reference gene and can be used for phylogenomic datasets. the mean p-distance from p. humanus for these genes ranged from  <dig> – <dig> . as expected, the more distantly related lice had higher p-distances from the reference sequences.table  <dig> 
+results from assembling  <dig>  1: <dig> orthologous genes using atram across different species of lice
+
+
+
+suborder, species
+years
+contigs
+reciprocal
+
+divergent
+best-blast
+
+anoplura, pedicinus badii
+
+anoplura, haematopinus eurysternus
+
+anoplura, linognathus spicatus
+
+anoplura, proechinopthirus fluctus
+
+ischnocera, brueelia antiqua
+
+ischnocera, columbicola liva
+years divergent from the reference taxon were estimated in millions of years from a). light et al.  <cit>  and b) smith et al.  <cit> . contigs are the number of the  <dig>  queries that assembled contigs in atram. the final column has the number of contigs that passed a reciprocal best-blast test against the entire pediculus humanus protein coding genome.
+
+
+
+CONCLUSIONS
+overall these results suggest that atram will likely prove useful for quickly assembling phylogenomic datasets across a wide taxonomic range. furthermore atram was designed to be agnostic to the type of input data and therefore future testing should include rna-seq data as well as other types of markers such as uces.
+
+availability and requirements
+project name: atram
+
+project home page:http://www.github.com/juliema/atram
+
+operating system: unix, linux, osx
+
+programming language: perl
+
+other requirements: client needs free software including, muscle, mafft, blast, velvet or trinity
+
+license: bsd 3-clause open source license
+
+additional files
+additional file 1: 
+dna vs protein query results.
+
+
+additional file 2: 
+table of individual gene results summarized in table 
+2
+.
+
+
+additional file 3: 
+fasta files of  <dig> genes , from lice in the genus 
+degeeriella. fasta files include atram contigs as well as sanger sequences.
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+ja and dh programmed the software. dh designed and engineered the software. ja and kpj tested with example datasets. kpj and qk provided critical insight into the functionality and testing of the program. ja wrote the manuscript. kpj, dh and qk edited the manuscript. all authors read and approved the final manuscript.
+

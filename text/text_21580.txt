@@ -1,0 +1,186 @@
+BACKGROUND
+metagenomics allows for a snapshot of the genomic content of all microbes within a specific environmental niche and is not limited by current microbial cultivation barriers. high-throughput shotgun sequencing is routinely applied on collected metagenomic samples, generating a large number of short dna sequences . a key analysis step is to infer the functions of the protein sequences predicted from these reads, hereafter referred to as annotation. the annotation problem is conceptually equivalent to the homology detection problem: given a reference sequence with known annotation, finding all homologous reads of the reference from the read set and subsequently transferring the annotation of the reference to the homologs. intuitively, the problem can be solved using a direct alignment approach, simply aligning the reference against the individual reads . an alternative de novo assembly approach assembles the individual reads into contigs , which correspond to near-complete or complete protein sequences that are easier to annotate. given the annotation of the contigs, the annotation of the reads can be inferred through their placement in the contigs. it has been shown that, for protein-sequence reconstruction, the assembly of short peptides  is more effective than the assembly of the nucleotide reads themselves  <cit> . either or both of the direct alignment and the de novo assembly approaches could be applied depending on specific applications and available computational resources.
+
+each of the direct alignment and the de novo assembly approaches has its own limitations. gene calling and homology search with short reads are, in general, more challenging than with complete sequences. on the other hand, reconstructing full-length genome  is time consuming and can frequently ignore low-coverage organisms, therefore making the detection of low-abundant genes difficult and incomplete. to tackle these limitations, the annotation problem can be reformulated into the gene-centric assembly problem, which, given a reference protein of interest, attempts to identify its homologs in a database of short peptide sequences while also assembling these homologs into complete protein sequences  <cit>  . the simultaneous alignment and assembly algorithm was developed to solve the gene-centric assembly problem and was implemented into a program called grasp   <cit> . grasp outputs both the sequencing reads that are homologous to the reference  as well as the corresponding assembled contigs.
+
+grasp is well suited to solve the gene-centric assembly as well as the annotation problem because it simultaneously alleviates the above mentioned limitations of the direct alignment and de novo assembly approaches. first, the sequence similarity is computed between the query and the contig , more accurately reflecting the true homology. second, alignment is performed between the query and the target  as the assembly algorithm traverses the sequence overlap graph, estimating the sequence similarity that is later used to guide the traversal towards the correct path. the more informed graph traversal allows for more effective pruning of false paths and meanwhile the identification of low-abundant true homologs. grasp achieves ~20 % higher recall rate than psi-blast based on simulation, and identifies ~ <dig> times more true homologous reads than psi-blast from a real metagenomics data set without loss of precision. however, grasp’s computational efficiency is adversely impacted by the assembly module and it requires substantial speedup for applications on large data sets.
+
+in this article we present graspx, a computational efficient improvement of grasp through substantially redesigned algorithm and data structure. its application as a homology detection program is benchmarked with its predecessor grasp , blastp, psi-blast  <cit>   and fastm   <cit>  . graspx is >30x faster than grasp; it also has a similar running time as psi-blast  and therefore is feasible for genome-wide analysis of databases containing tens of millions of sequences. as confirmed by simulation-based benchmark results, graspx has a similar accuracy as grasp, and both of them demonstrate ~20 % higher recall than psi-blast, and ~30 % higher recall than blastp and fastm at the same precision level. graspx also demonstrates the best performance among all programs being tested when applied to a real human saliva metagenomic data set. we anticipate that graspx will receive wider application for metagenomic analysis because of its high accuracy and substantially improved computational efficiency. graspx is freely available at http://graspx.sourceforge.net/.
+
+methods
+in this section, we first formulate the gene-centric assembly problem and discuss its relationship with the homology detection problem. we then briefly summarize the original grasp algorithm  <cit>  for solving these two problems. we finally present the intuition and details for the new graspx algorithm.
+
+the gene-centric assembly problem
+here we formally define the gene-centric assembly problem: given a query protein sequence q and a set of short peptide reads r, identify a set of contigs p  such that each sequence p ∈ p has a sequence similarity with q above a certain threshold , and that p is an assembly of a set of short peptide reads rp such that rp ⊆ r. intuitively, such a formulation allows some otherwise low-similarity reads to be assembled with other high-similarity reads and together be identified as homologs of the query q  <cit> . note that the regular homology search problem that can be solved using the direct alignment approach is a special case of the gene-centric assembly problem with the constraint |rp| =  <dig>  also note that solving the gene-centric assembly problem immediately solves the homology detection problem: ∪p∈prp is the set of homolog reads of the query q and they can inherit the annotation of q. in summary, the metagenomics read annotation problem can be first transformed into homology detection problem and then solved under the gene-centric assembly formulation.
+
+summary of the grasp algorithm
+the grasp algorithm takes the query  protein sequence as a guide and assembles contigs from the short peptide sequence database such that the alignment score of each contig with the reference sequence meets a pre-specified cutoff. the assembly algorithm of grasp shares conceptual similarities with sequence overlap-based approaches , except that the graph is not explicitly built in grasp but that the overlap information is resolved through suffix-array searches whenever needed. the grasp algorithm that extends towards the c-terminus of the reference sequence  is presented as follows .seeding: grasp first identifies exact k-mer matches in the reduced-alphabet space  <cit> , which improves sensitivity and selectivity in filtering alignment candidates  <cit> . it uses the seed in the target  sequence as the initial contig to be extended.
+
+suffix array search: grasp searches the fixed-length suffix of the current contig against the suffix array  <cit>  built on the database, and identifies all candidate reads that overlap with the current contig.
+
+redundancy removal: the suffix array search returns a list of suffixes that begin with the queried sequence. grasp traverses the entire list of returned suffixes to identify a set of maximal extension sequences , where each mes is defined as a suffix that is not contained in any other suffixes as a substring.
+
+alignment: grasp concatenates the current contig with each of the mess, and reevaluates the alignment scores between the reference and the extended contigs using a banded needleman-wunsch algorithm  <cit> . it utilizes the recomputed alignment scores as a filter  to select a subset of promising contig extensions. grasp retains the promising contigs and further extends them by executing the 2nd through the 4th steps iteratively.
+
+
+
+improvements implemented in graspx
+prebuilt extension links for maximal extension sequence determination
+the grasp algorithm identifies mess through searching the suffix array followed by redundancy removal . note that although the computing time for each step is short , these steps are performed in each iteration and thus the accumulated computations become a rate-limiting step. to speed up the algorithm, graspx pre-builds extension links with respect to reads in the given database, allowing for constant-time determination of the mess for each contig extension .fig.  <dig> summary of the major improvements of graspx. q is the reference/query sequence. a prebuilt extension link: the original grasp algorithm first searches the suffix x  of the current contig p against the suffix array sa , and then identifies the mess p→* . graspx simply follows the pre-built extension links  to identify all mess. b local assembly: the original grasp algorithm extends the contig until significant score drop-off is observed, which might lead to unnecessary extensions of the random seeds . graspx extends each seed with a pre-set maximal depth. homologous contigs  that are broken by this strategy are re-assembled through a recalibration step based on sequence overlap . c query-level parallelism: grasp spawns a thread  for each seed extension. graspx spawns a thread for each query sequence
+
+
+
+an extension link is defined as a directed edge between two reads, where the sink read is an mes of the source read. it is further required that each source read can be linked to no more than a fix number of sink reads . this is because reads with minor sequence differences  can be recruited through a post-mapping step . in this sense, constructing all extension links is conceptually similar to constructing an alternatively defined string graph . given the extension links, the algorithm is able to retrieve the mess directly through following the extension links, therefore bypassing the original rate-limiting suffix array search and redundancy removal steps.
+
+the computational overhead incurred by the extension link is controlled through the development of a novel linear-time construction algorithm . the algorithm first builds a suffix array and the corresponding longest common prefix  array from the short-peptide database, followed by a linear traversal of both of the arrays to identify the extension links. in practice, the algorithm runs only slightly slower than the original indexing step . the extension link construction algorithm and the corresponding pseudocode are presented in additional file  <dig>  memory-wise, as the main alignment/assembly module of graspx adopts the extension link, it is therefore possible for it to discard the suffix array that is originally required for identifying the mess. hence, graspx requires similar physical memory as grasp.
+
+local assembly strategy for each identified seed pair
+it has been observed that using a single seed is not selective enough to filter non-homologous seeds for alignment initialization ; therefore it is desirable to require multiple seeds to improve selectivity. the idea was initially developed in gapped-blast, which requires two seed pairs for alignment initialization  <cit> . currently, grasp only requires a single seed, and its computational efficiency can be further improved based on such an intuition.
+
+however, it is difficult to directly require multiple seeds in graspx, because the distance between the seeds in the target sequence is unknown. estimating such a distance requires the assembly of contigs that contain these seeds, which is itself the central problem to solve here. to circumvent this catch- <dig>  a local assembly strategy is adopted in graspx. specifically, each seed is allowed to be extended with a predefined maximum depth , and the extension is terminated disregarding the drop-off score after reaching the limit. this strategy saves computation time by not extending the non-homologous seeds to the very ends  orange seeds).
+
+using this strategy, long homologous contigs would be broken into smaller pieces; however, the broken contigs can be re-assembled because multiple seed pairs are expected between homologous sequences . on the other hand, the non-homologous contig pieces are unlikely to be re-assembled, as multiple seed pairs rarely exist in non-homologous sequences. a recalibration step is incorporated into graspx for re-assembly, which greedily merges the overlapping contigs based on the lengths of the overlaps. the recalibration step also re-evaluates the alignment scores and e-values for the re-assembled contigs.
+
+query-level parallelism for minimizing inter-thread communication
+the current implementation of grasp allows parallel execution; however its efficiency is adversely impacted by the intensive inter-thread communication . specifically, grasp spawns a thread for the extension for each seed pair, where the thread needs to consult a shared pool of already assembled reads before it can use it for the current extension . correspondingly, the thread also needs to notify the shared pool regarding the reads that have been exploited in the current extension.
+
+in this case, it is expected to minimize the inter-thread communication through spawning a dedicated thread for each query sequence . however, it is not a trivial task because grasp uses a large amount of physical memory to record the constituent reads  as well as their placement information. simply spawning threads at a per-query level would consume a large amount of physical memory. in graspx, information regarding the constituent reads is discarded while performing assembly, and subsequently recovered through a post-mapping step that aligns all reads against the assembled contigs . this strategy enables graspx to spawn multiple threads at a per-query level with reasonable memory consumption. for example, graspx requires ~14g of physical memory for searching ~ <dig> million reads with  <dig> threads, while grasp requires ~13g for the same search. the overhead incurred by the post-mapping step is trivial compared to that of the assembly stage, as the reads are only mapped to the assembled contigs. for example, graspx spends ~36 min for searching  <dig> marker genes from ~ <dig> million reads, while taking <2 min for post-mapping.
+
+description of the graspx algorithm
+the graspx algorithm consists of the following main steps:database indexing: graspx pre-builds extension links on a given database, which allows for constant time determination of each mes with respect to a given contig extension. graspx performs the indexing step only once.
+
+seeding: graspx adopts the same strategy as grasp for seeding, which identifies exact k-mer matches between the query and the target database sequences in the reduced-alphabet space.
+
+extension: graspx simply follows the pre-built extension links to determine all mess of the given contig. it replaces the second and the third steps of the grasp algorithm with this computationally efficient look-up step.
+
+alignment: graspx adopts the same alignment strategy as grasp . in additional to detecting potential termination criteria, it also terminates the extension if the depth of the extension exceeds a predefined threshold . the third and the fourth steps are performed iteratively for each of the identified seed pairs until termination.
+
+recalibration: the local alignment strategy would potentially break an otherwise complete contig into smaller pieces. graspx attempts to repair the broken contigs using this greedy re-assembly step.
+
+post-mapping: to reduce memory consumption, graspx does not keep track of the constituent reads for the assembled contigs. to recover this information, graspx maps all reads against the assembled contigs to identify the assembled homologous reads. note that the reads that cannot be assembled due to minor sequencing errors or single-nucleotide polymorphism can be recruited in this stage through allowing mismatches in the alignment.
+
+
+
+RESULTS
+data sets
+graspx was benchmarked with four other homology search programs, i.e. grasp  <cit>  , blastp, psi-blast  <cit> , and fastm  <cit> . for consistency of the benchmark data sets, we selected two data sets that were previously used to benchmark grasp  <cit> :ds1: this simulated data set was generated from  <dig> marine microbial genomes  using wgsim  <cit>  at 10x coverage with an expected length of 100 bp and an error rate of 1 % . short peptides were identified from the simulated reads using fraggenescan  <cit> , resulted in  <dig> , <dig> short peptide reads.
+
+ds2: this real data set was generated from a human saliva sample by the human microbiome project  <cit> . it was downloaded from ncbi’s sequence read archive  with accession number srs <dig>  short peptides were also called from the nucleotide reads using fraggenescan  <cit> . the resulting database contained  <dig> , <dig> short peptide reads.
+
+
+
+parameters
+all experiments were performed on an in-house server equipped with four intel xeon x <dig> @ <dig> ghz processors and 256gb physical memory. graspx, grasp, blastp, psi-blast, and fastm were invoked using their default sets of parameters, or are otherwise detailed as follows. psi-blast was run with three iterations. fastm was run using the blosum <dig> scoring matrix with gap opening and gap extension penalties of - <dig> and - <dig>  respectively , to match the settings used by the other programs.
+
+below we detailed the set of default parameters that are configured for graspx, which were used in all experiments presented in this article. graspx requires a 6-mer perfect match between the query and the target in the gbmr <dig> reduced alphabet  <cit>  for identifying seed pairs. it further requires that the alignment score between the two sequences of the seed pair is at least 6 *  <dig>  * a, where a is the mean of the diagonal scores of the scoring matrix in use. graspx adopts a minimum overlap of 10aa between reads during the extension link construction phase; and it extends the assembly with a maximum depth of  <dig> towards each direction . for the alignment module, graspx utilizes the blosum <dig> matrix with gap opening and extension penalties of - <dig> and - <dig>  respectively. graspx adopts the same approach as in blast to compute the bit score and e-value, and it also uses the same drop-off score cutoff as blast, i.e.  <dig> bits. the default band size for sequence alignment is  <dig> 
+
+running time improvement of graspx
+both the indexing time and the alignment/assembly time of graspx were measured and compared with those of grasp. the wall-clock indexing time of both programs on databases with different sizes  are shown in fig. 2a. the indexing time of graspx is longer than that of grasp, potentially due to the additional works that are required to create the extension links. however, the actual indexing time for both programs remains comparable. the wall-clock alignment/assembly time of graspx for searching  <dig> dehalococcoides sp. cbdb <dig> marker genes  <cit>  against ds <dig> is shown in fig. 2b. the results show that graspx is significantly faster than grasp in the alignment/assembly phase. the speedup is more significant when more threads are used , showing the advantage of the redesigned parallelization strategy of graspx. the results indicate that graspx algorithm achieves significant alignment/assembly speedup at a cost of marginally increased indexing time.fig.  <dig> running time of graspx. running time evaluated by searching the  <dig> d. sp. cbdb <dig> amophora <dig> marker genes against ds <dig>  a total indexing time of grasp and graspx on simulated data sets that were randomly sampled from ds <dig> with various sizes. b total runtime of graspx and grasp  when run with the corresponding number of threads. c graspx’s runtime  for searching a single protein sequence sgo_ <dig>  against simulated data sets that were randomly sampled from ds <dig> with various sizes. d graspx’s runtime  for searching amphora <dig> marker genes against ds1
+
+
+
+the empirical time complexity of graspx  is shown by searching a single protein sequence against different databases with various sizes , as well as searching different protein sequences with various sizes against a fix-sized database . it is observed that the running time of graspx grows linearly in both cases, indicating that graspx is scalable for large-scale analysis.
+
+finally, the running time of graspx on searching a much larger number of query protein sequences  against ds <dig> was summarized in table  <dig>  by comparing the graspx and the psi-blast running time , it is observed that psi-blast requires less  cpu time compared to graspx for the searches. however, graspx is capable of more effectively utilizing multiple threads than the current implementation of psi-blast, resulting in a comparable wall-clock running time.table  <dig> running time comparison of graspx and psi-blast on ds2
+
+‘query genome’ indicates the genome from which the query sequences were obtained; sgo: streptococcus gordonii; pac: propionibacterium acnes. ‘num. prot.’ indicates the number of protein sequences that are annotated in the corresponding genome and used as the queries. ‘cpu’ and ‘wall’ indicate the cpu time and wall-clock time for the corresponding program to search all query proteins sequences against ds <dig>  respectively. ‘perc. cpu’ indicates the percentage of cpu used for the search 
+
+
+
+performance of graspx on ds1
+graspx was benchmarked with grasp , blastp, psi-blast, and fastm on ds <dig> 
+
+define the ground-truth set of homolog reads with respect to a query sequence q as follows. recall that ds <dig> was simulated through random sampling of reads from the  <dig> marine microbial genomes described in  <cit> ; define g as the concatenation of the  <dig> reference genomes. also note that in cases of simulation, it is trivial to record where  a read was sampled. let i  be an arbitrary set of genomic intervals in g, and correspondingly denote the set of reads that were sampled from i as ri.  for a given query sequence q, define its homolog intervals in g through searching q against g using tblastn with e-value cutoff 10-3; denote the set of homolog intervals as iq. the ground-truth homolog read set for q is thus defined as riq.
+
+subsequently, define tp  as the reads that are both in riq and identified by the search , fp  as the reads that are not in riq but identified by the search, and fn  as the reads that are in riq but not identified by the search. recall, precision, and f-measure can subsequently be computed as: recall=tptp+fn,precision=tptp+fp,andf=2*recall*precisionrecall+precison, 
+
+the performances of all programs were investigated with different e-value cutoff ranging from 10- <dig> to  <dig>  which were then plotted as the receiver operating characteristics  curves. subsequently define the area under the roc curve  as: auc=∑krecallk+1+recallkprecisionk−precisionk+12; where recallk and precisionk are the recall rate and precision rate for the kth ascending e-value cutoff, respectively.
+
+two small sets of query protein sequences were first used to measure the performances of the programs. the first query set contained  <dig> d. sp. cbdb <dig> genes participating in the glycolysis pathway . the second query set contained  <dig> d. sp. cbdb <dig> marker genes that were collected in the amphora <dig> database  <cit> . the roc curves for glycolysis and amphora <dig> protein searches are shown in fig. 3a and b, respectively. the results confirm that graspx has a comparable performance with the original grasp . it is also observed that graspx has improved the recall rate of psi-balst by at least 20 % at the same precision level for both experiments, suggesting potential applications of graspx in both functional  and taxonomic  analysis of metagenomics sequencing data.fig.  <dig> performance of graspx on the simulated data set ds <dig>  performances were measured for graspx, grasp + mapping, fastm, psi-blast , and blastp on searching   <dig> glycolysis related d. sp. cbdb <dig> genes and   <dig> d. sp. cbdb <dig> amphora <dig> marker genes against ds <dig>  dashed lines indicate extrapolated performances. graspx shows marginally improved performance over grasp + mapping, and both of them significantly outperform the other programs
+
+
+
+the performance of graspx was further benchmarked on searching all  <dig> protein sequences annotated in the d. sp. cbdb <dig> genome  against ds <dig>  homologous reads with respect to each query protein sequence were further classified as close , moderate  and remote  homologs reads. the performances  of the search programs are summarized in table  <dig> . for most of the graspx searches, the optimal performances were achieved with e-value cutoff ranging from 10− <dig> to 10− <dig>  which is consistent with the results shown in fig.  <dig>  graspx achieves the highest performance on the majority of the searches of individual pathways as well as the overall search. graspx shows more significant improvement when searching remote homology. for example, the optimal f-measure and auc of graspx is 8 % higher  than psi-blast when detecting remote homology, compared to 5 % higher when detecting close homology.table  <dig> performances of four programs on searching all  <dig> d. sp. cbdb <dig> protein sequences against ds1
+
+c4
+tca cycle1
+
+2
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+overall3
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+ <dig> 
+
+1: the first row indicates the area under curves  for the corresponding programs. 2: the second row indicates the f-scores for the corresponding programs. 3: the overall performance is calculated on all  <dig> protein sequences annotated in the d. sp. cbdb <dig> genome. 4: ‘c’ indicates close homologs . 5: ‘m’ indicates moderate homologs . 6: ‘r’ indicates remote homologs . the highest performances among all programs are bolded
+
+
+
+performance of graspx on ds2
+for the real data set ds <dig> where the ground-truth homolog intervals cannot be defined , we alternatively measured tp  and precision rate of the programs. given the query q and its corresponding pfam model fq retrieved from kegg  <cit> , define tp for a given search as the identified reads that can be classified as a member of fq , or the identified reads that are substrings of some assembled sequences p such that p can be classified as a member of fq . also define fp as the identified reads that are not tp. precision rate can be subsequently computed in the same way as for ds <dig> 
+
+annotated protein sequences from streptococcus gordonii and propionibacterium acnes genomes  were used as queries for this experiment. the search results for the two sets of query proteins are shown in fig. 4a and b, respectively. the left panel of fig.  <dig> shows the precisions of the corresponding experiments while the right panel shows the raw numbers of tps. as shown in the left panel of fig. 4a and b,  <dig>  to  <dig>  %  of the reads identified by graspx corresponds to true homologous reads, compared to only ~40 % of the other programs. the high precision of graspx indicates that it is capable of assembling more reads into annotatable contigs . on the other hand, many of the individual homologous reads predicted by the other programs are difficult to annotate, potentially because they are not sampled from the conserved domains of the protein family. the right panel of fig.  <dig> shows that graspx is also capable of identifying much more reads than the other programs . in summary, the results suggest that graspx can identify more true homologous reads from real metagenomic data sets with higher precision rate than other programs; and at the same time assemble them into annotatable contigs that significantly facilitate downstream functional analyses.fig.  <dig> performance of graspx on the real data set ds <dig>  performances were measured for graspx, fastm, psi-blast, and blastp on searching  all  protein sequences annotated in the s. gordonii genome and  all  protein sequences annotated in the p. acnes genome against ds <dig>  left panel: precision rate. right panel: number of true positive  predictions
+
+
+
+utility of graspx in pathway reconstruction
+here we demonstrate the utility of graspx in pathway reconstruction. minpath  <cit>  was used to reconstruct pathways using, respectively, graspx and psi-blast identified homologous reads while searching all p. acnes encoded proteins against the human saliva data set ds <dig>  the p. acnes genome was chosen because it is known to be rare from healthy human saliva samples; and it simulates a challenging scenario where one happens to choose the protein sequences of low-abundant bacteria as references. graspx identified  <dig> , <dig> reads with e-value cutoff 10−10; minpath reconstructed  <dig> pathways using these reads. on the other hand, psi-blast identified  <dig>  reads for the same search with e-value cutoff of 10−10; minpath reconstructed  <dig> pathways from these reads. the set of  <dig> pathways reconstructed using graspx predicted reads fully contains the set of  <dig> pathways reconstructed using psi-blast predicted reads.
+
+the two pathways that were uniquely identified using graspx predictions are ko00071: fatty acid degradation and ko00520: amino acid sugar and nucleotide sugar metabolism. they have been reconstructed from human saliva metagenomics data independently by multiple research groups . the reconstruction of both pathways suggests high detection power of graspx: it is possible to use low-abundant and distantly related sequences as the references, and accurately identify homologous sequences and estimate their abundances. such an advantage allows for functional analysis of metagenomic sequences without requiring complete reference genome sequences.
+
+while the results can be used to establish high recall rate for graspx, it is possible that psi-blast did not identify reads correspond to these pathways simply because there is no sequence that is closely-related  with p. acnes exists in ds <dig>  to investigate such a possibility, it was found that the two pathways are not reconstructed because psi-blast did not identify any homologous reads for two querying p. acnes proteins, namely pac:ppa <dig>  and pac:ppa <dig> . to verify whether ds <dig> contains closely-related homolog sequences of p. acnes, the graspx identified contigs were aligned to the corresponding queries using blastp. the best e-value achieved for pac:ppa <dig> was 2 × 10− 94; and for pac:ppa <dig> was 2 × 10−  <dig> . while it is still unclear that, in biological sense, whether these contigs are closely related with p. acnes; these contigs indeed share high sequence similarity with the queries and thus should be detected for the given e-value cutoff. the results confirm that the reconstruction of pathways of ko <dig> and ko <dig> is due to the high recall rate of graspx, rather than the lack of closely-related homologs in the database.
+
+minpath only predicts the presence/absence of the pathways and ignores their actual abundances  <cit> , such that it is recalcitrant to less-sensitive homology predictions and has successfully reconstructed majority of the pathways even using psi-blast predictions. on the other hand, while using abundance-aware pathway reconstruction tools , the reconstruction results for using graspx and psi-blast predictions could be even more significant. meanwhile, the performance of these abundance-aware pathway reconstruction tools could also be improved by using graspx for that it more accurately estimates the true abundances of the proteins of interest  <cit> .
+
+CONCLUSIONS
+in this work we present a computational efficiency improvement of the simultaneous alignment and assembly algorithm. the improvement is made possible by three technical redesigns of the original algorithm. the construction of the extension links pre-computes the overlap information, speeding up the path extension step of the assembly module. the use of the local assembly strategy adopts a similar filtering heuristic implemented in the gapped-blast, alleviating the bottleneck of searching extremely long query protein sequences. finally, the re-implemented parallelization strategy allows for more effective usage of multi-core resources, rendering the search of multiple queries at a time possible. the resulting program is named graspx.
+
+in conclusion, graspx was developed as a simultaneous alignment and assembly program suitable for metagenomic data analysis in this work. graspx is capable of performing reference-based search  as well as gene-centric assembly of the identified reads. according to our benchmark test, graspx is more than 30x faster than its predecessor grasp while keeping the same level of performance. graspx has a similar running time as psi-blast, enabling genome-wide homolog detection on large metagenomic data sets with superior sensitivity and specificity. practically, graspx allows assembly and search of homologous reads with respect to all protein sequences encoded in a bacterial genome against a moderate-sized metagenomic data set  within approximately 12 h using  <dig> threads. we expect that graspx would substantially improve metagenomic applications such as gene abundance estimation and pathway reconstruction.
+
+additional files
+additional file 1: algorithm for constructing extension links and blastp alignments between selected p. acnes proteins and their predicted homologous contigs. the file contains detailed algorithm and pseudo-code for linear construction of extension links. the file also contains ncbi blastp alignments of two p. acnes proteins, whose homologous reads were not identified by psi-blast from ds <dig> but were identified by graspx. 
+
+
+

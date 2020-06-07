@@ -1,0 +1,181 @@
+BACKGROUND
+in the evaluation of biomarkers and gene signatures for survival data, the focus is often on the ability of a new marker combination to discriminate between patients with larger and smaller survival times . for example, one is often interested in predicting whether patients survive a specific time point of interest, e.g., five years after baseline examination. in practice, prediction models are often derived using cox regression, which, however, suffers from restrictive regularity assumptions such as the proportional hazards assumption. it is well known that, if violated, these assumptions may cause cox regression to result in suboptimal model fits with a decreased prediction accuracy  <cit> .
+
+despite its limitations, cox regression remains the predominant technique for modeling survival data in biostatistics . in fact, most attempts to relax the proportional hazards assumption  retain the basic properties and limitations of the cox model. similarly, regularization schemes for survival models  are usually based on cox modeling. on the other hand, non-cox-based approaches from the machine learning field such as support vector machines for survival data  <cit>  or random survival forests  <cit>  have the problem that they lead to black box predictions with limited interpretability.
+
+in this paper we focus on a statistical modelling approach that results in additive predictors 
+ η:=β0+∑l=1pβl·xl=x⊤β  which are optimized with respect to the concordance index for survival data  . the c-index is a discrimination measure for the evaluation of prediction models. the c-index is not based on restrictive regularity assumptions  but is non-parametric in the sense that it only evaluates to which extent the ranking of the values of the linear combination η is in agreement with the ranking of the survival times. in a recent article  <cit>  it was shown that the c-index can be optimized efficiently via a gradient boosting approach , which is also feasible in high-dimensional data situations. since the c-index is a popular evaluation criterion in bioinformatics and biostatistics , the method proposed in  <cit>  has the additional advantage that optimization of the c-index results in prediction rules that focus directly on the performance measure of interest instead of using a different optimization criterion such as the partial log-likelihood in cox regression.
+
+despite its good performance, especially in situations where the proportional hazards assumption is violated, c-index boosting has the drawback that variable selection cannot be accomplished as easily as with traditional boosting algorithms designed for the calibration of a prediction model . in fact, the discriminatory nature of the c-index, which evaluates the ranking of the values of η but does not involve probability estimation, has been observed to be relatively insensitive to overfitting, making traditional regularization approaches for boosting  infeasible. this observation coincides with a recent result by wyner et al.  <cit>  who demonstrated that overfitting in boosting models for binary outcomes is unlikely to happen as long as discriminatory measures  are used for evaluation. while resistance to overfitting is often considered to be an advantage in machine learning research, it also implies that sparse prediction rules, which are desirable in biomedical applications for reasons of interpretability and generalizability  <cit> , are difficult to obtain.
+
+to address this problem, we propose a new variable selection technique for c-index boosting that is able to identify the most influential and stable predictors for survival. the method is based on the stability selection approach proposed by meinshausen and bühlmann  <cit> , which has recently been enhanced  <cit>  and adapted to gradient boosting estimation  <cit> . the idea of stability selection is to fit the model to a high number of subsets of the original data. one then determines the average number of subsets in which a variable was selected. variables where the selection frequency exceeds a certain threshold are considered to be stable. importantly, variable selection is accomplished via controlling the per-family error rate  of the predictor variables selected for inclusion in the boosting model. as a consequence, the sparsity of the resulting prediction model is governed by the desired level of error control, and resistance to overfitting is no longer an issue. using a comprehensive simulation study, as well as a gene expression data set on lymph node negative breast cancer collected by desmedt et al.  <cit> , we will demonstrate that stability selection can also be adapted to perform variable selection in c-index boosting. in particular, our results suggest that the new method is able to both optimize the c-index and to identify the most relevant predictors for survival at the desired error level.
+
+methods
+the c-index for survival data
+the concordance index evaluates the rank-based concordance probability between a continuous predictor η and the outcome  <cit> . the non-parametric criterion can be applied for continuous, ordinal and dichotomous outcomes, as well as for time-to-event outcomes. in the latter case, it is defined as 
+ c:=ℙ,  where tj, ti are the survival times and ηj and ηi the predictors of two observations in an i.i.d. test sample. the c-index measures whether large values of η are associated with short survival times t and vice versa. the interpretation is similar to the widely known auc : a c-index of  <dig> represents a perfect discrimination while a c-index of  <dig>  will be achieved by a completely non-informative marker. in fact, it was shown that the c-index is equivalent to the area under the time-dependent receiver operating characteristics  curve, which summarizes the discriminatory power of η over all time points  <cit> .
+
+an extension of the c-index that evaluates the concordance probability between η and t up to a pre-specified time point τ is the truncatedc-index 
+ ctr:=ℙ. 
+
+the truncated c-index is an alternative to the c-index in situations where the right tail of the estimated survival function of t is unstable . while we do not explicitly consider the truncated version of the c-index in this work, our methodology easily extends to truncated time ranges of the form  .
+
+although following a relatively simple and straight-forward definition, in practice the estimation of the c-index becomes problematic in samples with censoring. some estimators proposed in the literature omit observation pairs where the smaller survival time was censored, however this can lead to biased results  <cit> . others rely on the assumptions of a cox proportional hazards model  <cit>  which becomes problematic in settings were those are not fulfilled. for an overview and comparison of different estimators for the c-index and other discriminatory measures for survival data see schmid and potapov  <cit> .
+
+to overcome these issues, uno et al.  <cit>  proposed an asymptotically unbiased estimator which incorporates inverse probability of censoring weighting  <cit> : 
+ c^uno:=∑j,iΔjĜ2iiη^j>η^i∑j,iΔjĜ2i. 
+
+the term ΔjĜ <dig> accounts for the inverse probability that observation j is censored. Δj represents the censoring indicator, t~ are observed survival times subject to censoring and Ĝ denotes the kaplan-meier estimator of the unconditional survival function for the censoring time tcens .
+
+when a truncated time range  is considered, the truncated c-index can be estimated by an extension of c^uno defined by  
+ c^tr:=∑j,iΔjΔiiiη^j>η^i∑j,iΔjΔii 
+
+of note, the estimator c^uno is a consistent estimator of the c-index if censoring is independent of t . if censoring is independent of t conditional on η , the terms Ĝ in the definition of c^uno can be replaced by conditional terms Ĝ that are derived from a survival model for the censoring distribution  <cit> . wang and long  also analyzed the properties of c^uno in situations where censoring is not independent of t.
+
+boosting the c-index
+to find the optimal predictor η with respect to the c-index, we adapt a component-wise gradient boosting algorithm  <cit>  with simple linear models as base-learners. boosting originally emerged from machine learning, but during the last  <dig> years has evolved into a powerful tool to fit statistical models . the basic idea is to apply simple regression functions as base-learners  and iteratively fit them one-by-one to the negative gradient of a loss function. in every boosting iteration only the best-fitting base-learner is included in the model, effectively leading to variable selection.
+
+the loss function defines the type of regression setting the additive predictor is optimized for. the l <dig> squared error loss leads to classical regression of the mean  <cit> , the l <dig> loss to median regression which can be extended to quantile regression via the check-function  <cit> . incorporating the negative log-likelihood as loss function allows to fit classical generalized linear or additive models . for an overview of different loss functions for gradient boosting and their implementation see hofner et al.  <cit> .
+
+using uno’s estimator for the c-index as loss function, however, is unfeasible because c^uno is not differentiable with respect to η. to solve this problem, we approximate the indicator function i by a sigmoid function  
+ k=1/1+exp−σ,  leading to a smooth estimator of c^uno c^smooth=∑j,iΔjĜ2i·k∑j,iΔjĜ2i  which is differentiable with respect to η and will serve as loss function for the algorithm. a more detailed overview on the algorithm for boosting the c-index and its application is provided in the additional file  <dig> 
+
+the variable selection properties of statistical boosting algorithms are controlled by the stopping iteration mstop  <cit> . if the algorithm is stopped before convergence , variables that have never been selected up to this iteration are effectively excluded from the final model. the stopping iteration mstop is typically chosen such that it optimizes the prediction accuracy on separate test data generated via resampling techniques .
+
+in case of c-index boosting, this common procedure, however, becomes problematic as the rank-based loss function is rather robust against overfitting and early stopping is hardly possible. an optimal mstop often cannot be determined in this case. similar results have been described for binary outcomes if discriminatory measures are used to evaluate the prediction performance  <cit> . in case of c-index boosting, in many practical settings it hence makes sense to run the algorithm until convergence and omit the optimization of mstop .
+
+stability selection
+to ensure the selection of the most influential predictors despite this resistance to overfitting, we incorporate the stability selection approach by meinshausen and bühlmann  <cit>  which was later refined by shah and samworth  <cit> . stability selection is a generic method that applies to a wide range of statistical estimation techniques which conduct variable selection  <cit> , including penalized regression approaches such as lasso  <cit> , boosting  <cit>  or tree based approaches such as random forests  <cit> .
+
+the principle idea is to use subsamples of size n/ <dig> and fit a boosting model on each of the b subsamples until a pre-specified number of variables q out of the p possible predictor variables is selected. average selection probabilities π^j are computed for each predictor  and only variables that exceed a pre-specified threshold πthr are included in the final model. an important advantage of stability selection is that it controls the per-family error rate pfer=𝔼, where v is the number of false positive variables, and thus provides error bounds for the number of false positives. an upper bound to the pfer  can be derived as 
+ 𝔼≤q2p  under certain conditions  <cit> .
+
+shah and samworth  <cit>  propose to use 2·b complementary pairs, i.e., use the subsample as well as its complement. with additional assumptions on the distribution of the selection frequencies , tighter error bounds can be derived  <cit> . this r-concavity can be seen as an interpolant between unimodality and log-concavity. with r=−∞r-concavity equals the unimodality assumption and with r= <dig> log-concavity is assumed . error bounds with unimodality assumption are tighter than the standard error bounds from the equation above, but not as tight as error bounds with r-concavity assumption. usually, both assumptions hold  <cit> .
+
+the selection of the parameters q, πthr and pfer are crucial for the performance of stability selection. in general, we advice to choose q large enough to select all influential variables but small enough to reflect the researchers believe in the sparsity of the resulting model. in a sensible range, the actual size of q is of minor importance. similarly, meinshausen and bühlmann  <cit>  found that the actual choice of the threshold πthr is of minor importance as long as it is in a sensible range ). note that for a fixed q it is computationally very easy to change either the threshold or the pfer as the resampling results can be reused. hence, for fixed q different thresholds  can be easily compared. larger thresholds lead to sparser models, while thresholds close to  <dig>  lead to models which are less sparse. this is also reflected in the upper bound for the pfer which decreases with increasing threshold. selection frequencies resulting from stability selection can also be used as a descriptive statistic to assess which variables are selected with high frequencies and which variables are rarely selected.
+
+if error control is of primary interest, we advice to chose q and the upper bound for the pfer. the pfer should be chosen such that α≤pfer≤m·α, with significance level α and m hypothesis tests. this provides a good rationale for a sensible error control with the extreme cases of fwer-control  and no multiplicity adjustment .
+
+for an in-depth overview of stability selection in the context of boosting, see hofner et al.  <cit> .
+
+implementation
+all presented methods are made available for the open source statistical programming environment r  <cit> . the algorithm for boosting the c-index is implemented via the cindex() family for the add-on package mboost. stability selection is implemented via the stabsel() function from the stabs  <cit>  package, which is also incorporated in mboost. it provides an implementation of the classical approach  <cit>  and the extended sampling scheme using complementary pairs  <cit> . for evaluating the discriminatory power of the resulting models on test data, uno’s estimator for the c-index the is provided with the unoc() function of the survauc  <cit>  package. a worked-out example on how to apply these function in practice is provided in additional file  <dig>  the r-code to reproduce the analyses of this article is included as additional file  <dig>  in order to benchmark our results, we used the competing cox lasso approach implemented in the glmnet package  <cit>  which also can be combined with stability selection via stabs. note that also other implementations for boosting survival models are available in the r framework  as well as methods depending on the brier score  <cit> , like the peperr  <cit>  and the pec  <cit>  packages.
+
+RESULTS
+simulation study
+we carried out a simulation study to check the performance of stability selection in combination with c-index boosting under known conditions. the aims of the simulation study were: 
+to analyze if the algorithm is able to correctly identify a small subset pinf of informative variables from a larger set of p possible predictors in settings of p>n.
+
+to investigate the impact of the two parameters which have to be specified for stability selection, namely the number of selected variables q per boosting run and the threshold πthr for the necessary selection probability.
+
+to compare the resulting discriminatory power of the final models  with the ones from c-index boosting without stability selection and the competing cox lasso approach.
+
+to check the performance of our approach in scenarios where the proportional hazards assumption does not hold.
+
+
+
+the survival times t were simulated from a log-logistic distribution for accelerated failure time  models  <cit>  and are based on the model equation 
+ log=μ+ϕ·w,  where μ and ϕ are location and scale parameters, and w is a noise variable following a standard logistic distribution. the true underlying model was μ=x⊤β with β=⊤ for pinf= <dig> and was correspondingly extended for other numbers of informative predictors pinf∈{ <dig> ,40}. the predictors x <dig> ....,xp were drawn from a multivariate normal distribution with pairwise correlation  and p∈{ <dig> ,1000}. note that only a very small amount pinf of the p available predictors have an actual effect on the survival time. in scenarios where the proportional hazard assumption should not be fulfilled, also the scale parameter ϕ depended on a predictor variable ϕ= exp/ <dig>  otherwise it was a simple scalar .
+
+additionally to the survival times t, we generated for every observation i= <dig> ...,n an additional censoring time tcensi and defined the observed survival time by t~i:=min leading to independent censoring of on average  <dig> % of the observations. the sample size remained fixed with n= <dig> observations. for stability selection we used 2·b= <dig> complementary subsamples and computed the error bounds under the r-concavity assumption . the final models containing only the selected stable variables were fitted with a fixed mstop= <dig>  we compared the performance of this approach also with c-index boosting on all p predictors  and the cox lasso. for the latter, the shrinkage parameter was optimized via 10-fold cross-validation.
+
+variable selection
+first, we compared the selection rates for different values of q and πthr. the median number of true and false positives from  <dig> simulation runs for the different scenarios are presented in table  <dig>  one can observe that the algorithm is able to correctly identify the true informative predictors out of up to  <dig> possible predictors in case of pinf=4: in all combinations of q and πthr the four true informative variables were included in the final model if at least four variables had been selected at all. the latter especially becomes a problem if q was chosen too small with respect to p . these results also hold if the proportional hazard assumption is violated.thr
+
+
+
+p
+p
+inf
+n
+q
+π
+π
+π
+π
+π
+thr
+in every setting p
+inf predictors were truly informative, p−p
+inf were non-informative; ph-viol: settings were the proportional hazards assumption was violated. c-index boosting without stability selection  was fitted on all p predictors with a fixed large m
+stop; in case of the cox lasso the shrinkage parameter was optimized via 10-fold cross-validation
+
+
+
+for given q, the parameter πthr controls the sparsity of the resulting models: for p= <dig>  q= <dig> and pinf= <dig>  for example, on average eight variables were falsely selected with a threshold value of πthr= <dig> . this number decreased over three , and one  to zero for higher threshold values πthr. thus, for threshold values of πthr≥ <dig>  only the four informative predictors were included in the final model.
+
+comparing the results for pinf= <dig> and different numbers of predictors p, it gets clear that the optimal combination of q and πthr depends not only on the number of true informative variables but also on p. for larger numbers of p, q should also be larger to give the algorithm the chance to select enough variables on each subsample so that the informative ones pass the threshold: for p= <dig> this could be achieved already with q=5; for p= <dig> at least q= <dig> is necessary . this interdependence between q, p and πthr can be also observed via the computed upper bound for the pfer . it has to be noted, however, that on average much less variables were falsely selected in practice than could be in theory . this indicates that the error bound is conservatively controlled.
+
+for higher numbers of informative variables pinf the algorithm had more problems identifying the correct ones. for pinf= <dig>  the number of selected variables per subsample has to be increased to q= <dig> to incorporate all true informative ones. for smaller values of q, even for πthr= <dig>  only parts of the true predictors were selected; however, stability selection still mostly prevented incorporating false positives. the competing cox lasso approach, in contrast, also on average achieved to identify the true pinf= <dig>  but additionally included large numbers of non-informative variables in the final model. for pinf= <dig>  the picture became more extreme: now both approaches, c-index boosting with stability selection and the cox lasso were no longer able to select the correct predictors. only for q= <dig> and πthr= <dig>  on average  <dig> out of  <dig> predictors were correctly identified by c-index boosting with stability selection , the cox lasso incorporated  <dig> true predictors in the model . c-index boosting without stability selection in this case correctly identified  <dig> predictors.
+
+discriminatory power
+the discriminatory power of the final models was evaluated on independent test data with n= <dig> observations. the resulting median c-index values  for the different scenarios are presented in table  <dig>  the estimates for Ĉuno reflect the results from the variable selection in table 1: the highest discriminatory power was achieved if the correct variables had been identified as stable predictors and were included in the final model. for truly sparse models , this could be either achieved via large values of q and high thresholds  or smaller values of q and therefore also lower thresholds . for larger true models , a high discriminatory power could only be achieved when enough variables were included: best results were found for combinations with large q and small thresholds . the poorest discriminatory power from our approach resulted from the scenarios with pinf= <dig> . in this case, with a rather large number of informative predictors, the additional stability selection even led for all combinations of q and πthr to poorer results than standard boosting of the c-index .thr compared to the competing cox lasso approach
+
+
+p
+p
+inf
+n
+q
+π
+π
+π
+π
+π
+thr
+in case of c-index boosting, the final models were fitted with fixed m
+stop= <dig>  numbers represent the median Ĉuno on test samples from  <dig> simulation runs. ph-viol: settings were the proportional hazards assumption was violated. in cases where no variables at all are identified as stable, no discriminatory power can be computed . c-index boosting without stability selection  was fitted on all p predictors with a fixed large m
+stop; in case of the cox lasso the shrinkage parameter was optimized via 10-fold cross-validation
+
+
+
+putting the resulting discriminatory power in table  <dig> into relation with the bounds of the pfer provided in table  <dig>  in our simulation settings with pinf= <dig> the best results were achieved with a pfer  of  <dig> to  <dig>  for pinf= <dig> and pinf= <dig> better results were achieved when the pfer reaches or exceeds the number of truly informative predictors pinf.
+
+the final models of the competing cox-lasso approach on average led to a slightly lower discriminatory power than the models from c-index boosting with stability selection, although in many scenarios the true informative predictors had been correctly identified. similar to our approach, the cox lasso also yielded the poorest results for the simulation setting with pinf= <dig>  where it was clearly outperformed even by c-index boosting without stability selection.
+
+breast cancer data
+we analysed the performance of our approach also on data to build a gene signature for the prediction of the development of distant metastases in breast cancer patients. the data set  was collected by desmedt et al.  <cit>  to validate a 76-gene expression signature proposed by wang et al.  <cit> . in addition to the expression levels of the  <dig> genes, four clinical predictor variables were considered  status, tumor grade and age). observed metastasis-free survival ranged from  <dig> days to  <dig> days, with  <dig>  % of the survival times being censored. the data set is available on geo .
+
+to generate independent data sets for model fitting and evaluation, we constructed  <dig> training and test samples via stratified subsampling . on each of the training samples, we fitted c-index boosting and also cox lasso models with and without stability selection . the selected genes were afterwards included together with the clinical variables in prediction models that were again fitted either via c-index boosting or via cox proportional hazard models.
+
+variable selection
+results regarding the variable selection properties of our approach and the cox lasso are presented in fig.  <dig> . in case of c-index boosting one can clearly observe how the incorporation of stability selection led to much sparser models. while c-index boosting on average led to models containing  <dig> predictors , incorporating stability selection with a minimal threshold value of πthr= <dig>  yielded only  <dig> selected variables . sparsity can be further enhanced by increasing the threshold: the median number of selected variables ranged from  <dig> variables for πthr= <dig>  to  <dig> variables for πthr= <dig> . in case of the cox lasso, the situation was different, as already the original tuning via cross-validation yielded rather sparse models containing only  <dig> variables . incorporating stability selection with low threshold values can here even identify more stable predictors than the lasso alone ; only for larger threshold values the models got sparser again .
+fig.  <dig> variable selection for the breast cancer application. number of selected variables resulting from boosting a smooth version of the c-index  and cox lasso  with and without stability selection for different values of π
+thr. boxplots refer to the results from  <dig> stratified subsamples drawn from the complete data set
+
+
+
+discriminatory power
+the discriminatory power of the final models  is presented in fig.  <dig>  as expected, c-index boosting led to a higher discriminatory power  than the cox lasso . in case of c-index boosting, additionally incorporating stability selection did not decrease the performance on test data  when only a minimal threshold value was applied. further enhancing the sparsitiy , however, inevitably led to a lower discriminatory power, reflecting the trade-off between small and interpretable models and high prediction accuracy  <cit> . in case of the cox lasso the situation was similar, only that again the tuning of the initial model already led to a sparser model with slightly poorer discriminatory power than the models from stability selection with low threshold value . generally, for any given value of πthr, the resulting Ĉuno was higher for the boosting approach than for the cox lasso models.
+fig.  <dig> discriminatory power for the breast cancer application. resulting c-index on  <dig> test samples from the breast cancer application comparing both c-index boosting  and cox lasso  with and without stability selection for different values of π
+thr
+
+
+
+
+discussion
+the numerical results from the simulation study and the breast cancer data suggest that c-index boosting in combination with stability selection is able to correctly identify small numbers of influential predictors in potentially high-dimensional settings.
+
+regarding discriminatory power, c-index boosting outperformed common cox-based penalization approaches both in the simulations and in the breast cancer application. this finding is not surprising, as our approach – in contrast to cox regression – is specifically tailored to optimize the ability of the model to differentiate between observations with smaller and larger survival times.
+
+on the other hand, we emphasize that our approach is particular favorable for identifying sparse models, the additional sparsity resulting from stability selection does not necessarily lead to more accurate predictions. while in the simulation study, where the algorithm was confronted in most scenarios with very few informative variables and a much larger set of completely non-informative ones, the additional stability selection also led to a higher discriminatory power than standard c-index boosting, this result was not confirmed in the breast data application: it can be assumed that most of the  <dig> pre-selected genes will at least have a minor effect on the survival outcome  <cit> . incorporating stability selection in this setting led to sparser models , but with higher threshold values πthr the discriminatory power decreased . in fact, also the results of our simulation study have shown that for larger true models stability selection with a very strict level of error control seems to discard predictor variables that have small but non-negligible contributions to prediction accuracy. in these cases, a higher discriminatory power was achieved without the incorporation of stability selection. one could hence argue, that increasing interpretability via sparsity and getting the highest possible discriminatory power are two different goals that may not always be achievable at the same time .
+
+in addition to the c-index considered in this work , various other approaches to evaluate the prediction accuracy of a survival model exist. for example, a well-established approach is to evaluate measures that emulate the r <dig> coefficient of explained variation by relating the likelihood of the prediction model to the respective likelihood of a null model that does not include the marker η  <cit> . in contrast to the c-index, these measures are likelihood-based  and are therefore dependent on the correct specification of the survival model under consideration. another popular approach is to consider scoring rules for survival data  <cit> , which measure prediction error by the distance between the predicted and the observed survival functions of the observations in a sample. an often-used scoring rule is the brier score, which evaluates the squared distance between survival functions  <cit> . because scoring rules are based on probability estimates of the individual-specific survival functions, whereas the c-index is solely based on the rankings of the survival times and the marker values, the two approaches share properties that are similar to the calibration and discrimination approaches, respectively, considered in binary classification .
+
+CONCLUSIONS
+the methodology proposed in this paper addresses the problem of variable selection in c-index boosting. by combining gradient boosting with stability selection, we constructed a subsampling-based estimation procedure that incorporates only the most “stable” predictor variables while controlling the per-family error rate. this property is of considerable interest in biomedical research, as the identification of a small subset of important  markers is often considered to be a key issue in prediction modeling. as pointed out by many authors , sparse prediction models containing only a moderate number of covariates are desirable in practice for reasons of interpretability. furthermore, measuring biomarkers is often costly, so that the implementation of a prediction model in clinical practice crucially depends on the level of sparsity of the model.
+
+the combination of gradient boosting and stability selection may also be considered appealing from an inferential point of view. because statistical inference in boosting models is challenging due to the partly unknown convergence properties of the algorithm and the various regularization schemes involved, very few approaches to derive covariate-wise hypothesis tests and p-values exist  <cit> . via stability selection, one can also compute the per-comparison error rate  <cit>  which can be interpreted as a standard overall p-value with multiplicity correction . therefore, by controlling the number of falsely selected predictor variables, stability selection provides an alternative to covariate-wise tests for assessing the relevance of predictor variables via inferential procedures.
+
+abbreviations
+auc, area under the receiver operating characteristics curve; c-index, concordance index; pfer, per-family error rate; fwer, family-wise error rate; roc, receiver-operating characteristics curve
+
+additional file
+additional file  <dig> supporting information. the document provides a more detailed description of the presented approach and its implementation. furthermore, it includes a worked-out example on how c-index boosting with stability selection can be applied in practice. 
+
+
+
+additional file  <dig> r code. this r-file provides the underlying functions to reproduce the results of the simulation and the breast cancer analysis. 
+
+
+

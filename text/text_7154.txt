@@ -1,0 +1,171 @@
+BACKGROUND
+related works
+searching databases of dna and protein sequences is one of the fundamental tasks in bioinformatics. the smith-waterman algorithm guarantees the maximal sensitivity for local sequence alignments, but it is slow. it should be further considered that biological databases are growing at a very fast exponential rate, which is greater than the rate of improvement of microprocessors. this trend results in longer time and/or more expensive hardware to manage the problem. special-purpose hardware implementations, as for instance super-computers or field-programmable gate arrays  are certainly interesting options, but they tend to be very expensive and not suitable for many users.
+
+for the above reasons, many widespread solutions running on common microprocessors now use some heuristic approaches to reduce the computational cost of sequence alignment. thus a reduced execution time is reached at the expense of sensitivity. fasta   <cit>  and blast   <cit>  are up to  <dig> times faster than the best known straight forward cpu implementation of smith-waterman.
+
+a number of efforts have also been made to obtain faster implementations of the smith-waterman algorithm on commodity hardware. farrar  <cit>  exploits intel sse <dig>  which is the multimedia extension of the cpu. its implementation is up to  <dig> times faster than ssearch  <cit>  .
+
+to our knowledge, the only previous attempt to implement smith-waterman on a gpu was done by w. liu et al.   <cit> . their solution relies on opengl that has some intrinsic limits as it is based on the graphics pipeline. thus, a conversion of the problem to the graphical domain is needed, as well as a reverse procedure to convert back the results. although that approach is up to  <dig> times faster than ssearch, it is considerably slower than blast.
+
+in this paper we present the first solution based on commodity hardware that efficiently computes the exact smith-waterman alignment. it runs from  <dig> to  <dig> times faster than any previous implementation on general-purpose hardware.
+
+the smith-waterman algorithm
+the smith-waterman algorithm is designed to find the optimal local alignment between two sequences. it was proposed by smith and waterman   <cit>  and enhanced by gotoh   <cit> . the alignment of two sequences is based on the computation of an alignment matrix. the number of its columns and rows is given by the number of the residues in the query and database sequences respectively. the computation is based on a substitution matrix and on a gap-penalty function.
+
+definitions:
+
+• a: a1a2a3….an is the first sequence,
+
+• b: b1b2b3….bm is the second sequence,
+
+• w is the substitution matrix,
+
+• ginit and gext are the penalties for starting and continuing a gap,
+
+the alignment scores ending with a gap along a and b are
+
+ ei,j=max{ei,j−1−gexthi,j−1−ginit}fi,j=max{fi− <dig> j−gexthi− <dig> j−ginit} 
+
+finally the alignment scores of the sub-sequences ai, bj are:
+
+ hi,j=  max  {0ei,jfi,jhi− <dig> j−1−w} 
+
+where 1≤i≤n and 1≤j≤m. the values for e, f and h are  <dig> when i< <dig> and j< <dig>  the maximum value of the alignment matrix gives the degree of similarity between a and b.
+
+an important point to be considered is that any cell of the alignment matrix can be computed only after the values of the left and above cells are known, as shown in figure  <dig>  different cells can be simultaneously processed only if they are on the same anti-diagonal.
+
+cuda programming model
+the two major gpu vendors, nvidia and amd, recently announced their new developing platforms, respectively cuda  <cit>  and ctm  <cit> . unlike previous gpu programming models, these are proprietary approaches designed to allow a direct access to their specific graphics hardware. therefore, there is no compatibility between the two platforms. cuda is an extension of the c programming language; ctm is a virtual machine running proprietary assembler code. however, both platforms overcome some important restrictions on previous gpgpu approaches, in particular those set by the traditional graphics pipeline and the relative programming interfaces like opengl and direct3d.
+
+we selected nvidia geforce  <dig> and its cuda platform to design our smith-waterman implementation because it is the first available gpu on the market capable of an internal integer representation of data.
+
+in cuda, the gpu is viewed as a compute device suitable for parallel data applications. it has its own device random access memory and may run a very high number of threads in parallel . threads are grouped in blocks and many blocks may run in a grid of blocks. such structured sets of threads may be launched on a kernel of code, processesing the data stored in the device memory. threads of the same block share data through fast shared on-chip memory and can be synchronized through synchronization points. an important aspect of cuda programming is the management of the memory spaces that have different characteristics and performances:
+
+• read-write per-thread registers 
+
+• read-write per-thread local memory 
+
+• read-write per-block shared memory 
+
+• read-write per-grid global memory 
+
+• read-only per-grid constant memory 
+
+• read-only per-grid texture memory 
+
+the proper choice of the memory to be used in each kernel depends on many factors such as the speed, the amount needed, and the operations to be performed on the stored data. an important restriction is the limited size of shared memory, which is the only available read-write cache. unlike the cpu programming model, here the programmer needs to explicitly copy data from the global memory to the cache  and backwards. but this new architecture allows the access to memory in a really general way, so both scatter and gather operations are available. gather is the ability to read any memory cell during the run of the kernel code. scatter is the ability to randomly access any memory cell for writing. the unavailability of scatter was one of the major limitations of opengl when applied to gpgpu applications. the main point in approaching cuda is that the overall performance of the applications dramatically depends on the management of the memory, which is much more complex than in the cpus.
+
+RESULTS
+exhaustive tests have been performed to compare the implementation of smith-waterman in cuda with:
+
+• the results of w. liu as reported in his paper  <cit> . his solution was implemented in opengl and was tested on a nvidia geforce  <dig> gpu
+
+• blast  <cit>  and ssearch  <cit> , running on a  <dig> ghz intel pentium iv processor
+
+• the results of the simd implementation by farrar as reported in his paper  <cit> . his tests were run on a  <dig>  ghz xeon core  <dig> duo processor.
+
+we have tested our solution on a workstation, having the  <dig>  ghz intel q <dig> processor and two nvidia geforce  <dig> gtx graphic cards. we have measured the performance by running the application both on single and on double gpu configurations. by doubling the computing resources we observed that the overall performance of the application also doubles. this shows that the solution can benefit from a nearly linear speed improvement when adding more graphic boards to the system. it must be mentioned that the nvidia sli option, available for multi-gpu systems, is designed for opengl. therefore, sli must be disabled for cuda, which requires direct programming of every installed gpu.
+
+smith-waterman in cuda vs. liu's implementation
+for this test five protein sequences of different length  were run against the swissprot database . the substitution matrix blosum <dig> with a gap-open penalty of  <dig> and a gap-extension penalty of  <dig> were used. the resulting mcups for each of the  <dig> query sequences are shown in table  <dig> 
+
+
+                              sequence
+                              sw-cuda*
+                              sw-cuda**
+                              weiguo liu
+
+                              name
+                              length
+                              mcups
+                              mcups
+                              mcups
+substitution matrix used: blosum <dig>  gap-open penalty:  <dig>  gap-extension penalty:  <dig> 
+
+database used: swissprot .
+
+* smith-waterman in cuda running on an nvidia geforce  <dig> gtx
+
+** smith-waterman in cuda running on two nvidia geforce  <dig> gtx
+
+liu obtained on the same sequences an average of  <dig>  mcups and a peak of  <dig> mcups. our solution on a single gpu was completed in a time of  <dig>  sec with an average of  <dig> mcups and a peak of  <dig> mcups. our implementation on two gpus achieved a search time of  <dig>  sec with an average of  <dig> mcups and a peak of  <dig> mcups. these results indicate that our implementation of smith-waterman is up to  <dig> times faster than that of liu.
+
+smith-waterman in cuda vs. blast and ssearch
+for this test we used the same sequences, database and substitution matrix described in the previous paragraph. ssearch completed the search in  <dig> sec with an average of  <dig>  mcups and a peak of  <dig> mcups. blast completed the search in  <dig>  sec with an average of  <dig> mcups and a peak of  <dig> mcups.
+
+the execution times of our cuda implementation were up to  <dig> times faster than ssearch and up to  <dig>  times faster than blast, as shown in figure  <dig> and table  <dig> 
+
+database used: swissprot .
+
+* smith-waterman in cuda running on an nvidia geforce  <dig> gtx
+
+** smith-waterman in cuda running on two nvidia geforce  <dig> gtx
+
+
+                              sequence
+                              sw-cuda*
+                              sw-cuda**
+                              ssearch
+                              blast
+
+                              name
+                              length
+                              time 
+                              mcups
+                              time 
+                              mcups
+                              time 
+                              mcups
+                              time 
+                              mcups
+substitution matrix used: blosum <dig>  gap-open penalty:  <dig>  gap-extension penalty:  <dig> 
+
+database used: swissprot .
+
+* smith-waterman in cuda running on an nvidia geforce  <dig> gtx
+
+** smith-waterman in cuda running on two nvidia geforce  <dig> gtx
+
+smith-waterman in cuda vs. farrar's implementation
+this last test was done running  <dig> sequences of different length  against the swissprot database . the substitution matrix is the blosum <dig> with a gap-open penalty of  <dig> and a gap-extension penalty of  <dig> 
+
+the farrar's approach is based on the following consideration: for most cells in the alignment matrix, f remains at zero and does not contribute to the value of h. only when h is greater than ginit + gext will f start to influence the value of h. so firstly f is not considered. then, if required, a second step tries to correct the introduced errors. farrar's solution completed the search in  <dig> sec with an average of  <dig> mcups and a peak of  <dig> mcups. our solution running on a single gpu turned in a slightly better time of  <dig>  sec with an average of  <dig>  mcups and a peak of  <dig> mcups. on two gpu devices the search was completed in  <dig>  sec with an average of  <dig>  mcups and a peak of  <dig> mcups. the search times and resulting mcups are shown in figure  <dig> and table  <dig> 
+
+database used: swissprot .
+
+* smith-waterman in cuda running on an nvidia geforce  <dig> gtx
+
+** smith-waterman in cuda running on two nvidia geforce  <dig> gtx
+
+
+                              sequence
+                              sw-cuda*
+                              sw-cuda**
+                              farrar
+
+                              name
+                              length
+                              time 
+                              mcups
+                              time 
+                              mcups
+                              time 
+                              mcups
+substitution matrix used: blosum <dig>  gap-open penalty:  <dig>  gap-extension penalty:  <dig> 
+
+database used: swissprot .
+
+* smith-waterman in cuda running on an nvidia geforce  <dig> gtx
+
+** smith-waterman in cuda running on two nvidia geforce  <dig> gtx
+
+farrar's solution improves its performances on the longer sequences, but on the average, it takes longer than our solution running even on a single gpu. so smith-waterman in cuda is up to  <dig> times faster than farrar's implementation.
+
+CONCLUSIONS
+up to now the huge computational power of the gpus was hampered by the limited programming model of opengl which is unsuitable for efficient general-purpose computing.
+
+the results of this work show that the new cuda compatible graphic cards are now advanced enough to be considered as efficient hardware accelerators for the smith-waterman algorithm. high speed can be obtained with the greatest sensitivity. but this work also opens interesting perspectives as similar strategies of acceleration could be applied to a number widely used algorithms in bioinformatics. thus equal investments in terms of hardware may lead to much better performances. future work of our team is planned in the direction of accelerating blast.
+
+the source files of our smith-waterman implementation are available at .
+

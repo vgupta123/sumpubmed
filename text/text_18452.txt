@@ -1,0 +1,156 @@
+BACKGROUND
+the comprehension of the molecular mechanisms involved in the physiology of human cells requires the development of new bioinformatics and biostatistics tools able to integrate and interpret the huge amount of data derived from different kinds of genome-wide approaches. the interpretation of the transcriptional state of the cell and its alterations in specific experimental or pathological conditions is today of particular interest and several technologies have been developed to identify and quantify the entire set of cellular transcripts. as a consequence, the amount of gene expression data available in public repositories has grown exponentially in the last years, now requiring new data mining tools to extract biologically relevant information.
+
+many databases of genome-wide expression data are today publicly available. gene expression omnibus  developed at ncbi  <cit>  and arrayexpress developed at ebi  <cit>  are the two main international repositories where about 45% of microarray published studies has been deposited  <cit> . a standardized system for reporting microarray results   <cit>  has been developed in order to facilitate the sharing of high-throughput data among scientists. these improvements made it possible to develop a variety of added-value databases that process and analyze expression data in order to answer to specific biological questions  <cit> . different methods have been exploited to combine data from different sources in meta-analysis studies to reveal new aspects of biological processes even if data heterogeneity represents a challenge. many procedures were developed in recent years to overcome this issue resulting in the availability of different bioinformatics tools. for example, the oncomine application  <cit>  considers gene expression datasets related to the tumorigenic transformation and the publime tool  <cit>  bases its analysis mainly on gene signatures. in coxpresdb  <cit>  a homogeneous set of data was selected from two human platforms and it was compared to expression data from different organisms. each of these solutions offers a view of the whole set of expression data from a different perspective. for this reason, despite the availability of several databases and analysis tools, new bioinformatics approaches to query the increasing amount of expression data are still required.
+
+in this context we developed correlagenes, a new bioinformatics tool exploiting geo expression data to provide new insights about the pathways in which a gene of interest could be involved  <cit> . correlagenes is aimed at identifying lists of genes potentially correlated to a gene of interest. this is accomplished through a cross-sectional analysis among data from different microarray studies with the ultimate goal of detecting those genes showing modulation of their expression in a significant number of different conditions. the correlagenes tool implements a customized association rule mining  algorithm and a set of indexes that allow the user to dynamically explore his target gene combining different input parameters.
+
+in this paper we will describe the process of data elaboration from the geo archive to the results output file that users could obtain through the web interface. we will also describe the indexes we implemented to achieve a reliable selection of genes correlated with the input target and their impact on a simulation on  <dig> randomly selected genes. moreover, we will show preliminary data about the biological relevance of correlagenes results and how the possibility to choose the type of gene expression alterations  will help in the elucidation of molecular pathways and of their players.
+
+implementation
+correlagenes was conceived to explore the biological role of a gene of interest selected by the user identifying a set of genes whose expression appeared altered in the same experimental or physiological state. the tool exploits geo expression data and uses a customized association rule mining algorithm for a cross-sectional analysis aimed at identifying those genes showing a coordinated modulation of their transcriptional profiles in different conditions. a schematic representation of the correlagenes workflow is shown in figure  <dig> 
+
+data pre-processing
+the source of the expression data used by the correlagenes tool was built from  <dig> human geo curated datasets  downloaded from the geo archive through the geoquery  <dig> . <dig> r/bioconductor package  <cit> . the experimental design related to each gds was used to group the intensity values measured for single sample sharing the same experimental factors . groups containing less than two samples were not suitable for subsequent analysis thus leading to discard a total of  <dig> gds. the resulting groups were used to create a contrast matrix including all groups versus group comparisons . a manually curated knowledge-based procedure was applied to select appropriate comparisons: as automatically generated matrices often include contrasts without a clear experimental meaning, a team of biologists defined a set of rules to extract those comparisons showing a strong biological rationale . figure  <dig> shows the procedure applied to gds <dig> . in this example a total of seven experimental factors were identified and used to create an all groups versus group contrast matrix of  <dig> comparisons among which only five were selected by the experts. this procedure brought to the selection of  <dig>  pairwise comparisons in  <dig> gds. in  <dig>  out of  <dig>  comparisons a "control" experimental factor was detectable thus allowing the definition of the sign of the altered expression measure .
+
+the calculation of the log fold change  and p value for each of the selected comparisons was performed with the linear regression algorithm implemented in the limma  <dig> . <dig> r package  <cit> . the adjusted p values were obtained applying the bayesian estimator implemented in the same package. the results of these analyses were used to initialize a postgresql  <dig> . <dig> relational database  <cit>  that was used as data source for the correlagenes application. the  <dig> , <dig> probes obtained from different datasets were assigned to  <dig>  unique identifiers. an automated procedure based on the biomart  <dig> . <dig> r package  <cit>  was developed to establish the relationship with ncbi official gene symbol and resulted in the unambiguous mapping of  <dig>  identifiers. the remaining  <dig>  identifiers were treated as spurious entities ; they cannot be used as target gene even if they were not discarded from the database. despite the very limited number of corresponding probes  it is anyway possible that they would appear in the output list.
+
+to better characterize the dataset used by correlagenes we analyzed the expression measures of the  <dig>  official gene symbols that can be used as target genes. defining a threshold of absolute lfc ≥  <dig> and adjusted p value ≤  <dig> , a total of  <dig>  genes were never found over- nor under-expressed. the remaining  <dig>  showed modulation of their expression in an average of  <dig> comparisons. in figure  <dig>  the histogram of the distribution of the number of genes in relation to the number of comparisons in which they were found modulated is shown.
+
+arm algorithm
+in order to discover a set of genes that are frequently differentially co-expressed correlagenes implements a customized version of an association rule mining  algorithm. in the arm formalism, datasets are organized in the form of transactions. each transaction contains a list of elements, called items, whose nature depends on the application. in our context, each transaction corresponds to a comparison and includes the list of differentially expressed genes in that transaction. such genes are selected on the basis of lfc and adjusted p value thresholds selected by the user. the application uses the transactions to identify association rules  of the form if a then c . in our context, these rules can be interpreted as: if set of genes  <dig> is differentially expressed in an experiment then set of genes  <dig> is differentially expressed as well  <cit> .
+
+the arm theory is based on the concept of frequent rule. a rule is frequent when it is verified by a sufficient amount of transactions in the dataset. in the case of gene expression experiments, an association is considered frequent if the involved genes are co-modulated in a sufficiently high number of comparisons. in the original arm algorithm, the quality of an association is defined by the support. support gives an idea of how frequent is a rule in a specific dataset. given a dataset containing n transactions, the support of the rule a=>c will be calculated as na, c/n, where na, c is the number of transactions verifying the rule . an itemset is defined frequent if its support exceeds a user-defined support threshold.
+
+in recent years different strategies were proposed to apply the arm algorithm to the analysis of microarray expression data  <cit> . in this paper we use a simplified version of the arm algorithm, which is based on two main points:  we look for associations containing only two genes and  one of the involved genes is constrained to be the gene selected by the user . in this way, the algorithm will look only for frequent item sets of cardinality  <dig>  and only for pairs of items involving the target gene as one of the members. indicating with t the target gene and with x a generic gene in the dataset, we will thus look for rules of the kind if t then x.
+
+to measure the quality of the associations, we herein introduce the following indexes: co-presence, co-expression , lift and χ <dig> p value. these definitions are based on the concept of presence and modulation of a gene. a gene is defined present in a dataset if at least one of the probes corresponding to it was measured with an adjusted p value lower than the threshold fixed by the user. a gene is defined modulated if it is present in the dataset and its expression value exceeds the specified lfc threshold. the notations used in the definitions below are explained in table  <dig> 
+
+co-presence is defined as the percentage of comparisons where both t and x are present.
+
+ co-pres=ntp,xpntp 
+
+the co-pres index represents a technical parameter used to exclude from the analysis all the genes that were measured with the target in an insufficient number of times to allow a reliable estimation of the other arm indexes.
+
+co-expression is defined as the percentage of comparisons where both gene t and gene x are differentially expressed. more formally:
+
+ co-expr=ntm,xmntp,xp 
+
+this is the adaptation of the notion of support for traditional arm algorithm to our domain. the co-expr index can be used as a raw estimation of the biological relevance of the association of the gene x expression with the target. in our simulations it was insufficient to discriminate the biologically relevant associations from the background even if it can be used to further rank the output gene lists.
+
+in traditional arm algorithm, lift is defined as the ratio between the confidence of a rule and the support of the consequent of the rule. for the scope of this paper, we define thus lift as follow:
+
+ lift=ntp,xp⋅ntm,xmntp,xm⋅ntm,xp 
+
+the lift index was the first main parameter allowing the selection of the genes biologically related with the target. from its definition a lift equal to one represents a gene randomly associated with the target while higher level of lift identifies genes with a significant co-modulation. in our simulations a lift threshold of two greatly improved the biological relevance of the output gene lists.
+
+we perform a χ <dig> test to evaluate the number of times the target gene and gene x result simultaneously differentially expressed compared to the expected value in the target population. the χ <dig> p value is used to estimate the independence between the target and a gene x. even if this type of index is rarely used to rank ars, in our simulations, it resulted useful to discriminate the biologically relevant associations from the background.
+
+using arm to mine frequently associated genes has several advantages. first of all the search procedure is very efficient as it is based on the apriori principle. second, it potentially allows a generalization towards considering any number of genes in the rule, naturally extending the present version of the method to more complex regulation scenarios.
+
+correlagenes web interface
+a web interface was created to provide users with an easy and efficient access to the tool . connecting to the correlagenes web page  <cit> , the user can start the analysis of the gene of interest by defining three sets of parameters:  the official symbol of the gene of interest  and the sign of the differential expression ;  the lfc  and the adjusted p value thresholds for the definition of differentially expressed genes;  the criteria to filter the list of related genes based on the arm indexes . flanking each input field a pop-up window is available to help users in the correct definition of parameters.
+
+as the correlagenes analyses are performed in batch an e-mail address is required to send the results back to the user that will initially receive a notification of the job submission followed by an email containing the link to the analysis output. the results are structured as tab-delimited text files and include an 8-rows header summarising all the analysis parameters and two additional rows indicating the number of comparisons where the target gene was found present or modulated. below the header, a table reports the list of the related genes found together with their annotation details  and all the arm indexes calculated during the analysis .
+
+correlagenes performances
+the performance of the algorithm was evaluated in term of execution time. a preliminary analysis was performed with  <dig> randomly selected genes used as targets and with the following input values: "target sign" =  <dig>  "target gene lfc" =  <dig>  "genes lfc" =  <dig>  "lfc p value" =  <dig> , "% co-pres" =  <dig>  "lift" =  <dig> and "chi-square p value" =  <dig> . averaging on the considered  <dig> genes, the whole procedure requires a mean execution time of  <dig> seconds. we evaluated the average cost of each phase as percentage of the total execution time. the profiling of the code showed that the 50% of the total time is spent initializing the data, the 44% is spent creating the different gene lists and the 6% is actually spent generating the ars.
+
+RESULTS
+ <dig> genes simulation
+to assess the tool functionality,  <dig> official gene symbols were randomly extracted and analyzed with correlagenes. for the purpose of this simulation we extracted our sample among genes modulated in at least one comparison . we run all the analysis setting the following parameters: "target sign" =  <dig>  "target gene lfc" =  <dig>  "genes lfc" =  <dig>  "lfc p value" =  <dig> .
+
+a threshold of "% co-pres" =  <dig> was applied to limit the number of false positive results due to genes co-measured in a small number of comparisons. the output lists obtained included an average of  <dig>  genes . additional file  <dig> shows the impact of different thresholds of the co-pres index on the total number of related genes.
+
+different thresholds of the χ <dig> p value and of the lift indexes were evaluated . increasing by a factor of  <dig> the threshold of the χ <dig> p value starting from  <dig>  and  <dig>  resulted in an almost linear reduction of the number of related genes . on the contrary, even small increases in the lift index drastically reduced the number of genes in the output lists . increasing the lift index from  <dig> to  <dig> resulted in halving the number of related genes while for lift values greater than  <dig> the median number of selected genes is always below  <dig>  a box-plot showing the combined effect of χ <dig> p value and lift indexes is presented in additional file  <dig> 
+
+biological relevance of the results: analysis of the prpf <dig> gene
+to assess the biological relevance of the correlagenes output gene lists we chose to analyze the list obtained using prpf <dig> as target gene . prpf <dig> is a well-characterized gene whose product plays a role in the formation of the rna splicing complex  <cit>  and it is also described to be involved in dna repair  <cit> , in the regulation of cell cycle  <cit>  and apoptosis  <cit> . the output lists, obtained using the same expression thresholds set for the simulation study and comparing different thresholds of lift and χ <dig> p value, were evaluated through the database for annotation, visualization and integrated discovery   <cit>  functional annotation clustering using gene ontology  biological process as source of information  <cit> . applying different cut-offs for the χ <dig> p value  we obtained a relatively small decrease in the total number of extracted genes . the analysis of the nine gene lists showed the presence of clusters  related to rna splicing, cell cycle, dna repair processes all with a david enrichment scores  always greater than  <dig> . clusters related to apoptosis showed the same level of es even if they strongly decreased at χ <dig> p value threshold smaller than  <dig> × 10- <dig>  the analysis performed with a lift threshold of  <dig> generated a list of  <dig>  genes that resulted mainly enriched in clusters related to rna splicing  whereas other processes showed es between  <dig>  and  <dig> . the analysis performed with a lift threshold of  <dig> resulted in a gene list containing only  <dig> genes with lesser significant david annotations . we repeated the χ <dig> p value analysis with a threshold of lift =  <dig> obtaining lists including  <dig>  to  <dig>  genes. the david functional annotation clustering highlighted rna splicing as the most enriched cluster with an es of  <dig>   while the other clusters obtained lower enrichment scores: dna repair , cell cycle  and regulation of apoptosis .
+
+to further characterize prpf <dig> related genes we performed the analysis distinguishing between up- or down-regulation of the target and of related genes. the results of this analysis  allowed to identify different expression relationships between the target and its correlated genes. in particular, the apoptotic process appeared inversely related to the up- or down-regulation of prpf <dig> while dna repair and cell cycle appeared directly related. finally, the expression level of the prpf <dig> gene seemed to be a limiting factor for the rna splicing process as its down-regulation results in a list of down-regulated genes highly enriched  for this function.
+
+discussion
+in this paper we described the development of a new bioinformatics tool, correlagenes, which exploits publicly available expression data to extract lists of genes transcriptionally correlated with a gene of interest.
+
+the transcriptional profiles used by correlagenes came from  <dig> human datasets obtained from the geo archive that were manually elaborated to select a subset of  <dig>  comparisons with a consistent biological rationale. this represents an added value of this new tool as the automated procedures, often employed to analyze the geo data, introduce distortions due to the presence of spurious correlations.
+
+moreover, due to the increasing number of curated datasets available at the geo archive, we planned a quarterly update of correlagenes. this process will include the addition of the new studies along with the manually curated knowledge-based selection of pairwise comparisons thus improving the overall accuracy of the results.
+
+the correlagenes tool was implemented with a customized arm algorithm that provides the user with a variety of indexes through which it is possible to modulate the features of the extracted gene list thus exploring different biological perspectives when considering the function of the target gene. the possibility of choosing different levels of gene expression modulations  and distinguishing between over- or under-expression of the target gene  allowed to focus the analysis on specific aspects of cell function and regulation. the tuning of the "co-pres" filter appeared particularly helpful in the reduction of experimental background as it limits the analysis to a number of observations suitable to avoid the majority of false positive results. moreover, combinations of the lift and χ <dig> p value can be used to dissect pathways where a target gene acts in different cellular conditions thus helping to untangle its complex functioning. the values we suggested as default appeared suitable for a general characterization of a gene of interest. depending on the user expectations, more stringent thresholds  could be used to reduce the occurrence of false positive results being aware that a concomitant reduction in informative genes could not be ruled out.
+
+the availability of large amount of data boosted the development of new bioinformatics tools allowing to explore many aspects of gene expression profiles applying different types of meta-analysis. to create correlagenes we focused on two aspects that we considered not fully exploited: the possibility to combine many studies with no restriction in the platform selection and with no restrictions in the experimental factors. the first point guided us to the choice of the arm algorithm that we found to be robust handling the high number of missing values present in data source. to address the second point, we included in correlagenes all curated datasets available in geo taking in consideration all different experimental factors used to perturb cell physiology. this feature might allow correlagenes to explore different aspects of gene functions and represents the main difference with respect to other tools as oncomine and publime that focus their analysis on cancer biology.
+
+the gene lists obtained with our tool can be analyzed by other bioinformatics resources to get insight into the biological processes or molecular mechanisms where the genes appeared involved. in this paper we used the david web tool to annotate the gene list corresponding to the prpf <dig> target gene. as illustrated in the results section, the obtained list is consistent with the known biological role of this gene thus providing a reliable source where to look for new players of the same process or to search for unknown processes in which the target gene could be involved.
+
+CONCLUSIONS
+the correlagenes tool, through a new approach for the characterization of human genes transcriptional profiles, could contribute to the comprehension of molecular pathways regulating cell physiology.
+
+availability and requirements
+• project name: correlagenes
+
+• project home page: http://www.igm.cnr.it/cabgen/
+
+• operating system: platform independent
+
+• software requirements: web browser 
+
+• other requirements: an e-mail account
+
+• programming language: fortran, r  <dig> , php <dig> . <dig>  typo <dig>  <dig> .6
+
+• updates: the tool will be updated quarterly
+
+• licence: free to academic, government and non-profit users for non-commercial use.
+
+list of abbreviations
+arm: association rule mining; ars: association rules; david: database for annotation, visualization and integrated discovery; ebi: the european bioinformatics institute; es: enrichment scores; gds: geo datasets; geo: gene expression omnibus; go: gene ontology; lfc: log fold change; miame: minimum information about a microarray experiment; ncbi: national center for biotechnology information.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+pc, sb, am and gb conceived this research. sb did the coordination of the study. pc and sb performed the data pre-processing procedures and the manual selection of comparisons. pc, ls, sb and gs designed the arm algorithm. sr implemented and optimized the algorithm. al and fc developed the web interface. pc and sr did the simulation analysis. pc, sb, am and gb analyzed biological results. pc, sr, ls, gs and sb wrote the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+contrast matrix creation and comparisons selection. the file includes, in pdf format, the detailed description of the contrast matrix creation process and the curated knowledge-based procedure workflow.
+
+click here for file
+
+ additional file 2
+description of the output file header.
+
+click here for file
+
+ additional file 3
+impact of the % co-pres index on the number of genes in the output lists.
+
+click here for file
+
+ additional file 4
+impact of the lift and χ <dig> p value indexes on the number of correlated genes.
+
+click here for file
+
+ additional file 5
+prpf <dig> output gene list. the file include the output gene list, in a tab-delimited text format, obtained by the analysis of the prpf <dig> gene.
+
+click here for file
+
+ additional file 6
+analysis of the prpf <dig> gene lists. trend of the david enrichment scores  respect to different lift thresholds.
+
+click here for file
+
+ additional file 7
+david functional annotation chart related to the output lists used in figures  <dig>   <dig> 
+
+click here for file
+
+ acknowledgements
+we thank dr. c. colì for critical reading of the manuscript. this work was supported by cariplo foundation grant n. 2010/ <dig> and by progetto di interesse cnr-miur "invecchiamento". pc is a student of the phd program in genetics, molecular and cellular biology of the university of pavia.
+
+declarations
+all the publication costs were supported by cariplo foundation grant n. 2010/ <dig>  and by progetto di interesse cnr-miur "invecchiamento" and by imati-cnr of pavia.
+
+this article has been published as part of bmc bioinformatics volume  <dig> supplement  <dig>  2014: integrated bio-search: selected works from the 12th international workshop on network tools and applications in biology . the full contents of the supplement are available online at http://www.biomedcentral.com/bmcbioinformatics/supplements/15/s <dig> 

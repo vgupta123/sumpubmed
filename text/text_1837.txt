@@ -1,0 +1,240 @@
+BACKGROUND
+genomic duplications and deletions are common in cancer cells and known to play a role in tumor progression  <cit> . as our ability to survey the fine scale of the human genome has increased, it has become apparent that normal cells can also harbor a number of variations in copy number   <cit> . the last few years have witnessed a steady increase in our knowledge of the size and frequency of these variants  <cit>  and their implications in complex diseases  <cit> . at the same time, statistical methods and algorithms have been developed to better harness the information available. at the cost of oversimplification, two different approaches have become particularly popular. one is based on the hidden markov model  machinery and explicitly aims to reconstruct the unobservable discrete dna copy number; the other, which we will generically call “segmentation”, aims at identifying portions of the genome that have constant copy number, without specifically reconstructing it.
+
+the hmm approach takes advantage of the implicitly discrete nature of the copy number process ; furthermore, by careful modeling of the emission probabilities, one can fully utilize the information derived from the experimental results. in the case of genotyping arrays, for example, quantification of total dna amount, relative allelic abundance, and prior information such as minor allele frequencies can be considered.
+
+no apriori knowledge of the number of copy number states is required in the segmentation approach—an advantage in the study of cancer where polyploidy and contamination with normal tissues result in a wide range of fractional copy numbers. possibly for the reasons outlined, hmms are the methods of choice in the analysis of normal samples  <cit> , while segmentation methods are the standard in cancer studies  <cit> . a limitation of segmentation methods is that they rely on data in which the variation in copy number is reflected in the differences in means of the segments. this fact makes segmentation methods applicable directly to a substantial portion of the data derived from recent technologies, but not to relative allelic abundance. however, see the modification suggested in  <cit>  and the following description for an exception.
+
+while a number of successful approaches have been derived along the lines described above, there is still a paucity of methodology for the joint analysis of multiple sequences. it is clear that if multiple subjects share the same variation in copy number, there exists the potential to increase power by joint analysis. wang et al.  <cit>  present a methodology that extends  <cit>  to reconstruct the location of tumor suppressor genes from the identification of regions lost in a larger number of samples. the initial steps of the birdsuite algorithm rely on the identification of suspect signals in the context of multiple sample. penncnv  <cit>  includes an option of joint analysis of trios. methodology to process multiple samples within the context of change point analysis has been developed in  <cit> . efron and zhang  <cit>  consider fdr analysis of independent samples to identify copy number polymorphisms , and nowak et al.  <cit>  use a latent feature model to capture, in joint analysis of array-cgh data from multiple tumor samples, shared copy number profiles, on each of which a fused-lasso penalty is enforced for sparsity.
+
+in the present work we consider a setting similar to  <cit>  in that we want joint analysis to inform the segmentation of multiple samples. our main focus is the analysis of genotyping array data, but the methodology we develop is applicable to a variety of platforms. by adopting a flexible framework we are able, for example, to define a segmentation algorithm that uses all information from illumina genotyping data. as in  <cit> , we are interested in the situation where some but not all the samples under consideration carry a copy number variant . we prefer to enforce a certain sparsity in the vector that identifies which samples carry a given variant. we tackle this problem using a penalized estimation approach, originally proposed in this context by  <cit> , for which we have developed an algorithmic implementation  <cit> . appreciable results are achieved in terms of speed, accuracy, and flexibility.
+
+in concluding this introduction, we would like to make an important qualification. the focus of our contribution is on segmentation methods, knowing that this is only one of the steps necessary for an effective recovery of cnvs. in particular, normalization and transformation of the signal from experimental sources are crucial and can have a very substantial impact on final results, as documented in  <cit> , for example. indeed, preprocessing to eliminate systematic variation in intensities is particularly important for joint analysis of multiple sequences, when repeated deviances are more likely to be interpreted as true signal. furthermore, calling procedures that classify results of segmentation while possibly controlling global error measures  <cit>  are also needed. indeed, in the data analysis included in this paper, we need to resort to both of these additional steps, and we will describe then briefly the fairly standard choices we make.
+
+before describing in detail the proposed methods for joint segmentation of multiple sequences, we start by illustrating various contexts where joint analysis appears to be useful.
+
+genotyping arrays and cnv detection
+genotyping arrays have been used on hundreds of thousands of subjects. the data collected through them provides an extraordinary resource for cnv detection and the study of their frequencies in multiple populations. typically, the raw intensity data  is processed to obtain two signals: quantification of total dna amount  and relative abundance of the two queried alleles . both these signals contain information on cnvs, and one of the strengths of hmms has been that they can easily process them jointly. segmentation models like cbs have traditionally relied only on lrr. while this is a reasonable choice, it can lead to substantial loss of information, particularly in tumor cells, where polyploidy and contamination make information in lrr hard to decipher. to exploit baf in the context of a segmentation method, a signal transformation has been suggested  <cit> : mirrored baf  relies on exchangeability of the two alleles and the low information content of homozygous snps. the resulting mbaf is defined on a coarser grid than the original baf, but is characterized by changing means in the presence of a cnv. while  <cit>  shows that the analysis of baf alone can be advantageous and more powerful than segmentation of lrr in some contexts, clearly a joint analysis of lrr and mbaf should be preferable to an arbitrary selection of one or the other signal.
+
+multiple platforms
+lrr and baf are just one example of the multiple signals available in some samples. often, as research progresses, the samples are assessed with a variety of technologies. for example, a number of subjects who have been genotyped at high resolution are now being resequenced. whenever the technology adopted generates a signal that contains some information on copy number, there is an incentive to analyze the available signals jointly.
+
+tumor samples from the same patient obtained at different sites or different progression stages
+in an effort to identify mutations that are driving a specific tumor, as well as study its response to treatment, researchers might want to study cnvs in cells obtained at different tumor sites or at different time points  <cit> . copy number is highly dynamic in cancer cells, so that it is to be expected that some differences will be detected over time or across sites. by contrast, the presence of the same cnvs across these samples can be taken as an indication that the tumors share the same origin. therefore, a comparative analysis of cnv can be used to distinguish resurgence of the same cancer from insurgence of a new one, or to identify specific cancer cell populations. given that the tissue extracted always consists of a mixture of normal and cancer cells, which are in turn a mixture of different populations, joint analysis of the signals from the varied materials is much more likely to lead to the identification of common cnvs when these exist.
+
+related subjects
+family data is crucial in genetic investigations, and hence it is common to analyze related subjects. when studying individuals from the same pedigree, it is reasonable to assume that some cnvs might be segregating in multiple people and that joint analysis would reduce mendelian errors and increase the power of detection.
+
+the rest of the paper is organized as follows: in the methods section, we first present the penalized estimation framework, and then describe how the model can be used for data analysis by:  outlining an efficient estimation algorithm,  generalizing it to the case of uncoordinated data, and  describing the choice of the penalization parameters. in the results section, we discuss our findings on two simulated data sets  and two real data sets. in one case multiple platforms are used to analyze the same sample, and in the other case samples from related individuals benefit from joint analysis.
+
+methods
+a model for joint analysis of multiple signals
+assume we have observed m signals, each measured at n locations, corresponding to ordered physical positions along the genome, with yij being the observed value of sequence i at location j. the copy number process can be modeled as 
+
+  yij=βij+εij, 
+
+where εij represent noise, and the mean values βij are piece-wise constant. thus, there exists a linearly ordered partition {r <dig> r <dig> …,rki} of the location index { <dig> ,…,n} such that βis=· · ·=βit=μk for s,…,t∈rk and  <dig> ≤ k ≤ ki. in other words, most of the increments |βij − βi,j− <dig> | are assumed to be zero. when two sequences k and l share a cnv with the same boundaries at location j, both |βkj − βk,j− <dig> | and |βlj − βl,j− <dig> | will be different from zero at the change point j. modulo an appropriate signal normalization, βij =  <dig> can be interpreted as corresponding to the appropriate normal copy number equal to  <dig>  we propose to reconstruct the mean values βby minimizing the following function, called hereafter the generalized fused lasso : 
+
+  f=12∑i=1m∑j=1n2+λ1∑i=1m∑j=1n|βij|+λ2∑i=1m∑j=2n|βij−βi,j−1|+λ3∑j=2n∑i=1m <dig>  
+
+which includes a goodness-of-fit term and three penalties, whose roles we will explain one at a time. the ℓ <dig> penalty ∑i=1m∑j=1n|βij| enforces sparsity within β, in favor of values βij =  <dig>  corresponding to the normal copy number. the total variation penalty ∑j=2n|βij−βi,j−1| minimizes the number of jumps in the piece-wise constant means of each sequence and was introduced by  <cit>  in the context of cnv reconstruction from array-cgh data. finally, the euclidean penalty on the column vector of jumps ∑i=1m <dig> is a form of the group penalty introduced by  <cit>  and favors common jumps across sequences. as clearly explained in  <cit> , “the local penalty around  <dig> for each member of a group relaxes as soon as the |βij − βi,j− <dig> | for one member i of the group moves off  <dig> ” bleakley and vert   <cit>  also suggested the use of this group-fused-lasso penalty to reconstruct cnv. we consider here the use of both the total variation and the euclidean penalty on the jumps to achieve the equivalent effect of the sparse group lasso, which, as pointed out in  <cit> , favors cnv detection in multiple samples, allowing for sparsity in the vector indicating which subjects are carriers of the variant. this property is important in situations of multiple tumor samples and related subjects, where one does not want to assume that all the m sequences carry the same cnv.
+
+the incorporation of the latter two penalties can also be naturally interpreted in view of image denoising. to restore an image disturbed by random noise while preserving sharp edges of items in the image, a 2-d total variation penalty λ∑i=1m∑j=2n|βij−βi,j−1|+ρ∑j=1n∑i=2m|βij−βi− <dig> j| is proposed in a regularized least-square model  <cit> , where βij is the true underlying intensity of pixel . in cnv detection problems, signals from multiple sequences can be aligned in the shape of an image, except that pixels in each sequence are linearly ordered while sequences as a group have no certain order a priori. thus, one of the two total variation penalties is replaced by the group penalty on the column vector of jumps.
+
+using matrix notation, and allowing the tuning parameter λ <dig>  λ <dig> and λ <dig> to be sequence specific, we can reformulate the objective function as follows. let y = m×n and β = m×n. let βi be the ith row of β and β the jth column of β. also, let λ <dig> = m× <dig>  then we have 
+
+  f=12||y−β||f2+∑i=1mλ <dig> i||βi||ℓ1+∑i=1mλ <dig> i||βi,2:n−βi,1:||ℓ1+∑j=2n||λ3∗−β)||ℓ <dig>  
+
+where ||·||f is the frobenius matrix norm, ||·||ℓ <dig> and ||·||ℓ <dig> are the ℓ <dig> and ℓ <dig> vector norms, βi,s:t indicates the sub-vector with elements βi,s,…,βi,t of the row vector βi, and “∗” denotes entry-wise multiplication between two vectors. it would be easy to modify the tuning parameters so as to make them location specific by reducing the penalty for a jump in genomic regions known to harbor cnvs.
+
+an mm algorithm
+while the solution to the optimization problem  might have interesting properties, this approach is useful only if an effective algorithm is available. the last few years have witnessed substantial advances in computational methods for ℓ <dig> -regularization problems, including the use of coordinate descent  <cit>  and path following methods  <cit> . the computational complexity of these methods in the best situation is o, where k indicated the number of knots along the solution path. here knots are conjunction points between a series of piecewise functions of tuning parameters. it is important to note that these algorithms – some of which are designed for more general applications – may not be the most efficient for large scale cnv analysis for at least two reasons. on the one hand, reasonable choices of λ might be available, making it unnecessary to solve for the entire path; on the other hand, the number of knots k can be expected to be as large as o, making the computational costs of path algorithms prohibitive.
+
+with specific regard to the fused-lasso application to cnv detection, we were successful in developing an algorithm with per iteration cost o and empirically fast convergence rate for the analysis of one sequence  <cit> . we apply the same principles here and start by modifying the norms in the penalty to achieve better computational stability. for the ℓ <dig> norm we substitute ||x|| <dig> ε=x2+ε for sufficiently small ε, and for the ℓ <dig> norm we substitute ||x|| <dig> ε=∑i=1nxi2+ε <dig>  this produces the differentiable objective function 
+
+  fε=12∑i=1m∑j=1n2+∑i=1mλ <dig> i∑j=1n||βij|| <dig> ε+∑i=1mλ <dig> i∑j=2n||βij−βi,j−1|| <dig> ε+∑j=2n||λ3∗−β)|| <dig> ε. 
+
+adopting an mm framework  <cit> , we want to find a surrogate function ℊε) for each iteration m such that ℊε∣β)=fε) and ℊε)≥fε for all β. at each iteration, the mm principle chooses β=arg min ℊε). a majorizing function with the above properties is readily obtained using the concavity of the square-root function ||x|| <dig> ε≤12||z|| <dig> ε, and its vector equivalent ||x|| <dig> ε≤12||z|| <dig> ε. the resulting surrogate function 
+
+ ℊε)=12∑i=1m∑j=1n2+∑i=1mλ <dig> i∑j=1nβij22||βij|| <dig> ε+∑i=1mλ <dig> i∑j=2n22||βij−βi,j−1|| <dig> ε+∑j=1n||λ3∗−β)||ℓ222||λ3∗−β)|| <dig> ε+c 
+
+separates as a sum of similar functions in the the row vectors βi ; namely, 
+
+ ℊε)=∑i=1mℊi), 
+
+where 
+
+  ℊi)=12βiaiβit−tβit+c~i. 
+
+here each ai is a tridiagonal symmetric matrix, and c~i is a constant, irrelevant for optimization purposes. in view of the strict convexity of the surrogate function, each ai is also positive definite. the nonzero entries of ai and bi  are listed in additional file 1: supplementary text . each of the surrogate functions in  can be minimized by solving the linear system βi=t− <dig> by the tri-diagonal matrix  algorithm  <cit> . this results in a per-iteration computational cost of o. this algorithm is empirically observed to achieve an exponential convergence rate  <cit> , although we do not yet have an analytic proof. in practice, this method scales well with joint analysis of tens to hundreds of samples with measurements at millions of locations, with limitations dictated by memory requirements. for analysis of real data, we suggest one or a group of samples to be analyzed chromosome by chromosome, since a cnv region can never extend beyond one chromosome to another. actual computation times are shown along with different examples in the results section. readers might be interested in comparing the outlined approach with other segmentation methods that are not based on the use of ℓ <dig> penalties, as  <cit> .
+
+stacking observations at different genomic locations
+while copy number is continuously defined across the genome, experimental procedures record data at discrete positions, for which we have used the indexes j= <dig> …,n. in reality, repeated evaluations of the same sample  will typically result in measurements at only partially overlapping genomic locations, either because different platforms use different sets of probes or missing data occur at different positions across the sequences. for example, for mbaf and lrr measurements from the same experiment on the same subject, the mbaf signal is defined on a subset of the locations where the lrr signal is defined.
+
+let s indicate the union of all genomic positions where some measurement is available among the m signals under study. and let si be the subset of locations with measurements in sequence i. we reconstruct βij for all j ∈ s. when j ∉ si, βij will be determined simply on the basis of the neighboring data points, relying on the regularizations introduced in . the goodness-of-fit portion of the objective function is therefore redefined as 
+
+  12∑i=1m∑j=1n2withδij= <dig> ifj∈si, <dig> otherwise. 
+
+the mm strategy previously described applies with slight modifications of the matrix ai .
+
+the attentive reader will have noted that the yij values with j ∉ si can be considered missing data, and evaluation of the missingness pattern is appropriate. in general, the yij cannot be considered missing at random. the most important example is the case of mbaf, where homozygous markers result in missing values. homozygosity is clearly more common when copy number is equal to  <dig> than when copy number is equal to  <dig>  therefore, there is potentially more information on βij to be extracted from the signals than what we capture with the proposed method. although most of the information on deletions is obtained through lrr, baf does convey additional information on duplications, where the changes in lrr are limited by saturation effects. on the other hand, it does appear that our method does not increase the rate of false positives. hence, it can be considered as an operational improvement over segmentation based on lrr only, even if in theory, it does not completely use the information on baf.
+
+choice of tuning constants and segmentation
+one of the limitations of penalization procedures is that values for the tuning parameters need to be set, and clear guidelines are not always available. path methods that obtain a solution of the optimization problem  for every value of a tuning parameter can be attractive, but recent algorithmic advances  <cit>  remain impractical for problems of the size of ours. a number of recent publications obtain optimal values of penalty parameters under a series of conditions  <cit> . we rely on these findings to propose a strategy for obtaining a solution of  for reasonably liberal values of the tuning parameters, followed by a sequence-by-sequence hard thresholding of the detected jumps with a data-adaptive threshold.
+
+we have found the following guidelines to be useful in choosing penalty parameter values: 
+
+  λ <dig> i=c1σ^i,λ <dig> i=ρc2σ^ilogn,λ <dig> i=c3σ^ipmlogn, 
+
+for i =  <dig> …,m, where σ^i is a robust estimate of standard deviation of yi, p is roughly the proportion of the m sequences we anticipate to carry cnvs, and c <dig>  c <dig> and c <dig> are positive multipliers adjusted to account for different signal-to-noise ratios and cnv sizes. we discuss the function ρ below.
+
+while a more rigorous justification is provided in the additional file 1: supplementary text, we start by underscoring some of the characteristics of this proposal. 
+
+● the sequence-specific penalizing parameters are proportional to an estimate of the standard deviation of the sequence signal. in other words, after initial normalization, the same penalties would be used across all signals.
+
+● the tuning parameter for the total variation  and the euclidean  penalties on the jumps depend on logn, where n is the possible number of jumps. this has a “multiple comparison controlling” effect and resembles rates that have been proven optimal under various sparse scenarios  <cit> . this term does not appear in the expression of λ <dig>  as the lasso penalty can be understood as providing a soft thresholding of the solution of  when λ <dig> =  <dig>  given the penalization due to λ <dig> and λ <dig>  the solution of  when λ <dig> =  <dig> will have much smaller dimension than n.
+
+● the group penalty depends on m, where m is the number of grouped sequences, as in the original proposal  <cit> .
+
+● the relative weight of the fused-lasso and group-fused-lasso penalties is regulated by ρ, which depends on p, the proportion of the m sequences expected to carry the same cnv. for example, if m =  <dig> and the two sequences record lrr and mbaf from the same individual, one expects p =  <dig> with ρ =  <dig>  enforcing jumps at identical places in the two signals. or, when studying the sequences relative to one parent and her/his offspring, it is reasonable to set p = 1/ <dig>  reflecting the fact that the two share half of their genome. for completely unrelated sequences, p =  <dig> and ρ =  <dig>  in this setting, p is defined by genome-wide characteristic of the samples. however, when analyzing specific genomic segments, corresponding to copy number polymorphisms, it is possible to use p to reflect the population frequencies of each of the copy number variants. we do not consider the problem of estimating a variable p in the present work.
+
+the standard deviation σ^i can be estimated robustly as follows. let Δij = yi,j +  <dig> − yi,j, for j =  <dig> …,n −  <dig>  be the first-order differences of adjacent yij for sequence i. then most var=2σi <dig> except those bridging real change points, so we can take 
+
+ σ^i=sd^/ <dig>  
+
+ where sd^=standard deviation or sd^=median absolute deiviation for Δi = {Δi, <dig> …,Δi,n− <dig> }.
+
+as mentioned before, the exact values of the penalty parameters should be adjusted depending on the expectations of signal strengths. following the approach in  <cit> , one can approximate the bias induced by each of the penalties and hence work backwards in terms of acceptable levels. as detailed in additional file 1: supplementary text, 
+
+ bias∝λ1bias∝λ2/length of segmentbias∝λ3/length of segment×# sequences sharing segment 
+
+following again the approach in  <cit> , one can show that under some relatively strong assumptions, the choices in  lead to a consistent behavior as n→∞ and m stays bounded . despite the fact that n is indeed large in our studies, it is not clear that we can assume it to be in the asymptotic regime. as finer scale measurements become available, scientists desire to investigate cnvs of decreasing length. the cnvs we are interested in discovering are often covered by a small number of probes. furthermore we have often little information on the sizes and frequencies of cnvs. in this context, we find it advisable to rely on a two-stage strategy: 
+
+ <dig>  sequences are jointly segmented by minimizing  for a relatively lax choice of the penalty parameters.
+
+ <dig>  jumps are further thresholded on the basis of a data-driven cut-off.
+
+step  <dig> allows us to be adaptive to the signal strength and can be carried on with multiple methods. for example, one can adopt the modified bayesian information criteria   <cit> . for sequence i, the jumps are sorted as {d^i,…,d^i} in the descending order of their absolute values. then we choose the first k^ change points where k^ is given by 
+
+ k^=arg max kmbick. 
+
+in data analysis, we often apply an even simpler procedure where the threshold for jumps is defined as a fraction of the maximal jump size observed for every sequence. specifically, for sequence i, let d^i=max2≤j≤n{|d^ij|}, where d^ij=β^ij−β^i,j− <dig> is the largest observed jump for sequence i. then we define 
+
+ γi=max{aσ^i,min{d^i,bσ^i}},fora<b, 
+
+ as a “ruler” reflecting the scale of a possible real jump size, taking cγi as the cut-off in removal of most small jumps. in all analyses for this paper, we fix a =  <dig>  b =  <dig> and c =  <dig> . in our experience, this heuristic procedure works well for both tumor and normal tissue cnv data.
+
+calling procedure
+even if this is not the focus of our proposal, in order to compare the performance of our segmentation algorithm with hmm approaches, it becomes necessary to distinguish gains from losses of copy number. while the same segmentation algorithm can be applied to a wide range of data sets, calling procedures depend more closely on the specific technology used to carry out the experiments. since our data analysis relies on illumina genotyping arrays, we limit ourselves to this platform and briefly describe the calling procedure adopted in the results section.
+
+analyzing one subject at the time, each segment with constant mean is assigned to one of five possible copy number states . let r collect the indexes of all snps comprising one segment and let  = {, j ∈ r} be the vectors of values for baf and lrr in the segment. on the basis of typical patterns for baf and lrr in the different copy number states , we can write log-likelihood ratio 
+
+  lr=loglbaflbaf+logllrrllrr,c= <dig> , <dig> , 
+
+explicitly defined in additional file 1: supplementary text. segment r is assigned a cnv state ĉ that maximize lr, only if lr>r <dig>  where r <dig> is a pre-specified cut-off.
+
+as noted in  <cit> , the lrr data for a segment with c =  <dig>  ideally normalized to have mean  <dig>  often has a small non-zero mean due to experimental artifacts. if the number of snps in r is sufficiently large, the above log-likelihood-ratio criterion would result in the erroneous identification of a copy number different from  <dig>  to avoid this, we also require that the size of the absolute difference of the mean of lrr from zero be larger than a threshold |y¯r|>r2σ.
+
+RESULTS
+we report the results of the analysis of two simulated and two real data sets, which overall exemplify the variety of situations where joint segmentation of multiple sequences is attractive, as described in the motivation section. in all cases, we compare the performance of the proposed procedure with a set of relevant, often specialized, algorithms. the penalized estimation method we suggest in this paper shows competitive performance in all cases and often a substantial computational advantage. its versatility and speed make it a very convenient tool for initial exploration. to calibrate the run times reported in the sequel, we state for the record that all of our analyses were run on a mac os x  machine with  <dig>  ghz intel core  <dig> duo and  <dig> gb  <dig> mhz ddr <dig> memory.
+
+simulated cnv in normal samples
+we consider one of the simulated datasets described in  <cit>  with relatively short deletions and duplications  are inserted in the middle of  <dig> snps long sequences, using a combination of male and female x chromosome data from the illumina humanhap <dig> array, appropriately pre-processed to avoid biases. these steps included a scrambling of snp positions so as to avoid long-range signal fluctuation. this setting mimics the small rare cnvs possibly occurring in the genome of normal individuals. in our main analysis, therefore, we process one individual at the time, reflecting the typical level of information available to scientists in these contexts. hmm methods, like penncnv, are expected to be the most effective in this problem; segmentation methods like cbs are closer to our own and therefore also make an interesting comparison. as repeatedly discussed, the illumina platform produces two signals for one subject, lrr and baf. a segmentation method that can process one signal at the time would give its best results using lrr, which carries most of the information. given this background, we compare four methods: penncnv, cbs on lrr, fused lasso on lrr only, and group fused lasso on lrr and mbaf. the implementations we use are those reflected in the software packages: penncnv , r package dnacopy for cbs   <cit>  and our own r package piet . tuning parameters for penncnv and cbs are set at the default values; the fused lasso implementation corresponds to λ <dig> =  <dig> , λ2=2× <dig>  and λ <dig> =  <dig> and the group fused lasso to λ <dig> =  <dig> , λ <dig> =  <dig>  and λ3=2× <dig>  to call deletions and duplications with cbs and the two fused-lasso approaches, we use both lrr and baf data  with the following cut-off values: r <dig> =  <dig> and r <dig> =  <dig> for duplication . performance is evaluated by the same indexes we used in  <cit> , the true positive rate  and the false discovery rate , all defined on a per snp basis. results are summarized in table  <dig> 
+
+tpr and fdr are measured as the percentage of related snps. overall accuracy is calculated by pooling all sequences with a given type of cnv. also reported are the average and standard deviation of the number of seconds required for the analysis of one sequence.
+
+not surprisingly, all algorithms perform similarly well for larger deletions/duplications, and it is mainly for variants that involve  <dig> or fewer snps that differences are visible. algorithms that rely only on lrr  underperform in the detection of small duplications. comparison is particularly easy for duplications involving  <dig> snps, where the selected parameter values lead to similar fdrs in the three segmentation methods. the group fused lasso can almost entirely recover the performance of penncnv and outperforms cbs in this context.
+
+out of curiosity, we analyzed all sequences simultaneously. while this represents an unrealistic amount of prior information, it allows us to evaluate the possible advantages of joint analysis. fdr practically became  <dig>  for all cnv sizes, but power increases only for cnvs including fewer than  <dig> snps.
+
+finally, it is useful to compare running times. summary statistics of the per sample time are reported in table  <dig>  while all algorithms are rather fast, the two implementations of the fused lasso dominate.
+
+a simulated tumor data set
+to explore the challenges presented by tumor data, we rely on a data set created by  <cit> , with the specific goal of studying the effect of contamination between normal and cancer cells. the hapmap sample na <dig>  genotyped on the illumina humanhap <dig> array, was used to simulate a cancer cell line by inserting a total of  <dig> structure variation regions, including one-copy losses, one-copy gains, and copy neutral loss-of-hetrozygosity  . the signal from this artificial “tumor” sample was then contaminated in silico with that of the original “normal” sample, resulting in  <dig> data sets, with a percentage of normal cells ranging from 0% to 100%. note that most simulated cnv or cn-loh regions are very large , and the challenge in detection is really due to the contamination levels.
+
+for ease of comparison, we evaluate the accuracy of calling procedures as in the original reference  <cit> . sensitivity is measured for each variant region as the percentage of heterozygous snps that are assigned the correct copy number, and specificity is measured as the percentage of originally heterozygous snps in unperturbed regions that are assigned cn= <dig>  we compare the performance of gfl to bafsegmentation  <cit>  and pscn  <cit>  representing, respectively, a version of segmentation and hmm approaches specifically developed to deal with contaminated tumor samples. both of these algorithms have been tested with success on this simulated data set.
+
+following other analyses, we do not pre-process the data prior to cnv detection. bafsegmentation and pscn were run using recommended parameter values. for each of the diluted data sets, we applied the gfl model on each chromosome, simultaneously using both lrr and mbaf, whose standard deviations are normalized to  <dig>  tuning constants are set to λ <dig> =  <dig>  λ2= <dig> ×3×logn, and λ3= <dig> ×3×logn for chromosomes interrogated by n snps. the change points resulting from hard segmentation on lrr and mbaf are combined to make a finer segmentation of the genome. finally, we adopt the same calling procedure described by  <cit> . for ease of comparison with pscn, only analyses of simulated tumor data are reported, even if bafsegmentation and gfl would gain from using the genotype of the normal cell in defining mbaf.
+
+pscn, like gfl, is implemented in r with some computationally intensive subroutines coded in c. bafsegmentation relies on the r package dnacopy, whose core algorithms are implemented in c and fortran. bafsegmentation wraps these in perl. a comparison of run times indicate that glf and bafsegmentation are comparable, while pscn is fifty times slower than gfl .
+
+one sample assayed with multiple replicates and multiple platforms
+we use the data from a study  <cit>  assessing the performance of different array platforms and cnv calling methods to illustrate the advantages of joint analysis of multiple measurements on the same subject. dna from four individuals was analyzed in triplicate on each of  <dig> platforms: affymetrix  <dig> , illumina 1m, 660w, omni1-quad  and omni <dig> -quad  . we use the results on the first three to define “true” copy numbers and try to reconstruct them using data from o1q and o2q. the nine “reference” experiments were analyzed with  <dig> or  <dig> cnv calling algorithms  <cit>  and a cnv was identified using majority votes. consistent evidence was required from at least  <dig> analysis tools, on at least  <dig> platforms, and in at least  <dig> replicates . here overlapping cnvs detected in two replicates/algorithms/platforms are collapsed to a single cnv.
+
+the test experiments are based on  <dig> , <dig> and  <dig> , <dig> autosomal snps, which after quality control reduce to a total of  <dig> , <dig> unique loci. since our focus here is to investigate how to best analyze multiple signals on the same subject, rather than on the specific properties of any cnv calling method, we carry out all the analyses using different settings of gfl in segmentation while keeping the same cnv calling and summarizing procedures. all segmentation is done on lrr only, while calling procedure uses both lrr and baf . here we compare three segmentation settings to analyze these  <dig> experiments per subject : 
+
+ <dig>  the signals from the three technical replicates with one platform are averaged and then segmented and subjected to calling procedure separately. the final cnv list is the union of cnv calls from the two platforms.
+
+ <dig>  the signals from the three technical replicates with one platform are each segmented and separately subjected to calling. a majority vote of at least two out of three is used to summarize each cnv result for each platform. the final cnv list is the union of the two platforms’ lists.
+
+ <dig>  the signals from the three technical replicates of both platforms  are segmented jointly. calling is still done on each replicate separately, and the same majority vote is used to summarize the cnv result for each platform. again, the final cnv list is the union of the two platforms’ results.
+
+to benchmark the result of joint analysis, we use mpcbs  <cit> , a segmentation method, specifically designed for multi-platform cnv analysis. the segments output from mpcbs are subjected to the same calling, majority voting, and summarizing procedures.
+
+the number of cnv detected  and overlapping  and the average computation time  for each sample under the different analyses.
+
+multiple related samples assayed with the same platform
+in the context of a study of the genetic basis of bipolar disorder, the illumina omni <dig> -quad chip was used to genotype  <dig> individuals from  <dig> columbian and  <dig> costa rican pedigrees. we use this data set to explore the advantages of a joint segmentation of related individuals. in the absence of a reference evaluation of cnv status in these samples, we rely on two indirect methods to assess the quality of the predicted cnvs. we used the collection of cnvs observed in hapmap phase iii  <cit>  to compile a list of  <dig> copy number polymorphisms  and assumed that if we identify in our sample a cnv corresponding to one of these regions, we should consider it a true positive. for the purposes of this analysis we considered a detected cnv to correspond to one identified in hapmap if there was any overlap between the two regions.
+
+another indirect measure of the quality of cnv calls derives from the number of mendelian errors encountered in the pedigrees when we consider the cnv as a segregating site. de novo cnvs are certainly a possibility, and in their case mendelian errors are to be expected. however, when the cnv in question is a common one , it is reasonable to expect that it segregates in the pedigrees as any regular polymorphism. we selected a very common deletion on chromosome  <dig>  and compared different cnv calling procedures on the basis of how many mendelian errors they generate.
+
+as mentioned before, penncnv represents a state-of-the-art hmm method for the analysis of normal samples and, therefore, we included it in our comparisons. however, the parameters of the underlying hmm algorithm had not been tuned on the omni <dig> -quad at this time, resulting in sub-standard performance. segmentation methods are less dependent on parameter optimization; hence, gfl analysis of lrr and baf one subject at a time can provide a better indication of the potential of single-sample methods. we considered two multiple-sample algorithms: gfl and msscan  <cit> , both applied on lrr with the group structure defined by pedigree membership.  a final qualification is in order. while the authors of msscan kindly shared with us a beta-version of their software, we did not find it to be robust. indeed, we were unable to use it to segment the entire genome. however, we successfully used it to segment chromosome  <dig>  so that we could include msscan in the comparison based on mendelian errors.
+
+prior to analysis, the data was normalized using the gc-content correction implemented in penncnv  <cit> . for individual analysis, the gfl parameters were λ <dig> =  <dig> , λ <dig> =  <dig>  and λ3=2×logn, where n is the number of snps deployed on each chromosome; for pedigree analysis, the gfl parameters were λ <dig> =  <dig> , λ2= <dig> ×2×logn, and λ3= <dig> ×2× <dig> m×logn, where m is the number of individuals in each pedigree. for msscan, cnv size is constrained to be fewer than  <dig> snps, and the maximum number of change points is set at  <dig>  the calling procedure with r <dig> =  <dig> and r <dig> =  <dig> was applied to both the gfl and msscan results.
+
+the number and overlap of cnp regions with frequency ≥ <dig>  detected in our sample by different methods. these cnp regions were compiled from hapmap. computation time is given in minutes per sample.
+
+across the various algorithms, subjects are assigned to one of  <dig> copy numbers. for each algorithm, we report the total numbers of cn≠ <dig> identified, the total number of nuclear families with mendelian errors, and the average computation time  per sample for the analysis of chromosome  <dig> 
+
+CONCLUSIONS
+we have presented a segmentation method based on penalized estimation that is capable of processing multiple signals jointly. we have shown how this leads to improvements in the analysis of normal samples , tumor samples , measurements from multiple platforms, and related individuals. given that copy number detection is such an active area of research, it is impossible to compare one method to all other available methods. however, for each of the situations we analyzed, we tried to select state of the art alternative approaches. in comparison to these, the algorithm we present performs well. its accuracy is always comparable to that of the most effective competitor and its computation times are better contained. given its versatility and speed, gfl is, in our opinion, particularly useful for initial screening.
+
+there are of course many aspects of cnv detection, ranging from normalization and signal transformation to fdr control of detected cnv, that we have not analyzed in this paper. there are also a number of improvements to our approach that appear promising, but at this stage are left for further work. for example, it is easy to modify algorithms so that the penalization parameters are location dependent and incorporate prior information on known copy number polymorphisms. it will be more challenging to develop theory and methods to select the values of these regularization parameters in a data-adaptive fashion.
+
+finally, while our scientific motivation has been the study of copy number variations, the joint segmentation algorithm we present is not restricted to specific characteristics of these data types, and we expect it will be applied in other contexts.
+
+implementation and availablity
+we have implemented the segmentation routine, which is our core contribution, in an r package  available at r-forge  <cit> . to demonstrate a visualization of the cnv results on chromosome  <dig> in the bipolar disorder study, we refer readers to additional file 6: figure s <dig> 
+
+abbreviations
+baf: b allele frequency; cn: copy number; cnv: copy number variant; cnp: copy number polymorphism; cn-loh: copy neutral loss of heterozygosity; gfl: generalized fused lasso; hmm: hidden markov model; lrr: log r ratio; mml: majorization-minimization.
+
+competing interests
+the authors declare that they have no competing interests.
+
+author’s contributions
+zz, kl, and cs conceived this study and participated in model and algorithm development. zz performed the statistical analysis and wrote the r piet implementation. all authors participated in writing the final manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplementary text. specification of surrogate function, justification of choice of tuning parameters, details of calling procedure.
+
+click here for file
+
+ additional file 2
+table s <dig>  regions of allelic imbalance imputed to the hapmap sample na <dig> 
+
+click here for file
+
+ additional file 3
+table s <dig>  speed comparison of three methods: gfl, bafsegmentation and pscn.
+
+click here for file
+
+ additional file 4
+table s <dig>  sample information and reference cnv regions summarized for each sample by their types and sizes.
+
+click here for file
+
+ additional file 5
+table s <dig>  summary of results for four real samples under different cnv analyses.
+
+click here for file
+
+ additional file 6
+figure s <dig>  visualization of pedigree-wise cnv analysis results of chromosome  <dig> data in the bipolar disorder study. in the main body of the plot, cnvs estimated for each individual are marked by small segments with color code: cn=  <dig> in blue, cn= <dig> in light blue, cn= <dig> in red and cn= <dig> in brown. each subject is a row, each snp a column. subjects belonging to the same pedigree are stacked together. the pedigree names are indicated on the left-hand side with the number of pedigree members included in parentheses. on the right-hand side, the barplot represents the number of cnvs detected per subject. two shades of green are switched alternately to indicate the pedigree to which the subject belongs. at the bottom, the gray histogram shows the gc content along the chromosome. coordinated with the representation of cnvs in the main body, the green histogram counts the frequency of cnvs among the subjects represented. vertical dotted line marks the centromere.
+
+click here for file
+
+ acknowledgements
+the authors thank nelson freimer and all of the collaborators of the bipolar endophenotype mapping project for authorizing use of their genotype data. we also thank susan service and joseph deyoung for assistance in data management and interpretation and pierre neuvial and henrik bengtsson for helpful discussion. cs gratefully acknowledges support from nih/nigms gm <dig>  mh <dig> and p <dig> 1mh <dig> and kl from nih/nigms gm <dig> 

@@ -1,0 +1,98 @@
+BACKGROUND
+what is web  <dig> ?
+since its definition in  <dig>  <cit> , web  <dig>  has been a much-touted buzzword. originally intended only to mark the "resurrection" of the web in the wake of the dot-com meltdown, it is now seen as a distinctive approach to web development, typified by the following factors:
+
+• large online data sources
+
+• user interaction and collaboration
+
+• rich web-based interfaces
+
+in this review we will be focusing on the first of these aspects: improvements to the speed and efficiency of serving large datasets.
+
+large data sources
+typical web  <dig>  data sources are the map and satellite images underlying google maps, amazon's book inventory, or wikipedia's hundreds of thousands of articles. likewise ensembl contains information -- dna sequence, gene annotations, variation and functional genomics data -- on a scale barely imaginable ten years ago; recent releases have comprised over half a terabyte of mysql files. the number of species, and thus the amount of data being served, continues to rise year on year , whilst physical resources  struggle to keep up, making it imperative for ensembl to access databases and serve pages as efficiently as possible  <cit> .
+
+methods
+we researched the technologies being used by web  <dig>  sites to enhance their performance, and chose those that were most compatible with our existing server setup. we also selected a number of free development tools that could be used to assess website responsiveness.
+
+caching technologies
+one of the principle problems when running a popular website is the time taken to fetch data from filesystems and databases and present the resultant pages to the many users who are simultaneously accessing the site. matters can be improved up to a point by adding more hardware, but then there is the issue not just of cost but also of co-ordinating data across multiple machines so that the user experience is seamless. prior to the site redesign, ensembl used a single filesystem shared across multiple webservers using the general parallel file system  created by ibm. this allowed the web files to be stored in only one place whilst many separate cpus ran apache webserver processes to return the data to hundreds of simultaneous users.
+
+however as the site grew ever larger and more heavily used, gpfs was found to be unstable when dealing with large numbers of concurrent users. this is a problem that is intrinsic to shared filesystems, and so an alternative solution was needed. memcached  <cit>  is a high-performance, distributed memory object caching system. it was created for livejournal.com as a way of dealing with very high website usage , and allows web files to be stored in a shared memory space and re-served to site visitors without needing to go back to the file system. a cluster of servers has access to this shared memory space, which thus acts like a shared file system but without either data access latency or instability under high load. popular files will tend to stay in memory almost permanently, with others being cycled in and out of memory as they are needed. for efficiency of memory management, memcached enables each file to be tagged with an identifier, so that whole categories of data can be flushed from memory when the information stored on the hard drives is updated.
+
+file access time is only part of the problem, however. the ensembl web code loads large quantities of perl into apache, via mod_perl, in order to access its several dozen databases in an efficient manner, with the result that each apache process occupies around  <dig> mb of ram. even a powerful server with  <dig> gb of ram cannot run more than fifty such processes at a time, and with each web page being made up of an average of 10- <dig> files, only a few complete pages can be served each second. in addition, large slow requests tend to be queued behind faster ones, resulting in longer and longer response times as the number of concurrent users increases.
+
+these large apache processes are necessary for accessing data from the genomic database to build dynamic displays, but they are overkill when it comes to serving small static files such as template images and text-based files such as html and css. we therefore implemented nginx  <cit> , a free, open-source, high-performance http server and reverse proxy, which integrates well with memcached. nginx takes over the role of serving the static files, so that only the requests that need the full might of an apache process get passed back to the main servers.
+
+client-side vs server-side testing
+both client-side and server-side tools were used in the analysis. server-side tests have the advantage that they apply specifically to the server hardware in use and should therefore be consistent for all users, but they cannot measure the interactions between server and client, which is a major element of any web site's performance. client-side tests, on the other hand, will vary enormously in their results, depending upon both the setup of the client machine and its browser and the speed of the network connection to the server. consequently the relative improvement between optimised and non-optimised sites is more important than the actual figures involved.
+
+in all cases, the client-side tests were made using the firefox web browser running under windows  from machines within the sanger institute; absolute response times are therefore likely to be a good deal faster than external usage but, as explained above, this does not invalidate the relative improvements produced by caching and optimisation technologies; on the contrary, users on slower connections may see substantially greater improvements.
+
+tools used in analysis and testing
+firebug
+firebug  <cit>  is a plugin for the firefox web browser, which allows detailed analysis of http requests, both in terms of the content returned  and the time taken to return each page component. it was this latter feature that was of particular use in our development process.
+
+we use firebug extensively throughout our development process, mainly to debug ajax requests. in the case of optimisation testing, we analysed a number of different pages and obtained broadly similar results; for the sake of simplicity and clarity, only one sample page analysis is included in this paper.
+
+yslow
+whilst improvements in the underlying code are essential, there are some simple steps that can be taken to increase website efficiency significantly with relatively little work. many of these take advantage of the changes in internet technology in the last ten to fifteen years; the optimisations that worked well back in the days of dial-up can actually be counter-productive in an era of widespread broadband usage.
+
+yslow  <cit>  is an addition to the firebug plugin which rates a web page's efficiency. the underlying concepts were developed by yahoo!'s exceptional performance team, who identified  <dig> rules that affect web page performance. yslow's web page analysis is based on the  <dig> of these  <dig> rules that are testable.
+
+only a single test before optimisation, and another afterwards, was required, since yslow focuses on general characteristics of the site rather than individual pages.
+
+apache benchmarking
+the apache webserver comes with a benchmarking program, ab  <cit> , which can be used to analyze server performance and produce statistics on how many requests per second can be served. we ran two sets of tests, one for memcached and one for nginx. for memcached, which is designed to improve performance of dynamic content, we used the standard "region in detail" view from ensembl human; for nginx, we used the ensembl home page, which contains a number of static files, including several images. we ran each battery of tests first with the given technology turned off, and then with it turned on. for speed we chose to configure the benchmark program to make only  <dig> requests at a time; adding more requests increases the accuracy slightly, but causes the non-cached tests to take a long time. the tests were run repeatedly using different parameters for the number of concurrent users , and the relevant figures from the benchmark output were recorded in a spreadsheet.
+
+RESULTS
+apache optimization
+an initial analysis of the ensembl home page using yslow gave the following results , scoring the ensembl site as 'f', the lowest possible. our sample page returned  <dig> separate files totalling  <dig>  kb of data on the first visit and  <dig>  kb after browser caching. also, despite browser caching,  <dig> http requests were made on every page visit, representing a substantial load on the server. the five main areas we addressed, as highlighted by the yslow grading, were:
+
+ <dig>  number of http requests
+
+ <dig>  changes to 'expires' headers
+
+ <dig>  gzipping of page components
+
+ <dig>  minifying javascript
+
+ <dig>  configuring etags
+
+yslow also suggested using a content delivery network , which deploys content via a geographically dispersed network of servers. this was not deemed appropriate for ensembl, as the cost of such a service could not be justified in terms of performance .
+
+http requests were reduced in the first place by deploying perl code that, on server startup, merges the separate css stylesheets into a single .css file and likewise the javascript modules into a single .js file. this immediately eliminated  <dig> of the  <dig> http requests. the perl script also "minifies" both css and javascript by eliminating all unnecessary whitespace, thus addressing point  <dig> 
+
+the 'expires' header in a file served via http tells the browser when to check to see if a file has been updated. most of the ensembl template files do not change from release to release, so by adding an 'expires' header of one month we can ensure that visitors' browsers do not make unnecessary requests for files that are unchanged. this further reduces the number of http requests on subsequent page visits. the minified css and javascript files are renamed each time they are changed, so that the browser treats them as new files and fetches them again; however this normally happens only once per release, so has minimal impact on performance. gzipping was implemented by enabling the mod_deflate compression module within apache, so that all files are automatically sent in a compressed form if the browser indicates that it can handle such files.
+
+etags are another method of telling the browser whether the file has been changed, by attaching a unique string to the header. normally this feature is turned on automatically, with the result that the browser always makes an http request to confirm whether the file has changed or not before downloading it. this made sense in the days of slow dialup web connections, but with the spread of broadband, the brief time taken to download a typical web page component no longer justifies the server overhead.
+
+by turning off etags in the apache configuration, http requests can be further reduced with no discernable impact on the user. after optimization, the site was scored as 'b' , a substantial improvement. the same page returned only  <dig> files and  <dig>  kb of data on the first visit, and only one file of  <dig>  kb on a subsequent visit.
+
+caching and proxying technologies
+both memcached and nginx produced marked improvement in the performance of the server.
+
+the following apache benchmark graph demonstrates the benefits of using memcached. in figure  <dig>  server responses returned per second is plotted against the number of concurrent users accessing the site, for dynamic pages that access the databases to build displays of genomic data. the lower blue line shows how the site performs when no caching is done; at no point does responsiveness exceed three requests per second, and once fifty concurrent users are reached, the site grinds to a halt. by contrast, the memcached-enabled site not only returns far more requests per second, but performance is not affected by the number of concurrent users.
+
+the following screenshots of our server monitoring software  show the loads on four sample server nodes with and without nginx. in both cases the scale represents the number of apache processes, with the lower green area being a safe load and the upper red area being excessive load. as can be seen, without nginx all the servers are operating at maximum or near-maximum capacity, whereas with nginx the servers are idling, with only 1- <dig> processes in use. this allows us to cope with peaks of usage even on relatively modest amounts of hardware.
+
+a graph of response times  tells a similar story to that of memcached, but for static rather than dynamic content. with nginx enabled, the server's power can be focused on returning data-heavy content, and so the static files are typically returned to the user twice as fast as with apache using memcached alone.
+
+the combination of memcached and nginx has had an enormous impact on the ensembl website, improving the user experience by serving pages far faster than was previously possible and without consuming additional resources.
+
+ajax
+the traditional method of creating and serving dynamic web pages is to fetch all the data from the database, create the html and images, and only then send the web page back to the user's browser. for small pages this is no problem, but when complex database queries are involved, there is often a substantial delay between the user clicking on a link and the page starting to appear in the browser. this is frustrating to the user  <cit> , who may be left staring at a blank screen for several seconds, or even a minute or more in the case of very large and complex requests.
+
+ajax   <cit>  offers an alternative method of returning and refreshing web pages so that they appear to the user to be faster and more responsive. rather than waiting for the whole page to be built before returning any data, ajax-enabled pages can return the data-light sections of the page such as the header and navigation immediately, then insert the images, tables and other "data heavy" page components as they become available . the ensembl website originally used the scriptaculous and prototype ajax libraries  <cit> , but has since moved over to using jquery  <cit> , as the codebase for the functionality required by ensembl is smaller in the latter.
+
+
+
+the screenshots below show the firebug diagnostic tools display for download times, first for an archive site that lacks ajax , then for an equivalent page on the current  release . note that the overall amount of data being downloaded is very similar; however the page loads substantially faster in the new version, due in large part to the other improvements already described. where ajax contributes is not so much in absolute load times as in perceived load times. whereas the non ajax page is not sent to the user until every file is available, some ten seconds after the page was requested, the ajax page begins returning content after only one second, as indicated by the vertical red line that marks the point where a response is sent back to the requestor. feedback to the user is thus much more immediate, leading to an improved browsing experience.
+
+CONCLUSIONS
+the size and complexity of genomic datasets now being produced demand a more flexible and imaginative approach to web application development within science, and the use of technologies that have hitherto lain outside the purview of the scientific community. we have shown how the adoption of these technologies can be of enormous benefit to the users of online scientific resources, allowing vast datasets to be served to the user with minimal latency.
+
+authors' contributions
+eb installed and tested memcached and nginx; js ran the yslow tests and implemented minification. js also wrote the original ajax code, which was subsequently ported to jquery by sb, and all authors were involved in updating the web code to use this functionality and deploying the new site. ap wrote this paper; images and figures were created by ap, eb and js. all authors read and approved the final manuscript.
+

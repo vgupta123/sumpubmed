@@ -1,0 +1,192 @@
+BACKGROUND
+with the beginning of the information age in the 90s of the last century, a large set of processes are established to manipulate and analyze data. in particular in the field of bioinformatics, many different workflows produce a growing amount of data. one example are sequencing technologies, which are capable of sequencing an entire human genome in less than a day. moreover, extensive software suites for analyzing biological data sets exist, e.g. http://galaxy.psu.edu/ <cit> . in addition, it is possible that an analyzing process produces more output data than provided input. for example, the input size of the herv data set used in this work is about  <dig> gb. the output of the mapping with blast is about  <dig> gb large. hence, rapid processes for storing and querying data are needed as it has impact on the general performance of the analytic processes.
+
+position-specific dna related data 
+in the field of bioinformatics, data related to dna sequences are of particular importance. examples are single nucleotide polymorphisms   <cit> , transcription factor binding affinities and probabilities  <cit> , and rnaseq data  <cit> . we generalize these types of data by the term position-specific dna-related data . a psdrd record is an information related to a specific dna position. psdrd records have three characteristics. first, a psdrd record r can be represented by a key-value pair r=. the key k is composed of the sequence identifier and the position of the associated value v. hence, the key is unique, and records can be easily sorted. second, psdrd records are usually requested by region . we call this kind of access range select. third, all psdrd of the same kind need the same space to be stored on device, i.e., two different records are represented by the same number of bytes. in contrast, textual annotations are generally of variable length. these three specific properties can be utilized for optimizing data handling of psdrd.
+
+time- and resource-intensive computations on psdrd
+many biological processes and bioinformatics algorithm have psdrd as input or output. this type of data is essential for understanding biological and biochemical processes. furthermore, diagnostics in medicine for cancer prediction and genetic diseases are using psdrd <cit> .
+
+many activities in bioinformatics focus on analyzing psdrd. however, often a file and folder strategy or standard databases like mysql  <cit>  are used for data management. these approaches are straightforward but not optimized for the intended processing of psdrd. in addition, data types used in these tools are expensive and might lead to an exhaustive usage of valuable resources  <cit> . both problems lead to resource-intensive requests of psdrd. for example, when performing range selects using mysql, nearly each record in the range must be fetched by a costly random access to the storage. because of the limits of standard desktop hardware, this might cause a bottleneck during data processing.
+
+requirements
+the following requirements result from the above mentioned problems: the data management must be usable with standard desktop technology. it must be possible to store billions of data records. platform independency was defined as an additional requirement . handling massive read requests during analytic processes has to be possible. while optimizing data handling of psdrd, the three specific properties from section “position-specific dna related data ” have to be obeyed.
+
+implementation
+in this section, we first describe a concept called drum, on which drums is based. subsequently, we describe the architecture of drums. finally, we briefly sketch the implementation of drums in java considering the three main requirements of handling psdrd data sets efficiently.
+
+drum concept
+the drum  concept  <cit>  allows to store large collections of key-value pairs . drum allows fast bulk inserts without generating duplicate entries. to enable fast processing, incoming psdrd records  are allocated based on their key k to separate buffers b in the main memory: m→bi. those buffers are continuously written to their counterparts on disk , where they are called buckets. if a bucket on disk reaches a predefined size, a synchronisation process with the persistently saved data  starts. the process is executed in the following way: a disk bucket is entirely read to a disk cache. there it is sorted. thereafter, a synchronisation is performed by combining each bucket after the other with the corresponding cache. as the records of the disk cache are also sorted, using mergesort is efficient. the synchronisation process is blocking all other processes within drum.
+
+the drum concept is very suitable for storing psdrd. however, requesting data efficiently was never a goal of this approach. hence, neither single lookups nor range selects have been optimized. furthermore, when synchronisation is performed, drum is not able to receive and cache new psdrd records. in the following, we propose an extension of drum that addresses these shortcomings.
+
+extensions by the drums concept
+we extend the drum concept by allowing the selection of records by key  or by range . within this concept we decoupled i/o-processes from memory processes to avoid blocking single components.
+
+following the three psdrd data properties, the following architecture decisions were made for drums in addition to the drum concept: 1) all records are equally sized, so that jumping to the start position of an arbitrary record in the file is possible. therefore, a sparse index  <cit>  can be applied efficiently, making rapid single selects possible by the following two steps: the sparse index points to a block of records, where the psdrd of interest might be found. to finally find the requested record, a binary search is performed. the binary search massively benefits from equally sized records. 2) records, which are close to each other on dna are stored close on disk according to their keys. this enables efficient range selects. 3) records are organized in buckets and chunks, which permits efficient prefiltering of regions of interest within a bucket.
+
+architecture of drums
+drums is composed of the interacting components described in this section. before each component is described in detail, we give a high-level overview of the insert and select process of drums.
+
+processes
+insert process
+the high-level overview of the insert process of drums is shown in figure  <dig>  kv pairs are sent to drums. as in drum, the incoming records are already distributed in memory between n buffers b . each bucket b
+i
+ in memory has a corresponding bucket d
+i
+ on disk. the sizes of the buckets are dynamic. if a bucket b
+i
+ exceeds a predefined size or memory limitations are reached, a synchronisation process, consisting of four phases, is started:
+
+1) the bucket b
+i
+ is taken and replaced by an empty one. hence, incoming data can still be buffered. 2) the kv pairs of b
+i
+ are sorted by their keys. 3) b
+i
+ and d
+i
+ are synchronised using mergesort. already existing records can be updated using state-dependent operations. 4) the merged data is continuously written back to bucket d
+i
+. hence, input data is now saved persistently on the disk.
+
+note: step  <dig> and  <dig> of the synchronization process are performed chunk-wise, so that optimal read and write performance can be achieved. the optimal chunk-size depends on the used hardware, the size of a single record, the expected data volume, and several parameters in drums. therefore, it has to be determined empirically.
+
+range select processs
+ and k
+e
+ . 1) the requested bucket d
+i
+ is identified by m→di. 2) the index of d
+i
+ is used for determining the correct chunk c
+k
+ of the first requested record r
+s
+=. 3) within c
+k
+ a binary search is performed for finding r
+s
+. the binary search massively benefits from equally sized records. 4) a sequential read is performed until k
+e
+ was found and consequently r
+e
+ returned. it might be needed to perform the sequential read over chunk and bucket boundaries.
+
+single select process
+a request of a single row  is considered as special case of the range select process where k
+s
+=k
+e
+. therefore, it is covered by step  <dig> to  <dig> 
+
+components of drums
+bucketcontainer and its buckets
+the bucketcontainer is a buffer that is organized in buckets b . it manages the distribution of incoming records to the buckets in ram. as in drum, the distribution of the incoming records r= to the buckets b is based on a predefined mapping function m→bi.
+
+the bucketcontainer is decoupled from any i/o-operation, so that preparing the data for writing can be done in parallel to the i/o-processes. the larger the size of the bucketcontainer, the larger are the parts of the data that can be processed sequentially. this increases the performance significantly as sequential i/o-operations are the most efficient on hdds and ssds.
+
+syncmanager, syncprocess, and synchronizer
+the syncmanager manages all syncprocesses. it observes the bucketcontainer and verifies the preconditions for the synchronisation of buckets b with their counterparts on disk d. if these preconditions are fulfilled, the syncmanager instantiates new syncprocesses. several syncprocesses can be run in parallel. in our implementation, a bucket in memory must reach a predefined fill level or age to be synchronized.
+
+a new syncprocess is always instantiated with the largest bucket in the bucketcontainer fulfilling the above mentioned condition. when a new syncprocess is started, the affected bucket in the bucketcontainer is replaced by an empty one. in this way the synchronization process is not blocking further insert operations for this bucket.
+
+the syncprocess instantiates new synchronizers. a synchronizer is in charge of writing data from the bucket b
+i
+ in memory to the bucket d
+i
+ on disk. all records are sorted in b
+i
+ and in d
+i
+. hence, the synchronizer is capable of using mergesort for synchronizing the records in memory with those on disk.
+
+representation and structure of the data
+each persistent bucket is represented by a file on a hard disk. the file is structured into two parts :  the header with meta information and the index structure referencing chunks of a predefined size and  the rest of the file used for the records to store, which are organized in chunks. a sparse index  <cit>  is applied as it is memory efficient and takes advantage of the order of psdrds.
+
+whenever a bucket d is opened for reading or writing, the header and the index are read into memory. in this way, a rapid access to the required chunks is possible.
+
+the internal representation of a record in a chunk is a sequence of bytes. this sequence is composed of a key-part and a value-part. each part may consist of several subparts, each of its own data-type . because of the fact that each record is of equal size, data structures and memory can be easily reused by application of the adaptor and the prototype pattern  <cit> .
+
+implementation of drums
+drums is build upon oracle java  <dig> . therefore, it is platform independent. we developed drums in an atomic thread-based way. all components work asynchronously and are exchangeable. this allows fast adaptations on single subprocesses or exchanging whole components like the synchronizer.
+
+RESULTS
+in this section we first give a short introduction into two different psdrd sets used for evaluation. second, we present the results and the evaulation approach considering  inserts,  random lookups, and  random range selects.
+
+to prove the superiority of drums in comparison with standard solutions within a desktop environment, we compare it to mysql which is used widely in the bioinformatics community.
+
+two different psdrd sets are evaluated. the data sets are described below. drums as well as mysql were tested comparatively using the three measures:  - . for all tests a standard desktop computer was used. mysql as well as drums are limited to use only  <dig> gb of the available memory. details can be obtained from table  <dig> 
+
+the desktop system which was used for the tests. mysql as well as drums are limited to use only  <dig> gb of the available memory.
+
+data sets
+snp-data from the  <dig> genomes project
+the  <dig> genomes project  <cit>  has the goal to understand the resulting of small mutations in different accessions of the reference plant arabidopsis thaliana. each accession mainly consists of five attributes: accession identifier, sequence identifier, position on sequence, source base, and target base. we downloaded filtered quality data of the strains sequenced by the gregor mendel institute and the salk institute on 2012-01- <dig>  containing  <dig> data sets, with  <dig> , <dig> snps. from all files, we extracted the data of the following five columns: accession name, chromosome, position on chromosome reference nucleotide, and mutated nucleotide. for the definitions of the used data types and their configuration  used in mysql and drums see table  <dig> 
+
+used data types in mysql and drums for snp data. all columns being part of the primary key are indexed.
+
+all data are public available at http://1001genomes.org/datacenter/.
+
+herv data
+human endogenous retroviruses  have integrated themselves in the human genome millions of years ago. because of the high number of existing herv fragments, they are thought to have a regulatory role. to investigate a possible influence of hervs, it is needed to locate herv fragments. therefore, over  <dig> known herv fragments were blasted against the human genome to find new putative herv-like regions. in the work of konstantin kruse  <cit>  all regions with an e-value less than 1e- <dig> were accepted as putative herv-like region. this lead to  <dig> , <dig> single records, stored in  <dig> files with tab-separated data field, with a total size of  <dig> gb. from these files we used the following seven columns: query id, subject id, query start, query end, subject start, subject end, and e-value. for the definitions of the used data types and their configuration  used in mysql and drums see table  <dig> 
+
+used data types in mysql and drums for herv data. all columns being part of the primary key are indexed.
+
+insert performance
+drums must be able to store hundreds of millions of records. because of this, it is needed to evaluate the insert performance.
+
+to estimate the insert performance, we measure the time for inserting  <dig> records. we obtain  <dig> time measurements points in case of snp-data and  <dig> for herv data. figures 4a and 4b show the insert performance of drums  and mysql . despite using bulk-requests for inserting the data, it was impossible to insert all  <dig> million herv records into the mysql instance. mysql inserts about  <dig> million records in the first week, but figure 4b shows that the insert performance has dropped to  <dig> records per second after one week. the insert performance of drums also decreases, but it was able to insert the whole data set within  <dig>  hours. at the end of the test, drums was still able to perform more than  <dig> inserts per second.
+
+the insert performance of drums decreases slowly in comparison to mysql. the reason for this is the decreasing ratio of read- to write-accesses with each round of synchronisation. with other words, drums must read more and more records per new record to write with the growing amount of data already stored on disk. however, drums still inserts more than  <dig> records per second at the end of the insert test for herv data, corresponding to approximately  <dig> kb per second.
+
+performance on random lookups
+from the view of bioinformatics, single lookups make no sense in both experiments. however, the performance of single-lookups is a significant indicator for the overall performance and the suitability of the implementation of a tool for handling data sets. moreover, the test may show how close the measured performance to the theoretical hardware limits of the used standard desktop hardware is. considering the test environment, it is assumed that a random access would take approximately  <dig> ms. hence, if no other disk accesses are done, it would be theoretically possible to read  <dig> records per second.
+
+figures 5a and 5b show the performance of mysql and drums, when performing random lookups. again, drums performs better than mysql in case of handling our two data sets. figure 5a implies that drums is able to do  <dig> times more random lookups than theoretically possible, when accessing snp data. in comparison, only  <dig> random lookups per second are performed when accessing herv data. the reason for this difference are cache structures provided by the operating system and the underlying hardware.
+
+in case of accessing snp data, the complete data set might be cached by the operating system after approximately  <dig>  lookups. hence, organizing the snp data as drums structure results in a file size small enough that it could be loaded into memory. therefore, nearly each request could be answered from the operating systems cache after a warm up. in contrast, the herv data set is too large to fit into memory, so only a few random lookups could be answered from cache. the increasing performance of mysql and drums in figure 5b is also an indication for the use of caches. figure 5b shows that drums can perform  <dig> random lookups of theoretically possible  <dig> 
+
+while considering the experimental results of mysql, the impression is conveyed that the defined index was not used correctly. however, a closer look validates the results as the explicit mysql index for the snp table has the size of  <dig> mb, which will not fit into the allowed  <dig> gb of main memory. hence, even index-based searches in mysql need several accesses to the hard disk resulting in worse performance. in contrast, the sparse index of each bucket of drums requires just  <dig>  mb, which sums up to only  <dig> mb for all buckets. to find a single record in a chunk, drums performs a binary search. the binary search can be done very efficiently for the reason that all records are of equal size. because of the reduced demands on the hardware, drums provides a good performance even on very large data sets like herv.
+
+performance on random range selects
+as described in the section background, psdrd-records are mostly requested by range. therefore, the need to benchmark the performance of range requests is obvious.
+
+the request for the snp-data is as follows: select all snps on chromosome c between position x and y for all ecotypes in the database. to perform the read test for snp-data, we first randomly generated  <dig> ranges of length  <dig> to  <dig>  second, we request records within those ranges randomly distributed over the whole genome of arabidopsis thaliana.
+
+analogously, we generate  <dig> test requests for the herv data set with lengths from  <dig> to  <dig>  again, we randomly distributed range-requests over the whole human genome. it might be a common task to filter the requested data by value. mysql provides this functionality by defining the filter condition in the where-clause. to accomplish this in drums, the returned records must be checked iteratively. in this test, we filter the requested herv records by an e-value less than 10- <dig>  10- <dig>  10- <dig>  10- <dig>  10- <dig>  10- <dig> or 10- <dig>  randomly chosen.
+
+figures 6a and 6b show the results of the range select test. once more, both databases perform much better on the smaller snp-data set. besides caching, this time another explanation for this observation is that a range request on the snp-data contains in average  <dig> times fewer records than a range request on the herv data. the performance increases with the number of read records. the performance of drums increases by a factor of  <dig> and of mysql by a factor of  <dig>  however, drums performs in average on the snp-data  <dig> times faster than mysql.
+
+regarding the larger herv data set, drums is able to perform  <dig> range-selects per second in average. this is over  <dig> times faster than mysql.
+
+within the whole test,  <dig> billion records were read in  <dig>  hours. that corresponds to an overall read performance of  <dig>  mb per second, filtering included. in contrast, mysql read  <dig>  million records in  <dig>  hours, which corresponds to only  <dig>  kb per second.
+
+CONCLUSIONS
+we defined psdrd  and showed three important properties of this kind of data. the flaws of drum were shown, which is already suitable for storing psdrd, but not for requesting it efficiently. the article introduces drums, a data management concept optimized to tackle the challenges of dealing with mid-size data sets in form of psdrd using standard desktop technology instead of expensive cluster hardware.
+
+an implementation of the drums concept was compared to the widely spread standard database management solution mysql considering two data sets of the bioinformatics context. on the larger herv data set, the evaluated drums implementation was  <dig> times faster inserting all records, two times faster performing random lookups, and  <dig> faster performing range requests. hence, the experiments show that dealing with psdrd benefits significantly from the characteristics of the drums concept. therefore, our main contribution is suggesting this data management concept for increasing the performance during data intensive processes while keeping the hardware investments low.
+
+availability and requirements
+project name: drums 
+
+project home page:http://mgledi.github.io/drums
+
+project home page of examples:http://github.com/mgledi/biodrums
+
+operating system: platform independent 
+
+programming language: java 
+
+other requirements: none 
+
+license: gnu gpl v <dig> 
+
+any restrictions to use by non-academics: no specific restrictions.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+mn and nt developed and tested the java code. all of the authors contributed to the design of the software architecture. all of the authors read and approved the final version of the manuscript.
+

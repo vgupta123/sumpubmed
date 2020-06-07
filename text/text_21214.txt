@@ -1,0 +1,112 @@
+BACKGROUND
+massively parallel sequencing of cdna libraries constructed from rna samples  has become a popular choice for quantifying gene expression levels of transcript isoforms  <cit> . advantages of rna-seq over conventional microarray technologies include its larger dynamic range for quantification and capacity of identifying novel isoforms at one nucleotide resolution without the need for designing cdna probes. a typical rna-seq data analysis workflow consists of two components: aligning sequenced reads to the reference cdna sequences, and quantifying transcript isoform abundances based on the number of mapped reads on the reference sequences. in measuring gene expression levels, fpkm  is calculated under the assumption that a relative expression level of an isoform is proportional to the number of cdna fragments that originate from it  <cit> .
+
+since reads are typically 50- <dig> bp paired-end for illumina sequencers, in many cases, they can be aligned to more than one isoform and/or locations on the reference sequences. one of challenges for accurate estimation of gene expression is to handle such multi-mapped reads  <cit> . several approaches have been proposed to model uncertainty of read mappings in a probabilistic framework, and it has been shown that the statistical inference of read mapping is effective for more accurate estimation of gene expression levels  <cit> . although rigorous simulation analyses with various conditions  have been performed with several tools in the literature  <cit> , cases for longer reads, such as  <dig> bp or longer that can be produced from the latest illumina miseq sequencer, have not been extensively studied so far. moreover, there are few methods suitable for rna-seq data produced from new types of sequencers, such as the ion torrent pgm sequencer, which generate variable-length reads with relatively higher error rate of substitutions, deletions, and insertions  <cit> .
+
+in this paper, we present a statistical method, tigar <dig>  which implements new features for improving sensitivity and accuracy of quantification of isoform expression levels from rna-seq data by extending the originally developed method  <cit> . first, for achieving maximum sensitivity for mapping longer reads to reference sequences, tigar <dig> can handle aligned reads from bwa-mem  <cit> , as well as other widely used alignment tools such as bowtie <dig>  <cit> . sequencing errors  within reads that can be inferred from the gapped alignments of reads to reference sequences are modelled under a probabilistic framework in tigar <dig>  second, in order to speed up the variational bayesian inference in tigar <dig>  a new algorithm is implemented so that only reads that can influence isoform abundance parameters in the next iteration are detected and considered in the following update equations.
+
+in order to evaluate quantification performance with tigar <dig>  we prepare simulation data that emulates illumina fixed-length reads  and ion torrent variable-length reads data. for simulating the variable-length reads, a variable read length distribution is empirically estimated from the actual rna-seq data by non-parametric regression with gaussian kernels as basis functions in our analysis. we also apply tigar <dig> to real data of human cell line samples and evaluate consistency of estimated gene expression levels among technical replicates.
+
+methods
+a pipeline of running tigar <dig> consists of two steps: alignment of reads to reference sequences, and estimation of transcript isoform abundances based on the alignment result . since the first part of the pipeline uses external alignment tools for aligning reads to the reference sequences, it is recommended to run the whole pipeline in the unix environment. details of each step are described in the following sections.
+
+alignment of reads to reference sequences
+reference cdna sequences in the fasta format of model organisms are either available from the refseq database  <cit> , or can be generated from the whole genome reference sequence and a gene annotation file  with a tool called "gffread", which is included in the cufflinks package  <cit> . for cases of non-model organisms, de novo transcriptome assembly might be considered  <cit> , and then the resulting contigs can be used as reference sequences. given a set of cdna sequences in fasta format, the fm-index for the following alignment step is constructed with the corresponding alignment tool. then, gapped-alignments of reads to the reference sequences are generated with bowtie <dig> or bwa-mem with allowing multiple mappings of reads to the reference cdna sequences.
+
+generative model of rna-seq data
+after the alignment is complete, tigar <dig> takes the resulting sam/bam and the fasta files as input for transcript isoform abundance estimation. we use a generative model for rna-seq data as described in figure  <dig>  which is an extended version of the original model  <cit> . here,  θ is a model parameter that represents transcript isoform abundances, and znt is an indicator variable and it takes one if read  n is generated from transcript isoform  t, and zero otherwise. rn <dig> and rn <dig> are the nucleotide sequence of the first and second pair of read n, respectively. then, the joint probability of the model is decomposed as the product of conditional probabilities as follows:
+
+ p=ppp. 
+
+p  is the prior distribution of the parameter and we assume the dirichlet distribution:
+
+ p=1c ∏t=0tθtαt- <dig>  
+
+where αt> <dig> is a hyperparameter,  c is a constant,  t is the number of transcript isoforms, and Σt=0tθt= <dig>  here, θ <dig> represents the noise isoform abundance .
+
+p is the conditional probability of znt given  θ and we further decompose as follows:
+
+ p=ppppp, 
+
+where tn,fn,sn,on, an <dig>  and an <dig> respectively represent the transcript isoform choice, fragment size, read start position, orientation, and alignment state of the first pair and second pair of read  n. p represents the probability of read n generated from transcript isoform tn given a parameter vector, and we compute p=θt. compared to the original model of tigar  <cit> , a fragment size variable is now included in the model. the conditional probability of observing fn=fn given tn=tn is calculated by truncated and normalized distribution  <cit> :
+
+ p=df∑x=1ltdf, 
+
+where lt is the length of transcript isoform  t, and df is the global fragment size distribution. we construct df based on the normal distribution with mean μf and standard deviation σf, which can be either specified according to experimental protocols, or can be estimated from the primary alignments of reads for the case of paired-end data. p represents the probability of the start position of the first pair of read  n given the transcript isoform choice and fragment size, and calculate p=1/ft if mrnas have poly tails, and p=1/ if mrnas do not have poly tails. p represents the probability of the orientation of read  n given the transcript isoform choice. for a strand specific protocol, it can be set as p= <dig> and p= <dig>  otherwise, it can be automatically estimated from the primary alignment of reads from the rna-seq data. prepresents the probability of the alignment state of read  n given the transcript isoform choice, fragment size, start position, and orientation of read  n. the transition probability of the alignment state is calculated as described previously  <cit> .
+
+finally, p is the conditional probability of sequence of the first and second pair of read  n given znt= <dig>  we calculate this probability considering the observed read length as
+
+ p 
+
+ = ∏x=1x1emit ∏x=1x2emit, 
+
+where emit  is the emission probability of nucleotide characters of the first pair of read  n, r <dig> is the nucleotide character, q <dig> is the base call quality score, c <dig> is the nucleotide character of the corresponding reference sequence, a <dig> is the alignment state of the first pair of read  n at position  x. emit  is similarly calculated as for the first pair of the read.
+
+modelling of variable read length distribution
+some sequencers, such as ion torrent pgm, produce reads whose lengths are variable. in order to simulate such variable read length, we model the conditional probability of the read length given the fragment size, which is also calculated by the truncated distribution  <cit> 
+
+ p|fn=fn)=dr)∑x=1fndr, 
+
+where length  is the observed length of read  n, and dr is the global read length distribution. here, dr can be constructed based on a linear combination of the smooth functions by fitting it to the data in a non-parametric manner with m equally spaced gaussian kernels as basis functions. let
+
+ g= ∑i=1maimi, 
+
+where ai is the coefficient parameter, and mi is the normal distribution with mean μi and standard deviation σ. from the rna-seq data, observations of read lengths and their frequency, , are constructed, where xn is the read length, and is yn the frequency of xn, and Σn=1nyn= <dig>  then, the least squares estimate  of the parameter vector a=t is obtained by
+
+ â=argmina ∑n=1n{yn-g} <dig>  
+
+define a real value matrix bij=mj. then, the ordinary lse is calculated by
+
+ â=-1bty. 
+
+then, the global read length distribution dr can be constructed from g as:
+
+ dr=gΣx′=1maxg, 
+
+where max is the maximum read length of the read data.
+
+an example of the estimated read length distribution from the real sequencing data of a human cell line  sequenced by the ion torrent pgm sequencer  is shown in figure  <dig> 
+
+estimation of transcript isoform abundances
+in our variational bayesian inference approach, latent variables  as well as model parameters  are estimated as the posterior distribution. we use the dirichlet distribution for the prior distribution θ~d
+
+with a single hyperparameter α0> <dig>  for α0< <dig>  the prior favors solutions in which some of isoforms have zero abundance. hence, α <dig> controls the complexity of model parameters . a hyperparameter α <dig> is selected as a maximizer of the lower bound of the marginal log likelihood of the observed data. here, we consider α <dig> =  <dig> ,  <dig> ,  <dig> , or  <dig> . each iteration step of the variational approximation updates posterior distribution until a convergence criterion is satisfied. in the vbe step, the expected number of reads that are mapped to the transcript isoform t is obtained by rt ^=Σnez. in the vbm step, the expected abundance of transcript isoform t is obtained by eθ=α^t/, where αt ^=α0+rt ^. details of these update equations and calculation of the lower bound of the marginal likelihood are described in  <cit> . recently, it has been shown that the variational inference described here is accurate in estimating the mean of posterior transcript expression, but not the variance  <cit> .
+
+the bottleneck of the computational cost of the inference algorithm is the calculation of ez for all the possible alignments in the vbe step, which takes o time if the total number of possible alignments is m. this time complexity is upper bounded by o, where n is the number of reads and t is the number of cdna reference sequences. suppose some eθ are already converged  at the current step. we store the information in a boolean variable theta_converged , which takes true if eθ is converged, and false otherwise for each isoform t. let τn be a set of isoforms to which read n is aligned. in the next vbe step, for each read n, ez will not change if theata_converged  is true for all t∈τn. to represent this information, we introduce a boolean variable read_movable, which takes false if ez will not change in the next vbe step, and true otherwise. the following algorithm computes read_movable at the start of each iteration:
+
+ <dig>  for each t, set theta_converged  to true if eθ did not change from the previous step, and false otherwise.
+
+ <dig>  for each n, if theta_converged  is true for all t∈τn, then set read_movable to false, and true otherwise.
+
+then, in the vbe step, ez is computed where read_movable is true. the algorithm heuristically eliminates unnecessary calculations of ez drastically in the later part of iterations, in which most of eθ are already converged and only a fraction of reads should be considered for calculating the update equations.
+
+RESULTS
+simulation data analysis
+we evaluate the performance of quantifying gene expression levels with tigar <dig> compared to existing methods using simulation data. first,  <dig>  transcript isoforms in the human refseq database  <cit>  are randomly chosen. second, a set of true gene expression levels is constructed, in which log of isoform abundance is sampled from the standard normal distribution. then, we generated  <dig> million,  <dig> million,  <dig> million, and  <dig> million rna-seq single-end reads of  <dig> bp,  <dig> bp,  <dig> bp, and  <dig> bp, respectively, so that the total throughput of nucleotides remains the same. similarly,  <dig> million,  <dig> million,  <dig> million, and  <dig> million paired-end reads of  <dig> bp,  <dig> bp,  <dig> bp, and  <dig> bp, respectively, have been generated whose fragment size follows the normal distribution with μf =  <dig>   <dig>   <dig>  and  <dig>  and σf =  <dig>   <dig>   <dig>  and  <dig>  respectively. in order to simulate sequencing errors, we prepared a set of simulation data with 1% substitution, 1% deletion, and 1% insertion errors. all the simulation data was generated by our in-house software. after aligning reads to the reference cdna sequences with bowtie <dig> , transcript isoform abundances are estimated with tigar <dig>  for comparing the performance, tigar <dig>  <cit> , rsem v <dig> . <dig>  <cit>  and cufflinks v <dig> . <dig>   <cit>  are applied to the same simulation data. although bitseq  <cit>  is also a relevant method, it is not included in our experiment since performance comparison with tigar was already conducted in their analysis  <cit> . similarly, variable-length reads are generated according to the estimated read length distribution as shown in figure  <dig>  and isoform expression levels are estimated with each method. the root mean square errors of the estimated abundances  compared to the true gene expression levels are calculated and shown in figure  <dig> and  <dig>  for both fixed-length  and variable-length reads, tigar <dig> consistently performed better than others. especially, when read lengths > 250bp, the prediction accuracies with tigar <dig> over those with rsem and cufflinks are markedly better, which can be explained by more sensitive mapping with the latest alignment tools and efficient optimization of multi-mapped reads by the variational bayesian inference implemented in tigar <dig>  since rsem uses bowtie as an aligner in the integrated pipeline, it becomes more difficult to align longer reads to the reference sequences without gapped-alignments of the reads, which potentially loses sensitivity of mappings.
+
+real data analysis
+to evaluate performance with tigar <dig> for real rna-seq data analysis, we obtained  <dig>  million single-end reads of variable lengths of the human hela cell, which is publicly available from the life technologies' web site . the sequencing was performed with the ion pgm sequencer, which detects the protons released sequentially when one of the four nucleotide bases is introduced in real-time  <cit> . we divided the rna-seq data into two data sets, assuming that they are technical replicates obtained from the same experimental conditions. gene expression levels were estimated with tigar <dig>  rsem, and cufflinks and plotted in figure  <dig> . the result shows that the quantification with tigar <dig> was most consistent among the technical replicates, compared to those with rsem and cufflinks. tigar <dig> outputs the optimized read alignment on cdna references in bam format after inference is done, so that predicted isoforms can be followed up. the resultant bam file can be loaded into a genome browser, such as integrative genomics viewer  <cit> . this function is also a new feature that is not available in the original tigar and tophat-cufflinks. the bottom track in figure  <dig> shows the optimized read alignments estimated with tigar <dig> for nm_ <dig>  which is an isoform of bap <dig> that is known to be expressed in hela cells  <cit> . compared to the read alignment by bowtie <dig> , not only the amount of reads assigned to the isoform increased, but also it became easier to identify possible sequencing errors from genomic variants.
+
+computational resources
+cpu time and memory required in the real data analysis are summarized in table  <dig>  tigar <dig> was the fastest among others, notably more than two times faster than tigar <dig> with practical memory requirement. tophat-cufflinks was slower than tigar <dig>  tigar <dig> and rsem, especially in the alignment step.
+
+the cpu time and memory required for the real data analysis with tigar <dig>  tigar <dig>  rsem, and tophat-cufflinks are summarized.
+
+to see the scalability of tigar <dig> for a large dataset, it is applied to  <dig> million synthetic reads . it required  <dig> gb memory and  <dig>  minutes of cpu time.
+
+all the experiments were performed on an intel xeon cpu e5- <dig> processor  with the red hat enterprise linux server release  <dig> .
+
+CONCLUSIONS
+we have developed a computational method, named tigar <dig>  which is accurate and sensitive in quantifying gene expression levels of transcript isoforms from rna-seq data. tigar <dig> outperformed existing methods with simulation data of both single-end and paired-end reads , especially for reads >  <dig> bp. tigar <dig> will be more effective for accurate detection and quantification of transcript isoforms compared to other existing methods, as new technologies for longer sequencing become available.
+
+instead of trying to find novel transcript isoforms from rna-seq data, reference cdna sequences of transcript isoforms are assumed to be known in the tigar <dig> pipeline. although there are a couple of algorithms to predict novel transcript isoforms or fusion genes  <cit> , tigar <dig> does not provide the novel predictions at the moment. however, once candidates of novel transcript isoforms are predicted by external tools, they can be treated as known and gene expression levels of these novel isoforms can be quantified and assessed with tigar <dig>  another possible extension of tigar <dig> includes modelling of underlying genomic variation for identifying allele-specific gene expression. because the cost of whole genome-sequencing is dropping sharply, it is becoming feasible to use both genomic information as well as gene expression data. finally, there should be an optimal balance between the maximum number of allowed alignments per read and the convergence speed. these topics will be investigated as our future works.
+
+availability of supporting data
+the implementation of tigar <dig> and the documentation is available in the github repository, https://github.com/nariai/tigar <dig> 
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+nn and mn conceived the study, nn, kk, tm, and mn designed the computational experiments, nn performed the analysis, and nn, kk, tm, and mn interpreted the results. ys, yk, and yyk collaborated on data collection and interpretation of the results. nn, kk, tm, ys, yk, yyk and mn wrote the manuscript. all the authors read and approved the final manuscript.
+

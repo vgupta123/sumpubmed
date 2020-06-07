@@ -1,0 +1,101 @@
+BACKGROUND
+research labs, sequencing core facilities, hospitals and research consortiums are accumulating massive databases of gene expression and other genomic data from primary patient samples. currently, the geo database for microarray data contains more than  <dig>  samples  <cit> , the international hapmap  <dig> project contains  <dig>  million common snps for  <dig> individuals  <cit> , and the cancer genome atlas project has  <dig>  petabytes of genomic data on more than  <dig> types of cancer  <cit> . while these databases are already massive, the low-cost of next-generation sequencing is making it easier to add more data to these repositories and to build massive private data repositories  <cit> . samples in these databases are often lightly annotated with clinical information or deidentified entirely for patient privacy. the question we address here is: “when a new patient sample arrives, what other samples, among those that we have seen, are most similar to this new one?” the solution we describe here, gemini, is a search engine that provides fast access to relevant samples in a database based only on similarity of gene expression profile, much like the pagerank algorithm provides access to internet web pages based on similarity between query terms and terms used in the web page content  <cit> .
+
+previous work on search engines for gene expression data largely falls into two categories: those that use a gene set query and those that use an expression profile query. expressionblast takes as input a species type, a gene list, an output species and a distance metric and uses text analysis methods to return labeled relevant experiments  <cit> . seek uses a novel cross-validaton-based algorithm to prioritize ranking and network information to identify relevant neighbors based on a query gene set for human data  <cit> . genechaser is an earlier effort that identifies all experiments where a single gene is differentially expressed  <cit> . in contrast to gene-set-based query search tools, profilechaser uses a geo accession number query to identify experiments that are similar to query  <cit> . the focus of that work is on choosing good data representation, dimensionality reduction, and similarity/distance metrics. however, they do not evaluate the computational performance or scalability of their approach. we build on the work in profilechaser by focusing on speed and scalability while allowing for different dimensionality reduction methods and distance metrics.
+
+our focus is on developing a method that is amenable to different data representations, dimensionality reduction methods, and distance metrics, and, importantly, is fast. tree data structures are common in search applications where optimizing query time is important  <cit> . by structuring the data records into a tree, a suitable algorithm is able to exclude irrelevant records from consideration and reduce search time to less than the brute force complexity of o, where n is the number of records in the database. some binary tree data structures used for search include kd-trees  <cit> , sr-trees  <cit> , r*-trees  <cit> . hash tables have very good search time for finding an exact match, but there is no good way to locate a record that is a nearest neighbor to a query. so, while hash tables are often used in applications where exact matches are needed, they are rarely used in application where near matches are needed.
+
+gemini uses a vantage-point tree  data structure to store genomic data records  <cit> . the vantage-point tree is a special case of a binary search tree where the left subtree of a node contains records that are closer than some distance, μ, and the right subtree contains records that are further than μ. the tree gets its name because the subtree nodes are partitioned from the vantage point of the current node. the advantage of the vp-tree in genomic search applications lies in the fact that is does not impose a particular coordinate structure on the data and instead employs a user-definable metric to measure distance. the construction and search algorithms for the vp-tree are described in the “implementation” section.
+
+implementation
+we describe the algorithms for the construction and search for the vantage-point tree here. gemini is implemented in python as a stand-alone command-line program and as a public web site; we describe those implementations in the “availability and requirements” section.
+
+data organization
+a record in gemini is a normalized gene-expression profile. in the cancer genome atlas project, this profile is a level  <dig> processed gene expression tab-delimited file. these records are converted to a hdf <dig> file format for compatibility and then preprocessed into a vantage-point tree. internally, each tab-delimited file from the tcga project consists of a vector of gene identifiers , and a vector of sample identifiers , along with a matrix of the log <dig> normalized expression value for each gene-sample pair. a query is likewise an hdf <dig> file with the same attributes but with only one sample. a search therefore returns the most similar expression profiles in a dataset to the profile in the query.
+
+the vantage point tree is implemented as a python class and is entirely loaded into ram. for datasets with thousands or millions of samples of complete gene expression profiles, the object requires several gigabytes of memory. though memory performance is somewhat system-dependent, in our tests a database of  <dig>  records required 4gb. by reducing the complexity of the profiles using principal component analysis , the memory footprint can be reduced.
+
+vantage-point tree construction
+construction of the vp-tree takes o time for records with constant dimension where n is the number of records in the dataset. we briefly summarize the simplest version of the recursive construction algorithm here and refer to the original article for further details and extensions  <cit> .
+
+
+
+this binary search tree construction works by taking a set s of records. if s is not empty, we create a new node and store a random element, p, in the node. we store the median distance between p and all the other elements in s in μ in the node using any distance metric that satisfies the triangle inequality. we partition the set s into two roughly equal size sets l and r, where l contains all of the elements of s that are closer to p than the median distance, μ and r contains all of the elements of s that are further than μ. the function recurses by calling itself with arguments l and r for the left  and right  subtrees. the recursion ends when the subtree sets are empty and the algorithm returns the pointer to the root node. clearly, because the size of the set in each subtree is half the original set, due to the use of the median distance, the time to construct the tree is o.
+
+vantage-point tree search
+search in the vantage-point tree proceeds by recursive depth-first search. the left subtree of a node contains records that are closer than μ from the vantage point of the current node’s records. symmetrically, the right subtree contains records further than μ.
+
+if we have a query profile, q and a vantage-point node, p, by symmetry and the triangle inequality of a distance metric d, we have 
+  d≥|d−d|=dp, 
+
+where s is any other record in the database and dp is defined as the vantage-point distance. since the vantage-point distance shrinks the true distance between q and s, if dp≥τ, then d≥τ  <cit> .
+
+suppose that we have found a record at distance τ from the query and we are at vantage-point node p in the tree. if d≥τ+μ, then the nearest-neighbor is not closer than μ and we can fathom  the left subtree as shown in fig. 1a. conversely, if d+τ≤μ, then the nearest-neighbor is certainly closer than μ and we can fathom the right subtree . thus, the vantage-point tree data structure allows us to exclude records from examination and we achieve super-linear search time. as shown by yianilos, the average-case querying time scales as o when the data is low-dimensional  <cit> . we have found that we achieve good performance if the dimension of the data loaded into the vp-tree is less than  <dig> and the query time is roughly two orders of magnitude faster than brute force for a dimension of  <dig> .
+fig.  <dig> vantage-point tree structure allows search algorithm to fathom subtrees. given we have already found a record at distance τ from the query node q and we are at vantage point p with a right subtree containing records further than μ from p and a left subtree with records closer than μ. a if d≥τ+μ, then the nearest-neighbor is not closer than μ and we can fathom the left subtree containing records closer than μ. b if d+τ≤μ, then the nearest-neighbor is certainly closer than μ and we can fathom the right subtree
+
+
+
+the search algorithm can be written as a recursive depth-first search algorithm as described previously  <cit> . the algorithm holds the node of the nearest neighbor in the global variable best and is initialized with τ← <dig>  if d <μ+τ, only the left subtree is traversed and if d >μ−τ then only the right subtree is traversed. if μ−τ≤d≥μ+τ then both subtrees are traversed.
+
+
+
+vantage point tree structures support any distance metric that satisfies the triangle inequality, but the optimal distance function is not yet known. for simplicity, gemini currently uses the euclidean distance between samples after principal component transformation.
+
+however, weighted distance functions utilizing genomic knowledge could better facilitate a particular search. for example, for a cancer dataset, one could limit the genes compared to known oncogenes, thereby finding which sample showed the most similar oncogenic profile to the query. this search should be more sensitive to small changes in particular genes, and and therefore result in less statistical noise, though we do not attempt to prove this in this paper.
+
+RESULTS
+comparison with brute-force and kd-tree methods
+we compare the vp-tree-based nearest neighbor search to a kd-tree and brute-force approach in fig.  <dig>  we focus exclusively on the speed of the methods since all three algorithms implement the nearest neighbor search algorithm and must return the same list of nearest-neighbor results. the brute force algorithm simply compares the query to every record in the database. as expected, the brute force approach scales linearly in the size of the database. the tree structure methods scale as the log of the size of the database due to the ability of the search algorithm to exclude distant samples from consideration based on their position in the vp-tree.
+fig.  <dig> timing comparison of gemini and other search methods. the search time in milliseconds is shown for a typical query in databases ranging in size from  <dig> samples to  <dig>  samples. the plot compares the vp-tree , kd-tree  and brute force  methods. the brute force search time scales linearly with the size of the database, while gemini search time scales as the log of the size of the database
+
+
+
+though both of the tree-based algorithms scale similarly with the log of the database size in the average case for low-dimensional data, they differ in their construction algorithms. kd-trees use non-leaf nodes to divide the dataset using a hyperplanes whose normal vector is equivalent to one of the dimensions of the data. splits continue recursively until the number of instances in each node is smaller than some threshold. yianilos showed that query time for both the kd-tree and vp-tree scales exponentially with the dimension of the data set . therefore, for both methods, it is important to perform some form of dimensionality reduction prior to storing the data in the data structure.
+
+both kd-tree and vp-tree are constructed in o, but kd-trees use a sliding midpoint median implementation, while the vp-tree uses a standard linear time median-finding algorithm. other trees achieve similar complexity and differ in the use of split heuristics and amount of reinsertion during construction.
+
+search in cancer genome atlas database
+we tested gemini on a database of gene expression data from the cancer genome atlas  comprised of  <dig> ovarian  and  <dig> breast cancer  samples. first, we projected the probe-level data onto the first  <dig> principal components to reduce the dimensionality of the data from  <dig>  features. the choice of  <dig> was selected due to diminishing returns on the retained variance in the data associated with each subsequent dimension. using the brca and ov dataset, the first  <dig> dimensions preserved  <dig> % of the variance in the data, while  <dig> dimensions preserved just  <dig> % and  <dig> more were required to achieve  <dig> %. a plot of the first two principal components for the brca and ov samples is shown in fig.  <dig>  clearly, the two cancer types differ in their gene expression patterns and cluster. however, there are two ovarian samples that do not cluster with the rest. one falls within a group of brca samples and the other falls outside of either cluster.
+fig.  <dig> differential gene expression for ovarian  and breast  cancer samples from tcga.  principal component analysis is used to project the  <dig>  dimension gene expression data to two dimensions for visualization. the ovarian samples and breast samples clearly cluster. one ovarian sample  has an expression pattern similar to breast cancer samples and one  shows an expression pattern outside of both the ovarian and breast clusters. representative breast  and ovarian  samples are circled.  a boxplot of all non-zero pairwise distances in the joint breast and ovarian cancer data sets. the nearest neighbors for the four queries are shown as symbols in the legend. we find that the nearest neighbors all fall closer than the lower quartile of all of the distances
+
+
+
+we tested gemini using four queries against the database of combined ov and brca samples. the four queries  are:  a prototypical brca sample,  a prototypical ov sample,  a brca-like ov sample, and  an outlier ov sample. the prototypical ov and brca sample is the nearest euclidean neighbor to the average ov and brca expression respectively. the top  <dig> hits by similarity to the prototypical ov sample are all ov samples and the top  <dig> hits for the prototypical brca are all brca samples as expected . the brca-like ov sample  has  <dig> brca samples and  <dig> ov samples in the top  <dig> hits. this result indicates that the brca-like ov gene-expression pattern has similarity to samples from both brca and ov. the ov outlier, surprisingly, shows the most similarity to  <dig> brca samples.
+fig.  <dig> gemini heat map results showing  <dig> nearest neighbors to the query  for four samples. four query profiles were used to search for nearest-neighbor profiles in a database containing both ovarian and breast cancer samples. the nearest neighbors of the prototypical breast cancer profile are all breast cancer samples and the nearest neighbors of the prototypical ovarian cancer profile are all ovarian cancer samples as expected. the ovarian cancer sample that falls in the breast cancer cluster is nearest neighbors with both ovarian and breast cancer samples. the ovarian cancer outlier has all breast cancer samples as nearest neighbors indicating that the differential gene expression patterns for that sample most closely resemble breast cancer
+
+
+
+there may be many reasons for the similarity of one gene-expression profile to another. there could be batch effects or other forms of confounding that suggest biological similarity when the true reason is technical artifact. furthermore, one cannot rule out random expression noise as a cause for similarity based on the results of one query. validation through experimental means would be required to support true biological similarity. the purpose of gemini, instead, is simply to quickly return the nearest-neighbors to a query profile from a large database.
+
+discussion
+gemini forms the basis of an open-source platform for machine learning optimization of search result relevance in genomic data repositories. by observing the click-through behavior of an individual or group of users, the platform may learn and re-rank results based on individualized probabilistic assessments of relevance.
+
+this search engine fits in the context of a large database of profiles that are centrally located as well as with distributed databases. while it may be impossible to store all of the public genomic data in one repository, autonomous software that crawls the web identifying genomic data resources can temporarily store the profile long enough to identify the insertion location in the tree. only the url of the root source of the data would then be needed in the vp-tree. then, if the record is identified as a near-neighbor, the profile can be retrieved on-demand.
+
+our capability to generate genomic data is outpacing our capability to analyze and re-use that data. a fast, accurate search engine for genomic data may enable researchers to make discoveries using community-collected data more effectively. gemini uses a vp-tree to enable us to make effective use of the massive genomic data repositories.
+
+CONCLUSIONS
+current genomic data search engines use text-based queries to search for numerical  genomic data profiles. but this paradigm represents a mismatch between the subject and object of the query. our genomic data search engine, gemini, matches the query and database record forms and leverages a vp-tree data structure to find the nearest-neighbor records in a gene-expression database with a focus on search speed.
+
+availability and requirements
+we have implemented gemini as a python module, a standalone command-line program and as a website. our code extends an implementation of the vp-tree originally written by huy nguyen whose code is available  <cit> . paul harrison’s code was also very helpful for our implementation  <cit> . the kd-tree was implemented using a scipy library written by anne archibald  <cit> . usage documentation for the python module is provided with the source code.
+
+the standalone command-line program has two sub-commands: build and search. the build sub-command takes a hdf <dig> format file with three datasets: “sample”, “feature”, “data” and returns a pickled vp-tree data structure. the source data contains sample names in “sample”, genomic features names  in “features” and the data matrix  in “data”. the search sub-command loads the vp-tree structure created in the build step and a hdf <dig> file in the same format as the source data except with a single column for the “data” vector as the query. gemini prints the top k matches in the source data matrix where k is  <dig> by default but can be modified in command-line options.
+
+the web interface at genomics.wpi.edu/gemini has only one entry box for the user to specify the query hdf <dig> or csv file. the vp-tree is built off-line and loaded using a separate administrative tool and associated with a specific query page for the data source. this design choice provides a robust and simple interface and minimizes the user-effort to search. after submitting the query, the user is directed to a results page that shows a heatmap representation of the top  <dig> matches to the query.
+
+project name: geminiproject home page:http://genomics.wpi.edu/geminioperating system: platform independentother requirements: python modules listed in requirements.txt on version control site . none for website.license: creative commons attribution  <dig>  international
+
+additional file
+additional file  <dig> 
+supplementary information. 
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+pf, td, and hs implemented the algorithm and website. pf conceived of the project and hs, and td performed the experiments. pf, hs, and td contributed to writing the manuscript. all authors read and approved the final manuscript.

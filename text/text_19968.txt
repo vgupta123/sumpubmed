@@ -1,0 +1,260 @@
+BACKGROUND
+techniques for the reconstruction of biological networks, such as genetic, metabolic or signaling networks, are used for getting insight into the inner mechanisms of the cell. they are usually based on perturbation experiments, e.g., gene knockouts or knockdowns, in which one or more network nodes  are systematically perturbed and the effects on the other nodes are observed. more concretely, in the context of genetic regulatory networks with knockout experiments, the nodes of the networks are genes. each gene is knocked out at least once and the expressions of the other genes are measured for each knockout experiment. the expression change with regard to the unperturbed wild type defines the influence of the knocked out gene on the other genes. based on that, connections between the genes can be established. using the difference in the expression between the perturbed and the wild type, weights and signs can be associated with the connections to quantify the influence and indicate over- and under-expression, respectively.
+
+an important problem in this kind of network reconstruction is that direct connections between genes might be established that are spurious, i.e., do not exist in reality. we illustrate this with the following example. suppose that the transcription factor a, produced by gene a, is needed to activate gene b. the activation of b results in the production of transcription factor b which is encoded by b. let b on its turn activate gene c, which is manifested by the production of the corresponding protein c. also, assume that genes b and c cannot be activated by any other gene/transcription factor. now, if we disable gene a, for instance by deleting it from the genome, the production of transcription factor a is prevented and as a result b and c will not be produced. thus, our measurement of the expression of genes a, b, and c will show that a directly influences both b and c. in the reconstructed networks we prefer to directly relate two nodes only if there is a direct influence between them. so, a direct connection between a and c, resulting from the transitive influence via b, would be obsolete, and the process of removing such indirect influences is called transitive reduction   <cit> .
+
+there are several ways to remove spurious direct relations depending on the representation of the biological networks. for instance, in  <cit>  this is done by comparing the measured influence strength between the direct and indirect interactions, i.e., an interaction chains that do not contain the direct interaction. the direct interaction is removed if it is weaker than the last edge of the indirect one. similarly, in the genetic networks inference tool aracne the method of data processing inequality is used to remove indirect interactions  <cit> . this method works for undirected networks. for each triple of genes their pairwise interactions are checked. the one with the lowest score is assumed to be a result of an indirect interaction of the other two. other approaches to remove obsolete interactions can be found in  <cit> .
+
+using tr for filtering out spurious connections was proposed by wagner  <cit> . the rule is to remove the direct interaction for each gene pair g and g′, if there is an alternative chain of interactions between g and g′. going back to our example above, tr would mean that the undesired edge between a and c, caused by the indirect interaction, is removed from the network.
+
+the first algorithms for tr date from the seventies  <cit>  and there are several other relevant publications on this subject  <cit> . in all previous works on tr the networks were represented as directed graphs without weights on the edges. however, in the network inference algorithms interaction strengths between genes usually play an important role. motivated by this fact, the concept of tr of weighted graphs was introduced  <cit> , where the weights correspond to interaction strengths. both these papers take interaction signs  into account.
+
+in  <cit>  several types of tr are described depending on how individual edge weights are extended to paths to quantify the indirect interactions. one of the variants of tr coincides with the definition that we employ in this paper. however, the interaction strength along paths, which is actually used in  <cit> , is defined quite differently from ours. also, they do not use thresholds in their definitions.
+
+with regard to the definition of transitive closure for weighted graphs and the general theoretical background, the closest to our work is  <cit> . their work is also motivated by a biological application, in particular, the analysis of protein-protein interaction networks. the authors define the notion of transitive closure of weighted graphs, but stop short of introducing tr. originally, we were inspired by their ideas about the transitive measure of interaction along a path in the network.
+
+unlike the previous work in  <cit> , we adopt an approach that disregards the interaction signs. a benefit of this decision is that the tr algorithms are of polynomial complexity and amenable to parallelisation. in contrast, the algorithm in  <cit>  is in the worst case np-complete, which means that its runtime grows exponentially with the size of the networks. tests with the dream challenges  <cit>  show that the omission of signs does not incur any degradation in overall performance compared to the signed weighted tr of  <cit> .
+
+we present parallel versions of the tr algorithms for both unweighted and weighted directed graphs. these algorithms are developed for general purpose graphics processing units . gpus have been extensively used for various applications, including bioinformatics and systems biology. since gpus are standard in modern computers, parallel algorithms become an attractive possibility to speed up computations.
+
+the crucial idea of tr on gpus is to formulate the algorithm in terms of matrix operations. since gpus are very efficient in implementing the latter, this results in a remarkable speed-up so that networks consisting of tens of thousands of nodes can be handled within seconds on a standard desktop computer.
+
+parallel algorithms for computing transitive closure of a graph, which is closely related to tr, have been developed before e.g.,  <cit> . however, the only work that we could find that deals explicitly with parallel algorithms for tr is  <cit> . their algorithms are restricted to unweighted graphs and claim efficiency for the special case of sparse graphs. to the best of our knowledge, there does not exist a previous implementation of a tr algorithm on gpus and thus, our work is novel in that sense, too.
+
+approach for unweighted graphs
+we adopt a graph-theoretic framework to formally represent biological networks. a directed graphg= is a pair of sets of nodesv and edgese⊆v×v, i.e., an edge e∈e is an ordered pair of nodes ∈v×v. without loss of generality, we identify v with an arbitrary but fixed order represented by the set of numbers n–={ <dig> ,…,n}, where n is the number of nodes in v. for example, in genetic networks, we associate the nodes with genes and the edges with interactions between genes. more formally, a gene i is connected to a gene j via an edge e= if and only if i influences j. the graph can be equivalently represented by an adjacency matrixa. for standard graphs which do not have weights associated with the edges, the elements ai,j of the matrix have value  <dig>  if there is an edge from nodes i to node j or  <dig>  otherwise.
+
+a path from node i to node j is a sequence pij=, where k0=i, km=j and ∈e, for 0<l≤m. nodes kl, where 1≤l≤m− <dig>  are called intermediate nodes. a cycle is a path pij whose first and last node coincide, i.e., i=j. a cycle that consists of one edge is called a self-loop. a graph is acyclic if it does not contain any cycles. we denote the set of edges of pijwith edges. let paths and paths denote the sets of all paths in the graph g and all paths from i to j, respectively.
+
+definition  <dig> 
+the transitive closure of a graph g is the graph gt= with ∈etif and only if there exists a path from i to j in g. the transitive reduction of an acyclic graphg is the unique  <cit>  smallest graph gt=, i.e., with the least number of edges, such that t=gt.
+
+intuitively, this means that the transitive closure is preserved by the reduction, i.e., no information about reachability is lost. for an acyclic graph g it can be shown  <cit>  that the tr gt can be obtained by removing each redundant edge ∈efrom the original graph g for which there is an indirect path, i.e., not including edge , between i and j in g. an example of tr for acyclic graphs is given in figure  <dig>  
+
+the definition of tr can be extended in a natural way to graphs with cycles. however, the reduced graphs are not unique and in general cannot be generated by deleting edges from the graph . to solve this, aho, garey and ullman  <cit>  shrink the strongly connected components of the graph to single nodes and apply tr on the resulting acyclic graph. after the reduction, we expand the components as they were in the original graph, as is done in  <cit> . 
+
+extension to weighted graphs
+we aim at modelling experiments that use node perturbations, e.g., gene knockouts, for the reconstruction of interactions between nodes. we already saw in the example above that spurious direct interactions are added if there exist an indirect path between two genes. hence, the outcome of the experiments actually produces a transitive closure of the real  network. by applying tr as a kind of inverse operation of the transitive closure, we try to cancel these side effects by removing direct interactions between two nodes, if there is an alternative indirect path between them. finding the tr amounts to reconstruction of the network as by removing those direct interactions we usually obtain a good approximation of the real network.
+
+however, sometimes both direct and indirect interactions can exist at the same time. examples of this are the feed-forward loops that occur in the genetic networks of many organisms  <cit> . unfortunately, in such cases, the tr as defined above will still remove the direct interaction. to avoid this anomaly, we use the notion of tr on weighted graphs where the weights represent interaction uncertainties. knowing the interaction uncertainty allows to refine the edge removal criterion: an edge  is removed from the original graph only if it is less certain than some indirect interaction between i and j. in other words, if an edge is at least as certain as all indirect interactions, then it is kept in the graph.
+
+the interaction uncertainties are represented as weights of the edges. formally, we associate to a directed graph g= a function w:e→r, which maps each edge to a real number, to obtain a weighted directed graphg=. the adjacency matrixa becomes a matrix of weights where the special value ⊤>maxe∈e{w} denotes the absence of an edge between two nodes. there are several plausible ways to choose the weight function w. in this paper we assume that the weights are p-values or similar measures, i.e., of the interval  <cit> , which are obtained from the post-processing of the perturbation experiments. thus, the smaller the weight w, the less uncertain is the interaction between two genes.
+
+definition  <dig>  transitive interaction uncertainty)
+transitive interaction uncertainty along a path is defined as a function w:paths→r that maps each path to a real number. we apply the principle of the weakest link and define w=maxe∈edges{w} for a path p. then, for a given edge ∈e we define the minimal transitive interaction uncertaintyh:e→r as the strongest weakest link, i.e., the minimal transitive path uncertainty over all paths between nodes i and j: 
+
+ h=minp∈paths{w}=minp∈pathsmaxe∈edges{w}. 
+
+note that if edge ∈e, then ∈paths. this implies directly that h≤w. recall that the criterion for preserving an edge in the reduced graph is that its uncertainty is not greater than the minimal uncertainty of the indirect paths, i.e., w≤h.
+
+by putting the last two inequalities together, we can refine the edge preservation criterion to w=h and obtain the following definition:
+
+definition  <dig> 
+the transitive reduction of a weighted graph  g= is the graph gt= with et={e∈e∣w=h} and wt=w for all e∈et.
+
+informally, edge  is kept in et if and only if its weight/uncertainty equals the minimal transitive uncertainty of all paths between i and j. the edge weights remain the same in the reduced graph. it is worth noting that the above definition of tr for weighted graphs supports the presence of cycles. an example of tr for weighted graphs is given in figure  <dig> 
+
+of course, there are other possible options to define the path weights based on the edge weights. for instance, summing up the edge weights to obtain the weight of the path is in some cases even a more natural choice than the max-min  approach that we use. however, in the case when p-values  are used, this is not the best option. summing up the p-values of all edges in the path can produce a result which is greater than  <dig>  i.e., something which is not a probability. since a trivial path consisting of only one edge is also a path, it is preferable to have a weight for non-trivial paths that is of the same nature as the edge weight.
+
+in general, the refined notion of tr with weights does not entirely resolve the anomaly of removing a direct interaction which exists in the network. one way to further improve the filtering of the edges is to use thresholds. we introduce a lower thresholdtlow determining that any edge e with w≤tlow is unconditionally kept in et, i.e., regardless of the existence of more certain indirect interactions. in this way we ensure that interactions which are measured with high certainty are not removed from the network. similarly, we use an upper thresholdtup such that any edge e with w≥tup is unconditionally removed from the network. hence, very uncertain connections are always removed from the original graph g. this filtering with threshold tupis actually independent of the tr concept and it can be done as a pre- or post-processing step.
+
+this can be shown by reasoning towards a contradiction. assume that thresholding  and tr are dependent, in other words, that the final result depends on the order in which th and tr are performed. say we have a graph g for which this holds. then, there must be at least one edge e from a node v to a node v′ which is not present in either th or tht, but it is in the other. let it not be present in th tis similar). then, either it was removed by tr , or by th . case 1: if e was removed by tr, there must exist a path p in g between v and v′ with w<w. the assumption was that e is still present in tht. therefore, we must have w<tup. but then, also w<tup, in other words, p must exist in th. the existence of p in th means that e must be removed from th when applying tr, leading to a contradiction. case 2: if e was removed by th, then w>=tup. but then, it would also be removed when applying th on g, leading to a contradiction.
+
+using a threshold tlowsplits the edge weights into two sets. within the sets the difference between values does not play any role. for instance, assuming tlow =  <dig> , the difference between the edge weights  <dig>  and  <dig>  is the same as between  <dig>  and  <dig> . an analogous remark holds also for tup.
+
+for many graph problems, the unweighted problem is often a special case of a more general weighted problem. for example, an algorithm to determine shortest paths in a weighted graph can be used to find shortest paths in unweighted graphs by assigning the same positive weight to every edge. for our problem of  tr, a similar analogy does not hold, i.e., we cannot use the algorithm for weighted cyclic graphs to calculate the tr of an unweighted cyclic graph. this fact results from the different natures of our definitions: for the weighted case, we choose the greatest weight on a path without considering its length. for the unweighted case, however, we will be adding up the edges of paths to obtain their length . the first approach is not affected by cycles – the transitive interaction uncertainty of a path with cycles is always greater or equal to the one for the same path with all cycles removed, thus, cycles are ignored “automatically” when searching a path with the minimal transitive interaction uncertainty. in contrast, for the second approach, cycles must be actively detected to ensure that only paths in which no node occurs more than once are considered . figure  <dig> illustrates this with the path  which has a length greater than one but still there is no indirect alternative path from a to c. for a similar reason, our algorithm for cyclic weighted graphs cannot be adapted to cyclic signed weighted graphs. the problems with cycles in signed graphs are discussed in  <cit> . 
+
+implementation
+after briefly discussing the emergence of many-core processors and the resulting need for parallelisation of programs, this section presents our parallelised algorithms for transitive reduction: first, for unweighted acyclic graphs and afterwards the extension to weighted cyclic graphs. finally, we discuss the problems with cycles in unweighted graphs.
+
+nvidiacuda gpus
+although moore’s law <cit> , stating that the number of transistors per chip doubles roughly every  <dig> months, still holds, the clock frequency of the processors does not increase exponentially anymore. thus, to keep improving the processor performance, the manufacturers turned to processors with multiple cores. in particular, general purpose graphics processing units  are an example of massively parallel many-core systems available in desktop computers for an affordable price. however, to benefit from these many cores, programs have to be redesigned for the new architectures.
+
+the compute unified device architecture   <cit>  is nvidia’s c-based approach to program gpus. sequential parts, including input and output operations, are executed “as usual” on the host cpu while parallel parts are executed on the gpu device by calling a special kind of functions, called kernels. the body of a kernel is executed by a configurable number of threads, each having its own id. the id determines the data, e.g., part of a matrix in memory, which is processed by the thread. as the gpu device has no access to the host’s main memory, the required data needs to be copied explicitly between them.
+
+algorithm for unweighted acyclic graphs
+for obtaining the tr of an unweighted acyclic graph g, typically its transitive closure gt would be calculated first. then, in a second step, all edges e=∈e would be removed if there exists a node k, k≠iand k≠j, such that ∈et and ∈et, i.e., there exists an alternative path  from i to j in g and, since the graph is acyclic, not using e. consequently, e is redundant because of the alternative path. the second step is necessary since the transitive closure adds new shortcuts but does not identify shortcuts already existing in g. instead of just calculating the transitive closure, we determine the length of the longest path connecting every pair of nodes , i≠j. this can be done efficiently using a variant of the floyd-warshall algorithm  <cit>  since the graph is acyclic. afterwards, we delete all direct edges ∈efor which a path from i to j of length at least two exists. obviously, for this condition the considered lengths can be bounded to two as it does not matter whether the alternative path is exactly of length two or longer.
+
+algorithm  <dig> gives a pseudo-code description of our approach. first, the integer-valued adjacency matrix a is loaded on the host and copied to the gpu; this copy is called b . afterwards, in the nested for-loops in lines 3– <dig>  the length of the longest path for all pairs of nodes is calculated by a parallel version of the floyd-warshall algorithm. whenever there is a path of length at least one from i to k, i.e., bi,k≥ <dig>  and one from k to j, i.e., bk,j≥ <dig>  this gives a path from i to j of length at least two. since we are interested only in the existence of an indirect path and not in its actual length, we limit the length of the longest paths to two. therefore, bi,j is set to two, denoting that there exists an indirect path between i and j. the last parallel for-loop deletes all edges ∈v×v for which such a detour exists, i.e., bi,j= <dig>  by setting bi,j:= <dig> . finally, the transitively reduced matrix b is copied from the gpu to a on the host which stores it to a file.
+
+algorithm 1
+pseudo-code description of parallelised transitive reduction of unweighted acyclic graphsrequires: adjacency matrix a
+
+1: read a from input file
+
+2: copy a from host to b on gpu
+
+3: fork= <dig> …,ndo sequentially
+
+4: 
+
+for∈n–×n–do in parallel
+
+5: 
+
+ifbi,k≥ <dig> and bk,j≥1then
+
+6: 
+
+bi,j:=2
+
+7: for∈n–×n–do in parallel
+
+8: 
+
+ifbi,j=2then
+
+9: 
+
+bi,j:=0
+
+10: copy b from gpu to a on host
+
+11: write a to output file
+
+in the cuda implementation, the parallel do-loop over ∈n–×n– is realized by starting n2threads of a kernel containing the loop’s body. thus, according to its thread id, each thread executes the loop’s body for one particular ∈n–×n–. in contrast, the sequential do-loop is performed “as usual” by the main program on the cpu.
+
+complexity
+the algorithm iterates n +  <dig> times over the n2elements of the matrix: n times in lines 3– <dig> and finally once in lines 7– <dig>  however, different steps of the same iteration can run in parallel on different processors. thus, the overall time complexity depending on the number of processors p is: on+1∗n2p. the pram model assumes an arbitrary large number of available processors – in particular we can assume p≥n <dig>  in this model, the time complexity becomes o linear in the number of nodes. for the sequential case, i.e., p= <dig>  we have time complexity o as for the floyd-warshall algorithm. similarly, the space  complexity is o.
+
+correctness
+we claim that the output matrix is the tr of the input and prove this for the sequential version, i.e., with sequential execution of the parallel loops, first, before considering the specifics of parallelisation. thereby we can rely on two things: the correctness of the floyd-warshall algorithm  and the fact that the tr of an unweighted acyclic directed graph can be constructed by successively removing redundant edges from the graph in any arbitrary order . it remains to show that our algorithm deletes exactly these redundant edges. an edge  is deleted if bi,j= <dig> holds before lines 7– <dig>  i.e., there exists a path from i to j of length at least two. since the graph is acyclic, this means that an indirect path from i to j without the direct edge  exists. thus, the edge  is redundant and can be deleted. on the other hand, if an edge  is redundant, an indirect path from i to j without the edge  exists. this path must have length at least two. consequently, we have bi,j= <dig> and the edge will be deleted.
+
+for the correctness of the parallelised algorithm, we have to show that the steps performed in parallel are independent and do not interfere. for the parallel do-loop in lines 7– <dig> this is obvious as each iteration reads from and writes to its individual memory location. analogously, all iterations of the inner loop of the floyd-warshall algorithm in lines 4– <dig> write to different memory locations. furthermore, it cannot happen that for a fixed k <dig> the elements bi <dig> k <dig> and bk <dig> j <dig> read in the iteration for  were already changed by the iterations for  and , respectively, since both check bk <dig> k0≥ <dig> which is never true since the graph is acyclic. the outer loop cannot be parallelised as it is crucial for the correctness of the floyd-warshall algorithm that all calculations of the kth iteration are completed before the thiteration starts.
+
+algorithm for weighted  graphs
+in order to obtain the tr of a weighted graph, according to the definition in section “background”, all edges ∈efor which an alternative path from i to j with a better transitive interaction uncertainty, i.e., h<w, exists have to be removed. consequently, the core of our algorithm is the calculation of the minimal transitive interaction uncertainties h for every pair of nodes ∈v <dig>  again, we use a variant of the floyd-warshall algorithm whose pseudo-code description can be found in lines 3– <dig> of algorithm  <dig>  the matrix b is initialised with the original adjacency matrix , i.e., bi,j=w, if ∈e, otherwise bi,j=⊤. then, for increasing k= <dig> …,nall paths between each pair of nodes are successively considered that use only  <dig> …,k as intermediate nodes. the idea behind this is as follows: let bi,j, bi,k, and bk,jcontain the minimal transitive interaction uncertainty of all paths that go from i to j, from i to k, and from k to j, respectively, and that use only intermediate nodes up to k− <dig>  then, the minimal transitive interaction uncertainty of all paths from i to j that use intermediate nodes up to and including k is the maximum of the minimal transitive interaction uncertainties of the path segment from i to k and from k to j . if this value is smaller than the minimal transitive interaction uncertainty calculated so far, bi,j is updated to it . figure  <dig> illustrates this principle. in the last step of the floyd-warshall algorithm, all paths with intermediate nodes up to n, which are in fact all paths, are considered. after this, the edges ∈e fulfilling the removal condition can be deleted by setting bi,j:=⊤  and the reduced matrix can be copied to and stored by the host 
+
+algorithm  <dig> 
+pseudo-code description of parallelised transitive reduction of weighted, potentially cyclic, graphsrequires: adjacency matrix a, thresholds tlowand tup
+
+1: read a from input file
+
+2: copy a from host to b on gpu
+
+3: fork= <dig> …, ndo sequentially
+
+4: 
+
+for∈n–×n–do in parallel
+
+5: 
+
+viak:=max,|bk,j||
+
+6: 
+
+if  and viak<|bi,j|then
+
+7: 
+
+bi,j:=−viak
+
+8: for∈n–×n–do in parallel
+
+9: 
+
+ifisnegative or bi,j≥tupthen
+
+10: 
+
+bi,j: = t
+
+11: copy b from gpu to a on host
+
+12: write a to output file
+
+however, two things are slightly more involved in the presented pseudo-code: first, to save memory, we use just one matrix b on the gpu for the whole computation. the problem is that if a path from i to j with a smaller transitive interaction uncertainty than the interaction uncertainty of the direct edge  is found, the original value in bi,jis overwritten. thus, some necessary information to check the removal condition h<w is lost on the gpu. yet, if this situation arises we already know that the edge  is to be deleted and we use the sign bit to indicate that. consequently, instead of checking the original removal condition, we check for negative values in b and delete the corresponding edges in the post processing step . note that it is not possible to remove such edges  directly during the floyd-warshall algorithm since the absolute values for bi,jmight be needed for later iterations. if, for example, in the second iteration  in figure  <dig>  case , the edge 3→ <dig>  was directly removed and not replaced by 3→ <dig> , the algorithm could not find in the next iteration  that 1→ <dig> → <dig>  has a better  interaction uncertainty, namely  <dig> , than the direct edge 1→ <dig> .
+
+the second aspect in the pseudo-code is the incorporation of thresholding. the upper threshold tup is applied in line  <dig> , ensuring that all edges with this or a bigger weight are always deleted. due to the one-matrix representation, the lower threshold tlowcannot be applied in this post processing fashion. instead, every edge with this or a lower weight is skipped in line  <dig>  so that its original weight is preserved in bi,j.
+
+time complexity
+the same as for algorithm  <dig> 
+
+correctness
+we claim that the output of our algorithm is the thresholded weighted tr of the provided input, i.e., that in the end bi,j=w, for ∈et, and otherwise bi,j=⊤ holds. again, we prove the correctness of the sequential algorithm first, before we argue about the issues that come up with its parallelisation. furthermore, we rely on the correctness of the floyd-warshall algorithm, i.e., that it correctly determines for each pair of nodes the minimum of the maximal weights of all paths between them.
+
+first, we show that all edges which are not inetare deleted fromb . initially, every matrix element bi,j is non-negative. if a matrix element bi,jis changed for the first time by the floyd-warshall algorithm, then a negative value  is written to it. this can happen only in two cases: i) for the edge ∈e that is not forced to be kept by the lower threshold, i.e., w>tlow, a path via some node k with a smaller transitive interaction uncertainty is found. thus, this edge is to be deleted to obtain the tr. ii) a path from i to j via some node k was found and ∉e, i.e., no direct edge exists in the input graph. of course, this edge must not be in the tr. although the absolute value might change in later iterations if an even better path is found, once bi,j becomes negative it stays negative. consequently, in both cases, these edges will be removed in line  <dig>  note that for non-existing edges ∉e for which no path from i to j could be found the value of bi,jstays ⊤ during the whole algorithm. finally, the post processing removes all of the remaining edges ∈e that are excluded from the tr by the upper threshold, i.e., w≥tup, as for them the condition bi,j≥tupholds.
+
+one might wonder whether the protection of edges by the lower threshold affects the correctness of the floyd-warshall algorithm. consider, for example, the situation depicted in figure  <dig> and assume tlow= <dig> : the edge b→ <dig> c is preserved although the better path b→ <dig> a→ <dig> c exists. consequently, for the direct edge d→c the best alternative path p=d→ <dig> b→ <dig> a→ <dig> cwith w= <dig>  is not found but only p′=d→ <dig> b→ <dig> c with w= <dig> . nevertheless, that still leads to a correct final result: if w≤tlow, e.g.,  <dig> , this edge is not removed even though the better alternative path p exists, since it is protected by the lower threshold. in contrast, if w>tlow, e.g.,  <dig> , this edge is not protected by the lower threshold and should be removed. this indeed happens since the path found  is better.
+
+it remains to show, that the edges that are inetand their weights are preserved inb : as reasoned above, the matrix entry bi,jfor an edge ∈e is changed only if a better path can be found and the edge is not protected by the lower threshold. conversely, it stays unchanged and thus still holds the values w for all edges ∈efor which no better path exists or that are protected by the lower threshold.
+
+finally, we have to argue that the parallelisation of the algorithm does not break its correctness. for the post processing in lines 8– <dig> this is definitely the case since every iteration reads only from and writes only to its individual memory location bi,j. as already discussed for the algorithm for unweighted acyclic graphs, it is crucial that the outer loop  of the floyd-warshall algorithm over k is executed sequentially. the inner loop  however can be parallelised since for a fixed k <dig> of the outer loop every iteration  writes only to its own memory location bi <dig> j <dig> and reads only the values from bi <dig> k <dig> and bk <dig> j <dig> which are not changed throughout the whole k0th outer iteration. the values of bi <dig> k <dig> and bk <dig> j <dig> would be changed only if maxbi <dig> k <dig> bk <dig> k0<bi <dig> k <dig> or maxbk <dig> k <dig> bk <dig> j0<bi <dig> k <dig>  respectively, holds. however, max<rnever holds for any r∈r.
+
+RESULTS
+we implemented our unweighted and weighted transitive reduction  algorithms in the tools cutter-u and cutter-w, respectively. we performed two sets of experiments with these tools which were aimed at showing their scalability as well as their competitiveness and quality with regard to similar techniques.
+
+scalability experiments with syntren generated graphs
+in this set of experiments we used networks of various sizes , with and without weights, as inputs for the tr algorithms. the unweighted networks were generated using the directed scale free graph algorithm  <cit>  and the erdős-rényi algorithm  <cit> . to obtain the weighted graphs from them, the networks were simulated using the tool syntren <cit> a. using moderated t-test, the p-values for the interactions between each node pair were generated and used as edge weights.
+
+the goal of this set of experiments was to test the scalability of cutter-w and cutter-u. we were interested in the speed-ups achieved by the parallel versions of our tr algorithms with regard to various sequential counterparts. all these experiments have been performed on  a personal computer with a  <dig>  ghz intel core i <dig> cpu  <dig>  and  <dig> gb ram, running ubuntu  <dig> . for the parallel executions, we used cuda  <dig>  and nvidia driver version  <dig>  with an nvidiageforce gtx  <dig> graphics card with  <dig>  gb vram and  <dig> streaming multi-processor cores, each running at  <dig>  ghz.
+
+for each graph size, we considered both acyclic unweighted and cyclic weighted graphs. we tested five implementations of tr algorithms. on acyclic unweighted graphs we applied wagner’s algorithm  <cit> , the sequential and the parallel implementations of cutter-u. for the weighted cyclic graphs we compared the sequential and parallel implementations of cutter-w.
+
+the results of the algorithms are summarized in tables  <dig> and  <dig>  for the graphs of size  <dig>  and  <dig>  we considered five different graphs, whereas for the size  <dig>  we used one scale-free graphb. for each graph the absolute runtimes were measured five times. the results for all runs on all graphs of the same size and type were very similar  and the averages are shown in tables  <dig> and  <dig>  in each table, the first three rows correspond to wagner’s algorithm, the sequential cutter-u, and the parallel cutter-u, respectively. the last three rows give the relative speed-ups. one can see that the speed-ups increase with the graph size. for instance, for a weighted scale-free graph of  <dig>  nodes, the parallel implementation is  <dig> times faster than the sequential one, which makes a difference between one and a half hours versus two minutes of reconstruction time.
+
+w = wagner’s algorithm, str = sequential cutter, ptr = parallel cutter, na = not applicable . the first block shows the absolute runtimes and the second gives the relative speed-ups.
+
+w = wagner’s algorithm, str = sequential cutter, ptr = parallel cutter, na = not applicable . the first block shows the absolute runtimes and the second gives the relative speed-ups.
+
+it is important to note that the structure and the density of an input graph has no significant effect on the performance of the tr algorithms. this can be concluded when comparing the results in tables  <dig> and  <dig>  additional experiments that we performed with dense erdős-rényi graphs further confirm thisc. in the case of dense erdős-rényi graphs the average runtimes for the weighted graphs of size  <dig> and  <dig> nodes are  <dig>  and  <dig> , which are comparable with their counterparts in table  <dig>  for the weighted graphs, this is not surprising, since each pair of nodes has a p-value assigned to it . this means that for, e.g., a graph g with  <dig>  nodes, the tr algorithms have to process  <dig> , <dig> p-values, no matter what the edge density of g is. thus, one can conclude that cutter-w never requires significantly more than two minutes to reduce a graph of that size .
+
+quality experiments with the dream  <dig> benchmark
+in recent years, the dialogue of reverse engineering assessments and methods   <cit>  challenge on in silico generated networks reconstruction has become an important benchmark. we tested cutter-w, which implements our tr algorithm for weighted graphs, using the fourth challenge . the first goal of this set of experiments was to test the performance of cutter-w compared to other state-of-the-art tools which had participated in the dream  <dig> competition. therefore, we compare cutter-w with cutter-u as well as with transwesd <cit> , a tool which is also based on transitive reduction of weighted graphs. since, besides the parallelisation, the main difference between cutter-w and transwesd is that the latter takes interaction signs into account, it was important to see how disregarding them affects the quality of the reduction in our approach. our second goal was to investigate to which extent using interaction signs and the weights contributes to the reduction quality.
+
+in our evaluation with the dream suite we repeated the tests which were applied to transwesd in  <cit> . in this way we wanted to ensure maximally fair comparison between the tools. thus, we tested cutter-w for the data set of the insilico_size_ <dig> subchallenge which can be downloaded from  <cit> . the data set consists of five networks of  <dig> nodes which are parts of real networks from e.coli and yeast. noisy measurements representing steady state mrna expression levels are generated in silico using gennet weaver <cit> . we used only the data from the simulated knockout and knockdown experiments, ignoring the time series data. the original networks  are known.  this makes the evaluation of the results much more objective than in the case of real networks, for which usually there is no consensus among the experts. to simulate the conditions of the real competition we tuned the parameters for cutter-w  based on the results obtained with the dream  <dig> challenge – in the same way like this was done for transwesd in  <cit> .
+
+the network reconstruction was done in two steps, described in more detail in  <cit> . in the first step, the so-called perturbation graph is produced. in the second step, a  tr is applied on the graph to remove spurious edges. for all three reduction tools, cutter-u, transwesd, and cutter-w we used as input the perturbation graphs produced by the first step of transwesd. the edge weights were generated as conditional correlations from the knockout and knockdown data as in  <cit> . to generate those graphs we used the matlab programs which were kindly provided by the authors of transwesd. in the case of cutter-u we simply disregarded both the weights and the signs in the perturbation graphs. besides that, before applying cutter-u, the possibly cyclic perturbation graph was transformed into an acyclic graph, whose nodes are strongly connected components, as described in section “background”.
+
+the output files representing the reconstructed graphs were evaluated using the corresponding matlab scripts provided by the dream  <dig> challenge. the output files were formed by dividing the edges in three classes. the first class contains the accepted edges, the second, the edges accepted by the first step, but rejected in the second  step, and the third one, the edges rejected already in the first step, i.e., already in the production of the perturbation graph. each class is sorted based on the weights.
+
+in the transwesd tests in  <cit>  the output files were composed by using only two classes of edges. the accepted edges after the second step were followed by the rejected ones. the edges within the same class were sorted in descending order according to their weights, like in our output files described above.
+
+the results of our experiments are given in table  <dig>  for each of the five networks we give the results 1) without tr for the generated raw perturbation graphs, 2) with cutter-u, 3) with tr using transwesd and 4) with cutter-w. the results with transwesd are slightly different from the ones in  <cit> . this is due to a minor improvement in transwesd as well as to the above mentioned different manner for producing the output files which were evaluated by the dream  <dig> challenge. 
+
+tp = true positives, tn = true negatives, fp = false positives, fn = false negatives. auroc = area under the receiver-operator characteristics curve and aupr = area under the precision-recall curve are computed by the dream  <dig> evaluation scripts.
+
+aupr  and auroc  are quite standard scoring metrics for binary classifiers, computed using the tp , tn , fp , and fn . for the definitions and a more detailed discussion on the scoring metrics for the dream challenges see  <cit> . in all cases there is a clear gain from the weighted tr compared to the input perturbation graph. tr removes a significant number of false positives at the price of just a few false negatives. cutter-w has on average 6% better aupr than the perturbation graph. also there is a clear improvement in the results with the weighted graphs compared to cutter-u. besides the significantly smaller number of false positives, cutter-w has on average 7% better aupr than cutter-u with aurocs being almost the same. the results of cutter-w and transwesd are quite similar. cutter-w consistently generates significantly smaller number of false positives, which is compensated by transwesd with more true positives, except for network  <dig> 
+
+the overall dream  <dig> score is calculated as log10p1×p <dig>  where p1and p <dig> are the overall paupr and pauroc values, respectively. the latter are obtained as geometric means of the individual paupr and pauroc values of each of the five networks. intuitively, the paupr and pauroc are p-values that indicate how much our results, and in particular aupr and auroc, are better than randomly chosen networks. some of these intermediate parameters were not included in the table, since they are summarized in the overall score. for the definitions of all of the above mentioned parameters see  <cit> . the overall dream  <dig> score for cutter-w is  <dig> , for transwesd it is  <dig>  and for the unreduced perturbation graphs, however, it is only  <dig> . with that we would have been ranked third behind the two best teams who had participated in the dream  <dig> challenge at the time, with the scores  <dig>  and  <dig> , respectively. considering that cutter-w uses only part of the available data, i.e., only knockout and knockdown expression levels, this is quite an encouraging result. the improvement with regard to transwesd is marginal. however, our intention was to show that disregarding the interaction signs, as we do in cutter-w in practice does not result in loss of quality compared to transwesd.
+
+the results with cutter-w can be even further improved by combining the methods of  <cit> . when generating the perturbation graph we use both knockout and knockdown data and the same parameters as for transwesd. however, in the statistics we use instead of the wild type the average expression, like in  <cit> . for the transitive reduction step we generate the weights as before with transwesd. as a result, we achieve the overall dream  <dig> score  <dig> , which is better than the above mentioned winning performance.
+
+at first sight, the fact that by omitting the signs there is virtually no loss of quality of reconstruction can be paradoxical. however, in many cases the relative loss of information by the omission of the edge signs is compensated by the lower threshold tlow in the tr algorithm. we illustrate this with the following example. consider a subnetwork of three nodes a, b, and c. let there be a direct positive edge between a and b and an indirect negative influence path consisting of a negative edge between a and c and a positive edge between c and b. being of opposite sign, the indirect influence via c does not explain . nevertheless, an unsigned algorithm without a lower threshold will still remove edge . however, one can assume that the direct influence between a and b will result in a strong original weight  on the edge . this will prevent an unsigned algorithm with a lower threshold to remove the edge.
+
+CONCLUSIONS
+we presented parallel versions of algorithms for transitive reduction  to reconstruct perturbation networks. the main improvement of our algorithms compared to the existing methods is the speed-up and scalability without loss of reconstruction quality. moreover, our algorithms are applicable to both weighted and unweighted networks. the gain of the tr is significant since it mostly removes spurious direct interactions, which are overlooked by the first filtering step that produces the so-called perturbation graph.
+
+we implemented our algorithms in the tool cutter. compared to similar approaches, like transwesd, cutter provides the same reconstruction quality, as measured by the dream challenge benchmark. this is achieved despite the fact that we do not use signs of network interactions . the gain of this simplification is that our method can be efficiently parallelised, hence reconstruction is much faster and scalable. the algorithm in transwesd is np-complete, whereas our algorithms have a polynomial time complexity o, where n is the number of nodes. this will be of utmost importance in the future when reconstruction methods will have to deal with whole genome knockouts or “hybrid” networks of genes, proteins and signaling molecules, i.e., with networks containing tens or even hundreds of thousands of nodes.
+
+since the tr algorithms depend on the threshold, fine tuning of this parameter might require several experiments. the advantage of obtaining the results within seconds or in the worst case minutes, instead of hours, can be very significant. currently, it takes less than a couple of minutes to process with cutter-w weighted graphs of  <dig>  nodes and potentially  <dig> million edges.
+
+our weighted tr algorithm is independent of the nature of weights. therefore, instead of correlations which were used for the transwesd perturbation graphs, one can use p-values or other statistical estimates of the interaction strengths. also, it might be interesting to explore alternative definitions of path weights. for example, the max operator, which was crucial in the definition of the path weight, can be replaced by any associative operator, like addition or multiplication.
+
+finally, although our approach is already quite effective despite its simplicity, it is worth considering combining it with other reconstruction methods.
+
+availability and requirements
+● project name:cutter
+
+● project home page:http://www.win.tue.nl/emcmc/cutter
+
+● operating system: linux, mac os, windows
+
+● programming language: c, cuda
+
+● other requirements: cuda
+
+● license: none
+
+● any restrictions to use by non-academics: none
+
+endnotes
+aa special version of syntren, kindly provided by its authors, was used that allows simulation of single gene perturbation experiments. for more information see  <cit> .bthe reason for this is that, unfortunately, generating graphs of size  <dig>  with syntren is very time and resource consuming.cthese additional experimental results can be obtained at  <cit> .
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+db, wl, and ph conceived the project. db came up with the idea to use gpus for tr. all authors contributed to the theoretical part of the paper. db, mo, and aw drafted the manuscript. mo and aw implemented the tr algorithms, performed the experiments and evaluated them. wl, aw, mo and db implemented part of the support programs. all authors read and approved the final manuscript.
+

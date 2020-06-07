@@ -1,0 +1,178 @@
+BACKGROUND
+oligonucleotide microarrays allow biomedical researchers to estimate the expression of thousands of genes simultaneously through their mrna transcripts. a labelled, fragmented version of the rna may be hybridised onto an array containing hundreds of thousands of complementary oligonucleotides and then scanned. affymetrix 3' genechip arrays represent genes by sets of probe pairs, each of which consists of an oligonucleotide of length  <dig> which matches a corresponding rna subsequence perfectly  and an identical probe with an inverted oligonucleotide on position  <dig>  that is intended to measure non-specific hybridisation.
+
+the bgx model  <cit>  is an integrated approach to the analysis of genechip microarrays in which correction for non-specific hybridisation and gene expression level estimation are performed simultaneously. posterior distributions of parameters in the model may be obtained numerically. based on these distributions, a powerful method for detecting differential expression has been developed  <cit> .
+
+the probes on affymetrix genechips have been found to exhibit varying propensities to "shine" according to the base composition of their sequences  <cit>  and methods for estimating expression levels from genechips that incorporate probe affinity effects have shown demonstrable advances over methods in which these effects are ignored . we present a new bioconductor  <cit>  package that implements the bgx model, includes an extension to incorporate probe affinity effects, employs novel algorithmic techniques to sample effectively from posterior distributions, and provides various analysis and plotting functions.
+
+implementation
+basic model
+bgx  <cit>  explicitly models probe intensities as arising partly from specific hybridisation, s , and partly from non-specific hybridisation, h, with only a fraction, φ, of the signal occuring at a pm probe also occurring at the corresponding mm probe. the ss and hs are gene , probe , condition  and replicate  specific, and the intensities are assumed to be affected by an additive array-specific noise:
+
+ pmgjcr~n,
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagaeeiuaalaeeyta00aasbaasqaaiabdeganjabdqgaqjabdogajjabdkhaybqabagccqgg+bgfcqwgobgtcqggoaakcqwgtbwudawgaawcbagaem4zacmaemoaaomaem4yammaemocaihabeaakiabgucariabdieainaabaaaleaacqwgnbwzcqwgqbgacqwgjbwycqwgybgcaeqaaogaeiilawcccigae8hxdq3aa0baasqaaiabdogajjabdkhaybqaaiabikdayaaakiabcmcapiabcycasaaa@4e51@ 
+
+ mmgjcr~n.
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagaeeyta0kaeeyta00aasbaasqaaiabdeganjabdqgaqjabdogajjabdkhaybqabagccqgg+bgfcqwgobgtcqggoaakiigacqwfgpgzcqwgtbwudawgaawcbagaem4zacmaemoaaomaem4yammaemocaihabeaakiabgucariabdieainaabaaaleaacqwgnbwzcqwgqbgacqwgjbwycqwgybgcaeqaaogaeiilawiae8hxdq3aa0baasqaaiabdogajjabdkhaybqaaiabikdayaaakiabcmcapiabc6cauaaa@5003@ 
+
+the log-transformed signal parameter, log, is assumed to follow a gene and condition specific distribution, while the log-transformed non-specific hybridisation term, log, is assumed to arise from an array-specific distribution:
+
+ log⁡~tn,
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagagiibawmaei4ba8maei4zacmaeiikagiaem4uam1aasbaasqaaiabdeganjabdqgaqjabdogajjabdkhaybqabagccqghrawkcqaixaqmcqggpaqkcqgg+bgfcqwgubavcqwgobgtcqggoaakiigacqwf8oqbdawgaawcbagaem4zacmaem4yamgabeaakiabcycasiab=n8aznaadaaaleaacqwgnbwzcqwgjbwyaeaacqaiyagmaagccqggpaqkcqggsaalaaa@4c0a@ 
+
+ log⁡~tn,
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagagiibawmaei4ba8maei4zacmaeiikagiaemisag0aasbaasqaaiabdeganjabdqgaqjabdogajjabdkhaybqabagccqghrawkcqaixaqmcqggpaqkcqgg+bgfcqwgubavcqwgobgtcqggoaakiigacqwf7oabdawgaawcbagaem4yammaemocaihabeaakiabcycasiab=d7aonaadaaaleaacqwgjbwycqwgybgcaeaacqaiyagmaagccqggpaqkcqggsaalaaa@4c07@ 
+
+where tn denotes the truncated normal distribution, truncated to the positive axis. the central parameter of equation , μgc, acts as the bgx expression measure, and equations  to  represent the basic bgx model.
+
+the core of the model is implemented in the c++ programming language for efficiency and uses mcmc to sample from the full posterior distributions of each parameter. parameters are estimated using gibbs sampling where possible  and a random walk metropolis-hastings algorithm elsewhere . three c++ class templates are used to instantiate zero, one and two-dimensional mcmc update objects for each parameter according to the dimensionality of the corresponding suffixes. each of the instantiated objects is updated in sequence using references to all other necessary parameters during a burn-in period, which is discarded, and a sampling period, which is used for the posterior distributions.
+
+probe affinity extension
+it has been observed that the propensity of probes to hybridise to mrna is affected by their base composition  <cit> . in particular, probes with a high number of cytosine bases have a high propensity to hybridise while probes with a high number of adenine bases exhibit the opposite tendency. moreover, the nearer the bases are to the centre of the oligonucleotide, the greater the effect. we account for this in an extension to the core model that incorporate affnity effects in the modelling of non-specific hybridisation. we categorise probes in the following way: let α be a function which, for each gene and probe pair, , gives the affnity category of a given probe: α :  → { <dig>  ..., k} . we refine equation  by allowing for a category and array specific distribution of the non-specific hybridisation parameter:
+
+ log⁡~tn,ηcr2).
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagagiibawmaei4ba8maei4zacmaeiikagiaemisag0aasbaasqaaiabdeganjabdqgaqjabdogajjabdkhaybqabagccqghrawkcqaixaqmcqggpaqkcqgg+bgfcqwgubavcqwgobgtcqggoaakiigacqwf7oabdaqhaawcbagaem4yammaemocaihabagae8xsdemaeiikagiaem4zacmaeiilawiaemoaaomaeiykakcaaogaeiilawiae83tdg2aa0baasqaaiabdogajjabdkhaybqaaiabikdayaaakiabcmcapiabc6cauaaa@52ec@ 
+
+the extended model, which we denote gcbgx, is based on equations , ,  and .
+
+the probes on the arrays are, prior to analysis, grouped into a number of probe affinity categories. this is done by:  calculating the probe affinities using the gcrma bioconductor package  <cit> ,  rounding them to the first decimal place,  assigning each value to a preliminary probe affinity category and  ensuring that the final categories contain a sufficient number of probes by collapsing small preliminary categories together. we enumerate the resulting probe affinity categories  <dig>  ... , k by increasing affinity. once categorised, the affinity-specific parameters are estimated from the data, simultaneously with all other parameters.
+
+in some cases, affymetrix do not directly provide the sequences for all probesets due to licensing restrictions and, consequently, there are bioconductor probe packages that do not contain complete sequence information. for example, hgu95aprobe  lacks sequences for probes belonging to  <dig> probesets. we tackled this problem by treating α as a random variable, taking values from  <dig> to k, with prior probability equal to the observed frequency of the categories, pk=nkn
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagaemicaa3aasbaasqaaiabdugarbqabagccqgh9aqpjuagdawcaaqaaiabd6eaonaabaaabagaem4aasgabeaaaeaacqwgobgtaaaaaa@343f@, where nk is the number of probes in category k and n=∑k=1knk
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagaemota4kaeyypa0zaaabmaeaacqwgobgtdawgaawcbagaem4aasgabeaaaeaacqwgrbwacqgh9aqpcqaixaqmaeaacqwglbwsa0gaeyyeiuoaaaa@3719@.
+
+adaptive mcmc
+the full conditional distributions of s, h, μ, σ, λ and η are updated by drawing new values from a proposal distribution, typically a random walk  gaussian proposal centred on the current value with a chosen variance. a typical experiment consists of several hundred thousand probes, resulting in potentially millions of s and h components and tens of thousands of μ and σ components. each component of a given parameter has a different support and consequently a different optimal rw proposal variance. using a fixed variance for all components results in excessively low or high acceptance ratios for a large proportion of components, leading to highly autocorrelated chains.
+
+in order to tackle this problem, we implemented the novel adaptive metropolis-within-gibbs algorithm recently proposed by roberts and rosenthal  <cit> . we used a unique proposal variance for each object, which adapts to its optimal value after successive batches of  <dig> iterations. the aim is to achieve an acceptance ratio of around  <dig> , which has been shown to be optimal for one-dimensional proposals in certain settings  <cit> , and is commonly accepted as being a sensible benchmark. an acceptance rate that is close to zero implies inefficient mixing, while an acceptance rate that is close to one implies the probability space is not efficiently explored. the algorithm proceeds as follows:
+
+• for each component c of parameter p, assign a parameter-specific starting value to the corresponding proposal variance, σcp2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbaaccigae83wdm3aa0baasqaaiabdogajjabdchawbqaaiabikdayaaaaaa@3174@
+
+• choose a sequence δ  →  <dig>  we chose δ  = min
+
+• start the mcmc simulation
+
+• after the nth batch of  <dig> iterations, calculate the acceptance ratio over the last batch
+
+• if the acceptance ratio is less than the optimal value of  <dig> , increase log by δ , else decrease it by δ 
+
+the algorithm preserves ergodicity as long as each kernel has the right stationary distribution; the total variation distance between successive kernels tends to zero in probability; and the convergence time of each kernel is bounded in probability  <cit> .
+
+r package
+the c++ component of bgx is compiled as a shared object which is loaded and executed automatically from within the r package  <cit> . bgx integrates standard bioconductor classes such as affybatch to store raw microarray data and expressionset to store processed gene expression measures. users interested in running bgx programmatically from a shell script, for instance, or in a more memory-efficient manner, also have the choice to run a standalone binary version of the program.
+
+RESULTS
+usage
+the bgx package and its dependencies, affy and gcrma, may be installed automatically from the bioconductor repository from an r shell. the package contains documentation and executable examples in a "vignette" file available using openvignette(). users who wish to compile bgx from source will require the boost c++ libraries  <cit>  and the hgu95av2cdf bioconductor package. the core functionality of the package is contained in the bgx function, which takes an affybatch object instantiated from one or more genechip cel files as its first argument and returns an expressionset object containing expression values for each gene and condition:
+
+adata <- readaffy
+
+eset <- bgx
+
+assaydata$exprs # returns expression values
+
+assaydata$se.exprs # returns standard errors for expression values
+
+optional arguments include samplesets, which specifies the experimental design; genes, which specifies a subset of genes to analyse; burnin and iter, which specify the number of iterations for the burn-in and post burn-in phases of the algorithm respectively; probeaff, which specifies whether or not to use the probe affinity extension to the original bgx model, and adaptive, which specifies whether or not to use metropolis-within-gibbs step adaptation. full documentation for the bgx function is available by running help.
+
+although the point measures returned in the expressionset object are useful, the distinctive power of the bgx method is that it provides samples from the full posterior distributions of the expression parameter, μgc. these samples are, by default, saved in directories named run. <dig>  run. <dig>  etc. in r's current working directory, although this may be overridden with the rundir argument. they may be read into r in order to analyse the results of a simulation as follows:
+
+bgxoutput <- readoutput.bgx
+
+the bgxoutput object is assigned to a list containing values from the full posterior distributions of μgc , their expected values  and the gene names . this object can be passed to a number of functions to analyse the results. in particular, this object provides a direct measure of the variance of gene expression, a quantity which is only sometimes available when fitting robust linear models . the difference in expression between two conditions, μg <dig> - μg <dig>  may be visualised with the plotexpressiondensity and plotdedensity functions . plotdehistogram fits a spline to the histogram of p using poisson regression, estimates the null distribution by spline fitting of the central part of the histogram, and uses the difference between the histogram fit and the null distribution to give a preliminary estimate of the number of differentially expressed genes   <cit> . a more thorough approach to the problem of classifying genes by differential expression may be found in the bgmix bioconductor package — an implementation of a fully bayesian mixture model for differential expression – which can analyse bgx output directly . rankbyde returns a matrix that ranks genes by their standardised bgx differences between two conditions ) and specifies each gene's name, index and differential expression measure. more information on each function is available via help.
+
+for the purposes of this paper, bgx was run with the "gold standard" of  <dig> k burn-in iterations and  <dig> k sampling iterations. however, the recommended  <dig> k burn-in iterations and  <dig> k sampling iterations are sufficient to provide good estimates of μg . under these settings, bgx takes approximately one hour per array on a standard 64-bit  <dig> ghz computer. analyses of up to  <dig> arrays ought to "fit" in a computer equipped with  <dig> gb of memory. however, bgx may be run separately for each condition, and the output subsequently combined in r by passing multiple output directories to the readoutput.bgx function. since φ, the only parameter that is shared between conditions, is very stable for a given type of array, the impact on the output of running bgx separately on each condition is negligible.
+
+estimation of non-specific hybridisation
+the gcbgx model groups mm probes into categories that have similar probe affinities based on their oligonucleotide content. instead of using a single array-specific parameter, λcr ), we associate an appropriate λcrα
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbaaccigae83udw2aa0baasqaaiabdogajjabdkhaybqaaiab=f7ahjabcicaoiabdeganjabcycasiabdqgaqjabcmcapaaaaaa@3757@ component with each probe ), which should correlate positively with probe affinity categories. figure  <dig> shows a colour-coded density plot of the λcrα
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbaaccigae83udw2aa0baasqaaiabdogajjabdkhaybqaaiab=f7ahjabcicaoiabdeganjabcycasiabdqgaqjabcmcapaaaaaa@3757@ parameter obtained in an analysis of the golden spike data  <cit> . as probe affinity categories increase, the distributions shift from left to right. the black density line corresponds to the λcr distribution in the original bgx model and highlights the discriminatory power of the probe affinity extension.
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbaaccigae83udw2aa0baasqaaiabdogajjabdkhaybqaaiab=f7ahjabcicaoiabdeganjabcycasiabdqgaqjabcmcapaaaaaa@3757@ parameter of an analysis of the golden spike data set. as probe affinity categories increase, the distributions shift from left to right. the black density line is the λcr distribution from the original bgx model and illustrates the discriminatory power of the probe affinity extension.
+
+probes with unknown sequences have their affinity categories estimated from the data. in order to check the effectiveness of this approach, we performed cross-validation on one out of every  <dig> genes from the golden spike data set, and compared the median estimated category to its true value. figure  <dig> shows a positive correlation between estimated and true categories, particularly for high-affinity probes.
+
+performance of adaptive mcmc
+bgx is a computationally intensive program and it is therefore desirable to use an mcmc algorithm that mixes efficiently. one quantity of interest in this respect is the integrated autocorrelation time , which inflates the variance of the sample mean, x¯
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagafmiwaglbaebaaaa@2d24@ <cit> . to be precise, the variance of the sample mean may be expressed as follows  <cit> :
+
+ var=e⋅n−1)−1
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbaacbigae8ndaynae8xyaemae8ncainaeiikagiafmiwaglbaebacqggpaqkcqgh9aqpcqwgfbqrdawadaqcfayaamaalaaabagaem4uam1aawbaaeqabagaegomaidaaiabcicaoiabdifayjabcmcapaqaaiabd6gaubaaaogaay5waiaaw2faaiabgwsixnqbaoaalaaabagaemoba4maeyoei0iaegymaedabagaeiikagiaemoba4maei4la8iaemyyaemaeiikagiaemiwaglaeiykakiaeiykakiaeyoei0iaegymaedaaaaa@4ed0@ 
+
+where x is an autocorrelated sample of size n with empirical mean x¯
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagafmiwaglbaebaaaa@2d24@, s2=1n−1∑i2
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagaem4uam1aawbaasqabeaacqaiyagmaagccqggoaakcqwgybawcqggpaqkcqgh9aqpjuagdawcaaqaaiabigdaxaqaaiabd6gaujabgkhitiabigdaxaaakmaaqababagaeiikagiaemiwag1aasbaasqaaiabdmgapbqabagccqghsislcuwgybawgaqeaiabcmcapmaacaaaleqabagaegomaidaaaqaaiabdmgapbqab0gaeyyeiuoaaaa@4202@, and a is the integrated autocorrelation time , defined as
+
+ a=
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagaemyyaemaeiikagiaemiwaglaeiykakiaeyypa0zaamwaaeaacqaixaqmcqghrawkcqaiyagmdaaewbqaamaabmaabagaegymaejaeyoei0scfa4aasaaaeaacqwgqbgaaeaacqwgubgbaaaakiaawicacaglpaaacqwgqbaudawgaawcbagaemoaaogabeaaaeaacqwgqbgacqgh9aqpcqaixaqmaeaacqwgubgbcqghsislcqaixaqma0gaeyyeiuoaaogaay5waiaaw2faaaaa@486b@ 
+
+where
+
+ pj=covvarvar.
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagaemiuaa1aasbaasqaaiabdqgaqbqabagccqgh9aqpjuagdawcaaqaaiabdogajjabd+gavjabdaha2jabcicaoiabdifaynaabaaabagaemyaakgabeaacqggsaalcqwgybawdawgaaqaaiabdmgapjabgucariabdqgaqbqabagaeiykakcabawaaoaaaeaacqwg2bgdcqwghbqycqwgybgccqggoaakcqwgybawdawgaaqaaiabdmgapbqabagaeiykakiaemodaynaemyyaemaemocainaeiikagiaemiwag1aasbaaeaacqwgpbqacqghrawkcqwgqbgaaeqaaiabcmcapaqabaaaaogaeiola4caaa@534c@ 
+
+evidently, if the sample is not autocorrelated, then pj =  <dig> for all j, a collapses to  <dig> and var becomes equal to the familiar expression for an iid sample, e . from , the iact of a chain relates positively with the variability of its mean, and thus highly autocorrelated chains lead to poor estimates of our gene expression measure.
+
+one way of improving our estimates is to increase the number of iterations while maintaining a fixed subsample size. this translates to subsamples being further apart on the original chain and therefore less correlated. it is faster and more attractive, however, to use an adaptive algorithm that explores the probability space more efficiently. using the golden spike data set  <cit>  for our investigation, we found that the adaptive method led to a range of optimal proposal magnitudes for the metropolis-hastings parameters. figure  <dig> illustrates this with a histogram of the optimal log variance for s proposals on one array and the original fixed step size overlaid in black. figure  <dig>  shows a dramatic reduction in the iact of the s parameters and a milder improvement on the μg parameters of expressed genes. a similar improvement was observed for the iact of the h parameters, this time for all genes .
+
+differential expression can be quantified by the standardised bgx differences between two conditions:
+
+ zg=d¯gvar
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbagaemoeao3aasbaasqaaiabdeganbqabagccqgh9aqpdawcaaqaaiqbdsgakzaarawaasbaasqaaiabdeganbqabaaakeaadagcaaqaaiabdaha2jabdggahjabdkhayjabcicaoiqbdsgakzaarawaasbaasqaaiabdeganbqabagccqggpaqkasqabaaaaaaa@3c27@ 
+
+where, from , var is estimated by
+
+ var_=s2n⋅n−1_− <dig> 
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xi8qivkypfjydhavhbbf9v8qqaqfr0xc9vqfj0dxdbba91qpepei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbawaaecaaeaacqwg2bgdcqwghbqycqwgybgccqggoaakcuwgkbazgaqeamaabaaaleaacqwgnbwzaeqaaogaeiykakcacaglcmaacqgh9aqpjuagdawcaaqaaiabdofatnaacaaabeqaaiabikdayaaacqggoaakcqwgkbazdawgaaqaaiabdeganbqabagaeiykakcabagaemoba4gaaogaeyyxicdcfa4aasaaaeaacqwgubgbcqghsislcqaixaqmaeaacqggoaakcqwgubgbcqggvawldaqiaaqaaiabdggahjabcicaoiabdsgaknaabaaabagaem4zacgabeaacqggpaqkaiaawkwaaiabgkhitiabigdaxaaakiabcycasaaa@5225@ 
+
+dg = μg <dig> - μg <dig>  g =  <dig> ..., g, that is, samples from the posterior distribution of the difference in the bgx expression measure for each gene, and a_
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbaqcfa4aaecaaeaacqwghbqycqggoaakcqwgkbazdawgaaqaaiabdeganbqabagaeiykakcacaglcmaaaaa@32e9@, the estimate of the monte carlo standard error, is calculated using sokal's adaptive truncated periodogram estimator . our z-score differs from the measure used in  <cit>  by a factor of _−1)/
+ mathtype@mtef@5@5@+=feaafiart1ev1aaatcvaufkttlearuwrp9mdh5mbpbiqv92aaexatlxbi9gbaebbnrfifhhdyfgasaacpc6xni=xh8vivgi8gi=heeeu0xxdbba9frfj0xb9qqpg0dxdb9aspei8k8fii+fsy=rqgqvepae9pg0db9vqaivgfr0xfr=xfr=xc9adbaqaaegacagaaiaabeqaaeqabiwaaagcbaqcfa4aaoaaaeaacqggoaakcqggoaakcqwgubgbcqggvawldaqiaaqaaiabdggahjabcicaoiabdsgaknaabaaabagaem4zacgabeaacqggpaqkaiaawkwaaiabgkhitiabigdaxiabcmcapiabc+caviabcicaoiabd6gaujabgkhitiabigdaxiabcmcapaqabaaaaa@3f85@, which takes into account the autocorrelation structure of the sequence of values generated by the algorithm. since the adaptive mcmc algorithm has the effect of decreasing a for expressed genes while keeping it approximately constant for non-expressed genes, it leads to an increase in the ranking of expressed genes and consequently in bgx's capacity to detect differential expression.
+
+performance on spike-in datasets
+we illustrate the performance of bgx by presenting detailed results from analyses of arrays from the affymetrix latin square data  <cit>  and the golden spike data set  <cit> .
+
+latin square data
+affymetrix published two data sets for assessing the performance of expression algorithms on their microarrays. the hgu95a data set consists of  <dig> genes spiked in at known concentrations ranging from  <dig> to  <dig> pm and arrayed in a latin square format. we considered  <dig> instead of the original  <dig> genes described by affymetrix because we included two extra spike-ins, 546_at and 33818_at, as reported in  <cit> . we used two replicates and  <dig> unique concentration configurations labelled a to m and q.  <dig> of the probes in this data set had no sequence information and therefore their probe affinity categories were estimated from the data as part of the model. the hgu133a data set consists of  <dig> genes spiked in at known concentrations ranging from  <dig> to  <dig> pm. we considered  <dig> instead of the original  <dig> genes described by affymetrix because we included  <dig> extra spike-ins, as reported in  <cit> . we used all  <dig> replicates for each of the  <dig> concentration groups.
+
+the data from these experiments were analysed using bgx, gcbgx, rma  <cit> , gcrma  <cit>  and mas <dig> , and the average expression for each concentration level was recorded. figure  <dig>  shows a steeper gradient at levels lower than  <dig> pm in the hgu95a data set using gcbgx instead of bgx, pointing to an increased ability to detect concentration changes. for both data sets, bgx and gcbgx are more sensitive to changes within the low range than rma, gcrma or mas <dig> .
+
+golden spike data set
+the golden spike data set consists of six drosgenome <dig> genechips, with three technical replicates from two conditions: c and s. there are  <dig> probe sets in each array representing  <dig> genes.  <dig> of these are expressed equally under both conditions while  <dig> genes are up-regulated in s relative to c. the data is highly valuable for comparing chip analysis methods because it is fully controlled and contains very realistic noise. due to the asymmetry of the spike-ins, a normalisation of the posterior distributions similar to that advocated in  <cit>  was carried out by fitting a loess curve to the ma plot  <cit>  of the posterior mean values of μgc for the non-differentially expressed genes, predicting a curve from the fit for all genes, and subtracting the curve from the posterior distributions of the differences in expression. the rma, gcrma and mas <dig> expression measures were similarly adjusted using loess normalisation at the probeset level instead of the default quantile normalisation at the probe level.
+
+receiver operating characteristic  curves depict the observed false discovery rate vs. the true positive rate as the cut-off of a ranked gene list is varied. figure  <dig>  shows average roc curves for the nine single-array comparisons between condition c and condition s while figure  <dig>  shows roc curves for three-replicate comparisons. gcbgx has a small advantage over bgx and both models perform well. in the single-array comparisons, bgx and gcbgx outperform rma, gcrma and mas <dig> for false discovery rates below 30%. the number of differentially expressed genes  were estimated by running plotdehistogram on the output of the nine comparisons involving one array from condition c versus one array from condition s. the number of genes detected as up-regulated with gcbgx ranged from  <dig> to  <dig>  and for bgx from  <dig> to  <dig> . both methods produced an average true positive rate across the nine comparisons of over 97% for up-regulated genes. in the three-replicate comparisons, bgx and gcbgx outperform rma, gcrma and mas <dig> for false discovery rates below 20%. an analysis of a three-replicate comparison yielded  <dig> and  <dig> degs with  <dig> % and  <dig> % true positive rates using gcbgx and bgx respectively.
+
+CONCLUSIONS
+bgx is a new bioconductor r package for analysing 3' affymetrix genechips. bgx implements a fully integrated bayesian hierarchical model with the option to take into account sequence-dependent probe affinities. bgx uses a novel adaptive mcmc algorithm that improves the efficiency with which the posterior distributions of parameters are sampled from. bgx compares favourably to rma and gcrma at detecting differential expression, particularly at low concentration levels.
+
+availability and requirements
+project name: bgx
+
+project homepage: 
+
+operating systems: platform independent
+
+programming language: c++, r
+
+other requirements: r, bioconductor
+
+license: gnu gpl
+
+any restrictions to use by non-academics: no
+
+authors' contributions
+et implemented and tested the code and developed the adaptive mcmc. akh and sr extended the bgx model to take into account probe affinity effects. nb and et modelled and implemented probe affinity estimation of probes with missing sequences. et, akh, nb and sr provided comments and discussion and wrote the paper. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+varying the number of sampling iterations. plot of mean posterior values of μg obtained using a sampling length of  <dig> k iterations versus those obtained using sampling lengths of  <dig> k,  <dig> k and  <dig> k using an alternative seed for the pseudo random number generator. the values for the  <dig> k and  <dig> k comparisons are shifted upwards for clarity. runs of more than  <dig> k confer a small increase in stability of estimation for non-expressed genes. at  <dig> k, estimates are as stable as between two  <dig> k runs using different seeds.
+
+click here for file
+
+ additional file 2
+r script to reproduce plots. r script to reproduce the plots in this paper.
+
+click here for file
+
+ acknowledgements
+we thank jeffrey s. rosenthal, gareth o. roberts for advice on adaptive metropolis-hastings algorithms, and alex lewin and marta blangiardo for valuable discussion. this work was supported by bbsrc 'exploiting genomics' grant 28egm <dig> and the john and birthe meyer foundation.

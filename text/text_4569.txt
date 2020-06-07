@@ -1,0 +1,226 @@
+BACKGROUND
+in ab initio protein structure predictions  <cit> , it is often the case that a large set of candidates  is generated, and one is required to select a single  best candidate from the set. one criterion for this selection is to choose decoys with more neighbors over decoys with fewer neighbors. the use of this criterion is well justified  <cit> , and there are a few tools which incorporate this strategy  <cit> . in the popular protein structure prediction systems i-tasser  <cit>  and rosetta  <cit> , decoys are selected using the following procedure: starting with the set of generated decoys, a threshold d is first decided. then, from the set, the decoy with the most neighboring decoys within rmsd d from it is found, and is reported as the highest ranking decoy.  this decoy and all of its neighbors  are then removed from the set, after which the decoy with the most neighbors within rmsd d is again found. this decoy is then reported as the second highest ranking decoy, and together with all its neighbors  are removed from the set. similarly the third highest ranking decoy is then found, and so on.
+
+current implementations of this procedure evaluate pairwise rmsd  of the decoys, resulting in runtimes which are at best quadratic in the number of decoys. as the number of decoys grows to the tens of thousands, this method becomes infeasible, necessitating the development of faster methods. in this paper we propose three strategies to speed up the procedure, with no compromise on the clustering performed. that is, the resultant method produces exactly the same clusters that are produced based on pairwise comparison, but only faster. in the first strategy we create auxiliary groups of proximate decoys. this allows us to, through the use of triangular inequality, deduce if a group of decoys is  within the threshold distance from a given decoy. our second strategy is to use efficiently computable lower and upper bounds of the rmsd to preliminary screen out unlikely candidates. thirdly, outlier decoys can be detected and removed prior to the clustering. these strategies are implemented in an open-source tool called calibur.
+
+implementation
+coordinates of the cα atoms on the protein fold backbone are used to represent the main structure of a protein. as distance measure between two protein structures we use the backbone cα-carbon root mean squared deviation . each cα atom corresponds to a point in 3d space. for two protein structures s <dig> =  and s <dig> = , each si, j,  <dig> ≤ i ≤  <dig>   <dig> ≤ j ≤ n, is a 3d point indicating a cα atom in the backbone. the cα rmsd of s <dig> and s <dig> is defined as:  
+
+where ℛ is the set of all rotations and  the set of all translations.
+
+strategy 1: auxiliary grouping of decoys
+to avoid pairwise cα rmsd computation, proximate decoys can be considered collectively, in deciding whether they are within cα rmsd d from a decoy. we illustrate this idea in figure  <dig>  where the input decoys are collected into five groups. when finding all the decoys that are within cα rmsd d from the decoy a , one can first consider each of the five groups as a whole. in this case, all the decoys in the groups  <dig> and  <dig> are within cα rmsd d from a, while all the decoys in the groups  <dig> and  <dig> are further than d from a. no such conclusion can be collectively made about the decoys in group  <dig>  this strategy is made possible by the fact that we can decide if an entire collection of decoys is within cα rmsd d from a decoy a by comparing a to a representative decoy c for the collection. that is, if a is within a certain distance from c, then we conclude that the entire group is within d from x. similarly, no decoy in the group is within d from a if a is further than some distance from c. how this can be done is as follows.
+
+we want a grouping such that each decoy belongs to exactly one group, and is at most cα rmsd r from the group's center . this is done as follows: first a distance r less than d is decided, and an arbitrary decoy is set as a center.  repeatedly we take an ungrouped decoy, and try to find from all current centers for one which it is within distance r from. if and when any such center c is found the decoy is grouped with c and its distance to c is recorded. otherwise the decoy is declared as a new center.
+
+to locate the decoys in a group that are within distance d from a decoy a, one can consider the following five cases :
+
+case 1: a is in the group of c , given that r = .
+
+case 2: cα rmsd + r ≤ d.
+
+case 3: cα rmsd > d + r.
+
+case 4: cα rmsd + cα rmsd ≤ d
+
+case 5: |cα rmsd - cα rmsd| > d
+
+these cases are depicted in figure  <dig>  since cα rmsd is a metric  <cit> , triangular inequality applies. hence in cases  <dig> and  <dig>  all the decoys grouped with c must be within distance d from a. in case  <dig> the converse is true.
+
+in cases  <dig> and  <dig>  we take advantage of the already computed distance from the group's center to each member of the group. again, triangular inequality implies that in case  <dig>  the decoy x is within distance d from a, while in case  <dig> the converse is true. the cα rmsd between x and a is computed if and only if none of the cases applies.
+
+strategy 2: lower and upper bounds to cα rmsd
+given any two decoys x and a, an efficiently computable lower bound of cα rmsd can be used to detect if cα rmsd is larger than a given threshold d. likewise, an upper bound can be used to detect the case where cα rmsd is smaller than d. our strategy is to use multiple such efficiently computable bounds as preliminary checks to reduce the much more expensive cα rmsd computations. we will first propose a few of such upper and lower bounds, and then demonstrate how they are applied. first consider any three decoys, o, x and y. by triangular inequality,  
+
+hence we can efficiently compute an upper and a lower bound to cα rmsd, through an arbitrarily chosen reference decoy o and pre-computed cα rmsd values for each decoy x. in practice, one can use n reference decoys o <dig>  o <dig>  ..., on to obtain n upper bounds and n lower bounds.
+
+the euclidean distance between two decoys, after they are re-orientated to minimize their cα rmsds to a fixed arbitrary decoy, yields another upper bound to their cα rmsd  <cit> . this upper bound distance is referred to as rrmsd.
+
+another lower bound can be obtained as follows. denote the centroid of a protein structure sx as cx. the signature sigx for a protein structure sx =  is defined as:   
+
+where vx, i = ||sx, i - cx||,  <dig> ≤ i ≤ n. define the distance between two signatures sig <dig> and sig <dig>  called signature distance, as:   
+
+the signature distance of two protein structures is a lower bound of their cα rmsd, that is:
+
+lemma  <dig>  cα rmsd ≥ dist
+
+proof. let r and t be the optimal rotation and translation found in computing the cα rmsd of two structures s <dig> and s <dig>  let rk = ||rs <dig>  k - s <dig>  k- t|| <dig>  u <dig>  k = ⟨s <dig>  k, c1⟩ and u <dig>  k = ⟨s <dig>  k, c2⟩,  <dig> ≤ k ≤ n. u <dig>  k and u <dig>  k are line segments with lengths v <dig>  k and v <dig>  k respectively.
+
+it is known that the superposition in computing the cα rmsd of any two structures results in the centroids of the structures to coincide  <cit> .
+
+let θ be the angle between u <dig>  k and u <dig>  k. by trigonometry, . hence, cα rmsd  = .
+
+to decide if a decoy x is within cα rmsd d of a decoy a, we first compute the bounds and examine the following.
+
+• if any of the upper bounds of cα rmsd is smaller than or equal to d. if so, clearly cα rmsd ≤ d.
+
+• if any of the lower bounds of cα rmsd is larger than d. if so, clearly cα rmsd > d.
+
+we compute cα rmsd if and only if these two checks fail.
+
+the upper and lower bounds can also be applied to the conditions in case  <dig> and case  <dig> of strategy  <dig>  as follows.
+
+• in case  <dig>  if any of the upper bounds of cα rmsd is smaller than d - r, then the condition cα rmsd + r ≤ d holds.
+
+• in case  <dig>  if any of the lower bounds of cα rmsd is larger than d + r, then the condition cα rmsd > d + r holds.
+
+we compute cα rmsd for case  <dig> and case  <dig> if and only if these two checks fail.
+
+strategy 3: filtering outlier decoys
+another possible enhancement to performance is to discard decoys with low similarity to other decoys in the set, prior to the clustering. here we propose an efficient technique to quickly identify such decoys. our aim is to retain all of the high ranking decoys, and the decoys which are within distance d from them. we identify these as "good" decoys. assume that every high ranking decoy is within distance d from 10% of all the decoys. for a random sample of n decoys, the probability for a good decoy to be within a distance 2d from at least one of the sampled decoys is  <dig> -  <dig> n, which is >  <dig>  when n =  <dig>  hence decoys that are not within 2d from any one of  <dig> randomly sampled decoys are likely not good, and are removed from the set.
+
+overall program design
+we designed a program based on the three strategies. on a given set s of n input decoys, the program does the following:
+
+step 1: discover a suitable threshold distance d for clustering s.
+
+step 2: filter outlier decoys using  <dig> randomly selected decoys, as in strategy  <dig> 
+
+step 3: create auxiliary groups out of the decoys as required by strategy  <dig>  compute the signature , and the distances  for each decoy x and reference decoy o; rrmsd for each decoy x, y) as required by strategy  <dig> 
+
+step 4: find for each decoy a a neighbor set na which contains all the decoys in s within distance d from a , using strategy  <dig> with the preliminary checks of strategy  <dig>  this is done in a straight-forward fashion as follows.
+
+    <dig>  set na to an empty set.
+
+    <dig>  for each auxiliary group of decoys g ,
+
+       if a is in g, add all decoys in g into na and go for the next auxiliary group.
+
+       examine if cα rmsd + r ≤ d using each of the upperbounds of cα rmsd.
+
+         if true, add all decoys in g into na. go for the next auxiliary group.
+
+       examine if cα rmsd > d + r using each of the lowerbounds of cα rmsd.
+
+         if true, skip g. go for the next auxiliary group.
+
+       compute cα rmsd.
+
+       examine if cα rmsd + r ≤ d.
+
+         if true, add all decoys in g into na. go for the next auxiliary group.
+
+       examine if cα rmsd > d + r. if true, skip g. go for the next auxiliary group.
+
+       for each decoy x in g,
+
+            i. examine if cα rmsd + cα rmsd ≤ d.
+
+               if true, add x into na. go for the next decoy in g.
+
+            ii. examine if |cα rmsd - cα rmsd| > d.
+
+               if true, skip x. go for the next decoy in g.
+
+            iii. examine if cα rmsd ≤ d using each of the upperbounds of cα rmsd.
+
+               if true, add x into na. go for the next decoy in g.
+
+            iv. examine if cα rmsd > d using each of the lowerbounds of cα rmsd.
+
+               if true, skip x. go for the next decoy in g.
+
+            v. compute cα rmsd.
+
+            vi. if cα rmsd ≤ d, add x into na.
+
+    <dig>  output na.
+
+step 5: start with an empty sequence output. repeatedly find a ∈ s with the largest na, appending a to output while removing na from s and all the neighbor sets.
+
+step 6: output the decoys in output. 
+
+the threshold selection in step  <dig> is addressed in the next sub-section.
+
+steps  <dig> and  <dig> are performed straightforwardly.
+
+step  <dig> is performed by repeating the following until s is empty: find the decoy x ∈ s with the largest nx  and append the decoy to output. then, remove nx from s and for each y ∈ nx, remove y from nz for each z ∈ ny.
+
+selection of a suitable threshold
+we consider two decoys to be significantly related if and only if their cα rmsd is relatively small among all pairwise cα rmsds of the decoys. hence our strategy to threshold finding is to identify a value d such that only x percent of pairwise cα rmsd distances are below d, for some suitable x. given x, a straightforward way to determine such a d exactly is to compute all n × n cα rmsds and find the -th shortest distance. alternatively, a reasonable approximation to the x-percentile value can be obtained efficiently using only a relatively small random sample of the decoys. in our tests, around  <dig> samplings of  <dig> decoys each sufficed to determine this value quickly and consistently in general. our program uses this method by default, with x set to min{100n-1/ <dig>  10}. the expression 100n-1/ <dig> is heuristic. it's aim is to reduce the percentile when more decoys are available, in order to speed up the clustering .
+
+a similar strategy would be to use the most frequently occurring cα rmsd among decoys, f say, as a reference to decide a threshold distance d.  as a selectable option the program includes a simple method based on this, in which we let d = cf + b, where c is set to  and b is set to the minimum pairwise distance discovered through random sampling.
+
+memory usage
+in steps 1- <dig> and  <dig>  the memory required is linear in n. for step  <dig>  in the theoretical worst case, |nx| = n for each x, resulting in o memory usage. however, such a scenario is unlikely to occur in the program's intended use. in practical use, |nx| is seldom above  <dig> n, and small for most x. note that in the case that the number of neighbor sets of a given size falls off geometrically with the size, the memory required to store all neighbor sets would in fact be linear in n. in our tests, the actual growth in memory usage is closer to o than o.
+
+if one is interested in only the highest ranked decoy from the clustering, it is unnecessary to construct the neighbor sets, since the sizes of the neighbor sets suffice to determine such a decoy. in this case, the total memory usage would be linear in n. we include this mode of operation as an option.
+
+RESULTS
+our c++ implementation of the program is called calibur. calibur accepts as input a list of names of pdb files  and an optional threshold d. no pre-processing is required of the pdb files. if no threshold is given, calibur automatically finds a suitable threshold for the input decoys, as discussed. the method which calibur uses for threshold discovery can be altered through commandline arguments. a list of all the implemented methods is shown when calibur is called without any input arguments.
+
+effectiveness of strategies
+the effectiveness of each of the strategies was evaluated with decoys predicted by falcon  on the proteins tm <dig> from the arrowsmith lab at university of toronto  and sh <dig> from donaldson's lab at york university . each of these two sets contains  <dig> decoys.
+
+auxiliary grouping, lower and upper bounds
+each of the different cases contributed in reducing the runtime, although the amounts differed at different thresholds . at low thresholds, the chances of decoys being further than the threshold distance are high. hence evaluations via case  <dig> and the lower bounds are more effective. for a similar reason, the effects of evaluations through case  <dig> and the upper bounds become elevated at larger thresholds.
+
+in calibur, the order in which evaluations are performed, as well as the range of thresholds to use for the evaluations has been optimized based on these observations.
+
+filtering
+on the data sets tm <dig> and caskin, filtering did not affect the clusters formed by the highest ranking decoys. their rankings remained the same. this is true even in the cases where more than 70% of decoys had been filtered prior to the clustering. figure  <dig> and  <dig> show, for tm <dig> and caskin respectively, the number of decoys filtered  at various threshold values.
+
+strategies' effects on calibur's performance
+to evaluate the strategies' effects on calibur at various thresholds, the runtimes when the strategies are used  and when they are not used  were compared. for reference purposes, the runtime for rosetta's pairwise evaluation based clustering program  is also shown. rosetta is currently the most popular system for protein structure prediction. all the tests are run on a  <dig> ghz intel core  <dig> duo pc with  <dig>  g ram running centos  <dig> . all three tools are compiled using gcc  <dig> . <dig> with optimization -o. the same codes is used for computing cα rmsd.
+
+all the tools were given input such that the output would be exactly the same. hence we compare only their runtimes. for pairwise and cluster_info_silent, the cpu time is taken to be the total time needed for neighbors finding and the recursive search for largest clusters. for calibur, the cpu time is the sum of the times taken for signature computation, decoys re-orientation, filtering, auxiliary grouping, neighbors finding, and the recursive search for the largest clusters. figure  <dig> shows the results on the data set tm <dig>  the largest sizes of the clusters at the thresholds  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig> are respectively  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig> 
+
+calibur's performance on a large data set
+calibur's performance in handling large numbers of decoys was evaluated using a set of  <dig> decoys for the tm <dig> protein generated by falcon. for each threshold in  <dig> ,  <dig>   <dig> ,  <dig>   <dig>   <dig>   <dig>  we performed  <dig> trial runs over a unix cluster.  all the runs resulted in the same decoy clusters. table  <dig> shows the average cpu times .
+
+numbers in brackets are the sizes of the largest clusters at the corresponding threshold.
+
+ cpu times of  calibur,  calibur with the filtering mechanism disabled , and  pairwise, on a set of  <dig> decoys for the tm <dig> protein. shown with ± standard deviation.
+
+in practice the largest clusters typically contain around 10% of the decoys. in the present case, the largest clusters found at  <dig>  threshold distance already contain more than 18% of all the decoys. at this point, the corresponding cpu time required by calibur is about one third of the time required when the strategies are not used.
+
+as a further reference on calibur's performance in high load use, calibur completed in around  <dig> seconds cpu time under its default settings in our recent tests using  <dig>  decoys.
+
+evaluation of calibur's output decoys
+to evaluate the decoys produced by calibur, we compared them to that obtained using spicker  <cit> , the clustering tool used in the leading ab initio protein structure prediction system i-tasser  <cit> . we used the decoy sets, natives and spicker's results published on i-tasser's website  <cit> , downloaded on the 24th of july,  <dig>  the data consists of decoys for  <dig> targets. the number of decoys for each target is shown in table  <dig> 
+
+the number of decoys for each target.
+
+in order to compare calibur with spicker in terms of both output and speed we ran calibur under the same conditions as spicker. both programs were compiled with optimization -o <dig> and were made to cluster exactly the same set of decoys. filtering was disabled in calibur. we noticed a limit on the number of decoys that spicker handles. when the number of decoys is larger than  <dig>  spicker samples only  <dig> decoys for clustering. to test calibur with the same set of decoys that spicker clusters, we obtained  <dig> decoys from each decoy set that is larger than  <dig>  and tested calibur with these decoys.
+
+when decoys are sampled, they may not be sufficiently representative and the quality of the best decoy obtained may be compromised. to investigate this effect, we randomly sampled  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig> decoys from each of the original sets and ran spicker and calibur with these sampled sets. since only  <dig> decoys are available for 1mkya <dig>  the full set was used as the sampled set at sizes above  <dig> 
+
+all the tests were performed on the same unix cluster as in the previous section. calibur used its default method for automatic threshold distance discovery. table  <dig> shows, at different sample sizes, the average tm-scores and total cα rmsds  for the best decoys reported by both tools, as well as the total cpu times used, as reported by the unix servers. these results are shown as histograms in figures  <dig>   <dig> and  <dig>  detailed results are given in additional file  <dig>  the average tm-score and total cα rmsd reported by both tools are similar, showing the decoys reported by both tools to be comparable. the cpu times required by calibur are significantly less than spicker for sample sizes above  <dig>  even with pdb files processing time included. there is an observable trend of increase in average tm-score as well as decrease in total cα rmsd, with an increase in sample size.
+
+average tm-score and total cα rmsd for the best decoys obtained, as well as the total cpu time used, on the sampled sets of sizes  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>  
+
+for each sample size, we counted the number of targets where the best decoy reported by spicker has a better tm-score than calibur, as well as the number of targets where the best decoy reported by calibur has a better tm-score. these numbers are shown in figure  <dig>  figure  <dig> shows the numbers where instead of the tm-score, the cα rmsd is compared.
+
+further experiment with calibur using more decoys than  <dig> suggests that decoy quality may improve when a fuller set of decoys is used. we randomly sampled  <dig>   <dig>   <dig>   <dig>   <dig> and  <dig> decoys from each of the target sets and ran calibur on these sampled sets. at each of the sample sizes, if the set contains less decoys than the sample size, then the entire set of decoys was used. the results are shown in table  <dig> . the highest average tm-score and total cα rmsd is observed at sample size  <dig>  rank sum test shows the average tm-scores obtained at the sample sizes above  <dig> to be higher than those obtained at sample sizes less than or equal to  <dig> .
+
+average tm-score and total cα rmsd for the best decoys obtained, as well as the total cpu time used, on the sampled sets of maximum sizes  <dig>   <dig>   <dig>   <dig>   <dig> and  <dig> 
+
+CONCLUSIONS
+calibur is a carefully implemented tool, dedicated to the purpose of clustering very large numbers of decoys. as methods in ab initio protein structure prediction advances, the number of decoys to be analyzed is expected to increase, and the disability to cluster decoys efficiently will eventually pose a hindrance to the analyses of various problems and subproblems in the prediction of protein structures. it is our belief that calibur, together with the methods it implements, will come in very useful when this situation arises. for this reason, we have decided to release the source codes of calibur with an open license.
+
+availability and requirements
+• project name: calibur
+
+• project homepage: http://sourceforge.net/projects/calibur/
+
+• operating system: multiple platform 
+
+• programming language: c++.
+
+• other requirements: none.
+
+• license: gnu general public license
+
+authors' contributions
+all authors jointly developed the methods and wrote the article. they read and approved the final manuscript.
+
+supplementary material
+additional file 1
+details of experiments using sample sets of sizes  <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig>   <dig> 
+
+click here for file
+
+ additional file 2
+details of experiments using sample sets of sizes  <dig>   <dig>   <dig>   <dig>   <dig> and  <dig> 
+
+click here for file

@@ -1,0 +1,151 @@
+BACKGROUND
+studying how individual cells spatially and temporally organize within the embryo is a fundamental issue in modern developmental biology to better understand the first stages of embryogenesis. cell dynamics can be analyzed from three-dimensional  images of labeled nuclei. to perform systematic studies and high-throughput analyses, automated methods that quantify nuclei over time and reconstruct cell lineages are required. for tracking purposes, detecting the centers of nuclei can be sufficient. however, for accurate geometrical and morphological analyses, a complete segmentation of nuclei is required. in addition, in cell-cycle studies, accurate classification of nuclei according to their cell-cycle stage is necessary.
+
+for these reasons, many segmentation and/or tracking methods have been developed. bao et al. <cit>  proposed local maxima detection followed by 3d spherical approximation for nuclei segmentation in caenorhabditis elegans. melani et al. <cit>  proposed the identification of nuclei using a spherical hough transformation, and soubies et al. <cit>  extended the procedure to the detection of ellipsoids. segmentation of nuclei by 2d detections using difference of gaussians and 3d reconstruction based on bayesian features was used by santella  <cit> . another algorithm based on a bayesian estimation framework for tracking was proposed by carranza et al., where the nuclei were detected using an h-dome transform  <cit> . multiple level sets and background/foreground detection was proposed by chinta et al. <cit> . most of these algorithms require fine-tuning of many parameters and are often only successful for dedicated applications and using specific acquisition systems or labeling protocols.
+
+for the purpose of automation, a key issue is the objective determination of a correct intensity threshold for image segmentation. due to imperfect imaging conditions and variations of fluorescence intensity with respect to time and depth, a unique global threshold generally fails to correctly detect nuclei. therefore, the use of adaptive local thresholding is necessary to detect nuclei regardless of fluctuations in their intensity. the idea of testing multiple thresholds for each object and then deciding which threshold is the best is not new . matas et al. presented mser , a method where the best threshold is the one that yields to minimal variations of the object surface. keller et al. developed an algorithm based on this same idea to detect nuclei in developing zebrafish embryos imaged with digital scanned light sheet microscopy  <cit> . however, identifying and specifying a priori a suitable threshold selection criterion  is a real challenge and may require the fine-tuning of several parameters.
+
+machine learning can be used to eliminate the need for an explicit threshold selection criterion. in supervised machine learning, samples of known categories are provided as input and the algorithm automatically finds a decision rule that most effectively separates the different classes. arteta  <cit>  uses a support vector machine to detect extremal non-overlapping regions in 2d images. lin  <cit>  proposed to use bayesian models on 2d intensity and geometrical features. in this approach, a first segmentation is suggested and the user validates the correctly segmented objects that will be used for the training. objects are then segmented using a classical watershed approach and the training is used to fuse separated regions.
+
+in the present paper, we introduce a learning-based method to segment nuclei in 3d/4d images of early embryos. this work was developed to compensate for the lack of robust alternatives to segment our working dataset of the c. elegans embryo imaged with a spinning disk confocal microscope. our method distinguishes itself from previous works in three ways. firstly, we propose a segmentation technique that can be applied to different image acquisition conditions and various embryo models. secondly, the number of parameters has been minimized to include just a few biological parameters. lastly, our algorithm segments and classifies nuclei simultaneously, while other approaches first segment and then classify nuclei. specifically, we chose the threshold leading to the object that is most similar to one in a set of training samples.
+
+in this paper, we present the results of applying our novel algorithm to three different datasets containing embryo nuclei from c. elegans, drosophila and 3d simulated data  <cit> . the algorithm has been implemented as an open-source plug-in for imagej  <cit>  and is publicly available for download along with a tutorial and sample data  <cit> .
+
+methods
+the procedure is composed of three steps: filtering to reduce noise, supervised learning of user-selected training samples and, finally, classification-based segmentation of nuclei . the only biological parameters that must be supplied by the user are the approximate volumes of the nuclei for each cell cycle phase at the start and end time points of the dataset.
+
+sample preparation of working dataset
+the c. elegans early embryo dataset was acquired with a spinning-disk confocal microscope. the dataset is composed of a developing embryo from the 4-cell stage to the 90-cell stage with  <dig> time points. the signal consists in histone-gfp expressed in the ovary and transmitted to the future embryo at the time of oocyte formation. at each cell division during embryo development, this maternal load is incorporated into the chromatin of an increasing number of cells, thus leading to a dilution of the fluorescence signal over time.
+
+overview of the method
+the main idea of the algorithm is to use machine learning to improve the segmentation results of cell nuclei. the learning step is an interactive process. the user first selects representative nucleus samples of each cell cycle by clicking on their locations inside the 3d or 4d dataset. the objects at the clicked positions are then segmented through an iterative thresholding procedure using the user-supplied volume estimates as a reference. after that, the user has to validate the proposed segmented nuclei, and 3d descriptors are computed from this set of validated nuclei. a predefined classifier is then trained to assign cell cycle phases to nuclei based on that set and those descriptors. the main joint segmentation/classification procedure is subsequently applied to all time points.
+
+choosing and setting up the classifier
+before setting up the segmentation procedure based on classification, it was necessary to choose and set up a classifier. a first training set of manually-validated nuclei were extracted from the image using the procedure presented in the supervised learning section below. each object was represented by a feature vector of 3d descriptors calculated as described in the following section, and was assigned its corresponding cell cycle phase or class by the user. to find the most suitable learning algorithm, we made experiments across our datasets after dividing our samples into a training and a test set . for this purpose, we used the experimenter of the waikato environment for knowledge analysis  suite  <cit>  and the biocat program  <cit> . we empirically found that a random forest classifier provided the best separation of our samples between the different cell-cycle phases. a random forest is an ensemble learning method based on the decisions of an arbitrary number of random decision trees  <cit> .  <dig> trees were used in our case. the decision trees are simple binary trees in which each node divides the set of samples based on the most differentiating feature at the given tree level. this way, the deeper we go down the tree, the better the samples are differentiated.
+
+pre-processing
+filtering is a common pre-processing step to improve the results of subsequent segmentation by increasing the signal-to-noise ratio in the image. for this purpose, a classical 3d median-filter is used with a variable radius, which is proportional to the radius of the equivalent sphere for a given volume r= <dig>  this classical filter proved useful for noise reduction while preserving edges. intermediate time point volumes are linearly interpolated from the minimum and maximum volumes supplied by the user at the learning step. nuclei are large at early stages, so a large radius can be used to reduce noise and homogenize intensity signals inside the nuclei. adapting the filter size ensures that late stage nuclei, which are smaller, are not removed.
+
+in addition, in order to avoid unnecessarily long computing times when filtering with too large a radius, a limit of r= <dig> is proposed by the plug-in  and performs well in practice. the filtering step is optional and data can be pre-processed with another filtering sequence before segmentation, if appropriate.
+
+supervised learning
+in this preliminary step, classes are created in an interactive manner, and features of nuclei for each class are computed. for this purpose the user manually selects some samples of each class at different time points by clicking on the approximate position of the nucleus sample centers in the 3d or 4d image. a fixed-size box centered on the selected voxel is then cropped, and the extracted sub-volume goes through an iterative thresholding procedure similar to mser. briefly, for each threshold, the volume of the segmented object  is computed and compared to the range of volumes given by the user. once the object falls inside the interval of volumes, it is extracted. the same applies to all selected positions; each sample is therefore thresholded with a different threshold. the user then has to validate correctly segmented nuclei from the set of segmented nucleus samples.
+
+3d shape descriptors
+finding a good set of features for machine-learning classifiers is an important task to obtain accurate classification. we tried to optimize the choice of descriptors so that they can be robustly used in different contexts of acquisition and species. among the 3d descriptors available, we first eliminated intensity-based descriptors since intensity may vary between nuclei and between acquisitions. secondly, we discarded descriptors that are size-dependent such as volumes or surfaces, since nuclei in the same cell-cycle phase  may have variable sizes, ranging from very large at the first time points to very small at the subsequent time points. we therefore focused on ten shape descriptors that are described below.
+
+compactness and sphericity
+these factors describe how far the object is from a perfect sphere. these two descriptors are related and can be estimated from a normalized surface-to-volume ratio. their values vary between  <dig> and  <dig> for a perfect sphere. these parameters are popular for evaluating morphological changes in biological entities  <cit> . 
+
+  compactness=36πv2s <dig> sphericity=c <dig> 
+
+where v is the volume of the object .s is the surface of the object .
+
+ellipsoid fitting
+in order to reduce the sensitivity to surface irregularities that could arbitrarily increase the surface area and decrease the accuracy of the above descriptors, a 3d ellipsoid can be fitted to the object. the fitting of the ellipsoid is performed using the classical moment-based procedure. elongation and flatness are the ratios between the different radii of the fitted 3d ellipsoid. 
+
+  elongation=r1r <dig> flatness=r2r <dig> 
+
+where r <dig>  r <dig> and r <dig> are three radii of the fitted ellipsoid, in decreasing order.
+
+the ratio between the best fitted 3d ellipsoid volume and the actual volume of the object can also give a good idea of how far the object is from an ellipsoid. 
+
+  ratio=43πr1r2r3v 
+
+3d geometric moments
+these six shape descriptors are invariant with respect to change of scale, translation and rotation. they are based on central moments up to the fourth order, and describe the variations of the object from the ellipsoid. they are described in detail in  <cit> .
+
+classification-based segmentation
+after the training, features are extracted from the nuclei that are validated by the user, the main classification-based segmentation is applied. as mentioned above, the procedure is based on an iterative thresholding method. for a given time point, the 3d filtered image is first segmented using a low threshold and all detected objects are extracted. for each detected object, we first check if the volume falls into the interval of volumes for all classes. if the volume of the object is valid, each descriptor value is compared against the minimum and maximum descriptor values for all classes. finally, if and only if the object has a valid volume and descriptor values, it is classified using the trained classifier and the corresponding object information  is saved . since the procedure starts with a low threshold, the whole embryo would be considered as one object, but as a result of this value checking, it will not fall into the interval of accepted volumes and will therefore not be classified, and the next threshold will be used. as the threshold increases, nuclei start to emerge from the embryo. they can be merged as one object for a low threshold, but they will be separated with higher thresholds . with increasing threshold values, objects change in shape and may therefore be classified into different classes. once the thresholding terminates, we obtain a hierarchy of objects that shows the separation of nuclei with increasing thresholds .
+
+in order to find the best threshold in each branch of this hierarchy , we search for the threshold values that stabilize the shape of the object and, therefore, the associated class. more precisely, for each branch, starting from the right , we look for the largest interval with consecutive classification in the same class. the threshold that provides the highest probability for this class is kept. the object in the branch is then reconstructed using the associated threshold.
+
+using a priori biological knowledge
+in our procedure, branches with higher thresholds are favored. this provides good separation of nuclei, even when they are close .
+
+in some cases, like in our c.elegans dataset, some prophase nuclei display very condensed chromosomes that look similar to metaphase nuclei. due to our strategy, whole nuclei will be segmented using low thresholds and classified as prophase. however, for higher thresholds, condensed chromosomes inside may be segmented and classified as either prophase or metaphase. therefore, we implemented a generic inclusion model that does not allow particular classes  to include other classes .
+
+RESULTS
+all figures were done with figurej  <cit> .
+
+datasets
+the algorithm was applied to three different datasets: the first two were acquired from two different biological models and the third one was a synthetic dataset that simulated dividing cells . our original motivation was to automate the segmentation of nuclei in the c. elegans dataset where none of the available methods had provided satisfactory results. the drosophila dataset was obtained from an existing reference and hence represents an additional validation dataset  <cit> . in their study, the authors used a histone-gfp labeling method with confocal microscopy. for our c. elegans dataset, a slightly different labeling procedure was used, with histone-gfp expressed in the ovary and transmitted to the future embryo. the fluorescence signal was thus gradually diluted with mitosis, leading to an overall decay in fluorescence intensity and, consequently, of image quality over time. another difference between the two datasets was that drosophila embryos were imaged with a conventional confocal microscope  <cit> , whereas c. elegans embryos were imaged with a spinning disk microscope. the third dataset was a synthetic dataset generated using cytopack  <cit> , a program that models dividing cells and creates synthetic datasets that simulate 4d video-microscopy acquisition. although the aspect of nuclei was realistic, it was not completely natural, and could present high intensity variation, thus providing a difficult test case for our algorithm.
+
+stage refers to the number of nuclei at the end time point.
+
+supervised learning
+before using the classifier in the main classification-based segmentationtion algorithm, we had to validate it. for this purpose a first test was performed using objects segmented by the procedure presented in the supervised learning section. this procedure is based on a mser algorithm and uses the volumes given by the user as inputs. for each dataset, between  <dig> and  <dig> sample nuclei, with approximately equal number for each class, were chosen from different time points according to shape variability, and then assigned a class by a human expert. for all of the datasets, the confusion matrix for the classifier showed satisfactory results, with a classification rate of approximately 90% for the two real embryo datasets and 80% for the synthetic dataset .
+
+
+c. elegans
+drosophila
+the number of samples used were  <dig>   <dig> and  <dig> samples for c. elegans, drosophila, and synthetic data, respectively. the classification accuracies were 90%, 89% and 78%, respectively.
+
+segmentation
+the efficiency and accuracy of the proposed algorithm was tested on the three complete datasets . the segmentation results were visually compared with original data for all time points and taking the 3d information into account. we used a classification based on five classes  for all three datasets. between  <dig> and  <dig> sample nuclei per class were chosen for the initialization . the values used as volume limits for the c. elegans dataset were :  <dig> – <dig>  , 14– <dig>  ,  <dig> – <dig> ,  <dig> – <dig>   and  <dig> – <dig>  . for the drosophila dataset, the minimum and maximum volumes were set to : 45– <dig>  120– <dig>  36– <dig>  25- <dig> and 20– <dig> 
+
+tp = true positive . fn = false negative . fp = false positive . recall = tp/. precision = tp/. f = 2*precision*recall/.
+
+for the c. elegans dataset, there was a decay of intensity with time due to the particular labeling technique and acquisition system, and the image quality was therefore not as high as in the drosophila dataset. furthermore, due to the embryo depth and imaging conditions, the slices farthest away from the objective lens were quite noisy. the selected thresholds corresponding to segmented nuclei varied between time points as well as within each time point image. the threshold values varied between  <dig> and  <dig>   for time point  <dig>  between  <dig> and  <dig>   for time point  <dig>  and between  <dig> and  <dig>   for time point  <dig>  however almost all of the nuclei could be correctly detected  for all time points . nevertheless, after time point  <dig>  the image quality was too low to accurately delineate the actual shape of the nuclei. figure  <dig> shows the results obtained for some of the time points. at an advanced time point , all nuclei were correctly segmented despite the low quality of the image . for the time points to  <dig>  only  <dig> out of  <dig>   were not detected, with zero false negatives.
+
+in the drosophila dataset, which has a higher signal quality, nuclei were generally present in a 2d layer. all nuclei were correctly segmented, only  <dig> out of  <dig>   were not detected, and an additional  <dig> spurious noisy objects were incorrectly identified as nuclei   . the selected threshold values did not vary much, which was coherent with the homogeneous intensity throughout the entire 4d dataset. the difference between the lowest and highest threshold value used was  <dig> for time point  <dig>   <dig> for time point  <dig>  and  <dig> for time point  <dig> 
+
+for the simulated dataset, all synthetic nuclei were correctly segmented despite high intensity variance within nuclei .
+
+the results obtained with our method on c. elegans data  were compared with the hierarchical k-means method   <cit>  of icy  <cit> . this method implements a slightly modified version of the mser technique and is therefore probably one the best available methods to compare to. with the same volume parameters as for our algorithm, hk-means was globally less accurate. several detected objects were actually noise, some nuclei were not detected, and several others were merged. for example, at time point  <dig>  there was one noisy object, three nuclei were missing, and there was one fusion of two nuclei; for time point  <dig>  there were six noisy objects, two nuclei were missing, and two were merged . since hk-means method favors low threshold values, the objects tended to be larger, and the delineation of nuclei was globally not as accurate as with our algorithm.
+
+the time to segment and classify  <dig> time points for the c. elegans dataset  on a xeon bi-processor with  <dig> cores/ <dig> threads , running ubuntu linux  <dig>  with  <dig> gb of ram and using java  <dig> , was between  <dig> and  <dig> hours, corresponding to approximately  <dig> minutes per time point.
+
+classification
+although the purpose of the classification procedure in our method is related to the selection of the best threshold value for segmentation, it can also be used collaterally as a classification algorithm per se to predict cell-cycle phases. the information about the cell-cycle stage given by the algorithm can be used for cell-cycle analysis and to help further tracking. we visually analyzed the classification results on a frame-by-frame basis, using temporal information to determine the actual cell-cycle stage.
+
+for the c. elegans dataset,  <dig> out of  <dig>  nuclei  were not correctly classified , and classification errors occurred uniformly in all time points. this error rate was less than the training error  because of the high number of interphase nuclei in the entire dataset, and mainly resulted from shape similarity between classes, especially at the anaphase and telophase stages.
+
+for the drosophila dataset,  <dig> out of  <dig>  nuclei were not correctly classified .  <dig> of these classification errors occurred in the three last time points. this error rate was similar to the one previously reported  <cit> .
+
+for the synthetic dataset, where all nuclei were correctly segmented, the classification results were similar, with 96% of correctly classified nuclei. due to the non-natural aspect of the simulated nuclei, the distinction between some stages was not obvious: the prophase and telophase stages were difficult to discriminate from other stages, whereas the interphase, metaphase and anaphase stages were correctly classified .
+
+discussion and 
+CONCLUSIONS
+we have presented a machine-learning based approach for segmenting nuclei in 3d microscopy images. the originality of the approach is to perform segmentation and classification simultaneously within an iterative threshold selection procedure, ensuring that the best threshold for each object will be found. by comparing our approach with hk-means, we evaluated the benefit of using a machine-learning approach to improve the segmentation accuracy by detecting objects similar in shape to training samples. the segmentation provided by our approach is more accurate because it is the one that leads to the best classification score. from the point of view of classification, we introduced with the paradigm of “jointly segment and classify” rather than “segment then classify”, a new idea that could be used as a basis for further algorithms.
+
+the major advantage of our method is its ability to robustly adapt to different imaging conditions and different species by reporting the introduction of the required knowledge on the initial learning stage from user-specified samples. the only assumption that is made is that an object can be segmented by one threshold value and has a class-specific shape.
+
+our algorithm was successfully tested on two embryo models, the c. elegans dataset , and the drosophila dataset . the overall segmentation results were comparable or better than those of existing algorithms, without the necessity of fine-tuning parameters. the only required parameters are the volumes of nuclei that can be easily learned from a set of trials and errors at the supervised learning step, where all descriptors values are displayed to the user. the user can take some time in training the system but it only needs to be done once per embryo model and imaging conditions. the same set of training descriptors can be re-used in different experiments. the implemented 3d descriptors summarize the shape of the object and do not take quantitative variable aspects such as object volume, surface or intensity into account since these values can be extremely variable over time. in fact, in the first time points of the series, nuclei are usually very large and very bright, contrasting with the numerous darker small nuclei at end time points.
+
+for the drosophila validation dataset, only a few nuclei were not detected , and generally corresponded to very crowded telophase nuclei that displayed very unusual shapes. however, it seems that we detected more nuclei than the original paper  <cit>  . we were also able to achieve an overall acceptable classification with an error rate of less than 5%, where classification errors were mainly present at end time points for very crowded interphase nuclei.
+
+for our working dataset, c. elegans, the results for segmentation and classification were quite satisfactory, even in a context of low signal-to-noise ratio. we can then validate the acquisition and labeling procedure for further studies to improve automated lineage reconstruction.
+
+for the synthetic dataset, we observed significantly better classification results in the entire data than in the training samples because of the over-abundant interphase nuclei , which were easier to classify than the other ones.
+
+classification is a very important step in our thresholding procedure. however, in order not to add a threshold parameter to the classification results, we preferred to add an interval check of volumes and of all descriptor values prior to classification, acting as a boolean pre-classifier. nevertheless the classification error rate was quite low, although it is not an easy task, even for an experienced biologist, to distinguish between the five cell-cycle stages we defined. with only three or four classes  we would expect higher classification results. furthermore, since interactive selection of samples for the supervised learning phase is an essential part of the method, we implemented a semi-automatic procedure to make this task easier. the user may have a tendency to choose rather non-ambiguous nuclei in the different cell-cycle stages. however, the nuclei in the different stages present continuous variations that lead to small changes in shape, thus inducing misclassification. for tracking analysis, this misclassification could be alleviated by taking the class of the object at the previous time point into account. some noisy objects were also detected, but they can be easily removed by post-processing procedures, as they appeared for some threshold values only, presented peculiar shapes or intensities, and had low classification scores. they could be easily filtered out using available tools such as the 3droimanager  <cit> . since we did not want to add extra parameters, we chose to keep these noisy objects and just warn the user about them with a screen message.
+
+the algorithm may be quite time-consuming since many threshold values are tested, especially in 16-bits. however, the user can speed it up by increasing the step between two thresholds or by converting the data to 8-bits. furthermore, using multi-threaded algorithms speeded up the process, leading to less than  <dig> minutes to process one time point.
+
+our results suggest that the segmentation method proposed can also be applied to other images and provides a promising start for tracking analysis using classification information.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+jgm implemented the segmentation algorithm; iac implemented the classification; pa participated in the design of the study; vg provided the c. elegans data, participated in the design of the study and validated the results; tb implemented the 3d descriptors and designed the study; jgm, iac and tb analyzed the results; jgm, iac, pa and tb wrote the paper. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+movie 1a. 4d view of raw data for the c. elegans dataset. movie 1b. 4d view of segmented data with classification for the c. elegans dataset. movie 1c. movie with contours overlaid on raw data for time point  <dig> for c. elegans.
+
+click here for file
+
+ additional file 2
+movie 2a. 4d view of raw data with for the drosophila dataset. movie 2b. 4d view of segmented data with classification for the drosophila dataset. movie 2c. movie with contours overlaid on raw data for time point  <dig> for drosophila.
+
+click here for file
+
+ additional file 3
+movie 3a. 4d view of raw data for the simulated dataset. movie 3b. 4d view of segmented data with classification for the simulated dataset.
+
+click here for file
+
+ acknowledgements
+the authors thank the different people for providing 3d/4d datasets so we could test and improve our algorithm. jgm thanks campus france and the regional government of kurdistan  for providing him a scholarship for his thesis. iac was funded by the french national research agency  infrastructure d’avenir tefor . vg wishes to thank: the centre national de la recherche scientifique , the university of pierre and marie curie, the french national research agency , the association pour la recherche contre le cancer, and the bettencourt-schueller foundation .

@@ -1,0 +1,199 @@
+BACKGROUND
+as the advance of high-throughput sequencing makes it possible to sequence billions of bases in a single experiment, this shift in the availability of genomic data allows researchers to focus on biological questions in non-model organisms. with the increased availability of de novo assembly algorithms that are designed specifically for assembling millions of short reads , it becomes possible to study entire genomes or transcriptomes by investigating the assembled sequences.
+
+to obtain a transcriptome, many rna-seq libraries are constructed under different experimental conditions or developmental stages, with each library corresponding to one sequencing run of a biological sample. it is preferable to utilize as many libraries as possible to construct one single assembly for each species, as the large amount of data enables simultaneous expression analysis and an increase in coverage support of transcripts that may not be highly expressed under some conditions. in order to obtain the best transcriptomic profile for a given species, there is a need to integrate large amount of accumulated data together from disparate projects and create updated transcriptome assemblies as new data become available. this creates a significant challenge for de novo assembly algorithms, since computational resources are often limited in individual labs while the computational time and memory requirement increase rapidly as the number of reads increases.
+
+these computational challenges have motivated the development of algorithms that are specifically designed for performing transcriptome assembly. while algorithms such as oases  <cit>  and trinity  <cit>  aim to extract as much information as possible, they are very memory-intensive, limiting their applications to small data sets with few libraries that biologists produce during experiments. algorithms such as soapdenovo-trans  <cit>  and trans-abyss  <cit>  have high memory requirements for large data sets.
+
+to address these difficulties, our goal is to develop transcriptome assembly algorithms that recover alternatively spliced isoforms while utilizing as many rna-seq libraries as possible that contain hundreds of gigabases of data. we subdivide the computations into two stages, in which the first stage collects information from each library independently and in parallel, and the second stage merges these results together while minimizing needed computations. to reduce memory consumption so that computations can be performed on a computing cluster with moderate amount of physical memory, we develop new techniques to enumerate k-mer frequencies in the first stage. we impose appropriate cutoffs in the second stage in order to obtain comparable or improved accuracy over existing algorithms. this strategy supports incremental updates of assemblies when new libraries become available since only the second stage needs to be rerun.
+
+we evaluate the performance of our algorithm by constructing transcriptome assemblies using publicly available libraries from model organisms, and comparing our assemblies to the ones obtained from soapdenovo-trans, trans-abyss, oases and trinity. we evaluate our performance on non-model organisms both by obtaining publicly available libraries from the naked mole rat heterocephalus glaber and by constructing new rna-seq libraries for the blow fly chrysomya rufifacies.
+
+methods
+de bruijn graph
+given a set of reads and a parameter k, a de bruijn graph is defined by taking each k-mer that appears within the reads as a vertex. two k-mers s
+1
+s
+2⋯s
+k and s
+2⋯s
+k
+s
+k+ <dig> are connected by a directed edge if the -mer s
+1
+s
+2⋯s
+k
+s
+k+ <dig> appears in the reads and the -suffix of the first k-mer is the same as the -prefix of the second k-mer, where s
+ <dig> and s
+k+ <dig> can be arbitrary letters. by linking together the same k-mer that appears in different reads, the de bruijn graph can be used to implicitly assemble these reads  <cit> . since the size of the de bruijn graph depends on the number of distinct k-mers from the reads that is often much smaller than the total size of reads, this strategy is especially suitable for assembling high-throughput sequencing data .
+
+independent computation of k-mer frequencies
+while most existing short read assembly algorithms use hashing techniques  <cit>  or suffix arrays  <cit>  to enumerate k-mer frequencies, the memory requirement per k-mer can be high with large multiplicative constants. while techniques such as sparse hashing  or entropy-based compression  <cit>  can be used to reduce the memory overhead per k-mer, there is a need to handle collisions and the memory requirement can still be high. recently, two algorithms dsk  <cit>  and kmc  <cit>  were developed based on disk-based partitioning of the k-mer space, which allow the user to specify a memory consumption limit.
+
+we consider the following iterative algorithm to enumerate k-mer frequencies independently for each library . at the start of each iteration, we assume that a list of all k
+′-mers that appear in the library in either the forward or the reverse complementary direction are given in sorted order for k
+′<k. this list can be represented by encoding each nucleotide by two bits and using a 64-bit or 128-bit integer to encode each k
+′-mer. suppose that there are n such k
+′-mers. we create an array of size 4n that contains four slots for each k
+′-mer. we use it to count the number of each -mer that appears in the library by using binary search to find the location of its k
+′-prefix within the array and updating one of the four slots that corresponds to its last nucleotide. at the end of the iteration, we remove slots with zero counts to obtain a list of all -mers.
+fig.  <dig> illustration of the iterative algorithm to enumerate k-mer frequencies. for the k
+′-mer a1⋯ak′, its two frequency slots with zero counts for nucleotides c and t are removed to obtain -mers a1⋯ak′a and a1⋯ak′g
+
+
+
+
+to make sure that each edge in the de bruijn graph corresponds to a -mer that appears in the library, we repeat this procedure until the frequencies of -mers are obtained and store all k-mer frequencies along with edge information. to reduce computational time, we start the process with a moderate value of k
+′  by assuming that all k
+′-mers appear in the library. one advantage of this procedure is that the memory requirement per k-mer is low with a multiplicative constant of four. when multiple assemblies with different values of k are needed, frequencies with smaller values of k for one assembly can be used to obtain frequencies with larger values of k for another assembly. this significantly reduces the computational time over all values of k.
+
+construction of de bruijn graph
+given a list of all k-mer frequencies in sorted order for each library, we combine these lists by performing a merge sort and adding the corresponding frequencies for each k-mer. we exclude a k-mer from the de bruijn graph if its frequency is less than a given k-mer coverage cutoff c. this strategy is different from the one employed by other short read assembly algorithms such as velvet  <cit>  or abyss  <cit> , which apply the cutoff after constructing the de bruijn graph and removing redundant paths that are of less support. since our results show that there is a need to increase the values of k and c to obtain good performance as the size of the data set increases, our strategy keeps the size of the de bruijn graph manageable. edges in the de bruijn graph are constructed by linking together adjacent k-mers through binary search. after the initial construction of the de bruijn graph, each linear path that contains a maximal succession of vertices with no branches is collapsed into a single node. while the entire merging process needs to be run sequentially for each given setting of k and c, different settings of k and c can be run in parallel.
+
+construction of splicing graphs
+to simplify the de bruijn graph, we remove short tips that may correspond to sequencing errors by iteratively removing end nodes with sequence length less than 2k. we follow the strategy in  <cit>  to obtain splicing graphs from the de bruijn graph so that each splicing graph mostly represents alternatively spliced variants of only one gene, with new strategies to handle paired-end reads. note that this strategy is different from algorithms that construct a set of predicted transcripts from the de bruijn graph .
+
+in order to remove obvious snps that create branches in the graph, we search for split-then-merge branching structures in which all the branches from a node merge immediately into a single node and the sequences associated with each branch are of the same length with very few mismatches. successive split-then-merge structures are merged into a single node.
+
+for each paired-end read, we identify the node u in the collapsed de bruijn graph in which the last k-mer of the forward read resides and the node v in which the first k-mer of the reverse read resides, and increase the frequency count of the paired edge u→v by one. we repeat this procedure over all paired-end reads and retain all paired edges that have frequency counts above a given cutoff c
+ <dig> that is proportional to the total number of bases in the data set. the resulting de bruijn graph contains two types of edges, including normal edges and paired edges.
+
+our results show that there is always a big tangle in the de bruijn graph that contains a large number of nodes within a single connected component, while most of the other tangles are much smaller. in order to address these tangles, we decompose each connected component into strongly connected components, in which each strongly connected component is either just a single edge or a maximal subgraph with each node reachable from all other nodes. the regions within a strongly connected component that are not just a single edge represent the complicated regions that always contain a cycle, while the other regions represent the simpler regions in which each connected region is likely to belong to the same gene. with the assumption that the reads are not strand-specific, it is also possible to have forward-backward tangles in which a connected component contains both a forward node and its corresponding backward node in the reverse complementary direction. both of these structures can be identified by using depth-first search with time complexity that is linear in the size of the graph.
+
+we extract the strongly connected components that are not just a single edge and all the forward-backward tangles. we ignore the junction information within these subgraphs, and treat each node as an individual splicing graph that consists only of a single node. we remove these nodes along with their adjacent edges, and extract each connected component in the remaining graph as a splicing graph that does not contain cycles. we remove the overlapping sequence fragments within the nodes that arise according to the definition of a de bruijn graph, and make the junction locations precise in obvious cases when a node does not have multiple incoming edges and multiple outgoing edges at the same time. we retain one of the two possible orientations for each splicing graph. only splicing graphs with length  of the longest path of at least  <dig> are retained.
+
+in order to study expression of nodes in a splicing graph, we incorporate the de novo expression measure of number of reads per kilobase of node per million reads  developed in  <cit> . this measure is similar to the number of reads per kilobase of exon per million mapped reads used by  <cit>  and  <cit> , except that reads that appear in the assembly are used instead of mapped reads, and each node in a splicing graph is evaluated instead of each exon, with each read that contains a k-mer within a node contributing to that node. within each node, a rpkm estimate is computed independently for each library. alternatively, measures similar to transcripts per million   <cit>  can be used, which are more comparable across libraries.
+
+in order to make the results directly applicable to downstream analysis, we represent each assembly in an annotated fasta format, in which each splicing graph is given as a collection of nodes, with connecting normal and paired edges and rpkm values for each library embedded within the name of each node. since it is possible to have empty nodes that do not contain any nucleotide after adjustment of junction locations, rpkm values are computed before junction adjustment to reflect the original coverage values across a branch. such empty nodes correspond to additional isoforms that skip nodes  within a branch.
+
+RESULTS
+model organisms
+to compare the performance of our algorithm asplice to other algorithms, we extracted reads from publicly available rna-seq libraries in model organisms schizosaccharomyces pombe, arabidopsis thaliana and drosophila melanogaster . we trimmed each read by removing all positions including and after the first position that has a quality score of less than  <dig>  we applied our algorithm to obtain a de bruijn graph for a given k-mer length and a given k-mer coverage cutoff c. we compare the performance of our algorithm asplice to soapdenovo-trans and trans-abyss on machines with  <dig> gb physical memory . nucleotide blast search is applied to the transcriptome of the same organism to evaluate the performance. since each algorithm returns different structures, note that the results are not completely comparable.
+
+s. pombe
+√
+√
+√
+
+a. thaliana
+√
+√
+√
+
+d. melanogaster
+√
+√
+
+h. glaber
+√
+√
+
+c. rufifacies
+√
+
+
+table  <dig> comparisons of transcriptome assemblies of soapdenovo-trans, trans-abyss and asplice in model organisms over different values of k and k-mer coverage cutoff c
+
+
+
+s. pom
+
+k_c
+
+a. tha
+
+k_c
+
+d. mel
+
+k_c
+the predicted units are locus for soapdenovo-trans that is represented as a splicing graph containing nodes and edges, transcript  for trans-abyss that is a linear concatenation of constituent nodes, and splicing graph for asplice. for soapdenovo-trans and asplice, n <dig> denotes the n <dig> value of the length  of the longest path in each splicing graph. for trans-abyss, n <dig> denotes the n <dig> value of the length of a predicted transcript, and only predicted transcripts of length at least  <dig> are retained. total hits denotes the total number of hits from nucleotide blast search of nodes to the transcriptome of the same organism. isoforms are considered to be the same gene. only the top hit with e-value below 10− <dig> is considered. hits from nodes within the same predicted unit to the same gene are counted only once. unique hits denotes the number of unique hits to different genes. mem  denotes the physical memory requirement in gigabytes over all stages of each algorithm
+
+
+
+fig.  <dig> sensitivity and specificity comparisons of soapdenovo-trans, trans-abyss and asplice with respect to mrna blast results in model organisms over different values of k and k-mer coverage cutoff c . sensitivity  is defined to be the percentage of nucleotide positions in the transcriptome that are recovered through the top blast alignments from each node in the assembly. specificity  is defined to be the percentage of predicted positions that are included in the top blast alignments from each node of the assembly
+
+
+
+fig.  <dig> sensitivity and specificity comparisons of trans-abyss and asplice with respect to alternative splicing junctions in model organisms over different values of k and k-mer coverage cutoff c . sensitivity  is defined to be the percentage of junctions in the gene transcripts that appear in the assembly. specificity  is defined to be the percentage of junctions in the assembly that appear in the gene transcripts. junctions in the gene transcripts are defined by concatenating the two sequences of length k that are immediately to the left and immediately to the right of all locations with alternative splicing that are derived from annotated positions of the gene transcripts to obtain a sequence of length 2k. junctions in the assembly are defined by concatenating the two non-overlapping k-mers at the beginning and ending nodes of an edge to obtain a sequence of length 2k. up to three mismatches are allowed when looking for occurrences of these sequences that span across a junction. notations are the same as in fig. 2
+
+
+
+
+2≤ <dig>  for gene transcripts without alternative splicing and  <dig> ≤r
+2≤ <dig>  for gene transcripts with alternative splicing, where r
+ <dig> denotes the coefficient of determination that measures how well the data fit a regression line. the lower r
+ <dig> in the latter case is probably due to higher assembly difficulties.
+fig.  <dig> regression in log scale of the de novo rpkm values from the 25_ <dig> assembly  of asplice against the fpkm values from rsem over all libraries. the gene transcript that corresponds to each node from asplice is identified through a bi-directional nucleotide blast alignment of length at least  <dig> to the transcriptome of the same organism. nodes that have no correspondences are ignored. for a. thaliana and d. melanogaster, regressions are performed separately on gene transcripts without alternative splicing and on gene transcripts with alternative splicing
+
+
+
+
+in terms of memory requirement, table  <dig> shows that while soapdenovo-trans and trans-abyss had large increases as the size of the data set increases , asplice had a large fixed memory overhead for all data sets with small increases for larger data sets. since each library can be further subdivided into multiple parts to reduce memory requirement during the parallel stage of asplice, the maximum memory consumption is obtained during the sequential stage, in which the main structure to store is the de bruijn graph after the k-mer coverage cutoff c is applied.
+
+non-model heterocephalus glaber
+we also assess the performance of our algorithm in the non-model naked mole rat heterocephalus glaber . table  <dig> shows that large values of the k-mer coverage cutoff c were needed to obtain reasonable assemblies due to the large size of the data set . similar trends were observed as before when translated blast search to the rat rattus norvegicus is applied, with asplice recovering more genes when the assembly conditions are more stringent.
+
+
+h. gla
+r. nor
+r. nor
+
+k_c
+notations are the same as in table  <dig> except that translated blast search  is performed instead of nucleotide blast search
+
+
+
+
+non-model chrysomya rufifacies
+we applied our algorithm to assemble the transcriptome of the blow fly chrysomya rufifacies from a set of rna-seq libraries that we have constructed, which includes the following developmental stages: embryos, first instar larvae, second instar larvae, predator and non-predator third instar larvae, early pupae, mid pupae, late pupae, thelygenic and arrhenogenic adult females, and adult males. there are totally  <dig> libraries with  <dig>  g reads and average read length  <dig> after quality trimming.
+
+the blow fly c. rufifacies has monogenic sex determination in which a female either produces only female offspring  or produces only male offspring  based on the genotype  <cit> , which is a distinct mechanism among flies. sex determination in flies is typically achieved  by alternative splicing, in which sex-specific isoforms of genes like doublesex and transformer lead to female or male development  <cit> . within the genus, there is also a human-associated male-eye phenotype that is hypothesized to have evolved multiple times in concert with human civilization  <cit> . genomic tools for this blow fly enable the study of the evolution of sex determination and co-evolution with humans.
+
+since there is not sufficient memory to run either soapdenovo-trans or trans-abyss on machines with  <dig> gb physical memory for this large data set with  <dig> g bases, we only run asplice, which allows computations to be performed on a computing cluster due to its low memory requirements. we considered larger values of k and further subdivided large libraries into multiple parts during the parallel stage. table  <dig> shows that the assemblies were of high quality, with long splicing graphs, moderate amount of branches that may represent alternative splicing, and over 60% of the d. melanogaster genes recovered. the ratio of the total number of blast hits from different splicing graphs to the number of unique blast hits to different genes was between  <dig>  to  <dig>  indicating a small amount of sequence fragmentation of the same gene into different splicing graphs. there were only a small number of splicing graphs that have blast hits to more than one gene, and the maximum number of different genes that have blast hits to a splicing graph was small, thus each splicing graph specifies the alternatively spliced variants of one gene in most cases.
+
+
+c. ruf
+d. mel
+
+k_c
+max length denotes the length  of the longest path over all splicing graphs. >1-node graphs denotes the number of splicing graphs with non-linear structures. max nodes denotes the maximum number of nodes in a splicing graph. avg nodes denotes the average number of nodes in splicing graphs with non-linear structures. >1-hit graphs denotes the number of splicing graphs that have blast hits to more than one gene in d. melanogaster. max hits denotes the maximum number of different genes that have blast hits to a splicing graph. other notations are the same as in table  <dig> except that translated blast search to d. melanogaster is performed
+
+
+
+
+by comparing to the d. melanogaster homologs of assembled nodes , we found expected alternative splicing in the doublesex gene and consistent bias of expression within female-specific  and male-specific  segments and between thelygenic and arrhenogenic females .
+fig.  <dig> a splicing graph in the 31_ <dig> assembly  of asplice in the blow fly c. rufifacies that is related to the doublesex gene in d. melanogaster. each node is represented by a rectangle of width that is proportional to  the length of its sequence. the histogram adjacent to each node gives the rpkm values for each adult library, with each light bar and the dark bar to its right denoting an adult female and its mate  respectively. the left half of each histogram  denotes thelygenic females and their mates, while the right half of each histogram  denotes arrhenogenic females and their mates
+
+
+
+
+small drosophila melanogaster libraries
+since oases and trinity are very memory-intensive, we assess their performance by extracting reads from a small set of three d. melanogaster rna-seq libraries in  <cit>  at the sequence read archive  <cit>  that includes the following developmental stages: 2– <dig> hours embryos , third instar larvae , and mixed pupae . these libraries have  <dig>  g bases after quality trimming, and k is fixed to  <dig> 
+fig.  <dig> sensitivity and specificity comparisons of oases, trinity and asplice with respect to mrna blast results and alternative splicing junctions on a small set of libraries from d. melanogaster with k= <dig> and over different values of k-mer coverage cutoff c . notations are the same as in figs.  <dig> and 3
+
+
+
+
+
+d. mel
+
+k_c
+for oases and trinity, the predicted unit is locus that contains a set of predicted transcripts, n <dig> denotes the n <dig> value of the longest transcript length in a predicted locus, and predicted transcripts of length at least  <dig> are retained. other notations are the same as in table 2
+
+
+
+
+
+CONCLUSIONS
+we have developed an algorithm for de novo transcriptome assembly of non-model organisms that utilizes a large amount of rna-seq libraries in order to obtain a transcriptome that is as complete as possible, while simultaneously extracting alternative splicing information and expression levels in different libraries. when compared to existing algorithms, our algorithm is more conservative and generally has higher specificity at the expense of lower sensitivity, but is able to utilize larger amount of data to obtain more complete assemblies. as the size of the data set increases, larger values of k and usually much larger values of the k-mer coverage cutoff c are needed to obtain reasonable assemblies.
+
+since large libraries can be further subdivided into multiple parts during the parallel stage, our algorithm is scalable and the parallel stage can be run on different computing nodes. since our k-mer counting technique requires iterating over every read and performing binary search repeatedly over increasing values of k, our algorithm is generally much more computationally intensive than existing algorithms, although our memory requirement is much lower for large data sets. our strategy is especially suitable when multiple assemblies with different values of k are desired, as our algorithm is based on processing iteratively larger values of k. incremental updates of assemblies are easy to perform, as it is only necessary to run the parallel stage on the new libraries before running the sequential stage on all libraries. such a strategy is especially important to iteratively obtain more complete transcriptome assemblies over time through collaboration across research communities.
+
+for small to medium data sets, it takes a few hours to a few days to complete the parallel stage over all values of k as long as the libraries are subdivided into small enough parts. the time to finish the sequential stage ranges from a few hours for a small data set to one to two days for a larger data set. for our largest c. rufifacies data set with  <dig> g bases, it takes a few days to finish the parallel stage over all values of k when the libraries are subdivided into parts with about  <dig> g bases each, with each computing process consuming less than  <dig> gb memory. for each given setting of k and the k-mer coverage cutoff c, it takes a few days to finish the sequential stage. with values of c between  <dig> and  <dig> in our largest c. rufifacies data set, the memory consumption is less than  <dig> gb. thus, our algorithm can assemble large data sets on a computing cluster with moderate resources.
+
+
+from fifth ieee international conference on computational advances in bio and medical sciences miami, fl, usa. 15– <dig> october 2015
+

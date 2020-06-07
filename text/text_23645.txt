@@ -1,0 +1,173 @@
+BACKGROUND
+large-scale gene expression profiling by microarrays or transcript sequencing enables identifying relevant expression changes in cells by comparing gene expression patterns of two distinct conditions . a frequent goal of such studies is the identification of dysregulated cellular pathways involved in an observed phenotype like, for example, abnormal proliferation and migration of cancer cells.
+
+for this, gene set enrichment tests are commonly applied on large scale gene expression profiles, testing over-representation of up- or/and downregulated genes in pathways. while most gene set enrichment approaches used for pathway analysis ignore topological information, we have introduced a computational method   <cit>  that explicitly takes the topology of metabolic and signaling networks into account by applying adjusted wavelet transforms on optimized, compact 2d grid representations of curated pathway maps, like those from the kyoto encyclopedia of genes and genomes   <cit> . in particular, this approach allows identifying not only metabolic pathways that show differential regulation as a whole, but also pathways affected by specific, localized switch-like regulatory shifts indicating a redirection of metabolic fluxes. this way, we have identified important metabolic switches in neuroblastoma  <cit> , breast cancer  <cit> , alzheimer's disease  <cit> , glioblastoma  <cit>  and in an evolutionary study of e. coli <cit> .
+
+here, we present the new, entirely revised and refined version of pathwave with several substantial improvements:
+
+i. a faster and more efficient arrangement of 2d grid representations of pathway networks ,
+
+ii. pre-arranged 2d grid representations for several species, including h. sapiens, m. musculus, d. melanogaster, d. rerio, c. elegans, and e. coli,
+
+iii. compliance with version  <dig> . <dig> of the kegg markup language ,
+
+iv. an interface to obtain colored kegg pathway maps depicting the identified expression changes,
+
+v. the use of pathways extracted from the human metabolic model reconstruction  <cit>  from the biochemical genetic and genomic  knowledgebase  <cit> ,
+
+vi. performance improvements due to faster processing of expression data, and
+
+vii. a more flexible and user-friendly interface.
+
+we briefly summarize the pathwave workflow, discuss the most important novelties of the new version and demonstrate its usage by two case studies:  we applied pathwave to rna-seq expression data to identify metabolic pathways that play a role in lung cancer, and  we analyzed microarray expression data to identify pathways associated with longevity of drosophila. finally, we show that pathwave is more sensitive than the frequently used methods gene set enrichment analysis   <cit>  and david  <cit> .
+
+implementation
+pathwave workflow
+the workflow consists of two major steps: the preprocessing of pathway information and the analysis of expression data. we briefly summarize the two steps :
+
+step  <dig> : to run a pathwave analysis which involves the use of wavelet transforms , compact 2d grid representations of pathways are required. curated pathway maps are translated into networks in which nodes represent metabolic reactions and edges link two reactions if one reaction produces a metabolite that serves as a substrate for the other. edges in signaling pathways are derived from direct interactions of the corresponding signaling proteins. these networks are described by their binary adjacency matrices {a
+ij
+}
+i,j ∈ v
+ where v is the set of nodes and a
+ij
+ =  <dig> if nodes i and j are joined by an edge. the sparse adjacency matrices  are optimally rearranged and embedded into smaller 2d, regular square lattice grid representations, best preserving the neighborhood characteristics of the reactions by placing adjacent nodes  of the original network as close to each other as possible on the lattice grid . for this, the overall manhattan distance on the lattice grid between neighboring nodes of the network is minimized using integer linear programming techniques. these optimal 2d grid representations need to be computed only once for a given set of pathways and can be saved for later use. we calculated and integrated preprocessed pathway sets for several species into the new pathwave r package , such that this step can be skipped for these organisms.
+
+step  <dig> : to identify pathways that are differentially regulated between two conditions or subsets of gene expression data, pathwave first associates gene expression levels with metabolic reactions or signaling proteins, thus mapping the expression data of each individual sample onto the 2d lattice grids of the pathways . then, haar wavelet transforms are applied to each optimized grid to explore every possible expression pattern of neighboring reactions or signaling proteins within an embedded pathway and to identify statistically significant discriminative patterns between samples of the two different conditions  <cit> . we used haar wavelet transforms to systematically apply low pass and high pass filters from fine grain to coarse resolutions  <cit> .
+
+namely, a 2d expression grid—corresponding to the expression data of a single sample mapped onto a particular pathway —is divided into disjoint sections of 2 × 2 pixels , e.g. a 2d grid of size 8 ×  <dig> is divided into  <dig> disjoint sections. grids with odd sizes  are extended with rows and/or columns of zeros to allow their division into disjoint 2 ×  <dig> sections. for each section, all combinations of row-wise and column-wise mean and differences, respectively, are calculated, yielding  <dig> combined quantitative features for each 2 ×  <dig> section: 1st) mean of the mean of the upper and mean of the lower row; 2nd) difference of the mean of the upper and the mean of the lower row; 3rd) mean of the difference of the upper and the difference of the lower row; and 4th) difference of the difference of the upper and the difference of the lower row . when these features are determined for all sections of the grid, all mean of means features  are taken to construct a new, smaller averaged grid which is again grouped into 2 ×  <dig> sections to be transformed into features in the same manner, again yielding  <dig> quantitative features for every section. this procedure is repeated until no further averaging is possible , thus computing quantitative low and high pass features from fine grain  to coarse resolutions . for more details on this haar wavelet transformation, please see mallat  <cit> . for each pathway, the features at all resolutions, obtained from the wavelet transformation, are used to identify features that can significantly discriminate between samples of the two conditions or subsets.
+
+thus, haar wavelets suit to detect both globally dysregulated pathways  and switch-like behaviors within the pathways, which significantly affect only small subnetworks . to overcome the rigidity of wavelet transforms, pathwave covers any possible combination of neighboring nodes by implementing a one-step frameshift concept that applies the transform to the original grids and to grids shifted by one row, one column, or by both. finally, pathways are ranked according to their most discriminative expression pattern, being it at a fine  or coarse grain resolution . this ranking is done by statistical significance which is obtained by repeated random sampling of the samples   <cit> . namely, for each pathway a gumbel distribution  is fitted to the pathway-scores obtained for the randomly shuffled samples. p-values of the pathways are determined from the respective fitted curves and the actual scores obtained for unpermuted samples, and are finally corrected for multiple testing. the robustness of both the estimated p-values of single pathways and the resulting overall pathway ranking increase with the number of random samplings. an assessment of their stability demonstrates a good to excellent robustness already at a rather modest number of  <dig>  to  <dig>  random samplings .
+
+it is to note that an expression pattern composed of multiple genes  may significantly discriminate between two conditions  even when the single genes do not appear to be differentially expressed after multiple testing correction . due to the identification of such potentially relevant patterns within pathways, pathwave can be more sensitive than common gene set enrichment approaches.
+
+improved embedding of metabolic pathways in 2d lattice grids
+the current pathwave version uses a new, up to  <dig> times faster branch-and-cut algorithm to embed metabolic and signaling pathways into compact 2d lattice grids, on which wavelet transforms can be applied, and to allow for optimal arrangements of larger instances  <cit> . the new method to optimally arrange every kegg/bigg pathway g =   into a compact 2d lattice grid computes an embedding of g into the lattice grid with the minimum possible total manhattan distance  of nodes  that are adjacent in g. the method is based on a novel integer programming formulation that models the pairwise distances between the nodes on the grid, instead of their absolute positions used in the previous version  <cit> . clearly, not every distance combination is a feasible solution: we say that an integral distance vector {d
+uv
+}
+uv ∈ e
+ is embeddable, if there exists a 2d arrangement of the nodes v on the grid such that the manhattan distance of u and v is exactly d
+uv
+ for every edge uv.
+
+for every unordered pair {u,v} of adjacent nodes u and v, we set the distance variable x
+uvk
+ to  <dig> if k is less than or equal to the manhattan distance of u and v. we set it to  <dig> otherwise. since for fixed u and v the number of variables being  <dig> is exactly the manhattan distance of u and v, the latter can be written as the sum of all variables x
+uvk
+ over k. to obtain the total length of a pathway's embedding  one has to additionally sum over all edges uv that constitute the pathway. this is done in the objective function  of the following integer programming formulation whose goal is to minimize the pathway's total length in the embedding:
+
+  min∑uv∈e∑k=1dmaxxuvk 
+
+subject to
+
+  ∑uv∈ehxuvduv-xuvduv+1≤eh- <dig> 
+
+for all sub graphs h =  of g and all distance vectors d on h that are not embeddable, and to
+
+  xuvk≥xuvk+ <dig> 
+
+for all uv ∈ e, 1 ≤ k ≤ d
+max
+ -  <dig>  where all x variables are required to be binary.
+
+the objective function  minimizes the total edge length of the embedding. the constraints in equation  ensure that the optimal distance vector is embeddable. they are the reason for the choice of the binary distance variables x, as these constraints cannot be modeled with integer variables directly taking the distance values . since their number is exponential, we do not add them to the model from the beginning, but separate them during the branch-and-cut algorithm. the constraints in equation  ensure consistency of the x variables: if the manhattan distance is at least k +  <dig>  then it must be also at least k. the maximum possible distance d
+max
+ can be set to the diagonal diameter of the lattice grid. as d
+max
+ is usually significantly lower in practice, it is estimated by our algorithm via an initial series of tests. moreover, the branch-and-cut algorithm features a simple primal construction heuristic. it produces approximate solutions even for large instances.
+
+compatibility and programming languages
+pathwave  <dig>  is compliant with the latest kegg kgml version  and an additional perl script can be used to translate systems biology markup language  files from the bigg database  <cit>  to compatible kgml-like files. while the parsing of the kgml pathway files to produce adjacency matrices is implemented in r, the integral linear program  that optimizes grid arrangements is written in c++, using cplex  as an lp solver.
+
+improved user-interface
+we made the pathwave user interface more flexible and easier to use. now, running a pathwave analysis  requires a single function call in r, as shown in the following simplified example:
+
+pwres < - pathwave.run
+
+expression data and the definition of the two sample classes, or conditions, can either be specified as file names or passed as r data.frame objects and/or factor objects. the preprocessed pathway information  to be used is specified as well as the number of permutations to be performed for statistical testing. when using kegg, the search can optionally be limited to metabolic pathways. additionally, we provide a simple function to build urls for querying the kegg web server at http://www.genome.jp/kegg/ to obtain graphical pathway maps with color-coded metabolic reactions or signaling proteins according to their up- or down-regulation:
+
+urls < - pathwave.getcolorkeggmapurls
+
+for convenience, the r package of the new version includes seven sets of preprocessed pathways for six species: kegg pathways for h. sapiens, m. musculus, d. melanogaster, d. rerio, c. elegans, and e. coli and pathways extracted from the human metabolic model from bigg  <cit> .
+
+RESULTS
+first case study: analyzing regulation of metabolic pathways in lung cancer
+lung adenocarcinoma is the most common type of lung cancer, and lung cancer is the world-wide leading cause of cancer-related deaths in males  <cit> . here, we have used pathwave and analyzed a gene expression dataset derived from a large-scale rna sequencing study  <cit>  to identify metabolic pathways showing significant dysregulation between lung adencarcinomas and patient matched normal controls of tumor adjacent tissues. as expected, metabolism of lung cancer cells showed profound differences to normal cell metabolism . one of the characteristic changes in metabolism of tumor cells is an increased uptake and utilization of glucose and fermentation into lactate  <cit> , already described by otto warburg in the 1920s  <cit> . accordingly, pathwave identified glycolysis to be significantly dysregulated , along with the citrate cycle . notably, in contrast to most reactions of the two pathways, some key reactions were down-regulated as shown in additional file 1: figure s <dig> and additional file 1: figure s2: fbp <dig> and fbp <dig> encode fructose- <dig> -bisphosphatase  <dig> and  <dig>  and showed significantly lower expression in tumor cells than in adjacent normal tissue . the reaction catabolized by these enzymes converts d-fructose  <dig> -bisphosphate to d-fructose 6-phosphate and opposes the metabolic flux during glycolysis . in turn, the inverse reaction catabolized by phosphofructokinase  was upregulated to allow high glycolytic flux. phosphoenolpyruvate carboxykinase  is the main control point for extracting metabolites from the tca cycle for gluconeogenesis, and this enzyme was downregulated while lactate production was upregulated.
+
+p
+*up is the number of up-regulated reactions in lung adenocarcinoma when compared to normal controls, down the number of down-regulated reactions; and no_ch the number of reactions without notable changes. p is the bonferroni corrected p-value for the pathway pattern.
+
+we detected a less known but nonetheless interesting metabolic switch in lung adenocarcinomas, namely the increased conversion of tryptophan to kynurenine by tryptophan  <dig> -dioxygenase  and indoleamine  <dig> -dioxygenase , both of which were upregulated . kynurenine has been shown to induce immunosuppression and aid tumor cells to evade immune surveillance in tumors  <cit> . interestingly, we also found a significant pattern in glycosylphosphatidylinositol  anchor biosynthesis. biosynthesis of gpi anchors is essential for appropriately locating gpi-anchored proteins onto cellular membranes. gpi transamidase  is in the downstream part of the pathway representation by kegg. the upregulation of gpi-t has been described in tumorigenesis and its genes suggested as biomarkers  <cit> . interestingly, the pattern we found showed particularly the upper part of gpi biosynthesis to be upregulated , dpm2: p =  <dig> e- <dig>  pig-l: p =  <dig> , pig-w: p =  <dig> e- <dig> and pig-m: p =  <dig> e- <dig> encoding enyzmes processing udp-n-acetylglucosamine into gpi anchor  <dig> -p) <dig> 1).
+
+for comparison, we performed the same analysis using pathways extracted from the human metabolic model of the bigg database . the obtained results were generally in line with those obtained for kegg and differences were mostly due to pathways that were differently represented in these databases.
+
+to demonstrate that pathwave's extension of pathway analysis to the identification of significantly dysregulated subnetworks is more sensitive than common gene set enrichment approaches, we applied gsea  <cit>  and david  <cit>  to the same dataset for metabolic kegg pathways. using david, only two pathways were significant after correction for multiple testing , namely aminoacyl-trna biosynthesis  and purine metabolism , and only six pathways had a nominal  p-value of less than  <dig>  . for gsea, three pathways were identified at nominal p <  <dig>  but none was significant after correction for multiple testing .
+
+second case study: pathways associated with aging in drosophila melanogaster
+as a second case study, we analyzed microarray expression data of d. melanogaster with an extended lifespan and controls  <cit>  to identify pathways being relevant for aging. we compared gene expression profiles of  <dig> samples from naturally long-living specimen with  <dig> samples from normal specimen at optimal nutrition. for the drosophila study signaling and metabolic pathways were considered. the two most prominent pathways obtained  are indeed associated with aging in other species:
+
+p
+*up is the number of up-regulated reactions in long-lived flies when compared to normal controls, down the number of down-regulated reactions; and no_ch the number of reactions without notable changes. p is the bonferroni corrected p-value for the pathway pattern.
+
+ starch and sucrose metabolism  is central for starch digestion which has been reported to increase with increasing age in chicken  <cit> , suggesting that it is more effectively metabolized. in long lived specimen of drosophila this could in principle be driven by an increased expression of genes encoding for enzymes digesting starch into glucose .  we detected a significant pattern in the pathway for circadian rhythm. the disruption of the circadian clock has been associated with aging and morbidity  <cit> . notably, expression of the clock gene was higher in d. melanogaster with an extended lifespan, consistent with the recent observation that the disruption of the encoded protein  reduces lifespan in mice  <cit> .
+
+methods
+kegg pathways
+kegg pathways  <cit>  were extracted from the corresponding kgml files obtained from the kegg website  for the following species: h. sapiens , m. musculus , d. melanogaster , d. rerio , c. elegans , and e. coli. the kgml files were preprocessed to build pathway networks in which nodes represent metabolic reactions or signaling proteins  that are linked by an edge if one reaction produces a metabolite that serves as a substrate for another or one signaling protein interacts with another, respectively. for each of these pathway networks an optimally arranged 2d grid representation was produced as described in results.
+
+extraction of pathway maps from the human metabolic model
+the compartmentalized version of the human recon  <dig> metabolic model  <cit>  was obtained from the bigg database  <cit> . the sbml file was parsed to extract subsystems  that were interpreted as pathways and converted to kgml-like xml files. these files were preprocessed in the same way as the pathways obtained from kegg .
+
+to focus on functionally relevant interactions, several exceedingly common metabolites  were ignored. roughly, metabolites were excluded if they were involved in more than eight reactions. the final list was manually curated to  retain some specific, informative metabolites even if they were involved in more than eight reactions; and to  exclude additional uninformative metabolites even if they were involved in eight or less reactions. additional file 1: table s <dig> lists all metabolites that were excluded from the model and thus from the extracted subsystems/pathways.
+
+rna-seq data for lung cancer
+gene expression levels for  <dig> lung adenocarcinomas and patient matched normal tissue were obtained from a recently published large-scale rna sequencing study  <cit>  . expression levels were given in reads per kilobase of exon model per million mapped reads   <cit> . we mapped the hugo gene symbols obtained from geo to their corresponding entrez/ncbi gene ids  <cit>   and restricted our analysis to genes with unique mappings . for these, the lowest non-zero rpkm value of the dataset was added to all expression levels as a pseudocount, such that expression levels could be log2-transformed for use with pathwave.
+
+gene expression data for the drosophila study
+for this case study, we used a very recent expression data set for d. melanogaster <cit>  . the dataset consisted of  <dig> samples of adult females of normal lifespan  and adult females of a long-lived, natural variant of d. melanogaster . samples were selected at two time points  and for three adult diets . for more details, see doroszuk et al.  <cit> . for our analysis, we selected  <dig> samples of animals with optimal nutrition:  <dig> samples for normal specimen  and  <dig> samples for long-lived specimen . we used the data as normalized in  <cit> . we mapped probeset ids of the affymetrix drosophila genome  <dig>  array to gene ids using the producers annotation information . probesets that mapped to more than one entrezgene id were discarded. expression profiles from multiple probesets mapping to the same gene id were averaged yielding one single expression profile for each of the  <dig>  genes analyzed.
+
+mapping of gene expression data to metabolic reactions
+pathwave applies haar wavelet transforms to compact 2d grid representations of metabolic pathways. the represented nodes are metabolic reactions, not genes. hence the gene expression values were associated with these reactions. this is done by averaging the expression values of all genes coding for enzymes that are required for catabolizing the reaction. the resulting reaction expression profiles are z-transformed over the sample set and mapped onto the compact 2d grid representations of each pathway.
+
+pathwave analyses
+for the drosophila case study, we performed the pathwave analysis on both metabolic and signaling kegg pathways using default parameters with the exception of performing  <dig>   random shufflings of phenotype labels  for statistical testing. final pathway p-values were corrected for multiple testing using the bonferroni correction. for the lung cancer case study, we performed the pathwave analysis on metabolic pathways from kegg and the human metabolic model from bigg. having more samples and thus more statistical power, we additionally required at least  <dig> genes/reactions to be up- or downregulated for a pathway to be selected and lowered the threshold of the bonferroni corrected p-value from  <dig>  to  <dig> .
+
+comparison with david and gsea
+to compare the sensitivity of pathwave with other, common approaches we used the rpkm expression values of  <dig> lung adenocarcinomas and their matched normal tissue, which was the larger dataset of our case studies.
+
+we identified  <dig>  significantly upregulated and  <dig>  significantly downregulated genes  which were tested for significant pathway enrichment using david . the background was the set of all  <dig>  genes we had used for the pathwave analysis. the functional enrichment analysis was performed with default parameters. results were extracted only for metabolic kegg pathways and p-value correction for multiple testing was applied accordingly. for gsea , we used only annotations from metabolic kegg pathways. statistical significance was evaluated by comparison with  <dig>  random shufflings of phenotype labels  of the  <dig> samples.
+
+CONCLUSIONS
+many patho-physiological clinical courses come along with major changes in cell physiology affecting single pathways or even largely remodelling signaling and the entire cellular metabolism, such as in the case of cancers  <cit> . even the dysregulation of only a few genes in a pathway can lead to a substantial regulatory switch that alters the output of a signaling process or redirects the metabolic flux in the cell. this may be related to aging or lead to growth advantages driving tumorigenesis, particularly when dysregulated genes are connected in the same subnetwork of a pathway and their functionality is closely linked. a good example found in this study, is the conversion of starch to glucose for which we observed a regulatory switch enabling improved digestion of starch in long-lived drosophila specimen. unfortunately, most pathway analysis methods require a considerably high number of genes to be dysregulated within a pathway in order to suggest the pathway as functionally relevant for the disease. these approaches do not consider significant regulatory patterns interlinked at smaller scales. for the purpose of identifying not only globally dysregulated pathways but in particular important switches in pathways, we have developed pathwave. here, we presented a considerably improved version that, among other changes, uses a novel lp formulation to optimally embed pathway networks into compact 2d lattice grids and provides a more flexible and user-friendly interface including ready-to-use pre-arranged 2d grid representations of pathway collections for now six organisms.
+
+we used pathwave to identify pathways that play central roles in human lung cancer and longevity of d. melanogaster. a comparison to commonly used pathway and gene set analysis methods showed pathwave to be considerably more sensitive. in contrast to common approaches, it regards pathways also when they contain only small numbers of significantly dysregulated genes, which may potentially constitute functionally relevant pathway switches, suggesting follow up investigations in the wet-lab.
+
+availability and requirements
+project name: pathwave
+
+project homepage:http://www.ichip.de/software/pathwave.html
+
+operating system: platform independent
+
+programming language: r, c++, perl
+
+other requirements: for running pathwave on expression data: r version  <dig>  or higher, standard cran r packages , standard bioconductor r packages ; for embedding pathways into compact 2d lattice grids: cplex, gridarranger v <dig>  , abacus v <dig> -alpha .
+
+license: gnu gpl
+
+any restrictions to use by non-academics: none
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+rk, rmp and re designed the study; sw, mo and gr designed the new grid optimization method; sw and nr implemented the new grid optimization method; rmp and gs implemented the new pathwave r package; rmp performed the data analysis; rmp, rk and sw wrote the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplementary text, figures and tables.
+
+click here for file
+
+ acknowledgements
+we thank zita soons  and ashwini kumar sharma  for extensive testing of the r package, and moritz aschoff , volker ast , volker hovestadt  and barbara hutter  for support and discussions. we acknowledge funding from the bmbf ; the helmholtz alliance on systems biology of signaling in cancer; and the bmbf/cancersys initiative mycnet . the funders had no role in study design, data collection and analysis, decision to publish, or preparation of the manuscript.

@@ -1,0 +1,71 @@
+BACKGROUND
+epigenetic regulation, such as cytosine  dna methylation, is important in gene regulation and transposon silencing. the gold standard technique for studying dna methylation is genomic bisulfite sequencing  <cit> . sodium bisulfite converts unmethylated cs to uracils, but 5-methylcytosines remain unconverted. hence, after pcr amplification, unmethylated cs are converted to thymines  while methylated cs are unchanged. recently, cokus et al. and lister et al. developed protocols, bs-seq  <cit>  and methylc-seq  <cit> , which couple bisulfite sequencing with next generation sequencing and completed a first single nucleotide resolution map of methylation in arabidopsis. while these approaches open up new avenues for genome-wide measurements of dna methylation  <cit> , aligning millions of bisulfite-treated short reads  onto the reference genome remains a challenge. mapping bisulfite-converted reads leads to ambiguity, since ts in the read can map to both genomic cs or ts. most alignment tools, such as blat  <cit> , soap  <cit> , and bowtie  <cit>  do not explicitly enable bisulfite mapping.
+
+currently, there are only a few aligners explicitly designed for mapping bs reads. cokusalignment  <cit>  treats each cycle in a read as probabilities of a, c, t, g and uses a suffix tree searching algorithm. however, to date only the arabidopsis suffix tree has been published. other newly-developed bisulfite mapping software includes bsmap  <cit> , rmap  <cit>  and maq  <cit> , which, unlike cokusalignment, model reads as discrete base calls instead of probability vectors. bsmap enumerates all possible combinations of c/t conversion in the bs read to find the uniquely mapping position with the least mismatches on the reference genome. it is reported  <cit>  to have a similar sensitivity as cokusalignment and outperformed the methods described in  <cit>  and  <cit> . the bisulfite mapping in rmap uses wildcard matching for mapping ts. maq also has a methylation alignment mode and it assigns non-unique reads randomly to one of the best-matching positions.
+
+two library protocols have been developed for constructing bisulfite-converted libraries . cokus et al's protocol  <cit>  uses two amplification steps: the first amplification generates both forward and reverse bisulfite-converted sequences ligated with dna adapters of dpni restriction sites. these sequences are then digested by dpni restriction enzymes that result in the 5-bp sequence tags on the bisulfite-converted sequences. there are two patterns of tags based on the forward  and reverse  directions of the bisulfite-converted sequences. after the ligation with standard solexa adapters and the second amplification step, four types of bisulfite-converted reads are generated. they are forward and reverse reads from watson  and crick stands , respectively . these tags are essential to reduce the ambiguity of certain classes of reads. unlike bsmap, maq or rmap, bs seeker is able to explicitly use the tags to improve mapping. the second experimental protocol  generates bisulfite libraries using premethylated adapters, and in this case no tags are present and all reads are +fw or -fw.
+
+bs seeker uses bowtie for mapping bs reads generated from either experimental protocol. it maps c/t converted fw reads to the c/t converted reference strands, and g/a converted rc reads to g/a converted, reverse complements of the reference strands. post-processing removes low-quality mappings based on the number of mismatches. the strategy of bisulfite converting the reference sequence by treating all cs as ts  has also been used in  <cit> , although implementations of this approach have not been published. however, most of these approaches are less precise than the ones we present here as they cannot correctly handle reads that are partially methylated.
+
+for the evaluation of our aligner, we use synthetic bs reads to assess the accuracy of mapping. we evaluate the mapping results by comparing the methylation statistics in the synthetic reads and in the mapped sequences. we also use bs seeker to align an arabidopsis library and human libraries from the two experimental protocols, which provides us with an evaluation using real data.
+
+implementation
+depending on the bisulfite experimental protocol that was used to generate the library  <cit> , bs reads may be observed in either four or two forms. cokus et al's protocol generates a forward read  from the watson strand, the reverse complement  of +fw, a forward read  from the crick strand, and the reverse complement  of -fw, see fig 2a. lister et al's protocol generates only +fw and -fw reads. we first describe how bs seeker handles data generated from cokus et al's protocol. it first converts all cs to ts on fw reads and both strands of the reference genome, so that the subsequent mapping is performed using only  <dig> letters, a, t, g. similarly, g/a conversion is performed on rc reads and both strands of the reverse complement of the reference genome. then it uses bowtie to map the c/t converted fw reads to the c/t converted watson and crick strands, and the g/a converted rc reads to the two g/a converted reverse complements of the watson and crick strands. reads that do not have a tag are treated as if they could be both fw and rc reads. during each of the four runs of bowtie, the mapped positions for each read are recorded. after all the runs of bowtie are complete, only unique alignments are retained. here, we define unique alignments as those that have no other hits with - the same or fewer mismatches in the 3-letter alignment . finally, we calculate the number of mismatches. for this calculation we consider a read t that aligns to a genomic c as a match, while a read c that aligns to a genomic t is considered a mismatch . similarly, when aligning rc reads, a read a that aligns to a genomic g is considered a match, while a read g that aligns to a genomic a is considered a mismatch. low-quality alignments with the number of mismatches larger than the user-defined value are discarded. aligning reads generated from lister et al's protocol is simpler, since there are no rc reads, and consequently bowtie is only run twice.
+
+RESULTS
+we first tested bs seeker against three bisulfite aligners, bsmap, rmap and maq, by mapping synthetic reads. the sensitivity and the specificity of the aligner's output are assessed by calculating the percentage of reads that mapped uniquely and their accuracy, which is the ratio of the number of correctly mapped reads over the total uniquely mapped reads. we also calculate the inferred average methylation rate in order to discern possible mapping bias from the aligners. we then show our mapability on a lane of experimental data from arabidopsis. finally, we mapped the bs reads of human libraries generated from the two experimental protocols, in order to measure the performance of bs-seeker on different protocols, and compare the speed of alignment to rmap.
+
+mapping synthetic reads
+we simulated 36-mer bs reads from human chromosome  <dig>  one million contained no base calling errors and another one million had base calling errors that follow the error distribution from  <cit>  . these were mapped to chromosome  <dig> using all four aligners. the simulated data were generated using both protocols. as shown in table  <dig> and supplementary table s <dig> in additional file  <dig>  we found that in all cases bsmap was significantly slower than the other aligners. maq's strategy, randomly assigning one of the best-matching positions for non-unique reads, results in a lower accuracy and biased estimates of the methylation rates. when the simulated reads are based on lister et al's protocol with no tags, rmap has a slight speed advantage over bs seeker, but the two methods are otherwise quite similar. however, when the cokus et al library protocol is used, bs seeker had a higher accuracy and shorter run time than rmap, since it is able to explicitly account for the fw/rc tags. furthermore, the methylation rate inferred from the mapped reads using bs seeker is very close to that of the initial synthetic data, indicating that the alignments are less biased than those of rmap. these results suggest that bs seeker is able to work with data from both protocols. by explicitly using tag information, it is able to optimally align reads generated by the cokus et al. protocol.
+
+a bs seeker, bsmap, and rmap discard non-uniquely mapped reads. maq keeps non-uniquely mapped reads and assigns them to one of the best-matching positions. b up to  <dig> mismatches are allowed. c the simulated methylation rates are set to be 72%, 0%, and 0% for cg, chg, and chh. d preprocessing reference genome needs 2- <dig> cpu minutes for the first run.
+
+mapping bs reads from arabidopsis
+we mapped  <dig> , <dig> bs reads of a single lane of an arabidopsis library from cokus, et al., , which is the same library tested in xi and li, . bs seeker is able to uniquely map  <dig> % of the reads, which compares favorably to the coverage reported in xi et al. the methylation rates inferred from the mapped reads for cg, chg and chh  are  <dig> %, 8%, and  <dig> % respectively, which are very close to the published results  <cit> , i.e, 24% cg,  <dig> % chg and  <dig> % chh methylation.
+
+mapping bs reads from human libraries
+in order to test the performance of bs seeker on large genomes, we used it to map bs reads from human libraries generated from the two protocols  <cit> . the mapabilities of reads from cokus et al's protocol and from lister et al's protocol are very close . the cg methylation rate we obtained from the mapping of reads from lister et al's protocol is  <dig> %, which coincides with the published result of  <dig> %  <cit>  .
+
+we also used rmap to align the same human libraries. the running time for rmap to map one lane of reads is between  <dig> - <dig>  hours, while for bs seeker it is between 20- <dig> minutes. both aligners showed close mapability, see table  <dig>  the significant advantage on the mapping efficiency suggests that bs seeker is the most efficient bisulfite aligner for mapping large genomes.
+
+CONCLUSIONS
+we present a tool for mapping bs reads, the bs seeker. it is simple to operate, and achieves high accuracy and coverage. we have made this tool publicly available for the community.
+
+availability and requirements
+• project name: bs seeker
+
+• project home page: http://pellegrini.mcdb.ucla.edu/bs_seeker/bs_seeker.html
+
+• operating system: linux, mac os
+
+• programming language: python
+
+• other requirements: python  <dig> . <dig> or higher, bowtie  <dig> . <dig> or higher
+
+• license: free for all users
+
+• any restrictions to use by non-academics: none, the software is readily available to any scientist wishing to use it for non-commercial purposes.
+
+• the software  and the examples are attached in additional file  <dig> and additional file  <dig>  respectively. it can also be downloaded via the project home page.
+
+authors' contributions
+pc wrote bs seeker and drafted the manuscript. sc and mp participated in the design and helped to draft the manuscript. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+supplementary information; supplementary materials to the bs seeker project.
+
+click here for file
+
+ additional file 2
+bs seeker software: a compressed file containing the source code for bs seeker.
+
+click here for file
+
+ additional file 3
+examples for running bs seeker. this compressed file includes two example datasets  for testing bs seeker. a step by step instruction is included in readme and can be also viewed from the project webpage at http://pellegrini.mcdb.ucla.edu/bs_seeker/examples.html.
+
+click here for file
+
+ acknowledgements
+the authors thank krishna chodavarapu for testing the program. pc is supported by eli & edythe broad center of regenerative medicine & stem cell research at ucla.

@@ -1,0 +1,290 @@
+BACKGROUND
+the development of rna-seq
+ <cit>  has boosted research on prokaryotic transcriptomes throughout the last years. it can be used for the detection of novel transcripts, e.g. non-coding rnas , analysis of differential expression in response to environmental stimuli and others. recently, a variant called drna-seq was introduced
+ <cit> , which allows the transcriptome-wide mapping of transcriptional start sites . this provides a means to reliably detect the 5’-end of transcripts. but what about the 3’-end?
+
+the accurate determination of transcript boundaries is useful for several reasons. it enables the identification of promoter and terminator elements and, thus, utrs which potentially carry regulatory elements. furthermore, target prediction for ncrnas will benefit from the knowledge of exact transcript limits and utrs. the same holds true for expression analysis, since all reads mapping a transcript can be rigorously accounted for, which improves the precision. not only expression levels might vary but also the transcript architecture, e.g. by differential processing or alternative tsss. for these reasons it is of interest to have an automated procedure to detect transcript boundaries. finally, the organization of genes into operons or transcriptional units can be easily elucidated when the genomic location of transcripts is known.
+
+in the near past, high-density genomic tiling microarrays were the method of choice for the characterization of complete transcriptomes. for this technology a segmentation method for the hybridization signal along genomic coordinates was proposed
+ <cit> . it makes use of a structural change model  which is fitted to the array data. the goal is to partition the data into blocks with ideally uniform expression and is achieved by computing the set of segments that minimizes the sum of squared residuals. an alternative approach for the analysis of high-density oligonucleotide tiling arrays makes use of a hidden markov model
+ <cit> .
+
+to the best of our knowledge no general method for transcript boundary estimation based on rna-seq data is available. cufflinks <cit>  and scripture <cit>  perform best with eukaryotic mrna-seq data, which captures polya-tailed transcripts only, and put a focus on the detection of splice variants. similar considerations hold true for de-novo transcript assemblers such as abyss <cit>  and soapdenovo <cit> . prokaryotic transcripts do not have a poly-a tail and, thus, bacterial rna-seq provides information on merely any rna present in the cell. on the one hand, this promises to provide the full picture of a bacterial transcriptome, but on the other hand, this also increases the complexity for its analysis. nevertheless, we set out to develop a method for transcript boundary determination based on rna-seq data mapped to a reference genome. more precisely, we chose drna-seq data as the input, since it explicitly provides information on transcriptional start sites.
+
+as a starting point we chose the scm based segmentation algorithm from
+ <cit> . we reimplemented it in c++ and added the ability for parallel computation using openmp . the major improvement is achieved by extending the segmentation method to make use of drna-seq data, especially data from libraries enriched for primary transcripts. for this, we modify the dynamic programming based optimization, such that segments satisfy certain user-defined constraints. this reduces the search space leading to improved speed and accuracy of the algorithm and further allows us to discriminate transcript from non-transcript segments. finally, we present a method to compute consensus segments, which makes use of the fact that the algorithm intrinsically computes many results. this integrative step results in segments with improved confidence.
+
+implementation
+in the following we will describe the algorithm implemented in rnaseg. due to the close relation to the algorithm developed in
+ <cit>  we reuse large parts of their notation.
+
+drna-seq data
+the data provided by a drna-seq experiment is in the simplest case a set of sequencing reads from two libraries. one library consists of sequencing reads from rna enriched for primary transcripts, and the second is untreated. throughout this manuscript we name the reads primary and secondary, respectively. ideally, sequencing reads from primary libraries start at the native 5’-end of a transcript, such that the 5’-ends of primary reads represent the 5’-ends of native primary transcripts. sequencing reads from secondary libraries start at the 5’-end of secondary transcripts. these may either be degradation or processing products or, as for the data used here, the result of a fragmentation procedure. note that if the secondary library is treated with tobacco acid pyrophosphatase  it also contains primary transcripts, which would otherwise not be accessible for ligation due to the pyrophosphate. tap treatment, although used in
+ <cit> , is not mandatory and to make rnaseg as widely applicable as possible, we provide means to handle the effects of this treatment .
+
+we store for each position i in the genome the number of primary read starts p
+i
+, the coverage by primary reads
+cip and the coverage by secondary reads
+cis.
+
+structural change model segmentation
+the data used for modeling consists of the number of primary read starts  and the secondary read coverage  for each position in the genome. the coverage by secondary reads is expected to be uniformly distributed over the full-length of the transcript and, thus, rnaseg uses this data to compute the sum of squared residuals for a candidate segment. primary read start information is used as a constraint for start positions of transcript segments and for differentiating between transcript and non-transcript segments. in the following, we recapitulate the definition from
+ <cit>  and explain our extensions to incorporate drna-seq data.
+
+fitting the model
+the scm models the log <dig> normalized
+cis as a piecewise constant function of genomic coordinates as shown in .
+
+  zi=μr+εiforcpr≤i<cpr+ <dig>  
+
+where i =  <dig> …,n is the genomic position,
+zi=log <dig>  cp <dig> …,cp
+r
+ are parameters for segment boundaries also called change points, cp1 =  <dig> and cp
+r+1 = n +  <dig>  r is the maximal number of segments, μ
+r
+ is the mean log <dig> normalized c
+s
+ for segment r and ε
+i
+ are the residuals.
+
+the model is fitted to the data by minimizing the sum of squared residuals as shown in  for a predefined number of segments r.
+
+  g=∑r=1r∑i=cprcpr+1- <dig> 
+
+the minimization which leads to the optimal set of parameters
+cp~ <dig> …,cp~r is done by the dynamic programming  algorithm described in the following section.
+
+optimization
+the tool rnaseg implements an extended version of the dp algorithm available from the bioconductor tilingarray package, which we call the original algorithm from now on. it calculates the minimal sum of squared residuals in the first step and determines the optimal set of change points during backtracing.
+
+the original algorithm starts with computing the cost matrix g which is the main input for the dp procedure that finds the optimal segmentation. the cost matrix contains for each entry g
+i,k
+ the sum of squared residuals of the segment from i to i + k -  <dig>  the calculation of the cost matrix for arbitrary segments would take quadratic time and space with respect to the genome size n. this renders the algorithm inapplicable on a genome wide scale. for our algorithm we reduce the complexity by restricting the segment length to a maximum value
+k^, resulting in a complexity of
+n×k^ for g. this strategy was already chosen in the original algorithm but using a fixed, rather than a user-defined
+k^.
+
+just like the original algorithm, our method uses two matrices for calculating the optimal segmentation. the scoring matrix stores in each entry
+miicp the optimal cost for the segmentation from  <dig> to i with cp change points. the traceback matrix contains in
+mticp- <dig> the index of the rightmost change point in the optimal segmentation from the start to i with cp change points. the major difference of our algorithm to the original one is, that in order to decide whether a segment is a transcript or a non-transcript segment our algorithm checks if the current segment suffices some constraints, such as enough primary reads at the segment start or a mean coverage by secondary reads above a threshold. if this is the case, the change point belongs to a transcript segment and is stored as a positive positional value in the mt matrix. otherwise the change point denotes the start of a non-transcript segment and is assigned a negative positional value. a segment may even be neither a transcript nor a non-transcript, which is for example reasonable for segments with high mean coverage but without a valid tss. in such a case, the segment is marked invalid and not further considered.
+
+in differentiating between transcript and non-transcript segments, the algorithm allows only for transcript segments to appear one after another, or as an alternating order of transcript and non-transcript segments. the occurrence of two adjacent non-transcript segments is prevented by checking the previous change point in the mt matrix. this restriction is not only biologically reasonable but also results in a speed-up of the calculation.
+
+the initialization and the recursions for the mi matrix are shown in  and . the algorithm computes the optimal segmentation for all different numbers of change points up to
+cp^.
+
+  initialization:mik0=g <dig> kfor0≤k<k^∞fork^≤k<n 
+
+  recursion:mijcp=min0≤k<k0zkwithk0=jifj<k^k^otherwiseandzk=mij-k-1cp-1+gj-k,kval=true∞otherwise 
+
+where val is a function that checks if the segment from i to j for cp change points suffices the user defined thresholds for transcript or non-transcript segments. the individual checks are described in the following.
+
+segment constraints
+in the following,  denotes a segment from position i to position j and cp denotes the number of change points of the current recursion.
+
+a constraint that was already introduced above and is essential for the performance of the algorithm is the maximal segment length
+k^. in addition, the user can also impose a minimum segment length
+kˇ. the latter may be useful in cases where the drna-seq library preparation includes a size selection step, such that only rnas above a certain length are analyzed. each segment  must satisfy
+kˇ≤j-i+1≤k^.
+
+a transcript segment  needs to start with a reasonable number of primary reads, say t. therefore, the number of primary read starts at position i has to exceed t . this is a rather simplistic criterion, and we provide possible alternatives in the discussion, but still the complete method performs well, as will be shown later.
+
+due to differences in preparation of the secondary library, namely tap treatment or not, the secondary libraries may also contain reads for primary transcripts. these may show up as blocks in the secondary read coverage at the start of some transcripts, e.g. cag <dig> and cag <dig> in figure
+ <dig>  while others  do not show this artifact. the existence of such a block artificially enlarges the cost for this segment and thus we introduce a way to skip these regions. instead of requiring more than t reads at the starting position of a transcript segment, we search such a position in an area in front of a segment. the size of this search window  is a user defined parameter. in order to prevent multiple calculation of the same value an auxiliary array n is precomputed. entry n
+i
+ stores the position q for which p
+q
+ > t and q ≤ i. if several q within i,…,i-w satisfy this condition, the q with maximum p
+q
+ is chosen.
+ <cit>  are indicated by filled and dotted arrows, respectively.
+
+for highly abundant transcripts the enrichment for primary transcripts will not be perfect, thus reads from degradation products will misleadingly show up as primary reads. the user can choose to reduce the resulting increase in potential transcript segment start points, by setting a ratio r  between primary read starts and primary read coverage. this changes the way in which the n array is computed, such that n
+i
+ stores the position q for which
+pq>t,q≤iandpqcqp≥r holds true. again the q with maximal p
+q
+ is chosen within i,…,i - w.
+
+a segment  is classified as a transcript segment if i - n
+i
+ ≤ w. this remapping of the start position is reflected in the scoring scheme by replacing
+mij-k-1cp-1+gj-k,k with
+min-1cp-1+gj-k,k in .
+
+an essential feature of rnaseg is the discrimination between transcript and non-transcript segments. as described before, the mt matrix stores positive and negative positional values for transcript and non-transcript segments, respectively. a non-transcript segment is only allowed to follow a transcript segment, while transcript segments are not constrained, thus
+∨ni≤w must hold true.
+
+additional constraints can be imposed on the mean coverage μ of segments. for transcript segments the user can provide a minimum cut-off a, which needs to be exceeded by transcript segments. vice versa, for non-transcript segments the user may provide an upper limit u, which must not be exceeded by non-transcript segments. we use  to verify this.
+
+  vc=true,i-ni≤w∧μij>atrue,i-ni>w∧μij≤ufalse,otherwisewithμij=1j-i+1∑l=ijcls 
+
+note, that we use the non-normalized
+cis here, compared to the log <dig> normalized values for computing the g matrix. we feel that this is more intuitive for the user.
+
+for certain numbers of change points, the imposed restrictions may lead to an invalid segmentation, i.e. for a certain position j in the genome no i can be found, such that  satisfies all constraints. we mark such instances by setting
+miicp=- <dig> and
+mticp-1=2n. during the recursion, if a candidate segment does not satisfy
+mii-1cp-1≠- <dig>  it is not considered a valid sub-solution and, thus, ignored.
+
+during traceback the positions of the optimal segmentation for each number of change points are stored in the result matrix th. the procedure works as shown in algorithm  <dig>  the two if-statements check if the current trace contains a segment for which no valid segmentation could be computed during the recursion. in this case, the current backtracing is stopped and the corresponding change point number cp tagged invalid.  
+
+the output of the algorithm contains the transcript and non-transcript segments for each number of change points in gff format. it is generated by parsing the change points stored in the th matrix thereby generating entries for transcript or non-transcript segments in the output file. change point numbers which have been tagged invalid during backtracing will be ignored and will not appear in the output. for each segment the start position is the current change point i and the end position is located one position in front of the following change point.
+
+optimal segment number and consensus segments
+rnaseg computes for each number of segments, the optimal set of change points. in other words, the algorithm does not provide the overall optimal solution, but rather many solutions which are optimal by themselves, i.e. for the given number of change points. the choice of the optimal number of change points is not trivial, as has already been stated in
+ <cit> . one can use information theoretical approaches, such as the aic  and bic , but the authors finally suggest an empirical estimation based on positive control regions. in our opinion, this is not satisfying and we provide two ways to cope with this.
+
+an intrinsic property of the constraints described above is that they limit the maximal number of transcript segments
+m^. since a non-transcript segment has to be followed by a transcript, a maximum of
+2m^+ <dig> segments are possible. during the calculation of nrnaseg determines how many positions satisfy the transcript start constraints, which gives an upper bound for
+m^. if
+cp^>2m^+1rnaseg automatically lowers
+cp^ to
+2m^+ <dig>  saving computation time and memory. the maximal number of change points for which a valid segmentation could be derived depends on all constraints and is available at the end of the run. this set of segments provides the highest resolution for the given constraints. for high quality data and reasonable constraints, it likely constitutes the final result.
+
+our second strategy makes use of all segmentations for the different change point numbers. for similar numbers of change points, the segment sets likely share a large number of segments. it is important to note that the computation does not enforce this behavior. in order to take advantage of this information we apply a consensus strategy. this strategy focuses on transcript segments  and has essentially four steps: 
+
+• first, transcripts are collected from all numbers of change points, and their occurrence frequencies determined. we use this occurrence frequency as a proxy for the quality of the prediction.
+
+• second, internal tsss may split a long transcript into two or more short transcripts. hence, transcripts that together correspond to a longer transcript, i.e., sub-transcripts, are chained and their occurrence frequencies added to the long version.
+
+• third, transcripts from different numbers of change points may differ only by a few positions. thus, we merge transcripts that overlap to 99% or more. for this, we keep the more frequent variant and sum up the occurrence frequencies.
+
+• fourth, for competing  transcripts we retain the one with higher cumulated occurrence frequency, as this is supported by a larger number of individual segmentations.
+
+as a result, the segment sets for the various change point numbers are merged and provided in a single output file in gff format, ready for visualization in popular genome browsers. furthermore, transcript segments are augmented by their occurrence frequencies among all change point numbers, which allows to infer the significance of the actual transcript. as a byproduct this script allows to merge results for the different strands as well as of several partial analyses of adjacent, possibly overlapping, genomic regions. thus, it is easy to split the analysis of a complete genome into small, overlapping pieces , do the segmentation piecewise, and merge the individual results. this decreases overall runtime, since for shorter sequences
+cp^ can also be reduced.
+
+RESULTS
+we applied rnaseg to the data from
+ <cit>  for helicobacter pylori  <dig>  the individual steps are described in the following.
+
+data
+we downloaded all data for the experiments srx <dig>  srx <dig>  srx <dig>  srx <dig>  srx <dig>  srx <dig>  srx <dig>  srx <dig>  srx014013- <dig> from the ncbi sequence read archive . the samples srx014013- <dig> represent solexa sequencing results of untreated rna, while the other samples correspond to  <dig> sequences from primary enriched libraries. in total approx.  <dig> million primary and  <dig> million secondary reads were obtained. all reads were polya trimmed at the 3’-end and  <dig> reads were additionally subjected to a 5’ adapter clipping .
+
+read mapping and input file generation
+we used segemehl <cit>  to map the reads to the genome, requiring a minimum accuracy of 85% and utilizing the co-optimal matching strategy.
+
+in the following a positional coverage file for each strand was generated where the primary read starts and coverage were calculated as the maximum of the primary libraries. the secondary coverage is the mean of the secondary libraries. in both cases the values were normalized beforehand via the number of mapped reads for the respective library. in order to be suitable as input for rnaseg the data was arranged in tab-delimited format as follows: each row has four values corresponding to primary read starts, primary coverage, secondary read starts and secondary coverage. the genomic position is not represented explicitly, but given implicitly by the position of the row in the file. thus, values in row  <dig> correspond to position  <dig> in the genome, row  <dig> to position  <dig>  and so on. we selected this format since it can be directly visualized by the artemis genome browser
+ <cit>  as a user graph. together with the output of rnaseg in gff format this allows a simple and fast visualization of the experimental data together with the prediction. the rnaseg distribution provides a python script to convert mapping files in sam format to the described format.
+
+application
+in order to speed up the computation, we analyzed the  <dig> , <dig> nt long genome in  <dig> parts of  <dig>  nt length where adjacent parts overlap by  <dig>  nt. rnaseg was applied with the following constraints: primary read start threshold t =  <dig>  min./max. segment length
+kˇ= <dig> k^= <dig> , maximal no. of change points
+cp^= <dig> , transcript mean coverage cut-off a =  <dig> , non-transcript max. mean coverage u =  <dig> , and read start ratio r =  <dig> . these settings were derived by analyzing small sample regions. the results were combined using our consensus strategy described above and transcripts with an occurrence frequency below
+ <dig> discarded. in total,  <dig>  transcripts and  <dig>  sub-transcripts were predicted. we also extracted the transcripts for the maximal number of change points for each analyzed part and joined those that meet without a gap within an annotated gene, resulting in  <dig>  transcripts. we term transcripts and sub-transcripts derived by summarizing t
+s
+ and
+tsubs and those from the maximum change points t
+m
+.
+
+figure
+ <dig> shows the results for section  <dig>  to  <dig> . this region comprises the cag pathogenicity island, which was also described in detail in
+ <cit> . overall, the coverage plots give an impression about the complexity of the data. t
+m
+ segments  or blocks of adjacent t
+s
+ segments  nicely reflect the genomic organization in this region. the two alternative operons  suggested in
+ <cit>  can be confirmed when taking into account the
+tsubs . in total,  <dig> and  <dig> t
+m
+ and
+ts/tsubs segments, respectively, were predicted from which  <dig> and  <dig>  respectively, correspond to the  <dig> manually selected tsss from
+ <cit> . among them the acid induced internal tss in cag <dig> 
+
+the second example in figure
+ <dig> shows the region from position  <dig>  to  <dig>  and comprises the urease operon . again our analysis confirms the operon organization ureab and ureiefgh presented in
+ <cit> , especially for the t
+m
+ segments that show perfect agreement. sharma et al. <cit>  manually derived operon structures by taking into account the operon prediction from the door
+ <cit>  database. we extracted those operons described as new, confirmed, alternative or extended and neglected those termed ambiguous. this resulted in  <dig> operons, some of which had two or more proposed alternatives, which we used as our reference set. for the predicted segments we defined operons as those genes overlapping the same transcript segment. for each operon from the reference set we looked for the closest predicted segment, where the distance was defined by the number of different genes.  <dig> out of  <dig> operons were equal,  <dig> differed by one gene,  <dig> by two,  <dig> by more than two, and  <dig> operons were not predicted at all. in addition,  <dig> new operons were predicted by rnaseg.
+ <dig> 
+
+simulated data
+to test the influence of the parameters on the performance of rnaseg we used simulated data. since no drna-seq read simulator is currently available we modified an rna-seq read simulator, namely rnaseqreadsimulator
+ <cit>  as follows: first, reads are poisson distributed over the transcript and, second, a user-defined fraction between 0–100% is assigned to the first position, which simulates the enrichment of primary transcripts in the primary drna-seq library. the simulation scripts are part of the rnaseg distribution. we simulated a primary  and a secondary library with approx.  <dig> million reads each, and applied rnaseg with varying values for the primary read start cut-off p, the mean transcript coverage cut-off a and the mean nontranscript coverage cut-off u. we used the f-measure and the fraction of recovered reads from the secondary library to assess the performance. the results are summarized in table
+ <dig>  rnaseg achieves a maximal f-measure of  <dig> , but interestingly the fraction of recovered sequencing data in transcript segments reaches 100%. the reason for this is that the section we analyzed contains genes for which very few or even no reads were simulated. if we would count these as true negatives the f-measure would be  <dig> . the f-measure drops to  <dig>  for high values of a and u, but still the fraction of recovered sequencing data stays high . this shows, that mainly genes with low read numbers are affected.
+
+a
+u
+f-measure and fraction of recovered sequencing data from the secondary library  for simulated data. rnaseg was applied to the forward strand of region  <dig>  to  <dig>  of the h. pylori genome. we set
+k^ =  <dig> ,
+cp^ =  <dig> , w =  <dig>  and varying values for parameters t, a and u. we define: true positives  are genes that are part of a transcript segment, true negatives  are intergenic regions that are not part of a transcript segment, false positives  are intergenic regions that are part of a transcript segment and false negatives  are genes that are not part of a transcript segment. ‘-’ indicates parameter combinations that have not been tested because they are not sensible. numbers in brackets below t correspond to the average runtime in cpu hours for all simulations with this value of t.
+
+performance
+as mentioned before, we restrict the computation allowing only for a maximum segment length
+k^. nevertheless the algorithm is still computationally demanding when applied on a genomic scale. memory consumption can be estimated as follows. the dominating elements are the matrices g, mi and mt and their sum accounts for over 99% of the memory consumption. given that each value is stored in  <dig> bytes  the g and mi matrices need
+8nk^ and
+8ncp^ bytes of memory, respectively. the mt matrix stores integer values needing only  <dig> bytes and thus its memory consumption is
+4ncp^, which is half that of mi. in total the memory consumption can be estimated with the equation
+8n bytes.
+
+the runtime scales linearly with n,
+k^ and
+cp^ each. for each cp we compute optimal segmentations for each 0 < i ≤ n. interestingly, the computation for each i depends solely on results from the previous change point numbers, thus allowing for parallel computation over all i. for this we make use of openmp and the runtime scales nearly reciprocal-linear with the number of threads. computation of our presented results took roughly  <dig> hours, using  <dig> cpu cores  and a maximum of  <dig> gb of memory.
+
+rnaseg also checks the values of
+k^ and
+cp^ for plausibility. during the computation of the array n, the algorithm counts the number of possible starts π and determines the largest gap between two adjacent starts δ. if
+cp^>2π+ <dig> it is reduced to 2π +  <dig> and if
+k^<δ <dig> it is increased to
+2δ <dig>  the conservative increase of
+k^ is a compromise between increased runtime and the chance to get a valid segmentation. note that a gap between putative tsss may be overcome by two segments, one transcript and one non-transcript segments. thus, in theory gaps of size
+2k^ may be segmented correctly.
+
+the parameter t controls the number of putative transcript starts, and thus effects the values of
+k^ and
+cp^. as a rule of thumb, the higher t, the lower
+cp^ and the higher
+k^. for our simulated data this effect is reflected by decreased runtimes for higher values of t. memory consumption was more or less constant at  <dig> gb because the automatically adjusted
+cp^ numbers  were on a relatively low level compared to
+k^ and n , which dominate memory usage.
+
+discussion
+using the scm approach we developed a tool, namely rnaseg, for the mapping of 5’ and 3’ transcript boundaries based on drna-seq data. previous drna-seq based studies on bacteria
+ <cit>  mainly made use of primary libraries to identify different classes of tsss, but neglected 3’-ends. these are of special interest for cis-antisense or trans-acting srnas which lack a coding sequence to determine their approximate range in the genome. our results show that, despite the partly noisy data, rnaseg performs well and can be used to infer transcriptional units from drna-seq experiments. compared with a manually curated operon prediction, our method reconstructs 70% of the known operons and misses many others by only a few genes. this failure can be mainly attributed to the presence of internal tsss, which result in the prediction of several adjacent transcripts rather than a long one. furthermore, these alternative transcripts might constitute interesting operon variants. availability of more robust data together with algorithmic improvements, as described below, will likely yield even better results.
+
+we expect predicted 5’-ends of transcripts to be more accurate than their 3’-ends for two reasons. first, primary libraries within a drna-seq experiment provide distinct information on the 5’-ends of transcripts and we do not have such data for 3’-ends. second, transcription termination is not as specific as transcription initiation. especially, rho-independent termination does not lead to defined 3’-ends since it is a dynamic process guided by the rna itself . the thermodynamic characteristics of the terminator hairpin and the successive u-tail heavily influence termination efficiency
+ <cit>  and read-through is a common phenomenon.
+
+a recent study of the transcriptome of the cyanobacterium synechococcus elongatus pcc 7942
+ <cit>  also applies the scm approach for the identification of non-coding transcripts. here, for non-coding transcripts the segmentation is applied strand-specific to  <dig> kb intervals with  <dig> kb overlaps and  <dig> change points. segments with a mean coverage below two reads per nucleotide are classified as non-transcribed regions and removed together with segments overlapping previously defined transcripts for annotated genes. for the remaining segments the 5’- and 3’-end are adjusted using a statistical approach, which models the positional drop in read coverage by a binomial test. by design, this test compares positions  <dig> and  <dig> nt apart, thus it is susceptible to noise, especially for low coverage transcripts.
+
+the two widely used tools for transcript assembly in eukaryotic studies, cufflinks <cit>  and scripture <cit> , are tailored to detect transcript isoforms. they are designed for rna-seq of mrnas, which makes use of the polya-tail for cdna synthesis, and perform best with paired-end data. in contrast to scripture, cufflinks can be applied to non-paired-end data. although the authors do not recommend cufflinks for the analysis of bacteria
+ <cit> , we have applied it to our data with default settings and got no reasonable results . we think, that the problems mainly originate from the data. rna-seq and also drna-seq data from bacterial transcriptomes harbour much more noise than polya-guided rna-seq data from eukaryotes. furthermore, our data does not provide paired-end information.
+
+currently, tss identification within rnaseg is mainly based on primary read starts that have to exceed a given threshold. false positives may be ruled out by the fact that a tss has to be connected to a region satisfying the transcript segment constraints. for low abundant transcripts, a constant threshold may be too simplistic and we may choose a more sophisticated method in a future version. here, the approach used in
+ <cit>  seems promising to us, since it explicitly makes use of the two libraries provided by a drna-seq experiment. roughly speaking, the read start counts of both the libraries are modeled by a poisson distribution and the difference of these distributions  is used to compute p-values, based on which significant tsss are identified.
+
+the sequencing costs will drop substantially within the next years, thus more sophisticated data sets will become affordable. especially, data for different growth conditions and with biological replicates will become standard. rnaseg can be easily extended to make use of these. for example, replicate data will contribute equally to the sum of squared residuals, as it is already implemented in
+ <cit> . different growth conditions may be used in such a fashion, that the change of the primary starts at the mapped transcript start should be similar to the change of the mean secondary coverage of the complete transcript. the relation of these two measures is likely not linear and, thus, needs to be carefully analyzed.
+
+runtime and memory consumption are quite large for the current version of rnaseg. we have several ideas how to improve on this. one solution would be to decrease the resolution. at the moment we work with single-nucleotide resolution, but switching to, e.g.,  <dig> nt resolution would decrease runtime and memory consumption nearly by a factor of  <dig>  of course, we would loose accuracy but mainly for the 3’-ends since the mapping of segment starts to positions with a reasonable number of primary starts can still be done with single nucleotide precision. memory consumption would benefit in the same way from the reduced resolution.
+
+CONCLUSIONS
+with rnaseg we provide the first method for the prediction of transcription units tailored for drna-seq data. it will help in whole-transcriptome characterization and in the identification of operon structures and 5’- and 3’-utrs. the latter are important regions in post-transcriptional gene regulation by ncrnas and, thus, the results will improve subsequent studies, such as ncrna target prediction or the identification of cis-regulatory elements and transcription termination signals.
+
+availability and requirements
+project name: rnaseg;
+
+project home page:http://www.comptrans.uni-freiburg.de/software/rnaseg;
+
+operating system: platform independent;
+
+programming language: c++;
+
+other requirements: boost libraries >=  <dig> ;
+
+license: gnu gplv2
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+tb implemented the software and drafted the manuscript, mk analysed the data, bv conceived of, designed and coordinated the study and wrote the manuscript. all authors read and approved the final manuscript.
+

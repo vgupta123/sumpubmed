@@ -1,0 +1,223 @@
+BACKGROUND
+lc-ms/ms-based proteomics is a key technique for protein quantitation and identification. a typical workflow starts with the proteolytic digestion of protein samples, using usually trypsin. the resulting peptide mixture is inserted into a liquid chromatography  column in which the peptides are eluted at different time points, called retention time , according to their physicochemical properties . lc system and mass spectrometer are connected, either directly with electrospray-ms  or indirectly via fractionation onto a target plate as used in maldi-ms. the resulting peptide signals in the lc-ms map are referred to as features while the selection of features for fragmentation with ms/ms is called precursor ion selection. peptide identifications are assigned to ms/ms spectra using database search tools, such as mascot  <cit>  or x!tandem  <cit> , or by de novo sequencing  <cit> . the peptide sequences are then used to reconstruct the proteins that were present in the sample.
+
+a problem for protein identification with tandem mass spectrometry is the limited number of possible ms/ms acquisitions. even in simple protein digests there are more detected peptide signals than possible selections for ms/ms  <cit> . the number of possible fragmentations is either limited by the elution time of the peptide  or by the amount of sample available for each fraction . a standard method for precursor ion selection with esi-ms/ms is data dependent acquisition  which selects the x most intense signals in each ms spectrum for fragmentation, with x depending on the instrument type. however, as biological samples have a high dynamic range of protein abundance, the number of peptide identifications is biased towards high-abundance proteins, although low-abundance proteins are mostly of higher interest.
+
+in order to circumvent redundancy, dda can be combined with a dynamic exclusion list  that prevents fragmenting a signal at the same m / z-value within a specified rt range. exclusion lists are often used for replicate analyses  <cit> : after each lc-ms/ms run the exclusion list is updated and contains the fragmented or identified signals of previous runs. in comparison to simple repetitions, chen et al.  <cit>  showed that the number of unique peptide identifications can be significantly increased. bendall et al.  <cit>  reached a higher number of proteins identifications.
+
+a complementary strategy to exclusion lists is directed ms/ms. instead of excluding potentially uninteresting signals, the selection focusses particularily on signals of interest. these signals are part of an inclusion list that contains the m / z-values and usually an rt window for each peptide. this procedure is a typical approach for lc-maldi ms/ms where ms and ms/ms are decoupled. thus, ms acquisition can be used to create a map of all detected signals which guides the precursor ion selection. moreover, inclusion lists have also been used in combination with esi-ms/ms: a consensus map of detectable lc-ms features created from previous runs was used to create the inclusion list  <cit> . these studies showed that compared with dda directed ms/ms might identify a higher number of peptides  <cit> . this effect is more pronounced for low intensity peptides  <cit> .
+
+in the last years, in several studies iterative approaches for precursor ion selection were applied. for instance, scherl et al.  <cit>  added theoretical m / z-values of tryptic peptides of already identified proteins to an exclusion list. in a previous study, we showed the effect of combining both the directed analysis of interesting signals and the exclusion of uninteresting signals through a heuristic  <cit> . in our study, a prioritized list of all possible precursors was reranked during ongoing ms/ms acquisition based on the identifications yielded so far. precursors having an m / z- value matching tryptic peptides of already identified proteins received a lower priority, whereas precursors matching tryptic peptides of uncertain protein candidates were assigned higher priorities. we demonstrated that this strategy can identify the same number of proteins as standard methods using fewer precursors. in our study, theoretical peptides were matched onto observed features using only the m/z-value. thus, our method showed a clear dependence on mass accuracy and sample complexity.
+
+liu et al.  <cit>  developed an iterative ms/ms acquisition  approach that used different filtering techniques to exclude uninteresting signals. proteotypic peptides of already identified proteins are excluded as well as signals with a mass defect untypical for peptides. this way, a larger number of proteins could be identified than with dda.
+
+in this manuscript, we introduce a deterministic framework that formulates the precursor ion selection problem as integer linear program . we show that it can be easily adapted to variations of the original problem. we present three different scenarios and their corresponding optimization problems. we address the problem of erroneous peptide-precursor assignments by including predictions of rts and proteotypic peptides into the matching. furthermore, we employ a probabilistic scoring to infer proteins from peptide identifications. our methods are implemented as part of the open-source library openms  <cit>  and will be available as a topp tool  <cit>  as part of the next release of openms.
+
+methods
+several precursor ion selection strategies are conceivable depending on the aim of a study and the available prior knowledge about the sample. here, we focus on three settings: the first two use static inclusion lists created once before the ms/ms acquisition starts. the third changes the selection based on previous identifications. the two static inclusion list approaches differ in the information used during the selection process. in the following, when talking about peptides we refer to protein subsequences as opposed to precursors which denote ms/ms measurements. 
+
+• feature-based inclusion list: given an lc-ms feature map, we want to maximize the number of scheduled precursors given some constraints on the number of simultaneous acquisitions per rt fraction. this is a common scenario with lc-maldi due to its decoupled nature of lc and ms.
+
+• protein-based inclusion list: given a list of protein sequences but no prior lc-ms run, we want to find an optimal set of precursors that represents the proteins of interest best. as proteins are not identified directly we need to find a peptide set that optimally covers our specific proteins. for this peptide set, we predict the lc-ms features  and add them to the inclusion list.
+
+• iterative precursor ion selection: given an lc-maldi-ms feature map, we want to optimally exploit the set of possible precursors. optimality in this case means that we want to identify the proteins in a sample using a minimal set of precursors, so that the remaining precursors can be used to discover other proteins. the precursor ion selection shall be adjusted during the ongoing ms/ms acquisition based on previous peptide and protein identifications. this way, we combine the discovery nature of dda with directed ms/ms. as with both inclusion list formulations, the number of ms/ms acquisitions is limited by the number of precursors per rt fraction.
+
+these settings can be formulated as optimization problems, which can be formalized as integer linear programs . solving the ilps yields a list of precursor ions, the actual inclusion list. in the following sections we will introduce and explain the formulations.
+
+feature-based inclusion list
+given a feature map, we want to schedule the highest possible number of features as precursors for ms/ms-fragmentation. since a feature elutes over several scans we have the option to choose the feature as precursor in any of those scans. ideally, one would like to use for each feature a fraction with a high signal intensity for fragmentation. a greedy approach  chooses for each feature the fraction with the highest signal intensity. then, in each fraction the highest of these feature maxima are scheduled for ms/ms. however, situations can be constructed where ga selects less features than a global strategy that tries to optimize the selection for all features simultaneously. an illustration of such a situation is shown in figure  <dig>  in the following, we present a formulation of the feature-based precursor ion selection as optimization problem.
+
+for each feature j, we introduce a set of binary variables xj,s, which are set to  <dig> if we choose feature j in scan s as a precursor and  <dig> otherwise. since we want to choose the best possible fraction for each precursor, we do not simply maximize the number of scheduled precursors but use the feature intensities as weights, because high intensity features are more likely to produce good and interpretable ms/ms spectra. the intensities are normalized by the maximal signal intensity the respective feature has in any spectrum. this results in weights between  <dig> and  <dig> and prevents a bias towards selecting only high intensity features.
+
+we have two constraints: first, the capacity of spectrum s, i.e., the maximal possible number of acquired ms/ms spectra in spectrum s. and second, the number of times a feature can be selected as a precursor which is set to  <dig> here, but this constraint could easily be relaxed to other values. table  <dig> gives an overview of all variables and constants used in the lp formulations.
+
+the lp formulation of the feature-based inclusion list can be formalized in the following way: 
+
+  max∑j,sxj,s·intj,s 
+
+  subject to∀s:∑jxj,s≤caps 
+
+  ∀j:∑sxj,s≤ <dig> 
+
+  xj,s∈{ <dig> }. 
+
+here, xj,s is an indicator variable, it is  <dig> if feature j is selected in spectrum s and  <dig> otherwise. intj,s is the normalized intensity of feature j in spectrum s, and caps is the “capacity” of spectrum s, i.e., the maximal possible number of precursors for that spectrum. the problem of finding an optimal inclusion list is an instance of a well-known combinatorial problem, the knapsack problem. we will show that solving our ilp yields a global optimal inclusion list.
+
+in our implementation, we solve the ilp formulation using the gnu linear programming kit . the solution provides values for all xj,s and all features j where xj,s =  <dig> are part of the final inclusion list. due to constraint , xj,s can only be  <dig> for at most one s for each precursor j. thus, each precursor is scheduled in a specified fraction.
+
+protein sequence-based inclusion list
+in the last section, we developed a method for inclusion list creation based on lc-ms feature maps. in the following, we describe another inclusion list scenario: protein-based precursor ion selection. given a list of protein sequences that we want to identify in a sample, the task is to select a set of precursors that represents the whole set of proteins. however, with lc-ms/ms we cannot identify proteins directly. instead, we need to collect peptide identifications that can afterwards be assembled to protein identifications. as it is known which peptide sequences are part of which protein sequence, we can select a set of peptides that yields a sufficient protein coverage. for these peptides we can predict the rt and calculate their m / z-value. this way, we retrieve a set of possible precursors based on a set of protein sequences. figure  <dig> shows the relation between precursors, peptides and proteins.
+
+this problem can be formulated as an optimization problem as well. again, we have the spectrum capacity and the number of times a feature can be selected as constraints. additionally, we want to achieve a certain likelihood for each protein to be identified with the selected precursors. in the following, we will refer to this as the protein detectability, in analogy to peptide detectability which is the likelihood to detect and identify a peptide in a given experimental setup. we develop a formula to compute the protein detectability via the protein probability calculation in the next section. this finally leads to the formulation of the protein sequence-based lp.
+
+protein probability calculation
+a basic problem for shotgun proteomics is inferring protein identifications from peptide identifications. several approaches for the protein inference problem were published during the last years  <cit> . in order to calculate protein probabilities, we use the basic formulas of proteinprophet  <cit> , a widely used tool part of the trans-proteomicspipeline  <cit> . thus, the probability pi that protein i is present in the sample can be calculated as the probability that at least one of its constituting peptides was correctly identified: 
+
+  pi=1-∏j. 
+
+here, pj is the probability that peptide j is correctly identified. as peptide j might be part of more than one protein, proteinprophet uses additional weights to distribute the contribution of pj to several proteins. using the logarithm, we reformulate the product in equation  to a summation: 
+
+  ∏j=1-pi 
+
+  ∑jlog=log, 
+
+which is invalid for pj =  <dig>  so in this case we enter a pseudo count instead.
+
+prediction of peptide properties
+in shotgun lc-ms/ms experiments typically not all tryptic peptides of a protein are observed. instead, a characteristic set of peptides exists which can be often identified for a specific protein, these peptides are called proteotypic peptides  <cit> . closely related to proteotypicity the detectability of a peptide is the likelihood that the molecular ions of the peptides are detected, fragmented by ms/ms and identified through a database search. there exist several approaches to predict peptide detectabilities  <cit> . we use a machine-learning approach from schulz-trieglaff et al.  <cit>  for the prediction of the detectability of a peptide and denote it with dp. as dp is a likelihood, it ranges between  <dig> and  <dig> 
+
+similar to detectability prediction it is also possible to predict the retention time of a peptide. again, we use a machine-learning approach to predict the rts of peptides  <cit> . in our approach, we then assume an rt window around the predicted rt for the precursor ion selection.
+
+both methods for detectability and rt prediction use support vector regression  with a kernel function that works solely on the peptide sequence. for rt prediction, a training set of peptide identifications with accurate retention times is required. model training for detectability prediction requires a positive set of observed peptides and a set of undetectable peptides.
+
+>calculation of protein detectabilities
+when creating the protein sequence-based ilp, there are no ms/ms measurements available. therefore, peptide probabilities can not be considered. instead, we substitute them by peptide detectability which reflects the likelihood of a peptide to be detected and identified by ms/ms. we calculate the detectability of protein i  via: 
+
+  ∑p,withaip=1∑slog=log, 
+
+where aip is  <dig> if peptide p is part of protein i and  <dig> otherwise. xp,s indicates whether a peptide p is part of the inclusion list and selected as precursor in spectrum s. in our specific case the indicator variable xp,s can only be  <dig> or  <dig>  hence the left hand side sum in equation  equals: 
+
+  ∑p,withaip=1∑sxp,s·log=log. 
+
+lp formulation
+in the following, we use the previously developed protein detectabilities for the creation of inclusion lists to maximize the sum of the protein detectabilities.
+
+  max∑yi 
+
+  s. t.∀s:∑jxj,s≤caps 
+
+  ∀j,s:xj,s≤xj 
+
+  ∑jxj≤max_list_size 
+
+  ∀j:∑s∉xj,s= <dig> 
+
+  ∀i:yi=-log 
+
+  ∀j,s:xj,s,xj∈{ <dig> } 
+
+tp denotes the predicted rt for peptide p and ws is the rt window size.
+
+again, solving the lp formulation using a solver like glpk yields a set of variables xj,s =  <dig> that build the inclusion list. in this case, we provide rt windows for each precursor in the inclusion list. thus, for each precursor j there can be multiple xj,s =  <dig> 
+
+lp for iterative precursor ion selection
+the methods described in the previous sections are used for inclusion list creation prior to ms/ms acquisition. in the following, we develop an lp formulation for iterative precursor ion selection where the selection is adapted during ongoing ms/ms acquisition. in contrast to replicate analyses, where new lc-ms and lc-ms/ms measurements are performed in each replication step, in iterative ms/ms acquisition the same sample and the same lc-ms map is used for the whole analysis. this is especially suited for lc-maldi ms/ms as there the sample is “frozen” on the target and data acquisition can be suspended. after the initial lc-ms step an lc-ms feature map is created for the sample which is used for precursor ion selection. during the iterative analysis, in each iteration a set of precursors is chosen whose ms/ms acquisition is triggered. variables corresponding to the selected precursor set are fixed for subsequent iterations. as we describe methods for lc-maldi, we can step forward and backward “in time” by selecting fractions corresponding to different, not necessarily consecutive rts.
+
+the goal of the iterative precursor ion selection is twofold. on the one hand, a maximal number of proteins shall be identified with a given statistical confidence. on the other hand, a maximal possible number of precursors shall be fragmented which is limited by the available sample. for both aims, lp formulations were presented in the last sections. for the iterative precursor ion selection we combined these lps. after each iteration, a database search is performed for each ms/ms spectrum. afterwards, the lp formulation is adapted based on the search results. in the following, we describe the iterative workflow in detail.
+
+as shown in figure  <dig>  we start with the lc-ms map based on which a feature-based lp is created. by solving the lp we retrieve a set of precursors for which the fragmentation is triggered. subsequently, we perform a database search for the resulting ms/ms spectra and assign peptide probabilities to the peptide hits. then, variables and constraints of the lp formulation are updated: if a new protein was found it is inserted into the lp. additionally, variables of already fragmented precursors are fixed and peptide weights updated. afterwards, the lp is solved again yielding a new set of precursors. this procedure is iterated until a predefined termination criterion is fulfilled. this can either be a maximal number of iterations or selected precursors, or the drop of the efficiency of the last x spectra below a given threshold. note, efficiency is given by the number of identified proteins per iteration. additionally, the iterative precursor ion selection terminates if there exist no lc-ms features that contribute positively to the objective function.
+
+considering proteins in the lp has two main advantages: first, we want to target peptides hitting protein candidates. these are proteins for which we received peptide identifications, but that did not reach a sufficient significance to declare a protein identified. that way, lower intensity features are included into the precursor set which are likely to yield the missing identifications. on the other hand, signals potentially derived from already identified proteins contribute less weight to the objective function as these do not provide additional information.
+
+protein probabilities pi are computed as explained in the context of the protein sequence-based ilp. for the iterative precursor ion selection we require a minimal protein probability c to declare a protein identified. thus, 
+
+  pi≥c 
+
+  ⇒log≤log 
+
+  ⇔loglog≥ <dig>  
+
+this way, we can define the indicator bi which is  <dig> if pi ≥ c and  <dig> otherwise: 
+
+  bi=loglog. 
+
+matching of predicted peptides to observed lc-ms features
+every time we find a new protein hit, we consider all its tryptic peptides and determine their matching lc-ms features. therefore, a feature set mp is defined for each peptide p, containing all features within a predefined m / z-range around the theoretical m / z of p. then, peptide detectabilities and peptide rts are used to compute matching probabilities. m / z-values are only used to create a set of matching features – those within a specified m/z-range of peptide p – for which probabilities are computed. m / z - values and mass accuracy are themselves not included in the actual matching probability.
+
+we assume the rt prediction error to follow a gaussian distribution, which is supported by figure  <dig>  then, we compute the rt matching probability of a feature j and a peptide p as the probability that the prediction error is in the range of , with x2 = tp - minrt and x1 = tp - maxrt. see figure  <dig> for an illustration. the probability that a predicted rt tp is truly shifted by x spectra can be calculated as: 
+
+  p=1σ2Π·e- <dig>  
+
+considering the minimal and maximal rt of the observed feature j leads to an rt matching probability rp,j computed as: 
+
+  rp,j=p=p-p. 
+
+peptide detectabilities and rt matching probabilities are considered to be independent, thus, both are multiplied to determine the probability that feature j is produced by peptide p: 
+
+  mp,j=dp·rp,j. 
+
+now, we combine everything and receive the following lp formulation: 
+
+  maxk1∑izi︷protein-based inclusion+k2∑j,sxj,s·intj,s︷feature-based inclusion-k3∑ibi·∑p∑j∈mp∑sai,p·mp,j·xj,s︷exclusion 
+
+  s. t.∀i:zi≤loglog+∑p∑j∈mp∑sxj,s·loglog 
+
+  ∀i:zi∈ <cit>  
+
+  ∀s:∑jxj,s≤caps 
+
+  ∀j:∑sxj,s≤ <dig> 
+
+  ∑j,sxj,s≤precs+step_size. 
+
+the objective function consists of three parts: protein-based and feature-based inclusion as well as exclusion. the inclusion parts contribute a positive value weighted by factors k <dig> and k <dig> while the exclusion part decreases the value of the objective function for peptide signals potentially derived from already identified proteins. it is weighted by k <dig>  typical values for k <dig>  k <dig> and k <dig> are  <dig>   <dig> and  <dig>  respectively. constraint  ensures that a given protein significance is reached. it considers both the peptide probabilities of already identified peptides and the “theoretical probabilities” received from the matching probabilities of tryptic peptides and observed lc-ms features. by dividing by the transformed threshold significance c and the limitation zi≤ <dig>  additional peptide identifications of an already identified protein do not contribute to the objective function. algorithm  <dig> shows the online precursor ion selection in pseudo code.
+
+algorithm  <dig> online precursor ion selection
+RESULTS
+data
+for evaluation of the described methods we used two samples of different complexity. on the one hand, a well-defined protein standard consisting of  <dig> pmol each of  <dig> human proteins . sample  <dig> is a tryptic digest of a cell lysate of hek <dig> cells. it was prepared and provided by the group of prof. h. meyer . the lc-ms/ms acquisition was done by anja resemann . both data sets were used in a previous study. see  <cit>  for a detailed description of the sample preparation.
+
+peptide identification was done with x!tandem  <cit>  ) using topp’s xtandemadapter  <cit> . the combined target decoy version of the swiss-prot protein sequence database in release 2011_ <dig> was searched with taxonomy limited to human. other settings included:  <dig> ppm mass tolerance,  <dig>  da fragment tolerance, + <dig> as minimal and maximal charge, methionine and tryptophane oxidation as variable modification,  <dig> allowed missed cleavage and tryptic cleavage sites. additionally, carbamidomethylation of cysteines was used as fixed modification for ups <dig> 
+
+we calculated peptide posterior error probabilities  using the topptool idposteriorerrorprobability and then converted the peps into peptide probabilities: pi = 1 - peti.
+
+for rt and detectability model training, the topptools rtmodel and ptmodel were used. the training data sets for ups <dig> consisted of three replicate lc-ms/ms runs, filtered for peptide ids with a probability of at least  <dig>  and that are part of one of the  <dig> constituent proteins. for the hek <dig> data set, we used the same probability threshold and filtered additionally for proteins with at least  <dig> peptide ids in order to keep the training sets at a reasonable size. figure  <dig> shows the deviation of predicted and observed rt for hek <dig> 
+
+evaluation workflow
+the described algorithms were tested in a variety of settings, for this reason a simulation study was best suited for our purpose. however, not the spectra themselves are simulated, only their selection . thus, an extensive fragmentation on all possible precursors was performed. the resulting lc-ms feature map and ms/ms spectra were then used as foundation for the simulation of the precursor ion selection. this way it was possible to discriminate performance differences from differences due to technical replication. the latter pose a serious problem as was shown by tabb et al. in a systematic study where the overlap in peptide identifications between technical replicates ranged between 35–60%  <cit> .
+
+feature-based inclusion list
+the three different strategies for creating a feature-based inclusion list as presented in figure  <dig> - a greedy approach , data dependent acquisition , and the ilp formulation  - were evaluated with a varying maximal number of precursors per rt bin, ranging from  <dig> to  <dig>  this led to inclusion lists of increasing size for each of the strategies. we used rt bins of  <dig> and  <dig> seconds for ups <dig> and hek <dig>  respectively. additionally, dda in conjunction with dynamic exclusion  of each scheduled precursor for the next two fractions was included in the analysis.
+
+for the evaluation, the number of uniquely selected features was counted. this means, even if a feature was selected more than once as precursor, it was only counted once. the results are shown in figure  <dig>  as expected, the two methods that use the feature information, ilp and ga, clearly outperform dda and dex. additionally, ilp performs superior to ga as  <dig> precursors per rt bin are already sufficient to select all possible features as precursors. ga, in turn, needs  <dig> precursors per rt bin. with dda and dex not all features present in the dataset get selected within the limit of  <dig> precursors per rt bin. with the hek <dig> sample both dda and dex perform even worse, less than half of all possible precursors are selected with a maximum of  <dig> precursors per rt fraction. ilp and ga perform equally well, until a maximum of  <dig> precursors per fraction, for higher values ilp is better. at maximal capacities of  <dig> and  <dig>  which are realistic numbers within our setup, ga selects around  <dig> and  <dig> precursors less than the ilp, respectively. no method yields all  <dig>  features within a limit of  <dig> precursors per rt bin. ga selects  <dig>  features and the ilp set consists of  <dig>  precursors. the advantage of our method is that it considers all features simultaneously and finds a global optimal solution. this way, more precursors can be scheduled than with a strategy that optimizes precursor ion selection for each lc-ms feature separately. 
+
+protein-based inclusion list
+the inclusion list creation with the protein sequence-based ilp was evaluated on the protein standard. we compared the precursors in the inclusion list with the observed features. whenever a predicted precursor overlapped with a feature, the peptide annotation of the feature was assigned to the precursor. this way, we were able to evaluate how many peptide and protein identifications an inclusion list would deliver. this is a strong assumption as it implies that for a given feature the fragmentation works at all rt bins in a similar quality. however, as pointed out before, it is justified by the limited reproducibility of repetitive lc-ms/ms analyses.
+
+in figure  <dig>  the number of peptide identifications for increasing inclusion list sizes is shown for rt window sizes of  <dig>   <dig> and  <dig> seconds. the number of identifications rises with the inclusion list size, for larger windows this effect is stronger. their maximum width is indirectly limited by the maximum possible number of precursors per rt bin. interestingly, when looking at the number of protein identifications, we observe a steep increase up to a size of around  <dig>  afterwards a plateau is reached ). note that already around  <dig> predicted features yield all possible protein identifications.
+
+we further analyzed the influence of the rt window size on the number of protein ids. we checked sizes from  <dig> up to  <dig> seconds and using either an inclusion list with maximally  <dig> entries or one of unlimited size. the results for both are similar . with a moderate window size of  <dig> seconds  <dig> proteins can already be identified. 
+
+our results show that considering the peptide-protein relation at the level of inclusion list creation prevents frequent and unnecessary identification of uninformative peptides. by incorporating protein detectabilities into the ilp we can directly control the expected protein significance. the moderate rt window sizes needed to identify a high number of proteins emphasizes further the effect of including rt predictions.
+
+iterative precursor ion selection
+we compared the performance of the iterative precursor ion selection with lps  with a heuristic approach presented in a previous study  <cit>   and with a static precursor ion selection based on an inclusion list which is sorted by intensity .
+
+sample complexity
+in a previous study we observed a drawback of the heuristic ips: it showed a clear performance loss when applied to a complex sample with limited mass accuracy  <cit> . this was due to erroneous assignments of theoretical peptides to observed features. in ips_lp the specificity of assignments is increased by including rt and detectability of a peptide.
+
+in figure  <dig> the performance of hips is compared to sps and ips_lp for hek <dig>  for figure  <dig>  the rt bin capacity was set to at most  <dig>  both iterative methods require less precursors than sps to identify up to  <dig> proteins. hips is the best method to identify up to  <dig> proteins as it needs up to 30% less ms/ms spectra than sps. with ongoing analysis the advantage decreases. in order to identify  <dig> or more proteins, hips requires around 10% more precursors than sps. on the contrary, ips_lp is almost always better than sps and can save a maximum of around 20% of the spectra. this shows that the heuristic makes good precursor choices at the beginning of the analysis, but after a certain number of iterations the number of false assignments of precursors to predicted peptides increases too much and thus the performance of hips drops. in turn, the inclusion of rt and detectability predictions increases the specificity of peptide-precursor assignments with ips_lp.
+
+we further examined the performance of the different methods with respect to limited number of precursors per fractions, as shown in figure  <dig>  when the maximal number of precursors in each fraction is less than ten ips_lp is able to identify more proteins than the other methods. this implies that ips_lp is particularily applicable in conditions with limited amounts of sample.
+
+as pointed out before, intensity-based selection methods like dda identify many peptides especially for high abundance proteins. our method aims at reducing this redundancy by excluding precursors matching peptides of already identified proteins. in figure  <dig>  we analyzed how many peptide identifications matching the 10% most abundant proteins were found with the evaluated methods. abundance of a protein was estimated by the mean of all its corresponding feature intensities. for both ips methods, we receive fewer peptide identifications for the high intensity proteins at the first stage of the experiment. thus, in this part the bias towards high abundance proteins is less pronounced for ips_lp and hips than with sps. however, after  <dig>   and  <dig>   ms/ms spectra the numbers quickly reach the ones from sps. this is due to the selection of previously downranked or excluded precursors. when considering low abundance proteins, we observe that ips_lp identifies proteins belonging to the 10% lowest abundant ones with less ms/ms spectra than hips and sps).
+
+weights
+the objective function of ips_lp contains the weights k <dig>  k <dig> and k <dig>  we tested both samples with different values to determine how robust the system is for changes of these weights and if different samples require different weights. both samples were examined with a mass accuracy of  <dig> ppm. we evaluated different values for k <dig> and k <dig> while k <dig> was fixed to  <dig> . setting k <dig> to  <dig> results in early termination due to a lack of positive contributions to the objective function. as expected, k1 = k3 =  <dig> leads to the same performance as sps since only feature-based inclusion is switched on. a small k <dig> does not greatly improve the performance as it can not compensate for the weight of all features. especially for the complex hek <dig> sample we can see that the exclusion part has a greater influence on the results. large values for k <dig> lead to a good performance for a large part of the experiment, but for more than  <dig> identified proteins the results are worse than for sps. this deterioration is probably due to erroneous precursor-peptide assignments and shows that too large values for k <dig> might impair the results. in summary, we can see that for both samples although being of different complexity the same values  yield good results.
+
+sequential precursor ion selection
+although with lc-maldi ms/ms it is possible to select precursors in an order independent of their rt, in practice the sample is analyzed following a specific fraction order. thus, in the following, we adapt the lp formulation so that it proceeds through the precursor set in a sequential order according to the fraction number.
+
+we start with spectrum s∗ =  <dig>  only the capacity constraint of the lp formulation  has to be adapted to account for the sequential selection: 
+
+  ∀s>s∗:∑jxj,s= <dig> 
+
+  ∀s<s∗:∑jxj,s=caps∗ 
+
+  ∑jxj,s∗=caps∗ 
+
+capacities of fractions with a lower number than s∗ are fixed at the number of selected precursors for the respective fraction to prevent going back in rt dimension. capacities of fractions after s∗ are set to  <dig>  when all precursors in s∗ were selected or its capacity has been reached, the next fraction is set as s∗.
+
+when selecting precursors with this sequential ips_lp the percentage of saved precursors to reach a certain number of protein identifications rises with ongoing analysis . finally, ips_lp saves more than 30% of the precursors. as in most fractions ips_lp selects fewer precursors than sps, this sums up to more than  <dig>  saved ms/ms spectra in the end without a loss in protein identifications. this reduction of precursors per fraction was also observed for the non-sequential ips_lp. there, in total  <dig>  were selected, in contrast to more than  <dig>  with sps.
+
+CONCLUSIONS
+we presented methods for precursor ion selection with lc-maldi ms/ms. we showed that inclusion list creation can be formalized as optimization problem and efficiently solved with linear programs. our methods can be used to schedule an optimal set of precursors. we presented exemplarily two situations where the available information prior to ms/ms acquisition differs. when the protein sequences of interest are known our method for inclusion list creation using protein sequences is well suited, as it creates very efficient inclusion lists. various adaptations to our methods are possible that can be easily integrated. for instance, the protein sequence-based inclusion list can be adapted to consider not all tryptic peptides of a protein but a specific predefined set of peptides that can be used for quantification of proteins in different cell states or in time series.
+
+finally, we presented a new method for iterative precursor ion selection that identifies proteins more efficiently than data dependent methods. this efficiency improvement is twofold: peptides from already identified proteins contribute less weight to the objective function and thus are less likely to be selected as precursors. this way the redundancy of information obtained with ms/ms can be reduced. on the other hand, ips_lp requires considerably fewer ms/ms acquisitions to identify the same number of proteins as a static inclusion list. the remaining sample and analysis time can be used for identifying more proteins in a sample. compared to our previously published heuristic method, ips_lp does not suffer from massive false exclusion of signals in complex samples by incorporating machine learning methods for rt and proteotypicity predictions.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors’ contributions
+az developed, implemented and evaluated the described methods and wrote the manuscript. en was involved in the experimental design. kr and hl provided supervision. kr and en revised the manuscript. all authors read and approved the final manuscript.
+

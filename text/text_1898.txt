@@ -1,0 +1,275 @@
+BACKGROUND
+calculating similarity scores between a given query protein sequence and all sequences of a database and computing multiple sequence alignments are two common tasks in bioinformatics. both tasks include iterative calculations of pairwise local alignments as a basic building block. this can lead to high runtimes for large-scale input data sets. since biological sequence databases are continuously growing, finding fast solutions is of high importance. an approach to reduce associated runtimes is the implementation of basic alignment algorithms on parallel computer architectures . more recently, the usage of modern massively parallel accelerator architectures such as cuda-enabled gpus has gained momentum  <cit> . in this paper we are investigating how a xeon phi-based compute cluster can be used as a computational platform to accelerate alignment algorithms based on dynamic programming for two applications: 
+ databases scanning of protein sequence databases with the smith-waterman algorithm, and
+
+ distance matrix computation for multiple sequence alignment .
+
+
+
+three levels of parallelization are required in order to exploit the compute power available in a cluster of xeon phis. parallelization within a xeon phi is usually based on the “scale-and-vectorize” approach: scaling across the up to  <dig> cores requires the usage of several hundred threads while exploiting the 512-bit wide vector units requires simd vectorization within each core. recent examples of efficient parallelization on xeon phis include scientific computing  <cit> , bioinformatics , and database operations  <cit> . furthermore, parallelization between xeon phis adds another level of message passing based parallelism. this level needs to consider data partitioning, load balancing, and task scheduling. the accelerator-based approach is motivated by the fact that the performance of many-core architectures is growing. for example, the 2nd generation xeon phi processor named “knight’s landing” has already been announced.
+
+the rest of this paper is organized as follows. the “related work” section provides important background information about the xeon phi programming model, pairwise and multiple sequence alignment, and hardware accelerated alignment algorithms. our single-node parallel algorithms are presented in the “algorithms on a single node” section. the “cluster level data parallelization” section describes our cluster-level parallelization. section “results and discussion” evaluates performance. some conclusions are drawn in section “conclusion”.
+
+related work
+programming models on xeon phi coprocessor
+xeon phi is a coprocessor connected via the pci express  bus to a host cpu. from a hardware perspective, it contains up to  <dig>  <dig> compatible cores. each core features a 512-bit vector processing unit  based on a new instruction set. the cache hierarchy contains a l <dig> data cache of size  <dig> kb and a  <dig> kb per core l <dig> cache. the cores are connected via a bidirectional ring bus which enables l <dig> cache coherence based on a directory based protocol. each core can execute up to four threads at the same time.
+
+assuming a xeon phi with  <dig> usable cores running at  <dig>  ghz, we can determine the peak performance for 32-bit integer  operations as follows:  <dig>  ×  <dig> integer operation ×  <dig>  ghz ×  <dig>  =  <dig>  tera integer operations per second.
+
+from a software perspective, three programming models can be used in order to harness the compute power of the xeon phi:  native model,  offload model, and  symmetric model. in this paper, we have chosen the offload model. in this model, code sections and data can be offloaded from the host cpu to the xeon phi. using openmp pragmas, offload regions can be specified. when encountering such a region during program execution, the necessary data transfers between host and xeon phi are performed and the code inside the  region is executed on the xeon phi.
+
+pairwise sequence alignment and database search
+the database search application considered in this paper scans a protein sequence database using a single protein sequence as a query . different to the blastp heuristic, we calculate the score of an optimal local alignment between the query and each subject sequence using the smith-waterman algorithm with affine gap penalties . the subject sequences are ranked in terms of this score. actual alignments are only computed for the top-ranked database sequences which only takes a negligible amount of time in comparison to the score-only search procedure. note that the score-only smith-waterman computation can be performed in linear space and quadratic time with respect to the length of the alignment targets.
+
+consider two protein sequences q and s and length q and s, respectively. we want to compute the score of an optimal local alignment of q and s with respect to a given scoring scheme consisting of a gap opening penalty α, a gap extension penalty β and an amino acid substitution matrix sbt(). the well-known smith-waterman algorithm solves this problem by computing a dynamic programming matrix iteratively based on the following recurrence relations: 
+  <dig> ha=max{ <dig> e,f,ha+sbt}e=max{ha−α,e−β}f=max{ha−α,f−β} 
+
+the iterative computation of theses matrices is started with the initial values: ha=ha=e=f= <dig> for all 0<=i<=q, 0<=j<=s.
+
+progressive multiple sequence alignment
+the time complexity of computing an optimal multiple alignment of more than two sequences grows exponentially in terms of the number of input sequences. thus, heuristic approaches with polynomial complexities must be used in practice for large inputs to approximate the  optimal multiple alignment.
+
+the multiple  sequence alignment application considered in this paper is the first stage of the popular clustalw heuristic  <cit> . clustalw is based on the classical progressive alignment approach  <cit>  featuring a 3-step pipeline : 
+distance matrix: for each input sequence pair, a distance values is computed based on the smith-waterman algorithm
+fig.  <dig> illustration of the three stages of progressive multiple alignment 
+
+
+
+guide tree: using the distance matrix computed in the previous step is taken as an input to compute an evolutionary tree using the neighbor-joining method  <cit> .
+
+progressive alignment: following the branching order of the tree a multiple sequence alignment is build progressively.
+
+
+
+hardware accelerated alignment algorithms
+we briefly review some previous work on accelerating pairwise alignment  and progressive multiple sequence alignment  on a number of parallel computer architectures. a number of simd implementations have been designed in order to harness the vector units of common multi-core cpus  or the the cell/be . recent years has seen increased interests in acceleration of sequence alignment on massively parallel gpus. initially, programming these graphics chips for bioinformatics application still required programming with shaders using languages such as opengl  <cit> . the release of cuda in  <dig> made the usage gpus for general purpose computing more accessible and subsequently a number of cuda-enabled smith-waterman implementation have been presented in recent years . a number of mpi-based solutions for progressive multiple sequence alignments are targeted towards pc clusters . another attractive architecture for sequence analysis are fpgas  which are based on reconfigurable hardware. however, in comparison to the other mentioned architectures, fpgas are often less accessible and generally more difficult to program.
+
+the solution in this paper is based on a cluster of xeon phis. compared to common cpus, a xeon phi contains significantly more cores and often a wider vector unit. different from cuda-enabled gpus, a xeon phi provides x <dig> compatibility, which often simplifies the implementation process. nevertheless, achieving near-optimal performance is still a challenge which needs to be addressed by parallel algorithm design and efficient implementation. in this paper we demonstrate how this can be done for protein sequence database search and distance matrix computation for multiple sequence alignment.
+
+compared to our previously presented lsbds  <cit> , we introduce the following new contributions in this paper: 
+we have designed new algorithms which can handle searching tasks for large-scale protein databases on xeon phi clusters.
+
+we have designed new algorithms for calculating large-scale multiple sequence alignments on xeon phi clusters.
+
+we have implemented our multiple sequence alignment algorithm using the offload model to make full use of the compute power of both the multi-core cpus and the many-core xeon phi hardware.
+
+
+
+methods
+algorithms on a single node
+protein sequence database search
+we have observed two facts:  protein sequence database search has inherent data parallelism;  each vpu on xeon phi can execute multiple integer operations in an simd parallel way efficiently. based on these two facts, we have partitioned the database search process on a single node into two data parallel parts: device level and thread level. the device level data parallel part is encoded on the host cpu. it splits the subject database into multiple batches that can be distributed to cpu and xeon phi devices. the thread level data parallel part is used to process data batches locally. in order to support search tasks for large-scale databases, we have designed a dynamic data distribution framework to distribute these batches to both the host cpu device and the xeon phi devices. in order to solve the performance loss problem for searching long query sequences, we have also proposed a multi-pass algorithm where long query sequences are partitioned into multiple short subsequences for consecutive searching passes. we have presented more implementation details of our algorithm in  <cit> .
+
+msa
+the distance matrix computation stage of clustalw is typically a major runtime bottleneck. thus, in our work we have only concentrated on designing a parallel algorithm for this stage. clustalw bases the distance computation between two protein sequences on the following concept  <cit> :
+
+definition <dig> 
+consider two sequences si,sj∈s={s <dig> …sn}. the following equation defines their distance d: 
+ d=1−nidmin{li,lj} 
+
+whereby nid is defined as the number of exact matches in an optimal local alignment between si and sj. li  is the length of si .
+
+the value nid can be calculated in the smith-waterman traceback procedure by counting the number of exact character matches. figure  <dig> illustrates this method. however, this direct method does not work well for long sequences and large-scale datasets because it needs to store the whole dp matrix. in order to solve this problem, we have adapted the method presented in  <cit>  to do the nid-value computation on the xeon phi architecture. that is we have used the following definition and theorem to calculate the nid-value without doing the actual traceback.
+fig.  <dig> an example of how to compute the nid-value in the traceback procedure. the matrix h
+a is shown for a linear gap penalty α= <dig>  and a substitution score + <dig> for the exact match and − <dig> otherwise. the nid-value here is five
+
+
+
+definition <dig> 
+consider two protein sequences s <dig> and s <dig>  affine gap penalties α, β, and substitution matrix sbt. the matrix na  is defined in terms of the following recurrence relations: 
+ na= <dig> ifha=0na+m,ifha=ha+sbtne,ifha=enf;ifha=f 
+
+where 
+ m= <dig> ifs1=s20;otherwisene= <dig> ifj=1na,ife=ha−αne;ife=e−βnf= <dig> ifi=1na,iff=ha−αnf;iff=f−β 
+
+it can be shown that 
+ nid=na  where  denote the coordinates of the maximum value in the corresponding pairwise local alignment dp matrix ha.
+
+input data set sizes for msa are typically smaller than for database search  making the subject sequence set for distance matrix computation comparatively small. in order to design an efficient parallel distance matrix computation algorithm on xeon phi, we have used the task partitioning method shown in fig.  <dig>  in our method, the sequences are sorted by their lengths and then partitioned into smaller sized batches. in an alignment task, a query sequence will be aligned to the corresponding sequence batch. this procedure will continue until all task batches are calculated. we have implemented the whole process into two parallel parts: the thread level and the vpu level. on the thread level, the process aligning si to s={s,…,sn} is grouped to taski, and each task is processed by a thread. on the vpu level, multi-pairwise comparisons are performed in parallel on vpus. in our method, s={s,…,sn} is packed into a 2d buffer which has  <dig> channels, meaning that sequence si can be aligned to  <dig> different sequence in the 16-channel buffer in parallel. we have used knights corner instructions to implement this part. figure  <dig> shows the pseudo-code of our algorithm framework. in order to take advantage of both cpus and xeon phis in a node to process msa for large-scale datasets, we have implemented our algorithm framework using the offload model. we have implemented the arithmetic operations specified by the equations in definition  <dig> using a number of knights corner instructions  for xeon phis. these instructions are executed on vpus to calculate the sixteen residue vectors of alignment matrices according to definition  <dig>  for cpus, vpus fetch  <dig> residues each time. the core instructions used on cpus are identical with xeon phis, whereas they have been implemented using different 256-bit avx intrinsic instructions.
+fig.  <dig> illustration of our task partitioning scheme
+
+fig.  <dig> the pseudo-code of our msa algorithm framework on a single computing node
+
+fig.  <dig> xeon phi vectorized implementation of pairwise alignment according to definition  <dig> by dynamic programming using  <dig> core instructions. the variables in these instructions can be divided into two classes. one class includes v
+h
+a, ve, vf, and vs which are used in the smith-waterman algorithm. another class contains v
+n
+a, v
+n
+e, v
+n
+f and v
+n
+s which are defined in definition  <dig>  here v
+n
+a is the target vector and v
+n
+s is the value n
+i
+d
+
+
+
+before performing the alignment process, two temporary score vectors  are created to help improve the io efficiency for loading the substitution matrix values and the m  values in parallel. figure  <dig> shows an example of how to create these two temporary vectors. from fig.  <dig> we can see that the substitution score matrix, the current database sequence vector, and the query sequence will be used to create the sprofile and the mprofile. vpus will make use of these two score vectors to load substitution values and m values quickly. the shuffling procedure in fig.  <dig> is used to help vpus fetch corresponding values from the substitution matrix in parallel  <cit> .
+fig.  <dig> an example of how to create the sprofile and the mprofile for two sequence vectors to match the ‘a’ residue
+
+
+
+in our implementation, the size of these two temporary vectors for xeon phi and cpu is  <dig> and  <dig> separately.
+
+we have designed and implemented a device level dynamic task distribution framework to distribute tasks to both the cpu device and the xeon phi device. figure  <dig> shows our framework. in this framework, the task distributor is implemented as a critical section to prevent the concurrent access to shared tasks. it is also used to perform the dynamic distribution of tasks to cpus and xeon phis. in fig.  <dig>  both cpus and xeon phis fetch and process multiple tasks in parallel. after the allocated tasks are processed, both devices will send requirements to the data distributor to request for new tasks. all new task requirements will first be identified and queued by the data distributor. it then distributes tasks to the queue in order.
+fig.  <dig> our device level dynamic task distribution framework. the black dots denote tasks
+
+
+
+cluster level data parallelization
+our approach is based on the fact that both subject database batches  and msa tasks can be scanned in parallel. thus we have implemented the cluster level data parallel algorithm for these two alignment applications. the cluster level data parallel algorithm is encoded on the master node. the master-node partitions the subject database or the msa tasks into a number of chunks that will be sent to different compute nodes. our approach is implemented using the following modules: 
+dispatcher : partitions subject database or msa tasks into a number of chunks in a preprocessing steps and sends them to compute nodes.
+
+algorithms on a single node : receives sequence chunks from master and performs the corresponding dp calculations.
+
+result collector : performs additional operations required to further process the returned results.
+
+
+
+protein sequence database search
+in our work, we have implemented a static dispatcher for our cluster level parallel database searching algorithm. figure  <dig> illustrates our method. in fig.  <dig>  the static dispatcher in the preprocess stage first divides the database into several chunks with respect to the total number of nodes. the database chunks are then sent to the corresponding node for local searching. since the compute power of all compute nodes may vary, the size of each database subset can also vary. in order to achieve load balancing among all nodes, we have implemented a sample test method. in our method, at the preprocess stage , firstly a sample test is performed to explore the compute power of all compute nodes. performance factors of different nodes are then automatically generated. in our work, we name this factor the compute power pi for node i. with the performance factor pi, we can then calculate the appropriate size of the database subset allocated to node i.
+fig.  <dig> illustration of our method to dispatch database subsets to all nodes. the node who has more computing power will be dispatched more sequences, which will finally balance the workload at runtime
+
+
+
+msa
+we have designed and implemented a cluster level dynamic dispatcher to distribute tasks to compute nodes. figure  <dig> illustrates our method. in this method, the dynamic dispatcher first divides the dataset into a set of tasks which are organized as a task pool. then, multiple tasks are sent to each node for local distance matrix computation. after the allocated tasks are processed, each node will send requirements to the dispatcher to ask for new tasks to process. this procedure will continue until all tasks are processed.
+fig.  <dig> illustration of our method to dispatch tasks dynamically to all nodes. the task partition method is illustrated in fig. 3
+
+
+
+
+RESULTS
+test platforms
+we have implemented the proposed methods using c++ and evaluated them on compute nodes with the following xeon phi cards  installed: 
+- intel xeon phi 7110p:  <dig> hardware cores,  <dig>  ghz processor clock speed,  <dig> gb gddr <dig> device memory.
+
+- intel xeon phi 31s1p:  <dig> hardware cores,  <dig>  ghz processor clock speed,  <dig> gb gddr <dig> device memory.
+
+
+
+tests have been conducted on a xeon phi cluster with three compute nodes that are connected by an ethernet switch. there are two xeon e <dig> cpus and 16gb ram on each compute node. the cluster runs centos  <dig>  with the linux kernel  <dig> .32- <dig> . <dig> el <dig> x86_ <dig>  the cpu configuration on each node varies, as is listed in table  <dig>  we also have ssd hard disks installed on each compute node.
+
+n
+1
+
+n
+2
+
+n
+3
+
+
+protein sequence database search
+a performance measure commonly used in computational biology to evaluate smith-waterman implementations is cell updates per second . a cups represents the time for a complete computation of one entry of the dp matrix, including all comparisons, additions and maxima operations.
+
+we have scanned three protein sequence databases:  the  <dig>  gb uniprotkb/reviewed and annotated ,  the  <dig> gb uniprotkb/trembl , and  the  <dig> gb merged non-redundant plus uniprotkb/trembl  for query sequences with varying lengths. query sequences used in our tests have the accession numbers p <dig>  p <dig>  p <dig>  p <dig>  p <dig>  p0c6b <dig>  p <dig>  and q9ukn <dig> 
+
+performance on a single node
+we have firstly compared the single-node performance of our methods to swaphi  <cit>  and cudasw++  <dig>   <cit> . swaphi is another parallel smith-waterman algorithm on xeon phi-based neo-heterogeneous architectures. it is also implemented using the offload model. however, swaphi can only run search tasks on xeon phi; i.e. it does not exploit the computing power of multi-core cpus. swaphi cannot handle search tasks for large-scale biological databases. in our tests, we find that the database size limitation for swaphi is less than the available ram size; i.e.  <dig> gb. cudasw++  <dig>  is currently the fastest available smith-waterman implementation for database searching. it makes use of the compute power of both the cpu and gpu. at the cpu side, cudasw++  <dig>  carries out parallel database searching by invoking the swipe  <cit>  program. it employs cuda ptx simd video instructions to gain the data parallelism at the gpu side. the database size supported by cudasw++  <dig>  is less than the memory size available on the gpu. neither swaphi nor cudasw++  <dig>  supports clusters.
+
+for single-node tests, we have used the n <dig> node  as test platform. in our experiments, we run our methods with  <dig> threads on two intel e5- <dig> v <dig> six-core  <dig>  ghz cpus and  <dig> threads on each intel xeon phi 7110p respectively. we execute swaphi with  <dig> threads on each xeon phi 7110p. we have executed cudasw++  <dig>  on another server with the same two intel e5- <dig> v <dig> six-core  <dig>  ghz cpus plus two nvidia tesla kepler k <dig> gpus with ecc enabled.  <dig> cpu threads are also used for cudasw++  <dig> . if not specified, default parameters are used for both swaphi and cudasw++  <dig> . furthermore, all available compiler optimizations have been enabled. the parameters α= <dig>  and β= <dig> have been used in our experiments. the substitution matrix used is blosum <dig> 
+
+we have measured the time to compute the similarity matrices to calculate the computing cups values in our experiments. figure 10a shows the corresponding computing gcups values of our methods, swaphi and cudasw++  <dig>  for searching the  <dig>  gb uniprotkb/reviewed and annotated protein database using different query sequences. from fig. 10a we can see that the computing gcups of our multi-pass method is comparable to cudasw++  <dig> . both of them achieve better performance than swaphi.
+fig.  <dig> 
+a performance comparison on a single node  between our method, cudasw++v <dig>  and swaphi. b performance results of our method using all three compute nodes
+
+
+
+swaphi and cudasw++  <dig>  cannot support search tasks for the  <dig> gb and  <dig> gb databases. thus, we only use our methods to search them. figure 10a also reports the performance of our methods for searching these two databases. the results show that our methods can handle large-scale database search tasks efficiently.
+
+performance on a cluster
+msa
+a set of performance tests have been conducted using different protein sequence datasets to evaluate the processing time for the distance matrix computation step of our implementation in comparison to msa-cuda  <cit> . the datasets are extracted from the uniprotkb/reviewed database, whose details are listed in table  <dig>  we have used two groups of datasets in our tests. datasets s <dig> to s <dig> are used to compare the performance of our method and msa-cuda, where the sequence numbers are small since msa-cuda can not handle datasets with large sequence number. datasets l <dig> to l <dig> are used to evaluate the performance of our method for handling large-scale datasets. these datasets consist at least  <dig>  sequences.
+
+s
+1
+
+s
+2
+
+s
+3
+
+s
+4
+
+s
+5
+
+s
+6
+
+l
+1
+
+l
+2
+
+l
+3
+
+l
+4
+
+l
+5
+
+l
+6
+
+
+the workload for computing a distant matrix grows quadratically with respect to the number of input sequences. the average sequence length of the dataset also has a great impact on the computing workload. we have used the following equation to measure the workload needed to process a dataset. 
+ w=∑i=1nli∗∑j=i+1nlj  where li denotes the length of the ith sequence in the dataset. thus, the workload w is actually the total number of matrix cells to be calculated. as our method utilizes the constant  <dig> instructions for calculating each cell , the execution time grows linearly with w. table  <dig> also lists the workload needed for processing each dataset.
+
+performance for processing medium-scale datasets
+for the medium-scale datasets s <dig> to s <dig>  msa-cuda is benchmarked on a tesla k <dig> gpu with default options and all available compiler optimizations enabled. our implementation runs on an intel xeon phi 7110p with  <dig> threads. figure  <dig> shows the performance comparison between our method and msa-cuda. from fig.  <dig> we can find our implementation achieves significantly better performance compared to msa-cuda.
+fig.  <dig> runtime  for processing datasets s
+ <dig> to s
+ <dig>  our method runs on a xeon phi 7110p. msa-cuda runs on a tesla k <dig> gpu
+
+
+
+performance for processing large-scale datasets
+for the large-scale datasets l <dig> to l <dig>  msa-cuda cannot work normally. we have run our methods on a single intel xeon phi 7110p, the n <dig> node and the cluster respectively. the performance results are shown in fig.  <dig>  figure  <dig> indicates that our methods exhibit very good scalability in terms of workload and number of compute nodes. although the nodes in our cluster have different compute power, our dynamic task dispatching scheme still works efficiently. moreover, our method on the cluster is able to process large-scale datasets that are rarely seen in other msa implementations, whereas the runtime is still acceptable.
+fig.  <dig> runtime  for processing datasets l
+ <dig> to l
+ <dig>  we have run our method on an intel xeon phi 7110p, the n
+ <dig> node and the cluster, respectively
+
+
+
+CONCLUSIONS
+we have presented two parallel algorithms for protein sequence alignment based on the dynamic programming concept which can be efficiently mapped onto xeon phi clusters. our methods exhibit good performance on a single compute node as well as good scalability in terms of sequence length and size, and number of compute nodes for both protein sequence database search and distance matrix computation employed in multiple sequence alignment. furthermore, the achieved performance is highly competitive in comparison to other optimized xeon phi and gpu implementations. biological sequence databases are continuously growing establishing the need for even faster parallel solutions in the future. hence, our results are especially encouraging since performance of many-core architectures grows much faster than moore’s law as it applies to cpus. for instance, the performance improvement with at least a factor of  <dig> can be expected on the already announced next-generation xeon phi product.
+
+declarations
+publication of this article was funded by the ppp project from csc and daad, taishan scholar, and nsfc grants  <dig> and u <dig> 
+
+this article has been published as part of bmc bioinformatics vol  <dig> suppl  <dig> 2016: selected articles from the ieee international conference on bioinformatics and biomedicine 2015: genomics. the full contents of the supplement are available online at http://bmcbioinformatics.biomedcentral.com/articles/supplements/volume-17-supplement- <dig> 
+
+availability of data and materials
+project name: lsdbs-mpi
+
+project homepage:https://github.com/turbo0628/lsdbs-mpi
+
+operating system: linux
+
+programming language: c++
+
+authors’ contributions
+hl, bs, and wl designed the study, wrote and revised the manuscript. hl, yc, and kx implemented the algorithm, performed the tests, analysed the results. bs, sp, and wl contributed the idea of using knights corner instructions and xeon phi clusters, participated in the algorithm optimization, analysed the results. all authors read and approved the final manuscript.
+
+competing interests
+the authors declare that they have no competing interests.
+
+consent for publication
+not applicable.
+
+ethics approval and consent to participate
+not applicable.

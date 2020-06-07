@@ -1,0 +1,157 @@
+BACKGROUND
+predicting ancestral protein sequences from a multiple sequence alignment is a useful tool in bioinformatics  <cit> . many evolutionary sequence analyses require such predictions in order to map substitutions to a particular lineage . in other situations, the predicted ancestral sequence alone may provide a more representative functional sequence than a simple consensus sequence constructed from an alignment.
+
+nevertheless, predicting ancestral sequences is not a simple procedure. it relies on a quality alignment plus an accurate – and correctly rooted – phylogenetic tree. strict consensus methods are quick but can suffer from over-representation of larger clades of related sequences, which contribute more sequences to the consensus than more sparsely populated clades. maximum parsimony  methods  <cit>  overcome this problem by minimising mutational steps, rather than maximising agreement with the terminal sequences. mp, however, cannot distinguish between several equally parsimonious predictions. more sophisticated likelihood-based methods exist that can give probabilities for different ancestral sequences  and implementation such as codeml  <cit>  and fastml  <cit>  provide a good balance between speed and accuracy. however, many of these programs cannot predict ancestral sequences for columns of the alignment that have one or more gapped residues  <cit> .
+
+gasp  is an ancestral sequence prediction algorithm that is designed to handle gapped alignments of any size using a combination of mp and likelihood methods. although probably not as accurate as some of the more sophisticated maximum likelihood approaches, it permits the estimation of ancestral states at residues that are gapped in any sequences of the alignment with comparable accuracy to that of ungapped residues.
+
+implementation
+the gasp algorithm
+input
+gasp uses input from three sources: a multiple sequence alignment ; an accompanying phylogenetic tree in newick format  <cit> ; and a point altered mutation  substitution probability matrix, such as that of jones et al.  <dig>  <cit> . sequences are read in from the alignment and node relationships established from the tree. the tree may be already rooted or rooted using gasp and must have branch lengths. bootstrap values are not used by gasp but will be read if present. sequences in the tree file can be represented by numbers  or the first word of the sequence name. details of the input formats can be found at: .
+
+output
+gasp outputs an alignment in fasta format with both input terminal sequences and predicted ancestral node sequences. ancestral sequences can either be grouped together at the end of the file or interspersed throughout the terminal sequences to reflect the tree topology ). three tree files are also output from gasp:  newick format of the original input tree, rooted );  a raw text version of the tree, with internal nodes numbered as for the output sequence file;  newick format tree with node numbers instead of bootstrap values, which can be opened with k tamura's treeexplorer program  <cit>  ). branch lengths in this last file are replaced with the most likely pam distance for a given branch, where pam likelihoods for each branch are calculated as the product of each individual residue:
+
+
+
+where px is the likelihood for a pam distance of x , i is the ancestral amino acid at position r,j is the descendant amino acid at position r, pijx is the substitution probability of i to j in a pamx matrix, and n is the number of residues in the alignment. substitutions involving gaps are ignored in this calculation.
+
+this allows a visual comparison between the branch lengths of the input phylogeny and the predicted branch lengths given the ancestral sequence predictions.
+
+gaps
+if the msa has gaps, gasp will first assign gap status to every residue at every node. insertions and deletions are assumed to be equally likely, although a gap is assigned in the case of a tied probability . for each residue r, gasp starts at the tips and works deeper into the tree, assigning a probability of a gap at each node n, which is equal to the mean probability of a gap at the descendant nodes:
+
+
+
+where p is the gap probability for residue r at node n. p <dig> and p <dig> are the gap probabilities for r at the two descendant nodes.
+
+terminal branches are given a probability of  <dig> if a gap is present or  <dig> if not. once the root is reached, the gap status is fixed for the root. if the probability of a gap is greater than or equal to  <dig> , residue r is fixed as a gap, otherwise r is fixed as a 'non-gap'. gasp then works back up the tree from the root, this time using the new ancestral gap probability and both descendant gap probabilities to recalculate the gap probability:
+
+
+
+where p <dig> is the gap probability for r at the ancestral node.
+
+as with the root, r is fixed as a gap if p ≥  <dig> . this continues until all nodes are assigned as 'gap' or 'non-gap'.
+
+ancestral sequences
+once gaps are assigned, ancestral sequences are predicted in a similar fashion. each residue r is assigned a probability for each amino acid at each node n. at the tips, r has a probability of  <dig> for the amino acid that is present in the msa. gasp then works down the tree assigning probabilities based on the descendant nodes, branch lengths and a substitution matrix. by default, the pam matrix of jones et al.  <dig>  <cit>  is used. this is a pam <dig> matrix, which represents the probability that a given amino acid will be substituted by each other amino acid when the mean substitution rate is 1/ <dig> residues. to make a pamx matrix, which represents a length of evolutionary time where a sequence will have undergone x substitutions per  <dig> residues, the pam <dig> matrix is multiplied by itself x- <dig> times:
+
+
+
+where i is the ancestral amino acid,j is the descendant amino acid, k is the  <dig> possible transitory amino acids, pijx is the substitution probability of i to j in a pamx matrix, pik is the substitution probability of i to k in a pam matrix and pkj <dig> is the substitution probability of j to k in a pam <dig> matrix.
+
+unless the ancestral node has a gap  at position r, the ancestral probabilities for each amino acid are calculated for the two descendant branches individually, using a pamx matrix, where x is  <dig> times the branch length as substitutions per site, i.e. a branch of  <dig>  substitutions per site would use a pam <dig> matrix:
+
+
+
+where pi is the probability of amino acid i at residue r of node n, pijx <dig> and pijx <dig> are the probabilities of substitution from amino acid i to each amino acid j in the appropriate pam matrix for the two descendant branches, pdj <dig> and pdj <dig> are the probabilities of amino acid j being at position r at the two descendant nodes.
+
+once the root is reached, the most probable amino acid is fixed as the ancestral sequence. as with gaps, gasp then works back up the tree, using the fixed ancestral node amino acid and the descendant node probabilities to give new probabilities for each amino acid. the most probable amino acid is then fixed and the process continues until all residues and all nodes have a fixed sequence.
+
+gasp is primarily designed for reasonably small trees , although there is no limit on input tree size. for larger trees, probabilities for each amino acid get very small near the root, which can lead to a heavy bias towards the fixed ancestral amino acid when gasp works back up the tree. to counter this gasp arbitrarily reduces any probabilities below a certain exclusion threshold  to zero, thus reducing the slow accumulation of very unlikely amino acids.
+
+variations
+to optimise the pam matrices used for probability calculations, gasp uses the variable branch lengths read from the input phylogeny. there is also an option to fix the pam distance used for all branches, which would allow the use of trees without branch lengths.
+
+assignment of ancestral amino acids with the gasp algorithm is achieved by combining data from the descendants of a given node n and its direct ancestor n <dig>  this ancestor itself is heavily influenced by the descendants of n but also by the 'outgroup' to n, namely those sequences that are descendant to n <dig> but not to n. the outgroup information contained by the ancestral node n <dig> can be vital in determining the correct sequence for n when the descendants of n are variable. for this reason, the gasp algorithm will, by default, fix ancestral sequences as it moves back 'up' the tree from the root, increasing the relative weighting of the outgroup to the two descendants. because there is a chance of the wrong amino acid sweeping back up the tree , there is an option to use amino acid probabilities from the ancestral node in the last stage of gasp rather than giving the fixed amino acid an ancestral probability of  <dig>  this option should be used with caution.
+
+simulated datasets
+basic trees
+to test the gasp algorithm, a number of artificial phylogenies were simulated. because there is a practically limitless number of possible tree sizes  and phylogenies, it was decided to test the algorithm on a set of simulated phylogenies based on real phylogenies that formed a subset of those for which the algorithm was originally written. this set comprised  <dig> neighbour-joining trees of protein families. each tree contained at least two subfamilies of at least  <dig> members each, giving in total between  <dig> and  <dig> sequences. 
+
+simulations started by creating a random protein sequence  <dig> amino acids long. each residue was assigned an amino acid randomly as determined by the amino acid frequencies in all the human sequences of swissprot-trembl   <cit> . sequences then evolved according to the template phylogeny. for each branch, residues were randomly substituted as described below until the total number of observed changes  equalled or exceeded the branch length of the phylogeny, which was not corrected for multiple hits. at this point, a new node was created with the new sequence and the tree split into two descendants. this proceeded until the whole phylogeny had been reconstructed. each template tree seeded ten randomly simulated datasets. algorithms were then given as input the simulated alignment and the parent phylogeny with 'real' branch lengths as calculated during simulation. 
+
+substitution methods
+three substitution methods were used. in the first 'pam equal rates' model, the pam <dig> matrix of jones et al.  <dig>  <cit>  was used, giving variable rates of evolution for different amino acids and different substitution likelihoods. for comparison, a purely random substitution matrix was used where every amino acid had an equal probability of evolving into every other amino acid . under these methods, different residues have similar rates of evolution. a further model was used based on the pam <dig> method where residues had different probabilities of evolving, before amino acid-dependent pam effects are considered. under this 'pam variable rates' model, 40% sites evolved at the 'normal' rate, 20% half-rate, 20% double rate, and 20% almost fixed . note that the observed branch lengths remain the same as the normal 'pam equal rates' method but highly variable sites will be more likely to have multiple substitutions under the 'pam variable rates' method.
+
+gapped data
+because one of the main advantages of gasp is its ability to deal with gaps, a second test dataset was generated from the 'pam equal rates' set of trees, this time with gaps added. the addition of gaps was kept simple so that the exact same trees could be used for the gap analysis, allowing direct comparison of the results with gaps and without.  to do this, gaps were limited to single insertion/deletion  events per column of the msa, allowing them to overlay onto the existing simulated 'pam equal rates' data. in addition, no indels occurring next to root were allowed as it is impossible to judge without an outgroup whether such an event would be an insertion or deletion.
+
+to make the gaps, each residue r of the simulated sequences was considered in turn and had a probability of 50% of containing an indel. gaps were all of length  <dig> . although unrealistic for testing multiple alignment or phylogeny reconstruction programs, such a simplification is not a problem for ancestral sequence prediction as each residue is treated independently. the short gaps meant that, for the same total number of gapped residues, there is a higher diversity in the phylogenetic positioning of the indels.
+
+indels were placed randomly with respect to evolutionary time. each node in the simulated data has an 'age', which is the number of rounds of potential substitution it took to complete the simulation after that node was formed. each indel occurs at a random age t between the tip  and the oldest direct descendant node from the root. a random branch  is then selected for which the ancestral node is older than t and the descendant node is no older. this is the branch on which the indel occurred. the indel is randomly assigned as an insertion or deletion event with equal probability. if it is an insertion then the ancestral node plus all nodes outside the descendant clade have residue r replaced with a gap. if it is a deletion then the descendant node and all its descendants have residue r replaced with a gap.
+
+RESULTS
+testing the gasp algorithm
+the simulated trees and alignments were run through the gasp algorithm. because the 'real' sequence of each simulated node was known, it was then possible to determine the accuracy of gasp predictions. to test the different parts of the gasp algorithm, predictions were also made using modified gasp algorithms with parts of the model excluded.
+
+because prediction for invariant sites is trivial for all methods, the expectation is that accuracy is inversely related to the number of variable sites. therefore, comparisons of methods are presented as a percentage of the variable sites. in this context 'variable sites' are defined independently for each node as those sites for which not all descendant nodes  have the same sequence as the ancestral node.
+
+the simulated phylogenies are of different sizes. considering all nodes of all trees would bias results towards the larger trees. to avoid this, each tree was arbitrarily reduced to four representative nodes:
+
+ <dig>  'root' = the root of the tree.
+
+ <dig>  'near root' = a direct descendant node of the root.
+
+ <dig>  'mid tree' = a random node approx. midway in the tree.
+
+ <dig>  'near tip' = a direct ancestral node of a terminal sequence.
+
+to determine whether the gasp algorithm was useful its performance was compared to a crude consensus sequence at each node. where two amino acids were present at equal frequencies in a column of the msa, the most frequent amino acid in the total msa was selected for the ancestral sequence. gasp may be considered crude compared to some existing maximum likelihood approaches and so its performance was also compared to that of both ml algorithms implemented by the codeml program from the paml package  <cit> , namely the marginal reconstruction algorithm of yang et al.  <dig>  <cit>  and the joint reconstruction algorithm of pupko et al.  <dig>  <cit> . in addition, the mp method implemented in the pamp program of paml  <cit>  was also tested for comparison.
+
+the gasp model marginally out-performs all methods tested for constructing the ancestral sequence at the root of the tree . for all other representative node groups of the tree, gasp is comparable to the mp algorithm of pamp but slightly inferior to both ml algorithms implemented in codeml. pamp is inferior to the ml methods at all levels of the tree. . to make a fair comparison of algorithms, data is only shown for datasets that did not cause codeml to crash.)
+
+although the ml algorithms of yang et al.  <dig> and pupko et al.  <dig> performed better overall for internal nodes, this difference was not seen for every node of every tree. at each level, gasp is sometimes better and sometimes worse than all three other algorithms . this is also true when comparing the three other algorithms with each other .
+
+gasp variants
+four individual elements of the gasp algorithm were explicitly tested by disabling each in turn and comparing the results to those generated by the complete algorithm. the four variants run were:
+
+ using fixed pam matrices rather than matrices derived from observed tree branch lengths.
+
+ fixing ancestral sequences on initial pass towards root without a second pass back up the tree.
+
+ no filtering of rare amino acid probabilities.
+
+ using ancestral probabilities when working back up the tree rather than fixed ancestral amino acids.
+
+elements  and  were chosen for testing because they increase computational time, while  and  may not intuitively give the best results.
+
+for the phylogenies used in these simulations, all four variants performed worse than the standard gasp algorithm . using a fixed pam distance for all branches rather than approximating the pam distance using tree branch lengths  gives an unfair weighting to long branches and thus increases the probability of substitutions that are, in reality, unlikely. fixing ancestral sequences on the way 'down' the tree to the root  does not use any outgroup information and is therefore significantly worse at distinguishing between two or more amino acids with similar ancestral probabilities. less intuitive is the effect of reducing low amino acid probabilities to zero  and using fixed ancestral sequences when recalculating amino acid probabilities using all three connected nodes . indeed, excluding these two elements have a much smaller effect but still reduce the overall accuracy of the algorithm .
+
+using fixed amino acids when working back up the tree increases the influence of the outgroup sequence. as was seen by the difference in accuracy between predictions at the root and nodes near the root , outgroup information is very important in predicting the correct sequence.  filtering out rare amino acids has a small effect in these trees but would be expected to have a larger effect in deeper trees. if rare probabilities are not removed then the most likely amino acid in each position will have an ever-diminishing likelihood, while highly unlikely ancestral sequences will find their probabilities ever-increasing. in very deep trees, this could result in probabilities being homogenised in the deep nodes. when fixed ancestral sequences are used to make predictions back up the tree, the fixed ancestral amino acid would potentially swamp the reduced probabilities in descendant nodes near the root, and sweep the root amino acid up the tree incorrectly. if this filtering is turned off when using larger trees, it is recommended that ancestral node probabilities be used instead of fixed ancestral sequences  and ).
+
+a final test was performed to compare the use of 'real' versus 'observed' branch lengths.  this is not testing the gasp algorithm per se but does provide information on the importance of using an accurate phylogeny construction algorithm.  in many cases there was no difference. however, nearer to the root, using observed branch lengths rather than the real ones decreased prediction accuracy slightly. this decrease was correlated with total tree age . this would imply that branch lengths corrected for multiple substitutions should be used for trees fed into the gasp algorithm, particularly with deep trees containing long branches.
+
+gapped data
+a central part of the gasp algorithm is its ability to handle gapped alignments. as expected, gasp correctly placed 100% of simple gaps used in this test.  to analyse the effect of gaps on prediction accuracy, pairwise comparisons were made between the gapped datasets and the corresponding ungapped simulations . as would be expected, some of the gapped data shows reduced prediction accuracy because, as with the root of the tree, there is no 'outgroup' information directly following an insertion event. in many situations, however, accuracy is increased. this is because a gap is easier to predict accurately  than an amino acid . the consensus method shows a similar pattern but with a smaller fraction of trees showing an increase in accuracy .
+
+dna data
+although explicitly designed for use with protein sequence alignments and trees, it is relatively simple to convert gasp for use with nucleotide datasets. to do this, a new 'pam matrix' should be created with substitutions probabilities for a, c, g and t only. this structure would allow the user to fit fairly complex substitution models, with different substitution probabilities for each pair of nucleotides. if the aligned sequence is coding dna, however, it is highly recommended to use the protein sequences or a different algorithm such as those in the paml package  <cit> , as the adjusted pam matrix would not take any consideration of codon positions.
+
+CONCLUSIONS
+we have presented an algorithm for predicting ancestral sequences in gapped datasets. at the root of the tree, gasp marginally outperforms three existing algorithms implemented in the paml package. for other nodes of the tree, however, the ml algorithms of codeml  <cit>  generally perform better than gasp, while pamp  <cit>  gives a similar performance. the main advantage of gasp is its ability to use gapped datasets. simple indel patterns are accurately predicted by gasp and do not greatly decrease ancestral sequence prediction accuracy. the gasp algorithm can be reliably run on either windows or unix platforms with no discernable instability.
+
+for real life datasets, as for all evolutionary studies, predictions are dependent on the quality of input alignments. gapped residues are, by their nature, often located in regions of evolutionary instability and therefore the interpretations of predictions at such sites require extra care. in many scenarios, however, gaps are introduced into alignments by the missing termini of fragment sequences. in these situations, the complete sequences that form the rest of the alignment may be very well aligned and so it is highly desirable to have an algorithm that can process the gaps introduced by the truncated sequences.
+
+availability and requirements
+project name: gasp 
+
+project home page: 
+
+operating system: platform independent.  and unix )
+
+programming language: perl.
+
+other requirements: none.
+
+license: none.
+
+any restrictions to use by non-academics: author's permission required.
+
+list of abbreviations
+gasp. gapped ancestral sequence prediction.
+
+indel. insertion or deletion event.
+
+ml. maximum likelihood.
+
+mp. maximum parsimony.
+
+msa. multiple sequence alignment.
+
+pam. point accepted mutation.
+
+authors' contributions
+re conceived the algorithm, coded the perl script, designed and performed the accuracy tests and statistical analyses, designed the phylogeny simulation method, generated the simulated datasets and drafted the manuscript. ds helped in the design of test simulations and in drafting the manuscript.
+

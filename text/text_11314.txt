@@ -1,0 +1,266 @@
+BACKGROUND
+the analysis of microarray experiments typically involves a number of stages. the first stage for analysis of affymetrix genechip arrays is usually the application of a summarisation method such as mas <dig>  or rma in order to obtain an expression level for each probeset on each array. subsequent analyses then use these expression levels, for example to determine differentially expressed  genes, or to find clusters of genes and/or conditions. although there are a number of summarisation methods which can give accurate point estimates of expression levels, few can also provide any information about uncertainty in expression levels . even for methods that can provide uncertainty information, this is rarely used in subsequent analyses due to the lack of available methods for dealing with such information. a large amount of potentially valuable information is therefore lost. recently, there has been a growing trend for disregarding the probe-to-probeset annotation provided by the array manufacturer in favour of so-called "remapped" data . with remapped data the number of probes in a probeset varies greatly, and hence making use of within-probeset uncertainty is likely to be of even greater benefit in this case. here, we introduce the puma bioconductor package which makes a suite of uncertainty propagation methods available to a general audience.
+
+the multi-mgmos method  <cit>  uses bayesian methods on affymetrix genechip data to associate credibility intervals with expression levels. this was made available through the bioconductor package mmgmos. the noise-propagation in principal component analysis  method  <cit>  can propagate the expression level uncertainty to improve the results of principal component analysis . this method was made available as matlab code. the probability of positive log ratio  method  <cit>  can combine uncertainty information from replicated experiments in order to obtain point estimates and standard errors of the expression levels within each condition. these point estimates and standard errors can then be used to obtain a pplr score for each probeset, which can then be used to rank probesets by probability of differential expression  between two conditions. the puma-clust method  <cit>  uses uncertainty propagation to improve results of a typical clustering analysis. pplr and puma-clust were made available as separate r packages, but were not released through bioconductor. the algorithmic details of multi-mgmos, nppca, pplr and puma-clust are explored more fully in the next section.
+
+while many microarray studies are concerned with identifying genes that are differentially expressed between two levels of a single factor, for example between cancer and non-cancer patients, microarrays are also increasingly being used in more complex experimental designs where more than one factor is varied. this is often achieved with a factorial-designed experiment, where each combination of the levels of each factor is tested. as well as enabling a researcher to identify the effects of multiple factors in a single experiment, a factorial design also enables the study of the effect of interactions between different factors. the pplr method is not directly applicable to such experiments.
+
+perhaps the most popular bioconductor package for analysis of differential expression is limma  <cit> . limma requires the creation of a design matrix, and optionally also a contrast matrix. a search through the archives of the bioconductor mailing list will reveal that one of the biggest difficulties users have is the creation of these matrices. affymetrix users, however, will often have provided much of the information required in these matrices in the form of phenotype data using the affy package. as well as being confusing for inexperienced users, the manual creation of design and contrast matrices can also lead to human error. although the methods incorporated in the puma package can often give improved results when compared to competing methods, this can come at the cost of increased computation time due to the parameter estimation methods involved. this is particularly the case with the variational em algorithm used for combining the information from replicates in the pplr method, which can take many hours to run for a typical analysis on a single machine. many users, however, will have access to the processing power of multiple cores, either through access to a multi-node cluster, through the use of multiple machines on a local network, or simply through the use of multiple processors or a single processor with multiple cores on a single machine.
+
+introduction to puma algorithms
+multi-mgmos and probe-level measurement error
+affymetrix genechips use multiple probe-pairs called a probe-set to interrogate gene expression profiles. each probe-pair contains a perfect match  probe and a mismatch  probe. the pm probe is designed to measure the specific hybridisation of the target and the mm probe measures the non-specific hybridisation associated with its corresponding pm probe. however, microarray experimental data show that the mm probe also measures the specific hybridisation signal in practice and the intensities of both pm and mm probes vary in probe-specific ways. this makes the identification of the true signal difficult. the probabilistic model multi-mgmos  <cit>  assumes the intensities of pm and mm probes for a probe-set both follow gamma distributions with parameters accounting for specific and non-specific hybridisation, and probe-specific effects. let yijc and mijc represent the jth pm and mm intensities respectively for the ith probe-set under the cth condition. the model is defined by
+
+   
+
+where ga represents the gamma distribution. the parameter aic accounts for the background and non-specific hybridisation associated with the probe-set and aic accounts for the specific hybridisation measured by the probe-set. the parameter bij is a latent variable which models probe-specific effects.
+
+the maximum a posteriori  solution of this model can be found by efficient numerical optimisation. the posterior distribution of the logged gene expression level can then be estimated from the model and approximated by a gaussian distribution with a mean, , and a variance, vic. the mean of this distribution is taken as the estimated gene expression for gene i under the condition c and the variance can be considered the measurement error associated with this estimate. the gaussian approximation to the posterior distribution is useful for propagating the probe-level measurement error in subsequent downstream analyses.
+
+including measurement uncertainty in finding de genes
+the pplr method  <cit>  includes probe-level measurement error in a hierarchical bayesian model to detect differentially expressed  genes. for a particular gene in pplr, the observed logged expression level for the ith replicate under the jth condition is assumed to follow a gaussian distribution,
+
+   
+
+where μj is the mean logged expression level under condition j, λj is the inverse of the between-replicates variance and vij is the probe-level measurement error, which can be calculated from probabilistic probe-level analysis methods such as multi-mgmos.
+
+pplr assumes that the parameters θ = {{μj}, {λj}} are independent and  is shared across different conditions to capture the gene-specific variability. the priors of the parameters are:
+
+   
+
+   
+
+where φ = {μ <dig>  η <dig>  α, β} are hyperparameters. inference in the pplr model is carried out with a variational expectation-maximization  algorithm. the estimated parameters are then used to calculate a pplr score for finding de genes.
+
+including measurement uncertainty in principal components analysis
+we write the measurement error, vi, as a vector capturing the main technical sources of variance of the measured expression level on each chip i. pca can be viewed as the maximum likelihood solution of a probabilistic factor analysis model  <cit>  and  <cit>  add the measurement error, vi, as an additional term in the observation noise of this model,
+
+   
+
+unlike standard pca there is no longer a closed form maximum likelihood solution and an iterative em algorithm is used for parameter estimation.
+
+including measurement uncertainty in mixture clustering
+similarly to nppca, puma-clust  <cit>  includes the measurement error of each data point in a standard gaussian mixture model. suppose xi is the true expression level for data point i. the kth component of the gaussian mixture model is modelled by p =  . for the measured expression level  the kth gaussian component can be augmented as
+
+   
+
+where diag represents the diagonal matrix whose diagonal entries starting in the upper left corner are the elements of vi.
+
+this version of puma-clust treats each chip as an individual condition. for replicated data we have developed an improved method which propagates measurement error to a robust student's t mixture model. once published, this method will be incorporated into the puma package
+
+contributions
+the puma package combines the various methods described above in a single, easy-to-use package, and overcomes some of the shortcomings of these methods. puma offers the following contributions:
+
+• pumade – an extension of the pplr method to the multi-factorial case.
+
+• the automated creation of design and contrast matrices for typical experimental designs.
+
+• pumacomb – an implementation of the method of combining information from replicates  <cit>  that is significantly speeded up through the use of parallel processing.
+
+• pumapca – an r implementation of nppca, with much improved execution speed over the previous matlab version.
+
+• bringing together for the first time in a single package a suite of algorithms for propagating uncertainty in microarray analysis, together with tools for plotting, data manipulation, and comparison to other methods.
+
+• demonstration of uncertainty propagation methods on "remapped" affymetrix genechip data.
+
+implementation
+puma is a bioconductor package, and as such is free to obtain, is available on all common computer platforms, and is open source making the methods completely transparent to the end-user. most of the core algorithms have been implemented in c code for speed, with the remainder of the package implemented in r. we have endeavoured to reuse as much existing bioconductor code as possible, in particular the use of common classes for holding data. this enables easier comparison of our methods with other methods, and we encourage users to do this.
+
+multi-factorial extension of pplr
+the calculation of pplr between two conditions is given in equation  of  <cit> . in puma we have extended this to arbitrarily complex contrasts. for example, the interaction term between two 2-level factors can be calculated as:
+
+   
+
+where p denotes the posterior probability after observing data d, and μij corresponds to the mean expression when the two factors take values i and j.
+
+under the variational approximation developed in  <cit> , the mean of each condition has a gaussian posterior distribution. therefore the above integral is easily calculated.
+
+automated creation of design and contrast matrices
+the puma package has been designed to be as easy-to-use as possible for end users who have little experience with r and bioconductor. one particularly important manifestation of this is the automated creation of design and contrast matrices. the details of this are included in the puma user guide  <cit> , but in essence the following contrasts are deemed as potentially interesting within puma:
+
+• all pairwise comparisons within each factor.
+
+• comparisons of one level vs all other levels for factors with three or more levels.
+
+• all main effects of factors.
+
+• all interaction terms  between factors.
+
+parallelisation
+we have parallelised the most time-consuming step of a typical puma analysis  by making use of the r package snow. the use of snow means that the parallel processing can be carried out on a large number of different architectures including multi-core processors, multi-processor machines, clusters running various versions of mpi and heterogeneous networks running pvm.
+
+using puma
+multi-mgmos  <cit>  is implemented in the function mmgmos. the nppca method  <cit>  is implemented in the function pumapca. the probability of positive log ratio  method of  <cit>  is implemented in the functions pumacomb  and pumade . puma-clust  <cit>  is implemented in the function pumaclust. each of these functions is described in separate sections in results and discussion.
+
+we have implemented a separate bioconductor experimental data package pumadata which contains example data sets that can help new users get up to speed with using puma. puma can be installed by first installing the latest version of r, and then running the following two commands from the r command line:
+
+> source
+
+> bioclite
+
+similarly, pumadata can be installed with the following command:
+
+> bioclite
+
+RESULTS
+accounting for uncertainty in probeset summarisation
+the first step in a typical analysis is to load in data from affymetrix cel files, using the readaffy function from the affy package  <cit> . puma makes extensive use of phenotype data, which maps arrays to the condition or conditions of the biological samples from which the rna hybridised to the array was extracted. it is recommended that this phenotype information is supplied at the time the cel files are loaded. if the phenotype information is stored in the affybatch object in this way, it will then be made available for all further analyses. details of how to include such phenotype information are included in the puma user guide  <cit> .
+
+the recommended summarisation method to use within puma is multi-mgmos  <cit> . the following code shows how to use this method on an example data set included in the pumadata package. we also create a summarisation using rma  <cit>  for comparison.
+
+> library
+
+> data
+
+> eset_estrogen_mmgmos <- mmgmos
+
+> eset_estrogen_rma <- rma
+
+mmgmos takes significantly longer to run than rma. the above commands took  <dig> and  <dig> seconds respectively to complete on a  <dig>  ghz intel core  <dig> duo macbook pro. multi-mgmos performs well on the affycomp benchmark  <cit> , giving the best score for  <dig> of the  <dig> measures  on the hgu <dig> spike-in data set, and  <dig> of the  <dig> measures int-fc slope) on the hgu <dig> data set .
+
+propagating uncertainty in principal component analysis
+
+a useful first step in any microarray analysis is to look for gross differences between arrays. this can give an early indication of whether arrays are grouping according to the different factors being tested. this can also help to identify outlying arrays, which might indicate problems, and might lead an analyst to remove some arrays from further analysis. principal components analysis  is often used for determining such gross differences. puma has a variant of pca called propagating uncertainty in microarray analysis principal components analysis  which can make use of the uncertainty in the expression levels determined by multi-mgmos. the following code shows what samples have been hyrbridised to each array, and then runs both pumapca and standard pca  on the results obtained from the summarisation steps in the previous section. following this, the  <dig> arrays used are plotted on the first two principal components using each method.
+
+> pdata
+
+      estrogen   time.h
+
+low10- <dig> cel   absent   10
+
+low10- <dig> cel   absent   10
+
+high10- <dig> cel   present   10
+
+high10- <dig> cel   present   10
+
+low48- <dig> cel   absent   48
+
+low48- <dig> cel   absent   48
+
+high48- <dig> cel   present   48
+
+high48- <dig> cel   present   48
+
+> pumapca_estrogen <- pumapca
+
+> pca_estrogen <- prcomp))
+
+> par)
+
+> plot
+
+> plot[,
+
++      1])), col = unclass[,
+
++      2])), main = "standard pca")
+
+pumapca is much more computationally demanding than standard pca. the above pumapca and prcomp calls took  <dig> and  <dig>  seconds respectively to complete on a  <dig>  ghz intel core  <dig> duo macbook pro. we can see from the phenotype data that this experiment has  <dig> factors , each of which has two levels , hence this is a  <dig> ×  <dig> factorial experiment. for each combination of levels we have two replicates, making a total of  <dig> ×  <dig> ×  <dig> =  <dig> arrays. it can be seen from figure  <dig> that the first component appears to be separating the arrays by time, whereas the second component appears to be separating the arrays by presence or absence of estrogen. note that grouping of the replicates is much tighter with multi-mgmos/pumapca. with rma/pca, one of the absent. <dig> arrays appears to be closer to one of the absent. <dig> arrays than to the other absent. <dig> array. this is not the case with multi-mgmos/pumapca. we have seen similar patterns in other experiments .
+
+identifying differentially expressed genes
+there are many different methods available for identifying differentially expressed  genes. puma incorporates the probability of positive log ratio  method  <cit> . the pplr method can make use of the information about uncertainty in expression levels provided by multi-mgmos. this proceeds in two stages. firstly, the expression level information from the different replicates of each condition is combined using the function pumacomb to give a single expression level  for each condition. following this, differentially expressed genes are determined using the function pumade. the following code determines de genes from the estrogen data using multi-mgmos/pplr, and also, for comparison purposes, using rma/limma.
+
+> eset_estrogen_comb <- pumacomb
+
+> pumaderes <- pumade
+
+> limmares <- calculatelimma
+
+note that running the pumacomb command is typically the most time-consuming step in a typical puma analysis. as an example, the above command took  <dig> minutes to run on a  <dig>  ghz intel core  <dig> duo macbook pro. the computation time of this step can be decreased significantly when computed in parallel. figure  <dig> shows typical run times when using different numbers of compute nodes on a beowulf cluster. the pumade and calculatelimma commands each took less than a second to run.
+
+because this is a  <dig> ×  <dig> factorial experiment, there are a number of contrasts that could potentially be of interest. puma will automatically calculate contrasts which are likely to be of interest for the particular design of a data set. for example, the following command shows which contrasts puma will calculate for this data set.
+
+> colnames)
+
+ <cit>  "present.10_vs_absent.10"
+
+ <cit> "absent.48_vs_absent.10"
+
+ <cit>  "present.48_vs_present.10"
+
+ <cit> "present.48_vs_absent.48"
+
+ <cit>  "estrogen_absent_vs_present"
+
+ <cit>  "time.h_10_vs_48"
+
+ <cit>  "int__estrogen_absent.present_vs_time.h_ <dig> "
+
+here we can see that there are seven contrasts of potential interest. the first four are simple comparisons of two conditions. the next two are comparisons between the two levels of one of the factors. these are often referred to as "main effects". the final contrast is known as an "interaction effect". in more simple cases, where there are just two conditions, puma will create just one contrast.
+
+suppose we are particularly interested in the interaction term. we saw above that this was the seventh contrast identified by puma. the following commands will identify the gene deemed to be most likely to be differentially expressed due to the interaction term by the rma/limma approach. we then plot the expression levels of this gene in the four conditions as determined by rma and multi-mgmos.
+
+> toplimmaintgene <- topgenes
+
+> par)
+
+> ploterrorbars
+
+> ploterrorbars
+
+the gene shown in figure  <dig> would appear to be a good candidate for a de gene. there seems to be an increase in the expression of this gene due to the combination of the estrogen = absent and time =  <dig> conditions. the within condition variance  appears to be low, so it would seem that the effect we are seeing is real. the plot of figure  <dig> tells a somewhat different story. again, we see that the expected expression level for the absent: <dig> condition is higher than for other conditions. also, we again see that the within condition variance of expected expression level is low . however, we can now see that we actually have very little confidence in the expression level estimates , particularly for the time =  <dig> arrays. indeed the error bars of absent: <dig> and present: <dig> both overlap with those of absent: <dig>  indicating that the effect previously seen might actually be an artifact.
+
+the following code determines and plots the gene most likely to be differentially expressed due to the interaction term using multi-mgmos and pumade. this analysis was not possible using previous implementations of multi-mgmos and pplr, as the pplr method was only able to determine differential expression between two levels of a single condition.
+
+> toppumadeintgene <- topgenes
+
+> ploterrorbars
+
+clustering with pumaclust
+the following code will identify seven clusters from the output of mmgmos:
+
+> pumaclust_estrogen <- pumaclust
+
+clustering is performing .....................................................................
+
+done.
+
+the result of this is a list with different components such as the cluster each probeset is assigned to and cluster centers. the following code will identify the number of probesets in each cluster, the cluster centers, and will write out a csv file with probeset to cluster mappings:
+
+> summary)
+
+> matplot)
+
+> write.csv
+
+examples of improved performance on real and simulated data sets of puma-clust when compared with a standard gaussian mixture model  are given in  <cit> 
+
+analysis using remapped cdfs
+there is increasing awareness that the original probe-to-probeset mappings provided by affymetrix are unreliable for various reasons. various groups have developed alternative probe-to-probeset mappings, or "remapped cdfs", and many of these are available either as bioconductor annotation packages, or as easily downloadable cdf packages. one of the issues with using remapped cdfs is that many probesets in the remapped data have very few probes. this makes reliable estimation of the expression level of such probesets even more problematic than with the original mappings. because of this, we believe that even greater attention should be given to the uncertainty in expression level measurements when using remapped cdfs than when using the original mappings. in the puma user guide  <cit> , we give an example of using a remapped cdf package created using affyprobeminer  <cit> . we show that, as with the standard affymetrix annotation, we can improve results of both pca and de detection using puma methods on the remapped data.
+
+application beyond affymetrix microarray data
+although the methods within puma were originally designed for use with affymetrix microarray expression data, there is considerable scope for application beyond this domain. this is particularly so for the functions pumacomb, pumade, pumapca and pumaclust. pumacomb and pumade can be used in situations where the probability of a difference between means is required from data which has associated standard errors. one directly related application is the analysis of illumina beadarray data. rather than using multi-mgmos to determine standard errors of expression levels as is recommended with affymetrix data, the empirical standard errors output by illumina's beadstudio software, or the bioconductor package beadarray  <cit>  can be used directly with pumacomb and pumade to determine differentially expressed genes. more generally, pumacomb and pumade can be used as an alternative to a t-test to determine probabilities of differences between means of data from different classes, where those data have both point estimates and standard errors associated with those estimates. similarly, pumapca and pumaclust can be applied more generally as alternatives to methods such as standard pca and standard clustering algorithms respectively.
+
+CONCLUSIONS
+the puma package makes use of uncertainty propagation to give improved performance when compared to more traditional methods of differential expression detection, principal component analysis and clustering. the package can be used for analysis of affymetrix genechip data, but can also be applied more generally. the package extends previous work by extending the pplr method to the multi-factorial case, and by implementing the nppca algorithm for the first time in r. the package also incorporates a large number of features which make anlaysis easier and quicker to run, including parallelisation of the pumacomb function, automated creation of design and contrast matrices, and tools for plotting, data manipulation, and comparison to other methods. puma is available freely from bioconductor.
+
+availability and requirements
+• project name: puma
+
+• project homepage: 
+
+• operating systems: platform independent
+
+• programming language: r, c
+
+• other requirements: r
+
+• license: lgpl except puma uses donlp  <cit>  which has the following conditions of use:
+
+ <dig>  donlp <dig> is under the exclusive copyright of p. spellucci  "donlp2" is a reserved name
+
+ <dig>  donlp <dig> and its constituent parts come with no warranty, whether expressed or implied, that it is free of errors or suitable for any specific purpose. it must not be used to solve any problem, whose incorrect solution could result in injury to a person, institution or property. it is at the users own risk to use donlp <dig> or parts of it and the author disclaims all liability for such use.
+
+ <dig>  donlp <dig> is distributed "as is". in particular, no maintenance, support or trouble-shooting or subsequent upgrade is implied.
+
+ <dig>  the use of donlp <dig> must be acknowledged, in any publication which contains results obtained with it or parts of it. citation of the authors name and netlib-source is suitable.
+
+ <dig>  the free use of donlp <dig> and parts of it is restricted for research purposes. commercial uses require permission and licensing from p. spellucci.
+
+list of abbreviations
+mgmos: modified gamma model of signal; multi-mgmos: multi-chip modified gamma model of signal; nppca: noise-propagation in principal component analysis; pplr: probability of positive log ratio; de: differentially expressed.
+
+authors' contributions
+rdp extended the pplr method to factorial experiments, developed the puma package from earlier code, maintains puma, and devised and wrote the manuscript. xl originally developed the mmgmos and pplr methods. gs partly developed the original matlab code for nppca. mm developed the code for mgmos. ndl partly developed the original matlab code for nppca and partly initiated the puma project. mr partly initiated the puma project and supervised the development of the puma package.
+

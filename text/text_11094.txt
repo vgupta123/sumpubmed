@@ -1,0 +1,197 @@
+BACKGROUND
+metagenomics, the study of the combined genomes of communities of organisms, is a rapidly expanding area of genome research. the field is driven by environmental shotgun sequencing , a technique of applying high-throughput genome sequencing to non-clonal dna purified directly from an environmental sample. this removes the requirement to isolate and cultivate clonal cultures of each species, allowing an unprecedented broad view of microbial communities.
+
+thus far, environments such as acid mine drainage  <cit> , scottish soil  <cit> , open ocean  <cit> , termite gut  <cit> , human gut  <cit> , and neanderthal  <cit>  have been sequenced, to name a few. attention has been directed to bacterial and viral fractions of these communities, with eukaryotic metagenomics pioneered by projects such as the marine protist census  <cit> . complexity of these communities varies greatly from  <dig> to several thousand identifiable bacterial species. these projects have uncovered vast amounts of previously unobserved genetic diversity  <cit> . for example, "deep sequencing" using  <dig> pyrosequencing suggests that possibly tens of thousands of species coexist in a single ml of seawater  <cit> .
+
+given this wealth of genomic data it is becoming possible to make increasingly precise biological inferences regarding the structure and functioning of microbial communities  <cit> . as but one example, the discovery of a novel proteorhodopsin gene was the first step in uncovering a previously unknown, yet apparently dominant, mechanism for phototrophy in the oceans  <cit> . characterization of functional diversity is limited by our ability to classify sequences into distinct groups that reflect a desired taxonomic or functional resolution.
+
+shotgun metagenomic dna is sequenced in fragments of  <dig> to  <dig> nucleotides, then possibly assembled into longer sequences . phylogenetic binning, the task of classifying these sequences into bins by taxonomic origin, then becomes critical to separate metagenomic data into coherent subsets plausibly belonging to separate organisms. this task is challenging due to the short length of available fragments. bacterial communities of very high complexity, with thousands of species present, further complicate the task.
+
+while methods such as 16s bacterial community censuses  <cit>  and functional- or sequence-based screening surveys are the forerunners of modern metagenomics, indiscriminate whole-genome shotgun sequencing may be the defining approach of the discipline today. this approach has recently generated vast amounts of data, facilitated by continual capacity increases and quality improvements at major sequencing centers and the emergence of cost effective very high throughput next generation sequencing  . at the highest diversity levels, the reads may not be assembled at all due to the sparseness of even the highest throughput sequencing methods and the danger of chimeric assemblies, arising from sampling so many organisms at once, leaving the binner with raw reads. binning methods therefore aim to be able to operate on very short read lengths provided by next-generation sequencing, although most, including the present approach, are only able to go down to  <dig> pyrosequencing read length  and not to microread length .
+
+classic approaches to phylogenetic determination of species identities from environmental sequences rely on identifying variants of highly conserved genes, like 16s rrna or reca  <cit> . this approach is not applicable on a full metagenomic scale for two reasons: first, ribosomal or marker gene sequences comprise a small fraction of the bacterial genome, so most shotgun sequences do not contain them and cannot be classified this way; and second, organisms with identical or closely related 16s genes have been shown to exhibit variations in essential physiological functions  <cit> . other approaches are broadly divided into sequence similarity based classifiers such as megan  <cit> , which rely on blast or other alignments, and sequence composition based classifiers, which rely on statistical patterns of oligonucleotide distributions. many solutions integrate the task of phylogenetic assignment  together with that of binning per se  of genomic fragments. however, with unsupervised methods, like the one presented here, labeling is not possible as part of the algorithm and has to be performed by other means, like analyzing the correspondence of generated clusters to known phylogenies.
+
+sequence classification based on oligonucleotide distributions has been the basis for gene finding applications since the early 1990s. in  <dig>  karlin and burge  <cit>  noted that dinucleotide distribution is relatively constant within genomes but varies between genomes. since then, this property has been extensively studied and generalized to other oligonucleotide lengths  <cit> . with the advent of ess, several binning methods have used oligonucleotide distributions of various orders to build supervised and semi-supervised classifiers. these include phylopythia  <cit> , compostbin  <cit> , and self-organizing map  based methods  <cit> .
+
+machine learning-based classification algorithms like those used for binning are categorized into supervised, semi-supervised, and unsupervised classes. supervised algorithms accept a training set of labeled data used to build their models, which are then applied to the query data. in case of binning, this training set consists of genomic sequences labeled according to the species they originate from. semi-supervised algorithms use both training set data and query data to build their models. unsupervised algorithms use no training data and derive their models directly from the query input. while methods described above have achieved considerable success in classifying short anonymous genomic fragments, their supervised nature makes them reliant on previously sequenced data. for example, blast-based methods are completely dependent on the presence of sequences related to the query in the database. while semi-supervised clustering methods can have significant generalizing power, their accuracy still depends on similarity of input data to their training set.
+
+to our knowledge, two approaches to unsupervised metagenomic binning have been published. tetra  <cit>  explores the applications of k-mer frequency statistics to metagenomic data. the authors state that their method is suitable as a "fingerprinting technique" for longer dna fragments, though not as a general-purpose binning method for single-read  <dig> pyrosequenced or sanger fragments, and an application of methods including tetra to binning of fosmid-sized dna is used in  <cit> . abe et al.  <cit>  used self-organizing maps  in combination with principal component analysis  on 1- and 10-kb fragments, and this method was evaluated and enhanced in  <cit>  using growing self-organizing maps , an extension of som, on 8- and 10-kb fragments.
+
+given the apparent diversity of metagenomic samples and the significant fraction of the full bacterial phylogeny with no sequenced representatives  <cit> , as well as possible undiscovered diversity of the tree of life, binning methods must perform well on previously unseen data. semi-supervised methods may be able to extrapolate on this data, but if not, unsupervised clustering will be a necessary part of a combined-method binning approach. we present likelybin, a new statistical approach to unsupervised classification of metagenomic reads based on an explicit likelihood model of short genomic fragments  <cit> . the rest of this paper is organized as follows. the methods section introduces a formal definition of the binning problem, the application of the markov chain monte carlo  formalism, and the feature space and likelihood model used. we discuss numerical methods used in the implementation, including a novel coordinate transformation which achieves dimension reduction for the feature space of k-mer frequencies, and the genomic fragment divergence measure dn, a novel statistical measure we developed for performance evaluation of our algorithm. the results section presents performance evaluations of our method on mixtures of  <dig> to  <dig> species compiled from completed genomes available in genbank, with fragment lengths starting at  <dig> nt, as well as accuracy trends over different fragment lengths and mixing ratios. we also present results on the fames  <cit>  dataset and compare the current method to a semi-supervised binning method based on k-mer distributions  <cit> . the conclusion section explains the applicability of our method, its speed and availability, as well as important future directions for improvement.
+
+methods
+the binning problem
+we state the problem as follows: given a collection of n short sequence reads from m complete genomes, how can we predict which sequences derive from the same genome? in our model, we represent a genome as a string of characters deriving from a stochastic model with parameters Θ, referred to here as a master distribution. we make the simplifying assumption that the oligonucleotide distribution is uniform across the bacterial chromosome. this assumption is not satisfied biologically; gene-coding, rna-coding, and noncoding regions, leading and lagging strands of replication, and genomic islands resulting from horizontal gene transfer can all exhibit distinct oligonucleotide distributions. accurate classification of these regions in metagenomic fragments is an open problem which requires complex statistical models that we have yet to incorporate into our framework, and which are targets for subsequent model development. nonetheless we have found that clustering of short reads using the above assumption is sufficiently accurate for use in low complexity metagenome samples.
+
+given this assumption of statistical homogeneity, we model a collection of sequences from a single genome as realizations of a single stochastic process. similarly, we model a collection of sequences from multiple genomes as realizations of multiple stochastic processes, one per genome, each with its own master distribution. we are interested in determining which sequences in a metagenomic survey are likely to have been drawn from the same genome and, consequently, the statistical distributions of oligonucleotides within each of the master distributions. if the number of master distributions is unknown, then we must include some prior estimate to close the model. thus, even in cases where due to insufficient coverage it is impossible to assemble disparate segments of a consensus genome together, a binning algorithm should still be able to group reads together based on their statistical distribution of oligonucleotides.
+
+the simplest model of a genome would be a random collection of letters, a, t, c, and g. the master distribution of a single genome can then be represented as a single probability, pa, denoting the fraction of a-s in the genome. base complementarity requires pa = pt and pc = 1/ <dig> - pa = pg. a more complex representation would be to assume that genomes are random collections of k-mers. when k =  <dig>  each nucleotide is independent of the previous. when k =  <dig>  the genomes are random collections of dimers and so on. however, when k ≥  <dig>  inherent symmetries are present in this representation since all but the first letters of the current k-mer are also contained in the next k-mer. in a metagenomic dataset, each short fragment derives from a single master distribution, θi, which is represented a fraction fi of times. how then can we infer the most likely Θ ≡  and f ≡  given a set of n sequences s ≡ ? to do so, we must calculate the likelihood ℒ of observing the sequences s given the parameters Θ and f. then, we must estimate the values of Θ and f that maximize the likelihood ℒ. below, we demonstrate the use of a mcmc algorithm to perform this task.
+
+mcmc framework
+likelihood model
+consider a nucleotide sequence s = c <dig> c <dig> c <dig>  ..., cℓ. we would like to know the probability of observing such a sequence given some underlying model. we assume that our sequence is selected from broken pieces of double-stranded dna, and thus that complementary nucleotide sequences have the same probability: i.e., l = l, where , and  is the nucleotide complementary to the nucleotide ci. we assume that the probability of our sequence is determined by a set of 2k k-mer probabilities .
+
+that is, we write:
+
+   
+
+assuming we know probabilities for all of our k-mers, we have probabilities for k - 1-mers as marginals.
+
+thus we can write:
+
+   
+
+as an example, the probability of a sequence given a set of known dimer frequencies is:
+
+   
+
+note that we assume the marginal probabilities are well defined: i.e., that we get the same marginal probability if we collapse a k-mer to a k - 1-mer by summing over the first, or the last, nucleotide. the likelihood of observing n sequences given m master distributions is
+
+   
+
+where pm is the probability of generating the i-th sequence given the m-th master distribution.
+
+a simple example of likelihood computation according to the described model is given in the appendix.
+
+the space of k-mer frequencies
+given the assumption of uniformity of the k-mer  distribution across each genome, we can impose three kinds of constraints on the k-mer frequency space. this space is a subspace of , subject to three kinds of constraints: all k-mer frequencies sum to  <dig>  e.g.
+
+  
+
+each k-mer has the same frequency as its complement; and all marginal probabilities are consistent over all margins, e.g.
+
+  
+
+we then derive a transformation of the original k-mer frequency vector, x = , into the independent coordinate space. to generalize and automate the process, we perform it for each case from 1-mers  to 5-mers  by generating all equations governing the constraints above. we use the notation  to denote the matrices of the constraint equation ax = b by generating rows for each constraint type. for example, for k =  <dig>  we write the summation, complementarity and marginality constraints as follows:
+
+   
+
+   
+
+   
+
+we find the nullspace of the resulting matrix a and use it to perform the transformation. the resulting number of independent dimensions is shown in table  <dig>  the mcmc simulation then performs the search in the independent coordinate space. for k >  <dig>  the matrix a becomes too big to compute its nullspace using a non-parallelized algorithm. even for k =  <dig>  the number of independent dimensions is so large that the mcmc simulation takes an intractable amount of time. therefore, we only generalize our algorithm up to k =  <dig> 
+
+initial conditions
+the choice of initial conditions can dramatically alter the speed of convergence of a mcmc solver. we used the same initial conditions for comparison of model results, specified by the frequencies of k-mers in the entire dataset provided as input . other possibilities, implemented but not chosen as the default, include taking uniformly distributed frequencies, randomizing the starting condition, or using principal components analysis with k-means clustering to obtain initial cluster centroids. we verified that convergence, when it did occur, did not depend sensitively on initial conditions .
+
+finding the maximum likelihood model
+once the predefined number of timesteps has elapsed, the model with the largest log likelihood is selected. note that the mcmc framework is amenable to a bayesian approach, which we implemented as an alternative. once the equilibrium state has been reached we calculate the autocorrelation of frequencies and estimate a window over which frequencies show no significant autocorrelations. given a specified prior distribution p for the master distribution and frequencies, the metropolis-hastings approach will converge to the true posterior distribution of π  ∝ ℒ  p. in our case we used an uninformed prior distribution so long as positivity and all other specified constraints among k-mer probabilities were preserved. we then sample from the equilibrium state to find π . averages of master distributions in the posterior distribution also preserve the constraint conditions because of the linearity of the averaging operator. accuracy of the model was similar whether using the maximum likelihood model or the average of the posterior distribution . full posterior distributions of k-mer models could be used to estimate posterior distributions of binning accuracy.
+
+numerical details
+precision
+due to precision limitations of the machine double precision floating point format, the model likelihood calculation is performed in log space. denote the old model under consideration as m = {m <dig>  m <dig>  ... mm}, and the new  model as . the log likelihood of a single model is
+
+  
+
+and note that the innermost fraction contains higher-order terms when working with markov chain orders higher than  <dig>  the innermost product term is a product of on the order of  <dig> terms of magnitude ≈ 1/ <dig>  however, 1/4n exceeds double floating point precision at n ≈  <dig>  to prevent underflow, we find the pm of highest magnitude and divide the inner sum by it. this allows log space evaluation of the highest magnitude term and ensures that any terms whose precision is lost are at least ≈ 1e <dig> times smaller. the model log likelihood ratio is then . if this term exceeds  <dig>  the new model is more likely to be observed than the old.
+
+the mcmc iteration loop was implemented with the metropolis-hastings criterion. from an initial model, a perturbed model mn is generated. the new model's probability is evaluated as above and compared to that of the currently selected model mc. if higher, the new model is selected; otherwise, the new model is selected with probability p = exp  - log ℒ). the step is repeated n times . each selected model is stored in a model record for later sampling.
+
+computing the perturbation
+the statistical model consists of sub-models for each source. the perturbation step is performed for every sub-model independently. every sub-model consists of a complete k-mer frequency vector, {pa, pt, pg, pc, paa...}. it is perturbed by scaling each vector of the basis matrix a by a random number ri drawn from a gaussian distribution with mean  <dig> and constant variance , then adding each scaled vector in succession to the frequency vector. the basis matrix a is precomputed for each k-mer model order from  <dig> to  <dig> and supplied with the program. the computation is performed by generating a system of equations representing the base complementarity, marginal, and summation constraints and using the standard nullspace algorithm supplied with gnu octave.
+
+the perturbation step variance must be calibrated independently for each dataset. an excessive variance will result in too many suboptimal perturbations as well as perturbations placing the frequency vector outside the unit hypercube . a variance that is too small can result in an inability to escape local maxima in the model search space and an inability to reach the stationary phase before the pre-determined number of steps is taken. to calibrate the variance, the mcmc iteration is started independently for a reduced number of steps, and different variances ranging from 1e -  <dig> down to 1e -  <dig> are tried. with each trial, the number of new model acceptances is recorded. we consider the fraction . once the variance yielding f closest to  <dig>  is found , we use this variance for the main run. convergence to the stationary phase occurred after  <dig>  iterations in all cases of interest.
+
+computing the prediction
+to derive the final model prediction, the model with the overall maximum log likelihood is selected. the full mcmc simulation is repeated a selected number of times . final model predictions are compared between different runs, and the best overall prediction is selected according to its model likelihood .
+
+the classifier then assigns a putative source to each sequence fragment it was initially queried with. for every fragment, its likelihood according to each sub-model in the final predicted model is computed, and the sub-model supplying the highest likelihood is selected. since the sources are anonymous, they are referred to simply by indices from  <dig> to n corresponding to each sub-model's index in the final predicted model. figure  <dig> illustrates the log likelihood comparison process for all fragments in a given dataset, according to the best model selected as a result of this process.
+
+testing methodology
+simulated metagenomic datasets were created by selecting two or more genomic sequences as source dna. sequence fragments were selected at random positions within source sequences; overlaps were allowed to occur. fragment size was fixed for all fragments for each experiment. the total number of fragments per source was selected either according to overall source length or at specified frequency ratios . the number of sources in each testing dataset was supplied to the classifier.
+
+accuracy of the classifier is calculated as follows. every possible matching of source genomic sequence names to classifier output indices is considered, e.g. {seq <dig> →  <dig>  seq <dig> → 2}, {seq <dig> →  <dig>  seq <dig> → 1}. the number of correct assignments made by the classifier is then counted for each matching and the matching with the highest number of correct assignments is selected. accuracy is then given as . to evaluate separability of the randomly generated datasets according to the classifier's model, we also define and compute the genomic fragment divergence between two sources' k-mer distributions. first, we compute the mean, μ, and standard deviation, σ, of each k-mer frequency for each source across fragments originating from that source. the genomic fragment divergence of k-mer order n is then given by
+
+   
+
+generalizing to m species, let {s} = {s <dig>  s <dig>  ... sm}. then we define.
+
+   
+
+RESULTS
+the accuracy and applicability of the present method in binning short sequence fragments from low complexity communities  was systematically analyzed using a variety of species, varying fragment lengths, and varying ratios of fragment representation.
+
+first, a set of  <dig> completed bacterial chromosomes was retrieved from genbank. this set was randomly sampled for sets of  <dig>   <dig>   <dig>   <dig> genomes at a time, representative of various genomic fragment k-mer distribution divergences. binning results for nearly  <dig> simulated communities comprised of  <dig> or  <dig> genomes at a time are summarized in the top panels of figure  <dig>  there is a strong positive correlation between genomic fragment divergence and average performance. classification accuracy was consistently above 85% for fragment divergences when d <dig> >  <dig>  results for bayesian posterior distribution sampling were not substantially different .
+
+accuracy of binning simulated communities of 5- <dig> species was consistent with the results from 2- <dig> species communities. the accuracy of binning was strongly positively correlated with genomic fragment divergence with accuracies consistently above 85% for d <dig> >  <dig>  note that accurate binning was possible when fragment length was either l =  <dig> nt or l =  <dig> nt . for  <dig> and  <dig> species, a total of  <dig> simulated communities were tested in the l =  <dig> nt case and a total of  <dig> simulated communities were tested in the l =  <dig> nt case.
+
+next, we evaluated the robustness of our binning method to changes in fragment length and to changes in fragment ratios using five distinct genome pairs from the preceding experiment . the pairs were selected based on their relatively low genomic fragment divergence, d <dig> ≈  <dig>  given a fragment length of l =  <dig> nt. binning results on these 2-species tests were evaluated using sequence fragments whose lengths ranged from  <dig> to  <dig> nt. the results are shown in figure  <dig>  performance stabilizes close to its optimal value at fragment length  <dig>  again, results for bayesian posterior distribution sampling were not substantially different than the maximum likelihood approach .
+
+random subsets of  <dig> sources each were selected from the fames simlc dataset, with a genomic fragment divergence, d <dig>  as shown. fragments were truncated to the indicated length where appropriate. reads from the dataset were used raw with no trimming.
+
+for the same five pairs as in figure  <dig>  we performed a test of fragment ratio-dependent contributions to accuracy . the binner successfully classifies mixtures with species' fractional content of 20% and above. although robust to moderate variation in fragment ratios, these results indicate that binning relatively rare species may require modifications to the present likelihood formalism.
+
+we also tested our method using subsets of the jgi fames  <cit>  simulated low-complexity dataset . we took  <dig> genomic sources at a time, using  <dig> fragments, each of length l =  <dig> nt. the accuracy results for binning these simulated low complexity communities are summarized in table  <dig>  the binning method has approximately 80% accuracy for a five-species community despite the genomic divergence, d <dig>  being approximately  <dig>  .
+
+frag l, fragment length; frag n, number of fragments per source; cb seeds, labeled fragments supplied to compostbin for training. likelybin consistently performed equally to or above compostbin performance despite being completely unsupervised, while compostbin required a fraction of input fragments to be labeled to seed its clustering alorithm. we supplied training fragments to compostbin without regard to their origin . in a likely practical scenario, only 16s rna-coding fragments would be labeled, but would have different k-mer distributions from protein-coding regions, possibly confounding classification.  convergence toward a good clustering was not observed in compostbin for these datasets; accuracy can be less than 50% due to labeled input.
+
+we also compared our method to compostbin  <cit> , a semi-supervised algorithm that utilizes a pca method to bin fragments based on their k-mer distributions . we performed comparisons on pairs of genomes with fragment divergence d <dig> ≈  <dig> using the same dataset analyzed in figures  <dig>   <dig> and table  <dig>  the results indicated that our method performs on par with or better than compostbin, even though compostbin required a fraction of input fragments to be labeled to initialize its clustering algorithm. run time and memory performance was comparable between the two methods.
+
+frag l, fragment length; ll, output model log likelihood
+
+the resulting accuracy differences were negligible. accuracy was also compared in 3-mer models vs. 4-mer models. while 4-mer models slightly outperformed 3-mer models on average, a significant run time increase was observed . nc_identifiers refer to genbank accession numbers for genomes listed in each trial.
+
+the algorithm is implemented in portable perl and c code that can be compiled and run on any platform supporting a perl interpreter. both memory use and run time scale linearly with the number of fragments and species, and sub-linearly with fragment length. memory complexity scales quadratically with the number of dimensions in the search space, or exponentially with k . we selected k =  <dig> as the default k-mer length, with user-defined options for  <dig>   <dig>  or  <dig> available. we have not yet formalized convergence time performance as a function of k. in practice, a 3-species dataset of  <dig> fragments per species, with k-mer order set to  <dig>  takes approximately  <dig> minutes to run on an intel core  <dig> duo-class processor.
+
+CONCLUSIONS
+we developed an unsupervised, maximum likelihood approach to the binning problem - called likelybin. likelybin uses a mcmc framework to estimate the set of master distributions and relative frequencies most likely to give rise to an observed collection of short reads. the likelihood approach is based on k-mer distributions, for which we developed an index of separability of any pair of genomes, which we termed the genomic fragment divergence measure, dn. we found that the vast majority of genomes have sufficient divergence to be distinguished using the present method .
+
+using a high-performance implementation, likelybin can be used to cluster sequences with high accuracy  even when the mononucleotide content of the original genomes is essentially identical . the method does as well or better than a comparable semi-supervised method  that also uses k-mer distributions as the statistical basis for binning .
+
+performance of likelybin is consistently good for synthesized low-complexity datasets  with fragments of length as low as  <dig> nt, which corresponds to the characteristic single-read length of a  <dig> pyrosequencing flx machine. microread sequencing technologies such as solexa and solid are currently out of reach of any non-alignment-based binning method when applied to single reads, which range from  <dig> to  <dig> base pairs with these technologies.
+
+the unsupervised nature of our approach makes it potentially useful for classifying mixtures of novel sequences for which supervised learning-based methods may have difficulties. a future direction for our work is to combine our statistical formalism with alignment and supervised composition-based models. for example, we could develop a feature selection framework that would transform the input fragments' features such as k-mer statistics, coding frame information, and variable-length motifs into a lower-dimensional space. we could then feed these features to an unsupervised mcmc-based classifier in tandem with an alignment-based classifier that can partially label fragments based on known taxonomic information, then compare and combine their results.
+
+a number of challenges remain to broaden the scope and applicability of the current method. at present, our method is scalable for k-mer length from k =  <dig> to k =  <dig>  we intend to expand the method's ability to capture longer motif frequencies by using dimension transformation or feature selection in a future work. intra-genomic heterogeneity of oligonucleotide distributions is another topic that is yet to be addressed. a confidence measure that serves as a performance self-check is already available as part of our method but we have not incorporated it into the program's output yet.
+
+further, applying the current method in an environmental context requires an estimation of the number of bins. the problem of identifying the necessary number of distinct models, or groups thereof, to represent all components of a given genome, is related to the problem of identifying the number of distinct genomes in the mixture. a combination of jump diffusion and grouped models is our currently planned solution. in this respect, the use of phylogenetic markers to estimate the number of bins will provide important prior information.
+
+in summary, the unsupervised method we proposed is based on a maximum likelihood formalism and can bin short fragments  of low complexity communities  with high accuracy  given sufficient genomic divergence. the maximum likelihood formalism and its mcmc implementation make the current approach amenable to extension and incorporation into other packages. the mcmc binner application is provided as an open-source downloadable package, likelybin  <cit> , that can be installed on any platform that supports perl and c and is fully automated to facilitiate use in genome processing pipelines. version  <dig>  of the source code is provided in additional files  <dig> 
+
+authors' contributions
+ak developed code, performed all statistical analyses, and wrote the manuscript. sb developed code and performed preliminary statistical analyses. jd developed the mathematical method and supervised the statistical analysis. jsw developed the mathematical method, supervised the computational and statistical analysis, and wrote the manuscript. all authors read and approved the final manuscript.
+
+appendix
+example application of likelihood model
+suppose we have two source genomes, g <dig> and g <dig>  with two fragments from each: g <dig> → {atgtta, tgtaat}, g <dig> → {cctgtc, aggcctc}. we wish to evaluate the likelihood of observing these sequences according to a dimer model of  <dig> sources, m = {s <dig>  s2}, which we have generated. assume the model's source frequency vector is f = , its monomer frequencies are
+
+{s <dig> : {pa =  <dig> , pt =  <dig> , pg =  <dig> , pc =  <dig> }, s <dig> : {pa =  <dig> , pt =  <dig> , pg =  <dig> , pc =  <dig> }} and its dimer frequencies are
+
+s <dig> : {paa =  <dig> , pat =  <dig> , pag =  <dig> , pac =  <dig> , pta =  <dig> , ptt =  <dig> , ptg =  <dig> , ptc =  <dig>  pga =  <dig> , pgt =  <dig> , pgg =  <dig> , pgc =  <dig> pca =  <dig> , pct =  <dig> , pcg =  <dig> , pcc =  <dig> }, s <dig> : {paa =  <dig> , pat =  <dig> , pag =  <dig> , pac =  <dig> , pta =  <dig> , ptt =  <dig> , ptg =  <dig> , ptc =  <dig> , pga =  <dig> , pgt =  <dig> , pgg =  <dig> , pgc =  <dig> pca =  <dig> , pct =  <dig> , pcg =  <dig> , pcc =  <dig> }}
+
+then the likelihoods of observing the first fragment, atgtta, given master distributions s <dig> and s <dig>  respectively, are
+
+  
+
+where superscripts s <dig> and s <dig> denote the master distribution. similarly,
+
+  
+
+the overall posterior likelihood of the model is then
+
+  
+
+supplementary material
+additional file 1
+convergence dynamics. figure 1: convergence dynamics for good accuracy, mycoplasma capricolum subsp. capricolum atcc  <dig> vs. campylobacter jejuni subsp. jejuni 81- <dig> . a single mcmc simulation was completed for this pair of genomes as described in methods. k-mer order  <dig> model was used with  <dig> steps, and expected nucleotide frequencies in accepted models were plotted over time for all independent mono- and dinucleotides in the model. two starting conditions were compared: uniform initial frequencies  and frequencies at dataset mean . dotted lines indicate true average frequencies in the constituent species' fragment datasets. convergence was observed to be substantially the same, demonstrating robustness of the algorithm to initial starting conditions. final model accuracy was ≈ 95% in both cases.
+
+click here for file
+
+ additional file 2
+convergence dynamics. figure 2: convergence dynamics for poor accuracy, granulibacter bethesdensis cgdnih <dig> vs. gluconobacter oxydans 621h . details are identical to additional file  <dig>  but final model accuracy was ≈ 60% in both cases.
+
+click here for file
+
+ additional file 3
+accuracy-divergence dependencies for bayesian sampling. figure 3: pairs and triples of genomes were sampled randomly from a set of  <dig> completed bacterial chromosomes, and experiments were conducted using bayesian posterior distribution sampling on the stationary distribution of the mcmc simulation. the results were found to not be significantly different from those for maximum likelihood sampling .
+
+click here for file
+
+ additional file 4
+likelybin version  <dig>  archive. this archive contains the source and executable files for the binner application.
+
+click here for file
+
+ acknowledgements
+we are pleased to acknowledge the support of the defense advanced research projects agency under grant hr0011-05-1- <dig>  joshua s. weitz, ph.d., holds a career award at the scientific interface from the burroughs wellcome fund. the authors would like to thank jonathan eisen for many inspiring discussions. the authors would also like to thank amol shetty, michael raghib-moreno, sourav chatterji, luca giuggoli, and simon levin for their suggestions on a preliminary version of the present model, and thank three anonymous reviewers for their helpful suggestions on the paper. the authors are grateful to sourav chatterji, jonathan eisen, and ichitaro yamazaki for their help in the utilization of compostbin.

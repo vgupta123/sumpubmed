@@ -1,0 +1,157 @@
+BACKGROUND
+high-throughput short read sequencing technologies have become the mainstay of genomic research. critical attention is paid to read quality as it affects the quality and performance of sequencing applications. for example, read quality directly impacts accuracy in mapping to a reference genome. in de novo genome sequencing, apart from accuracy of the generated contigs, read quality affects contig lengths. error-free reads can also improve algorithmic performance, as alignments can be replaced with much faster exact matching.
+
+the focus of this work is applications of high-throughput sequencing in which a single genome is sampled at high coverage, such as resequencing and de novo sequencing. in these cases, the infrequent occurrence of errors in reads, and the apparent lack of affinity of errors to any fixed genomic location, provide a way to detect and correct erroneous bases in reads. if the reads covering a specific genomic position can be identified and properly positioned relative to their locations of genomic occurrence, this layout can be used to infer the true base by majority vote and correct the others. this works for a haploid genome, but can be extended to polyploid genomes to at least identify correct bases. several error correction algorithms for haploid genomes have been developed, using k-spectrum  <cit> , suffix trees  <cit> , or multiple sequence alignments  <cit>  to identify overlapping reads. for a detailed survey of error correction methods, see  <cit> .
+
+most error correction methods are designed for illumina sequencers, which are predominantly used. with rare exceptions, reads from these sequencers only contain substitution errors, leading to simpler algorithms based on hamming distance instead of edit distance. high-end sequencers have error rates well within 1%, and a large percentage of reads are indeed claimed to be free of errors. taking advantage of this, in this paper we propose a different approach: rather than base-level error correction, we seek to identify reads that are error-free . if such predictions can be made with high accuracy, it opens the door to simplifying algorithms for downstream applications, not to mention improvements in quality. in fact, we show that error correction algorithms themselves can be improved by using the perfect reads to correct others, instead of collectively using all the reads.
+
+contributions
+in this paper, we present a k-spectrum analysis based approach to filter out erroneous reads in a high-coverage illumina dataset. we applied our algorithm to one hiseq  <dig> and five hiseq  <dig> datasets. our experiments show that if around 80% of the reads in a dataset are perfect, then our approach retains almost  <dig> % of the perfect reads with more than 90% precision rate. though the coverage reduces by 7% on an average, we observed no noticeable skew in the distribution of perfect reads as compared to the distribution of the original dataset. we also developed a way to characterize the type of datasets for which such an approach is effective.
+
+depending on the application, our method can be customized to vary the degree of stringency used to discard a read as erroneous. for example, if the objective is to retain most of the perfect reads despite the risk of increasing false positives, then the lowest level of stringency should be used. on the other hand, if the objective is to minimize false positives, the highest level of stringency should be used.
+
+finally, we demonstrate that our prediction of perfect reads can be used to improve the performance of error correction algorithms. to do so, we consider reptile  <cit> , a k-spectrum based error correction algorithm. this method performs an analysis of kmers in the input reads and uses a hamming graph constructed based on the kmers to detect and correct errors. we found that if only kmers from perfect reads are used instead, this leads to an improvement of up to 10% on the percentage of errors removed from the dataset. this approach can be readily applied to improve other error correction algorithms.
+
+the organization of the rest of the paper is as follows. the details of our approach are presented in section titled methods. experimental results are presented in section titled results. in section titled improving error correction algorithms, we show how to apply this approach to improve error correction methods. we conclude in section.
+
+methods
+our algorithm is based on analyzing the k-spectrum of the given data set. the k-spectrum is the collection of all kmers, i.e., all substrings of length k from the reads. define a kmer to be valid if it is present in the genome being sequenced, and invalid otherwise. a read is perfect if it does not contain any invalid kmer. in the absence of the reference genome, the validity of a kmer can be estimated from its frequency in the dataset. as errors are infrequent, with sufficient coverage, a valid kmer should occur at significantly larger frequency than invalid kmers. thus, similar to k-spectrum based error correction algorithms, our method consists of two phases. in the first phase, we generate frequency statistics of the kmers, and construct a graph to link kmers within short hamming distance. in the second phase, each read is checked for potential errors using the statistics built in the first phase.
+
+kmer statistics generation
+the kmer at position p of read r is denoted by r. we assume k to be a fixed even number so that k/ <dig> is a whole number. to determine the validity of a kmer, we also consider the quality scores of the associated bases. we count an instance of a kmer only if each of its associated bases exceeds a quality threshold qe . the number of such instances of a kmer t is termed its frequency, denoted by f. because of the double stranded nature of dna, each kmer is associated with its reverse complement kmer also. we represent both these kmers by the one smaller in lexicographic order, and combine the frequencies. the frequencies of all the kmers in the k-spectrum can be easily computed in a single pass over the data. alternatively, other efficient kmer counters such as  <cit>  can be modified to use quality scores.
+
+in the first phase, our algorithm also builds a hamming graph over the k-spectrum. each kmer is represented by a node in the graph. a pair of nodes is connected if the corresponding kmers differ in at most d positions, for a fixed d. the main purpose of the graph is to better estimate the validity of a kmer by taking its graph neighborhood into account. we use the same space efficient data structure to construct and store the hamming graph as in reptile .
+
+identifying perfect reads
+our algorithm for processing a read is presented in algorithm  <dig>  the algorithm decomposes a read into overlapping kmers such that the overlap between two consecutive kmers is k/ <dig>  half their length. if there are insufficient base pairs for such an overlap towards the end of a read, the last kmer is chosen to be the suffix of the read of length k. if none of these kmers is estimated to be invalid, the algorithm outputs the read as perfect.
+
+algorithm 1: error detection
+
+data: read r
+
+result: classify r as perfect or erroneous
+
+p ← 0; /* current kmer r */
+
+while  do
+
+t ← kmer of r at position p;
+
+if t is not valid then return erroneous;
+
+if  then return perfect;
+
+if  + k < |r|) then p ← p + k/2;
+
+else p ← |r| − k;
+
+end
+
+the algorithm relies on a rule to estimate if a kmer is valid. we consider five different rules based on properties p <dig>  . . . , p <dig> below:
+
+p1: f  ≥ ce
+
+p2: f  ≥ cg and each base pair in t has quality ≥ qg
+
+p3: f  ≥ cg and t does not have a neighbor t′ in hamming graph with f ≥ cg
+
+p4: f  ≥ cg and t does not have a neighbor t′ in hamming graph with f ≥ f × fh
+
+p5: f  ≥ cg and all neighbors t′ of t in the hamming graph have property: all the base pairs of t
+
+where t differs from t′ have quality score ≥ qg where the following parameters are to be set appropriately: ce , cg , qg , fh , ce > cg and qe > qg.
+
+for the rest of the paper, we say t is valid by rule i if it satisfies any one of the properties p <dig>  p <dig>  . . . , pi. thus, the rules are in decreasing order of stringency. in the most stringent case , the algorithm treats a kmer t as valid only if its frequency f  is at least a threshold ce . in p <dig>  f  is allowed to be above a lower threshold cg but each base in t must have quality score above qg. the rationale for properties p <dig> and p <dig> is that as the kmer in consideration has comparatively lower frequency, and there are no high cardinality d-neighbors, it might be the case that the kmer is from a region of low coverage. in p <dig>  the kmer has strong quality scores at all the positions in which it differs from its d-neighbors, and hence it has a high likelihood of being valid.
+
+note that these rules are heuristics and hence the perfect reads detected by our algorithm may have errors and some of the erroneous reads detected by our algorithm can in fact be error-free.
+
+RESULTS
+we applied our algorithm to  <dig> datasets from the ncbi short read archive, the details of which are given in table  <dig>  for each dataset the table shows sra accession number, sequencer platform, name of the reference genome, strain, organization that published the data, date of publishing, percentage of gc content, length of the genome in mb, read length, and average coverage.
+
+ucb: university of california, berkeley; wtsi: wellcome trust sanger institute; umigs: institute for genome sciences, university of maryland; cshl: cold spring harbor laboratory
+
+to evaluate our method, knowledge of error-free reads in each dataset is required. to determine them, we aligned each dataset using the bwa aligner  <cit>  with default parameters. a read is taken to be error-free if it is perfectly aligned by bwa without any substitution, insertion, or deletion. the results of bwa alignments are shown in table  <dig> where each row shows the strain of the reference genome used, number of reads in the dataset, number of reads aligned, number of reads not aligned, number of reads ambiguously aligned, number of reads perfectly aligned, and overall error rate. note that the rows of tables  <dig> and  <dig> are arranged in increasing order of the percentage of perfect reads.
+
+experiments and evaluation methodology
+we applied our algorithm to each of the datasets using the following default parameters: k =  <dig>  cg =  <dig>  ce =  <dig>  qg =  <dig>  we chose qe =  <dig> for s <dig> and qe =  <dig> for the remaining datasets. to assess the quality of predictions made, we define:
+
+tp = number of perfect reads that are classified by our algorithm as perfect
+
+fn = number of perfect reads that are classified as erroneous
+
+fp = number of erroneous reads that are classified as perfect
+
+tn = number of erroneous reads that are classified as erroneous
+
+then, we used the standard measures of specificity , sensitivity , and precision  as:
+
+sp = tn/
+
+sn = tp/
+
+pr = tp/
+
+discussion
+the results of our experiments using rule  <dig>  which tests for conformance with at least one of properties p <dig> and p <dig>  are presented in table  <dig>  except for dataset s <dig>  rule  <dig> achieves near 100% sensitivity, indicating this rule correctly classifies an overwhelming majority of error-free reads, and misclassifies a negligible percentage of error-free reads. thus, applications which take reads predicted to be error-free by our algorithm will retain almost all of the error-free reads. specificity for various datasets indicates to what extent our algorithm succeeded in weeding out reads that contain at least one error. except for dataset s <dig>  our algorithm eliminated at least 50% of erroneous reads from the dataset, reaching close to 90% in some cases . precision, the ratio of true perfect reads to total reads predicted as perfect by our algorithm, is over 90% in all cases except dataset s <dig>  the lower performance on s <dig> can be attributed to the comparatively lower coverage and lower percentage of perfect reads.
+
+tp
+fn
+fp
+tn
+in all cases except s <dig>  applications can significantly benefit by taking as input the reads predicted to be error-free by our algorithm, instead of the raw datasets. doing so, the applications will be operating on data that has over 90% perfect reads, miss very few perfect reads from the original dataset, and can do away with a majority of erroneous reads. we also tested the coverage induced by the reduced datasets generated by our algorithm against the coverage of the genome by the original raw datasets, and found no noticeable loss of information, i.e., we did not find any regions of the genome disproportionately losing coverage significantly higher than what is implied by the reduction in the size of the dataset. for visualization of the test, we show plots generated by the tool qualimap  <cit> , which divides the complete genome into about  <dig> windows and plots the average of the coverage of all base pairs within each window. we show in figure  <dig> the plot generated by qualimap for dataset s <dig> alone; for datasets s <dig> and s <dig> we get similar plots. it can be seen that the coverage pattern remains the same though the average coverage reduces from 140x to 130x . figure  <dig> also shows that the percentage of gc content remains same. as illumina sequencers can generate billions of reads in a single experiment at a very low cost per base, eliminating erroneous sequences can significantly improve data quality for applications without appreciable loss of data-scale.
+
+execution time
+all experiments were carried out on a hp proliant dl580g <dig> server, which has  <dig> intel xeon e <dig>  processors and 132gb main memory. the server is running 64-bit ubuntu  <dig>  os. we used jellyfish software  <cit>  to generate kmer statistics in phase  <dig> of our algorithm. our multi-threaded implementation of phase  <dig> is also based on the library functions associated with the jellyfish software. the rightmost two columns of table  <dig> show the average time taken by the two phases of our algorithm in  <dig> independent runs on each of our datasets. in our experimentation, we used  <dig> threads in each phase. the time taken in phase  <dig> is within the same order of magnitude of time taken in generating the kmer statistics.
+
+predicting applicability of our algorithm
+as noted previously, our algorithm performed well on all datasets except for s <dig>  it would be of tremendous practical value if we can ascertain the applicability of our algorithm by evaluating the dataset alone, without knowing the reference genome. below, we present a methodology to do so.
+
+the quality of results obtained by our algorithm can be explained using the histogram of kmer frequencies . in figure  <dig> we plot the histogram of kmer frequencies in dataset s <dig> for k =  <dig>  on the horizontal axis we show the different frequencies of the kmers. for a particular frequency x on the horizontal axis the curve named all shows the number of distinct kmers t that have frequency f = x. depending on the alignment, the kmers can be divided into three categories. a kmer is good if it comes from the error-free regions of all the reads that it appears, bad if it comes from erroneous regions in all the reads it appears, and mixed if it appears in the error-free regions on some reads and in the erroneous regions of some other reads. in figure  <dig> we also show the frequency histograms for good, bad and mixed kmers.
+
+a necessary condition for the good performance of a k-spectrum based error detection algorithm is that the frequency histograms for good, bad, and mixed kmers should follow the pattern in figure  <dig> where the number of mixed kmers is very very low, most bad kmers have low frequency, bad kmers with higher frequencies are very rare, and the histogram of good kmer frequencies follows a normal curve which has mean approximately equal to the average coverage. when this condition is satisfied, we can clearly demarcate a threshold frequency at the crossover of the good and bad curves such that most of the kmers with frequency less than the threshold are bad, and most of the kmers with frequency above the threshold are good. the dataset s <dig> follows the pattern and our algorithm works well on s <dig> 
+
+on the other hand, the plots for s <dig> shown in figure  <dig> do not follow the expected pattern. in fact it is not possible to distinguish the good kmers from the bad ones depending upon only the frequency, as the bad curve is above the good curve. increasing the kmer size does not help either. figure  <dig> shows the plots for all kmers for values of k =  <dig>   <dig>   <dig>   <dig>  and  <dig>  none of which follows the expected pattern. this explains the bad performance of our algorithm on s <dig> 
+
+unlike the curves good, bad, and mixed, the curve all can be plotted even in the absence of alignment information. if the shape of the all curve follows the expected pattern as in figure  <dig>  our algorithm should perform well.
+
+the plots also give hints on how to set the parameters. the parameter k should be such that the probability of a kmer having repeats in the genome g, i.e., |g|/4k is very small. ce should be the first minimum of all curve. at least 95% of the kmers should have frequency cg or more. the quality parameters could be such that about 80%  of the bases have quality at least qg .
+
+effects of varying stringency levels
+we also varied the rules used to identify if a kmer is valid or not, as described in section. we report the results on datasets s <dig>  s <dig> and s <dig> with parameter fh =  <dig> in table  <dig>  as we increase the rule number, the stringency of declaring a read to be error-free decreases, resulting in more true and false positives. hence, sensitivity increases but specificity and precision decrease.
+
+tp
+fn
+fp
+tn
+pr
+sp
+sn
+improving error correction algorithms
+our algorithm for predicting error-free reads can be used to improve the performance of error correction algorithms themselves. we demonstrate this using the error correction algorithm reptile  <cit> , though the methodology is more broadly applicable. reptile consists of two phases: in the first phase, it counts the frequency of all kmers and constructs a hamming graph on them. in addition, kmers are classified as valid or invalid based on whether or not they exceed a threshold count. nodes in the hamming graph are marked with this information. in the second phase, each read is corrected by changing invalid kmers in it to their valid hamming graph neighbors. we slightly modified the first phase of reptile to count kmer frequencies in only those reads which are predicted as error-free by our algorithm. in addition, we use the hamming graph to only correct errors in reads that are predicted to be erroneous by our algorithm.
+
+
+set
+algo
+tp
+fn
+fp
+tn
+wc
+sn
+sp
+g
+eba
+as proposed in  <cit>  and more widely adopted later, gain is an important measure for assessing the quality of an error correction algorithm. from table  <dig> for the datasets on which our prediction performs well, mainly s <dig>  s <dig>  and s <dig>  the modification improves gain by up to 10%.
+
+CONCLUSIONS
+thanks to the continuous technological improvements in high-throughput dna sequencing, reads of dominant sequencing platforms such as the illumina hiseq are sporting high coverage and accuracy. this has now reached an extent where we can envision just filtering out reads with errors, thus making error correction less important. our algorithm is a first attempt to propose and demonstrate this new paradigm. our experimental results demonstrate that development of such algorithms shows great promise. there are directions for further improvement of our algorithmic strategy. our algorithm relies on several parameters. an automated choice of parameters sensitive to, and computed based on, the dataset would be useful. it might be useful to have values of parameters ce , cg dependent on the pattern of bases in the kmers. like all error correction algorithms, our algorithm ignores paired read information and treats them as though they are single reads. utilizing paired read information to further improve the performance of error detection or correction algorithms remains an open question. in case of long reads where reads are less likely to be perfect, a notion of approximate perfect  can be used.
+
+availability
+a c++ based implementation of our algorithm can be found at the following github public repository: https://github.com/soumitrakp/perfectread.git.
+
+competing interests
+the authors declare that they have no competing interests.
+
+authors' contributions
+sa conceived the study. sp implemented the algorithms and carried out the experiments. sp and sa analyzed the results and wrote the paper.
+

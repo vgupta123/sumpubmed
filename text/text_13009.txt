@@ -1,0 +1,190 @@
+BACKGROUND
+adapter contamination is a common problem of short-read sequencing. it arises from fragments of the sequencing library that are shorter than the read length itself. in that case, a ‘read through’ into the sequencing adapters occurs after sequencing the actual insert of interest. these adapter sequences often disturb downstream analysis of the data, i.e. read mapping and variant calling, or de-novo assembly of reads.
+
+thus, trimming adapter sequences is a common preprocessing step in most ngs data analysis pipelines. for amplicon-based sequencing approaches, which are widely used in clinical diagnostics, sensitive adapter trimming is of special importance. recurrent untrimmed adapters at the same genomic position can lead to spurious variant calls. shotgun sequencing approaches with random distribution of reads over the target region are more robust towards adapter contamination. the random read distribution reduces the probability of spurious variant calls for most variant calling applications. however, when calling variants with low allele frequencies, e.g. somatic variants or mosaic variants, adapter contamination can still lead to spurious variant calls. therefore, adapter trimming is an essential step for shotgun data as well.
+
+adapter trimming algorithms typically try to find the adapter sequences in the reads using semi-global alignment or similar techniques. jiang et al.  <cit>  give a detailed overview of the algorithms used in various tools. algorithms designed specifically to handle paired-end data often take a different approach than those for single-end data. adapter contamination in paired-end data means that the insert, i.e. the fragment of interest, was completely sequenced in both reads . most tools that are designed for paired end data use the match of insert sequences instead of searching for adapter sequences. this approach has the big advantage that it can trim very short adapter residues, down to one base length. we will term this the insert match approach. the alternative approach, where adapters are detected based on their sequence only, is called adapter match approach.fig.  <dig> read layout with adapter contamination  and insert match algorithm examples with different offsets . inserts are colored grey, adapter remains are colored black. reverse reads are displayed with reverse-complementary sequence to facilitate visual comparison of sequences
+
+
+
+while analyzing ngs data generated with the amplicon-based haloplex enrichment , we found that adapter contamination was not fully removed by any of the adapter trimming tools we applied, even with optimized parameters  <cit> . thus, we developed seqpurge, a very sensitive paired-end adapter trimmer that is based on a probabilistic approach.
+
+implementation
+before going into the algorithm details, we will briefly define the problem more formally: given forward/reverse adapter sequences and the forward/reverse read produced from one dna fragment, remove all bases from the reads that stem from a read-through into the adapters, if present. those bases that must not be trimmed because they stem from the actual sequence of interest are called insert in the following text.
+
+calculation of non-random match probability
+as mentioned in the introduction, our algorithm is not based on sequence alignment. it uses a rather simple probabilistic approach. given two dna/rna sequences of length n, we count the number of matching bases k between the sequences. given the probability p of a single base match, we calculate the probability p to observe k or more matching bases in sequences of length n using the binomial distribution: p=∑i=knn!i!n−i!pi1−pn−i 
+
+we call two sequences a  match, if p is less than a given threshold. this threshold is the main parameter that balances sensitivity/specificity of our algorithm.
+
+using this simple approach is possible because modelling indels is not necessary - an insertion/deletion in the insert is present in both read directions. we use a fixed match probability p of  <dig>  for all bases, i.e. we assume that all four bases occur at the same rate. based on our performance evaluations, this simplification causes no major problems.
+
+algorithm description
+the primary design goal of seqpurge was to achieve a very high sensitivity while maintaining a state-of-the-art specificity. in general, the insert match approach is very sensitive and thus is the best approach for paired-end reads. however, certain sequence motives and unbalanced base content can make sequencing difficult in one read direction or even in both read directions. in these difficult sequences, the adapter match approach can perform better than the insert match approach. thus, we combine the two approaches to increase the sensitivity of seqpurge.
+
+first, we try to find an insert match between forward read and the reverse-complement of the reverse read. to detect an insert match, each possible offset between both reads is tested for a match . if we find a match, the adapters are trimmed and the insert remains. if we find several matches, we select the best offset, i.e. the one with the lowest probability of being random. several matches occur primarily in reads of regions with simple repeats. to prevent overtrimming because of false-positive matches in simple repeat regions, we also require a match between the previously defined adapter sequence and the sequence flanking the putative insert. this additional adapter match is required in only one out of the two reads, which makes the algorithm more robust towards bad read quality in one read direction.
+
+if no insert match was found, we check for adapter matches in the forward and reverse read separately. again, each possible offset is tested for an adapter sequence match. if an adapter match is detected, the read is trimmed starting at the offset position. if only one of the two reads has an adapter match, the other read is trimmed at the offset as well, because a ‘read through’ is always symmetrical. the rationale is again that one read could have bad quality due to sequencing problems.
+
+theoretical runtime and runtime optimizations
+the theoretical runtime of the algorithm is nm <dig> where n is the number of reads and m is the read length. we implemented several optimizations to reduce the runtime in practice.
+
+because we need to calculate the match probability m <dig> times for each read pair and three faculty values are required for the calculation, the faculty values are pre-calculated and stored in a hash for fast lookup.
+
+to avoid a large part of the match probability calculations, we added a minimum matching bases parameter . once the maximum allowed number of mismatches of a comparison is exceeded, the rest of the comparison can be skipped. this reduces the overall runtime by up to 75 %.
+
+reading the data from file and processing the data in the same thread can slow down the analysis considerably when file i/o is slow. thus, we pre-fetch reads in an i/o thread and use n additional threads for data analysis . this strategy of course increases the memory usage slightly.
+
+we are currently evaluating the possible speedup when using four bit-arrays instead of characters to store dna sequences. this approach is also used by skewer  <cit> , the fastest tool in our comparison.
+
+RESULTS
+for our benchmark we selected the best tools for paired-end reads from  <cit> : skewer  <cit> , adapterremoval  <cit> , trimmomatic  <cit> , seqprep  and flexbar  <cit> . additionally, we benchmarked the recently published tool peat  <cit> , which was not part of the comparison by jiang and colleagues.
+
+benchmark datasets
+for the main performance comparison, we used real-world data to make the benchmark as realistic as possible. we created a benchmark dataset by sequencing the nist reference sample na <dig>  <cit> :  a library was created from the na <dig> sample using a haloplex custom panel containing the exons of  <dig> genes  related to hereditary breast and ovarian cancer;  the library was sequenced on an illumina miseq  resulting in about half a million paired-end reads of 158 bp length. an amplicon dataset was used for the benchmark, because the effect of incomplete adapter trimming can even be seen in variant lists. generally, an adapter trimmer that performs well on amplicon data will perform equally well on shotgun data.
+
+for a second benchmark, we simulated paired-end data. five million read pairs for the coding region of the genome  were created with varying error rates of  <dig> to 4 %. the 100 bp read pairs were created based on a theoretical library with mean insert size of 100 bp and a standard deviation of 50 bp. this results in a dataset where 50 % of the reads contain adapter contamination and need to be trimmed. the reads were simulated using the persim .
+
+benchmark metrics
+we compare the adapter trimming performance based on metrics of raw reads, mapped reads and variants called. for each of the three steps, different metrics are used.
+
+for raw reads, the number of bases remaining after trimming is counted. additionally, we report the number of remaining adapter 20-mers from the beginning of the adapters. this crude metric already gives a good impression of the sensitivity. after perfect adapter trimming no adapter 20-mer should be found in trimmed data.
+
+for mapped reads, the first metric is the number of properly paired reads with a mapping quality of  <dig> or higher. the high mapping quality cutoff of  <dig> was chosen to remove low-accuracy alignments. removing low-accuracy alignments is important because alignments are the basis to calculate the metrics of overtrimmed and undertrimmed bases: the start positions of the forward and reverse read indicate the start and end position of the insert, respectively . these metrics depend on the mapping software and its parameters. for the real data evaluation, we assume that all alignments are correct and that the phred mapping quality is well-calibrated. for the simulated data evaluation, no mapping is required and the correct trimming is known a priori.
+
+for variants, the most basic metric is the overall number of variants called. this simple metric can be used to identify adapter trimmers that cannot trim short adapter fragments. remaining adapter sequences result in higher variant counts. the more significant metrics are the number of uncalled true-positives and called false-positives. to determine these, all variants with genotype calls differing between tools were manually inspected.
+
+benchmark results on real data
+for this benchmark, we performed adapter trimming with the respective trimming tool, mapping with bwa  <dig> . <dig>  <cit>  and variant calling with freebayes  <dig> .20- <dig>  <cit> .
+
+all adapter trimmers were configured similarly to make the results comparable: one thread was used for trimming; reads smaller than  <dig> bases after trimming were discarded; no trimming by base quality or no-call stretches  was performed. for algorithm-specific parameters of the adapter trimmers default values were used. mapping was performed using the bwa “mem” algorithm with default parameters. variant calling was performed on bases with a phred base quality of  <dig> or higher only.
+
+table  <dig> summarizes the raw data metrics after trimming. the first line shows that more than  <dig>  exact adapter 20-mers are present in the input data. all adapter trimmers significantly reduce the number of adapters, but only seqpurge and seqprep can remove all adapters without any parameter optimization. trimmomatic and flexbar remove nearly all adapter 20-mers. adapterremoval, skewer and peat leave a significant amount of adapter sequences in the reads.table  <dig> adapter trimming benchmark results on real data 
+
+1450
+24298
+146433832
+142069127
+425
+the number of adapter 20-mers and the number of bases left in the raw read data after adapter trimming. the most notable entries are highlighted 
+
+
+
+in terms of bases left after trimming, most tools produce roughly  <dig>  million bases. seqprep removes significantly more bases. this will be discussed in the next section together with the number of properly-paired reads. peat removes significantly less bases, because peat keeps reads with an insert size of zero, i.e. adapter-dimers with no insert.
+
+table  <dig> shows the performance metrics after mapping. the properly-paired read count for most tools lies between  <dig> and  <dig> reads. interestingly, the properly-paired read count for untrimmed reads is higher. intuitively one would argue that adapter trimming should increase the number of mappable reads. however, this contradiction can be explained. untrimmed adapters can make reads with very short inserts uniquely mappable which would not be uniquely mappable without adapter. even reads without any insert can be mappable when allowing soft-clipping of reads during the mapping, which bwa does . only seqprep and peat are outliers in terms of properly-paired read count. for seqprep the properly-paired read count is lower because it completely removes about  <dig> reads no other trimmer removes. manual inspection revealed that most of these reads are of high quality and are mappable as a proper pair. it remains unclear why seqprep removes these reads . peat cannot remove reads with no insert. these untrimmed reads lead to a seemingly higher properly paired read count.table  <dig> adapter trimming benchmark results on real data 
+
+1022388
+223997
+4539534
+1022901
+69296
+354531
+1018828
+95279
+190062
+benchmark results after mapping: properly-paired reads, erroneously trimmed insert bases, untrimmed adapter bases. the most notable entries are highlighted 
+
+
+
+when looking at overtrimmed and undertrimmed bases, only seqpurge and seqprep show balanced sensitivity  and specificity . flexbar and peat have a low specificity. adapterremoval, peat, skewer and trimmomatic have a low sensitivity.
+
+table  <dig> shows the benchmark results of the variant calling step.  <dig> variants were called after trimming with each of the adapter trimming tools. these consensus variants were considered true-positives and, thus, were not further evaluated. all variants with diverging calls were manually inspected using igv  <cit> .table  <dig> adapter trimming benchmark results on real data 
+
+178
+1
+24
+174
+19
+178
+23
+benchmark results after variant calling: overall variant count, number of true-positive variants that were not called, number of false-positive variants that were called. the most notable entries are highlighted 
+
+
+
+without adapter trimming,  <dig> spurious variants were called. they were all caused by short adapter remains in mapped reads. the high number of spurious variant calls underlines the importance of highly sensitive adapter trimming for amplicon-based sequencing data. using flexbar and trimmomatic  <dig> and  <dig> false-positive variants were called, respectively, because they failed to trim short adapter remains. flexbar trims adapter sequences longer than two bases only. trimmomatic trims adapter sequences longer than seven bases only.
+
+interestingly, one true-positive variant was missed when applying no adapter trimming. the allele frequency of the heterozygous variant dropped from  <dig> to 3 % due to incorrect mapping of untrimmed adapter remains at the same genomic position .
+
+table  <dig> shows the single-thread processing time and memory usage benchmark. the time benchmark clearly demonstrates that adapter trimming must not slow down the overall processing. fast adapter trimmers with a good trimming performance can speed up the overall analysis time because mapping is considerably faster after trimming. these mapping times are specific for bwa. however, when using a more sophisticated mapper, e.g. stampy  <cit> , or an additional indel-realigner, e.g. abra  <cit> , an even greater benefit of adapter trimming can be expected. a second observation from the time benchmarks is that adapterremoval, seqprep and flexbar are probably too slow for routine application in a high-throughput setting. the peak memory usage of most tools is below 30 mb. only peat and trimmomatic use much more memory, but the reason for this remains unclear.table  <dig> resources benchmark results on real data
+
+303
+403
+165
+ <dig> 
+304
+ <dig> 
+benchmark results of single-thread processing times  and peak memory usage . the most notable entries are highlighted 
+
+
+
+the adapter trimming benchmarks presented so far, did not take trimming of low-quality bases into account. we excluded this feature, because not all tools in the comparison support it. those tools that support it use basically the same approach with only minimal differences: low-quality bases are removed from the end of the read until a given base quality cutoff is exceeded. thus, no significant performance differences between tools can be expected.
+
+it is however interesting if quality trimming improves mapping and variant calling in general. our benchmarks using seqpurge and skewer  indicate that trimming low-quality bases improves the properly-paired read count and the undertrimmed bases count. interestingly, most of the performance improvement was already achieved at moderate quality score cutoffs  and increasing the cutoff did not improve the performance any further. a more extensive evaluation of read trimming effects on ngs data can be found in  <cit> .
+
+benchmark results on simulated data
+in our benchmark on real data we measured the adapter trimming performance using a comprehensive set of metrics. however, on real data we could not measure the tolerance towards sequencing errors. in practice, this is an important feature because it is not possible to adjust algorithm parameters for each dataset in a high-throughput setting. thus, we benchmarked the error tolerance on simulated data with different error rates.
+
+table  <dig> shows the trimming performance on simulated data without sequencing errors. in terms of trimming time, the results are similar to the benchmark on real data: adapterremoval, seqprep and flexbar are slower than the other tools. likewise, flexbar, peat and trimmomatic show a lower sensitivity/specificity. seqpurge shows a slight tendency to over-trim up to  <dig> bases from the end of reads that consist of simple repeats. however, this affects less than  <dig>  % of the reads, which is acceptable since the focus of the algorithm lies on sensitivity.table  <dig> trimming benchmark results on simulated data without errors
+
+1712
+837
+2842491
+221979
+2701634
+70617998
+1158
+2225766
+benchmark results on simulated data  without sequencing errors. the most notable entries are highlighted 
+
+
+
+with increasing error rate the execution time and the number of overtrimmed bases  stayed constant for all tools, only the number of undertrimmed bases  changed significantly. thus, we now focus on undertrimmed bases of those tools that performed well on error-free data . table  <dig> shows the undertrimmed base counts for different error rates. these results show that seqprep and skewer do not cope well with higher sequencing error rates. adapterremoval performs well up to 2 % error rate. only seqpurge performs well up to 4 % error rate, which corresponds to a very bad read quality that would not be tolerated in production data.table  <dig> undertrimmed base counts on simulated data
+
+866762
+2927032
+2029956
+9321200
+3367375
+36206230
+6233300
+4248922
+109562658
+undertrimmed base counts on simulated data  with different rates of sequencing errors. the most notable entries are highlighted 
+
+
+
+CONCLUSIONS
+we have presented seqpurge, a novel adapter trimmer for paired-end sequencing data that is based on a probabilistic approach. the performance of seqpurge was compared to six other adapter trimming tools on an amplicon-based benchmark dataset and on simulated data.
+
+our comparison shows that seqpurge is the only tool that offers a good performance in terms of sensitivity, specificity, speed and error tolerance: adapterremoval is very slow and not very sensitive. flexbar is quite slow, not very specific and fails to trim short adapter remains. peat has a low sensitivity and specificity, fails to remove reads without insert and has a high memory usage. seqprep is very slow and removes good reads from the dataset. skewer is not as sensitive as seqpurge, but it is by far the fastest tool in the comparison. using skewer might be considered for large amounts of shotgun data where the runtime is more important than sensitivity, i.e. for whole genome data. trimmomatic is not very sensitive, keeps short adapter remains and has a high memory usage.
+
+for the real data benchmark we focused on amplicon-based sequencing data because the effects of incomplete adapter trimming can be demonstrated more easily on amplicon data than on shotgun data. a similar benchmark was done on shotgun data . the results are comparable to the amplicon-based benchmark with two exceptions:  spurious variant calls are rare in shotgun data because untrimmed adapters are generally not placed at the same genomic position;  adapter dimers without insert occur less frequently in shotgun data than in amplicon data.
+
+when considering the overall runtime and file i/o load of an analysis pipeline, processing the fastq raw data is one of the main contributors. thus, it is advantageous if only one tool is needed for raw read processing. seqpurge not only offers adapter trimming functionality, but also trimming by base quality and no-call stretches. additionally, it can merge input fastq files from several runs or lanes during the trimming process, and it can calculate basic quality control metrics on raw read data. the combination of these features reduces the number of passes needed to perform the basic data preparation steps significantly. to our knowledge, seqpurge is the only adapter trimmer that combines all these features into a single tool. seqpurge currently does not support merging of overlapping read pairs into longer single-end reads, which is supported by seqprep and adapterremoval. a detailed feature overview of other adapter trimmers from our comparison can be found in  <cit> .
+
+availability and requirements
+seqpurge is implemented in c++ and runs both under linux and windows. it is available under the ‘gnu general public license version 2’ as part of the ngs-bits project: https://github.com/imgag/ngs-bits.
+
+ethics approval and consent to participate
+not applicable.
+
+consent for publication
+not applicable.
+
+availability of data and materials
+the real ngs dataset supporting the conclusions of this article is available in the european nucleotide archive, ftp://ftp.sra.ebi.ac.uk/vol1/era494/era494451/. the simulated data supporting the conclusions of this article was created using persim which is available at https://github.com/imgag/ngs-bits.
+
+additional file
+additional file 1: figure s <dig>   mapping of reads without insert. figure s <dig>  variant that is suppressed by adapter contamination. figure s <dig>  high-quality reads removed by seqprep . figure s <dig>  high-quality reads removed by seqprep . table s <dig>  benchmark results with low-quality trimming. table s <dig>  detailed benchmark results on simulated data. 
+
+
+
+competing interests
+
+the authors declare that they have no competing interests. 
+
+authors’ contributions
+
+ms designed and implemented the algorithm, carried out the benchmark data analysis and prepared the manuscript. cs contributed to algorithm design, tested the algorithm and prepared the manuscript. pb contributed to algorithm design and prepared the manuscript. all authors read and approved the final manuscript.
+

@@ -1,0 +1,91 @@
+BACKGROUND
+southern blotting is a dna analysis technique that allows one to detect a specific dna sequence in a complex dna sample  <cit> . gel electrophoresis is used to size separate restriction-digested dna, which is then transferred  to a solid support such as a filter for probing and detection by radioactive or luminescent labelling.
+
+the method has found widespread application throughout molecular biology. it has been used for gene discovery and mapping. it also has diagnostic and forensic applications, such as mutation detection in patient samples and dna fingerprinting in criminal investigations. it has been employed as the definitive method for detecting transgene integration  <cit> , and successful homologous recombination in gene targeting experiments that ablate or modify a gene's function in vivo  <cit> .
+
+for the technique to succeed one needs to identify a probe sequence that is unique within the genome for the gene or locus of interest so that it does not cross-hybridize with other endogenous dna sequences present in the sample. like others we have routinely used a manual approach to design and test our probes, which is labor intensive and usually requires trial of different probes before the desired result is obtained. it is therefore highly desirable to have bioinformatic tools that aid in the design process and can also optimize the probes.
+
+the typical manual approach is to choose a probe of at least  <dig> bp in length, to ensure efficient labeling in the random priming reaction  <cit> , and in practice probes of 500- <dig> bp are generally employed. following identification of the genomic locus one wishes to probe, the dna sequence from a genome browser  is examined for repetitive sequence elements as these can result in an intense background smear on hybridization that obscures single copy gene hybridization signals. the test probe is then searched against the genome using blast  <cit>  or other means and the results inspected. one hopes to obtain a single perfect match to the target locus on the genome, with little or no cross-reactivity to other loci. if this is not the case, one has to return to the genome browser and move and/or shorten the sequence before repeating the blast search. with each genome search taking several minutes this is a time consuming exercise and is unlikely to yield the best possible probe.
+
+clearly this method is amenable to bioinformatic automation. many programs already exist for oligonucleotide probe discovery, principally in the area of microarray design  <cit> . these programs are generally designed to find probes less than  <dig> bp rendering them inapplicable for the considerably longer southern blot probes. to address this need we have written a system to find  unique probes in a specified region of a genome, which contain little or no repetitive dna sequence, and also to design pcr primers to facilitate the recovery of the probes from cellular dna for subsequent southern blotting. we went on to experimentally validate a number of these designs by southern blotting in the mouse genome.
+
+implementation
+given user-supplied chromosomal coordinates, and a desirable size range for the southern blot probe , we used a tiling approach to generate many possible probes in the specified design window. the program starts from the maximum allowable probe length, tiling the window by moving by a small percentage of the probe length each time . once this is completed the probe length is reduced by  <dig> bases  and the window re-tiled, generating more candidate probes. the process is repeated until the minimum probe length is reached . the candidate probes are searched against the target genome using the exonerate pairwise sequence alignment program  <cit> .
+
+we calibrated the method using a set of manually-designed genomic probes that we have previously successfully employed for southern blotting . these had an average length of ~ <dig> bp and when searched with exonerate  all of these produced a perfect match to their genomic locus  and a number of additional lower-scoring alignments to other loci. on average these second best matches spanned  <dig>  ±  <dig> %  of the probe length, with  <dig>  ±  <dig> % dna sequence identity . from the scores of the on-target or 'self-hit' and the highest scoring off-target locus alignments we calculated a score ratio as measure of uniqueness of the candidate probe. our calibration probes averaged  <dig>  ±  <dig>  . this score ratio is proportional to both the length and sequence identity of the two matches.
+
+shown are the mouse genomic target and length of each of the probes, together with uniqueness and repetitive dna content measures produced by evaluating the probes in the automated design pipeline. these are the score ratio, which is calculated as the ratio of the score of the on-target hit of the probe to the genomic locus of interest, and the highest-scoring off-target second best hit. the percentage repetitive and low-complexity dna content  is shown for each of the probes. finally, the percentage identity and query coverage are given for the second hit used to calculate the score ratio.
+
+comparing the probe sequences to a version of the genomic assembly that has been screened for repeats and low-complexity regions by repeatmasker  <cit>  and dust  <cit>  allows us to estimate the repetitive dna content of individual probes. our calibration probes contained  <dig>  ±  <dig> % such dna.
+
+considering these results we chose a minimum score ratio of  <dig> and a maximum combined repetitive and low-complexity base content of 5% as the minimum requirements for probe acceptance . candidate probes reaching these criteria that were completely overlapped by a longer and better-scoring probe are considered redundant and removed from the passing set.
+
+with the number of genome searches to be carried out potentially taking several hours for each southern blot probe design, we thought that employing a single program and computer to complete the whole task was unlikely to achieve a reliable and timely solution. instead we decided to use a database to store and retrieve the design information for each probe, and subsequently to hold the results of the many genome searches carried out for candidate probes. multiple processors and cores as available from a compute cluster are employed to perform the genome searching, reducing the real time taken to test the probe designs in silico. when all the searches are complete the whole set of genome-search results are analyzed to find the best probe candidates.
+
+a mysql database  was designed for this purpose together with a set of perl data objects and sql adaptor classes to allow programs to write and retrieve from the database. these follow the ensembl api and schema design where one creates a set of classes representing the core objects in the system, in this case probe designs, candidate probe sequences belonging to a design to be tested, and their matches to the target genome, partnered by a set of complementary adaptor classes that hold the cognate sql necessary for storing and retrieving these from the database. changes to the database schema can the then be made without impact on the object classes  <cit> .
+
+we then decomposed the task into three principal steps:
+
+1) create_probe_search takes the user-specified chromosomal coordinates for the design and generates many candidate probes at the granularity governed by the window tiling parameters, storing the design specification and the candidate probe sequences in the database. use is made of the ensembl api to extract the dna sequence  from the genome assembly covering the probe design window, then subsequently to extract sub-sequences to generate each candidate probe sequence. these sequences are grouped into batches  for efficient searching with exonerate in step  <dig> 
+
+2) run_probe_search takes the set of sequences specified by a particular job, searches them against the target genome, and parses the exonerate output results, storing the hits, including their scores, location, and masked sequence content  in the database. run_probe_search is not launched interactively but is initiated by submit_probe_search that utilizes the lsf job scheduling system to run many separate instances of run_probe_search in parallel to complete the genome searches required for a probe design.
+
+3) analyse_probe_search is the final step in the probe design process. it checks that all the genome-searching jobs for the probe design have been completed successfully, then fetches the alignment results from the database, applying the specified cut-off criteria for score-ratio and repetitive/low-complexity dna content. these are used to separate and rank the sequences into unique, passed and failed groups. redundant  sequences are filtered into a fourth bin.
+
+if none of the sequences in the probe design pass at the specified criteria, the cut-offs are automatically relaxed to find the best  probes in what is likely to be a difficult portion of the genome to design southern blot probes. primer <dig>  <cit>  is then used to generate primers for recovery of the passed candidate probes, run using the bioperl-run wrapper  <cit> . chosen primers can be manually-checked for potentially confounding polymorphisms if required, by search of dbsnp.
+
+static web output is generated for user inspection . this includes the probe design window coordinates, counts of the candidate probes generated and subsequently placed in each bin and results of the quality assurance checks that each genome search generates an 'on target' hit to the correct position on the genome for the candidate probe sequence. a graphic plot is rendered showing the frequency of occurrence of each base position in the set of sequences found in the unique, passed or failed probe groups across the design window.
+
+four accessory scripts are also provided. create_probe_search_db_tables creates the mysql database tables for the design pipeline. delete_probe_design removes a probe design from the database should it have been wrongly specified, or is no longer needed. delete_job_results removes the results of a particular batch of exonerate genome searches from the database should an error have occurred, allowing the job to be resubmitted, and finally, get_probe_search_cpu_time calculates the total time to execute the searches for a given probe design.
+
+each of these programs read their customizable parameters from a .ini type configuration file.
+
+RESULTS
+to date we have designed  <dig> probes using flanking regions in about  <dig> genes that we chose to perturb by gene targeting in mouse embryonic stem cells. given a ~ <dig> kb window in which to search for a southern blot probe and a desirable length range for the final probe of 500- <dig> bp, the tiling strategy outlined produces on average ~ <dig> candidate probes  to search against the genome .
+
+in total 103/ <dig>  of these designs passed by the criteria above of score ratio ≥  <dig> and repetitive/low-complexity dna content ≤ 5%. on average the best candidate probes for each design were  <dig>  ±  <dig>  bp long and contained only  <dig>  ±  <dig> % repetitive and low complexity dna, the latter being significantly lower than our manually-designed calibration set .
+
+calibration
+automated
+shown are the average length  of the probes in the calibration and automatically designed sets, together with their average score ratio, which is calculated as the ratio of the score of the on-target hit of the probe to the genomic locus of interest, and the highest-scoring off-target second best hit. the average combined percentage repetitive and low-complexity dna content  is shown for each of the probes. also shown are the number of probes in each set that had a unique hit to their target genomic locus, with no off-target hits i.e. no apparent cross-reactivity. * p <  <dig>  student's t-test.
+
+additionally by such brute-force searching and scoring of genomic probes, in exactly half the design cases  it was possible to find one or more unique probes amongst those tested. these had a single  hit to their target genomic locus with no cross-reactivity to other loci. it is worth noting that none of the calibration probes gave this 'ideal' result, when evaluated using the same exonerate search parameters.
+
+the remaining probes  that passed our empirical cut-off criteria, had an average score-ratio of  <dig>  ±  <dig> , which was not significantly different to the experimental calibration set .
+
+in order to confirm the system does design effective southern blot probes we experimentally tested  <dig> of the in silico designs. blots were performed on mouse genomic dna extracted from embryonic stem cell lines in order to confirm homologous recombination had occurred thus correctly targeting the gene to be ablated as part our of our high-throughput mouse knockout and molecular neurobiological phenotyping programme  <cit> . 13/ <dig> of the probes tested gave a usable signal upon blotting, the remainder gave a smear likely indicative of non-specific probe binding, or no resolvable signal. representative sothern blots are shown in figure  <dig> 
+
+CONCLUSIONS
+we have developed an automated system for the effective design of southern blot probes. many candidate probes that lie in a given genomic window are searched against the target genome in a brute-force approach to finding the best probe in the locus, as assessed by uniqueness and repetitive dna sequence content. using these in silico measures we can automatically design probes that would be predicted to perform as well, or better, than previous manual designs, while reducing the time taken by the molecular biologist to yield a successful probe. the majority of the probes we tested experimentally in southern blotting performed well confirming our in silico prediction methodology, and the usefulness of the software for automated genomic southern blot probe design.
+
+availability and requirements
+• project name: southern_blot
+
+• project home page: http://www.genes2cognition.org/software/southern_blot and additional file  <dig> 
+
+• operating system unix and linux variants
+
+• programming language: perl and sql
+
+• other requirements: bioperl core  <dig> . <dig> or higher, bioperl run  <dig>  or higher, ensembl core  <dig> or higher, config::inifiles  <dig>  or higher, dbi  <dig>  or higher, gd  <dig>  or higher, exonerate  <dig> . <dig>  primer <dig>  <dig> . <dig>  lsf  <dig>  or higher, mysql  <dig>  or higher
+
+• license: artistic license  <dig> 
+
+• any restrictions to use by non-academics: none
+
+abbreviations
+api: application programming interface; blast: basic local alignment search tool; bp: base pairs; dna: deoxyribonucleic acid; kb: kilobase; lsf: load sharing facility; pcr: polymerase chain reaction; sql: structured query language.
+
+authors' contributions
+mdrc conceived and implemented the method. dgf experimentally validated the resulting probes. nhk and sgng directed the investigation. all authors read and approved the final manuscript.
+
+supplementary material
+additional file 1
+software package for automated design of genomic southern blot probes. archive of all the components of the pipeline packaged using "tar", and subsequently compressed with "gzip". includes source code, example configuration files, example output, and a user's guide for installation.
+
+click here for file
+
+ acknowledgements
+funding: wellcome trust
+
+the authors wish to thank drs louie n. van de lagemaat, rené frank and rob andrews for their critical reading of an earlier version of the manuscript.

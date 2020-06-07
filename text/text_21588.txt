@@ -1,0 +1,215 @@
+BACKGROUND
+bioinformatics research is currently dominated by the evolution in high-throughput sequencing technology. new sequencing platforms produce biological sequence fragments faster and cheaper than ever before. the resulting growth in access to large amounts of data opens perspectives for new applications and prestigious projects, but simultaneously pushes existing sequence analysis tools beyond their limits as data storage, computational analysis and interpretation become true bottlenecks in life sciences research.
+
+mapping sequencing reads to reference genomes plays a key role in many genomics analysis pipelines. the olympic motto citius, altius, fortius in the context of this computationally intensive problem drives read mappers into the algorithmically challenging quest to find an optimal balance between maximal speed, minimal memory footprint and maximal accuracy. read mappers are also expected to shoot at a moving target, as reads produced by fast evolving technologies differ in length distribution and sequencing errors. read mappers and their underlying index structures are therefore under constant development to handle specific applications or data models and to further improve implementations  <cit> .
+
+although design and implementation of existing read mappers differ in their choice of algorithmic techniques, optimizations and heuristics, they share many of their key concepts and follow a common general outline. a preprocessing step of indexing reference genomes and/or sequencing reads must guarantee fast substring matching. the overall search space is pruned to candidate genomic regions by searching matching segments  between reads and the reference genome. these candidate regions are then further investigated to look for acceptable alignments that reach a particular score.
+
+recent advances in next-generation sequencing technologies have led to increased read lengths, higher error rates and error models showing more and longer indels. this general trend is likely to continue with third-generation sequencing technologies like oxford nanopore and pacific biosciences  <cit> . most of the current read mappers target short reads and allow for no or low numbers of mismatches and/or indels. this makes them vulnerable to the ongoing technological advances. it has inspired a second generation of novel read mappers , while authors of short read mappers present new versions equipped for aligning longer reads with higher error rates . recurring strategies include increasing the seed lengths, clustering neighboring seeds into candidate regions and optimizing the implementations of global and local alignment algorithms using banded and bit-parallel versions. however, except for bwa-sw and bwa-mem, none of the existing mappers scales well for read lengths up to several kilobases.
+
+the read mapper alfalfa presented in this paper is extremely fast and accurate at mapping long reads , while still being competitive for moderately sized reads . its implementation of the canonical seed-and-extend approach  is empowered by a novel index structure, combined with several new optimizations and heuristics. both end-to-end and local read alignment are supported, and several strategies for paired-end mapping can efficiently handle large variations in insert size. alfalfa is unique in using enhanced sparse suffix arrays to index reference genomes. this data structure facilitates fast calculation of maximal and super-maximal exact matches  <cit>  and supports the important design goal of balancing between processing speed, memory consumption and mapping accuracy. the speed-memory trade-off is tuned by setting the sparseness value of the index. the techniques and heuristics used to filter and combine seeds and candidate regions are designed to handle longer reads. furthermore, alfalfa uses a chaining algorithm to speed up dynamic programming extension of candidate regions.
+
+
+implementation
+due to huge differences in size between sequencing reads and reference genomes, most read mappers share a high-level strategy of i) finding matching segments that are used to ii) prune the search space to genomic regions in which iii) alignments are found that meet a particular scoring threshold. these steps are usually preceded by a step in which either the reference genome or read data set is indexed. notwithstanding this common search strategy, read mappers differ in many of their design choices  and in a multitude of optimizations and heuristics used during all search phases. these algorithmic choices do not only govern the trade-off between performance, memory usage and mapping accuracy, but are also geared towards particular sequencing technologies or specific types of applications. best-mappers such as bowtie  <cit>  and bwa  <cit>  search for a single optimal alignment according to a particular scoring function, whereas all-mappers such as razers <dig>  <cit>  and gem focus on finding all alignments within a given hamming or levenshtein distance.
+
+next-generation and third-generation sequencing technologies produce ever longer reads with varying degrees and types of sequencing errors. this evolution has a serious impact on the design of read mappers, as can be seen from the wide range of software packages that have been proposed over the last years. longer reads feature the possibility of more and/or longer seeds. this opens perspectives for reducing the number of candidate regions along the reference genome that need further investigation, but at the same time increases their size.
+
+the alfalfa algorithm is outlined in figure  <dig>  alfalfa takes advantage of the technological evolution towards longer reads by using maximal exact matches   <cit>  and super-maximal exact matches   <cit>  as seeds . these seeds are then extensively filtered and triaged to allow for more accurate prioritization of candidate regions . to further limit the number of expensive dynamic programming computations needed, alfalfa chains seeds together to form a gapped alignment. as a result, the extension phase is limited to filling gaps in between chains while evaluating alignment quality . the following sections discuss the alfalfa workflow in more detail.
+
+enhanced sparse suffix arrays
+to boost seed-finding, read mappers rely on fast and low memory-footprint index structures such as k-mer lookup tables and fm-indexes  <cit> . alfalfa is the first read mapper that makes use of an enhanced sparse suffix array  index structure . instead of indexing all suffixes of the reference genome into a suffix array, sparse suffix arrays reduce memory consumption by sparsely sampling the list of suffixes, this in contrast to compressed suffix arrays and fm-indexes, which instead store a sparse sample of suffix array values. sparse suffix arrays can be further enhanced with auxiliary data structures to provide fast string matching  <cit> , similar to the way burrows-wheeler transformed texts are enhanced with auxiliary data structures to form fm-indexes. the sparseness value s of sparse suffix arrays  provides an easily tunable trade-off to balance performance and memory footprint. in theory, sparse suffix arrays take up 9/s+ <dig> bytes of memory per indexed base. a sparse suffix array with sparseness factor  <dig> thus indexes the entire human genome with a memory footprint of  <dig>  gb. this is similar in size to the memory consumed by some of the fm-indexes used by other read mappers . earlier results have shown that enhanced sparse suffix arrays are competitive in mem-finding when compared to implementations using an fm-index  <cit> . they especially perform extremely well in cases where the number of seeds is high, a likely scenario when mapping long reads.comparison of the used index structures and memory requirements of evaluated mappers
+
+
+
+mapper
+index type
+adjustable
+size on disk
+peak memory
+construction time
+
+
+
+the alfalfa index is evaluated for two different sparseness values. the read mappers bwa-sw and bwa-mem both use the same index structure, jointly reported as bwa. the third column indicates whether memory footprint can be tuned via user-specified options. the fourth column reports the memory footprint of the index structure when stored on disk. the fifth column provides peak memory of the read mapper observed during alignment of 1kbp reads. the time needed to construct the index structure is given in the last column. §a pre-built gem index was downloaded from the gem website as the indexer of this mapper ran into a fatal error in our test environment.
+
+
+
+seed-finding
+seed-finding is the first major phase in the mapping process. depending on the data and parameter settings, it usually takes about a quarter to half of the total runtime. ideally, seed-finding produces a limited number of long seeds that cover as much of the mapping location as possible. finding too many seeds results in an exponential increase of candidate mapping locations and usually favors highly repetitive regions in the genome. as a result, mapping locations may be missed. finding too few seeds results in a possible loss of good mapping locations and shorter chains. the latter may increase the computational cost of the extension phase.
+
+alfalfa tries to balance the number and the quality of seeds using a combination of maximal and super-maximal exact matches. the intervals  and  correspond to a maximal exact match between a read and a reference genome if there is a perfect match between both subsequences of length ℓ starting at position i in the read and at position j in the reference genome, with mismatches occurring at positions  and  just before and after the location of the matching subsequence. since mems between a read and a reference genome may overlap, super-maximal exact matches are defined as mems that are not contained in another mem in the read  <cit> . the difference between mems and smems is shown in figure  <dig>  mems were introduced in one of our earlier proof-of-concept implementations  <cit>  and cushaw <dig>  <cit> , whereas smems were introduced in bwa-mem  <cit> . in comparison to fixed length seeds, mems and smems have the advantage of potentially covering larger parts of a read. as such, they bear more information about the relevance of a region in which the seed is found. this information can be used to filter out candidate regions with low probability of finding good alignments.
+
+
+one of the strongholds of alfalfa is its use of the essamem algorithm  <cit>  as a way to identify candidate regions for mapping reads to the reference genome. essamem locates mems and smems using exact string matching between an enhanced sparse suffix array index structure and a subset of suffixes sampled from the read. alfalfa automatically selects the sampling value based on the sparseness of the index and the minimum seed length . in addition, alfalfa imposes a minimum seed length, which is automatically tuned using the read length and the expected number of differences in an alignment. although the algorithm does not guarantee to find all smems, the produced set of mems and smems works well in practice. in case no seeds are found using using the initial parameter settings, a rescue procedure is initiated that gradually lowers restrictions until seeds are found. this procedure helps the algorithm to find suitable candidate regions for rare reads that contain excessive amounts of errors compared to the average of the read set.
+
+candidate regions
+a combination of neighboring seeds increases the evidence that some region in the reference genome holds potential to serve as a mapping location  <cit> . alfalfa therefore sorts seeds according to their starting position in the reference genome and bins them into non-overlapping clusters using the locally longest seeds as anchors around which regions are built. this results in a list of candidate regions along the reference genome. to limit the number of candidate regions requiring further examination, only smems and rare mems are used for candidate region identification . afterwards, mems overlapping with candidate regions are also taken into consideration to increase the number of read bases covered by seeds. this new optimization introduced by alfalfa positively affects accuracy without a major performance overhead.
+
+a successful candidate region extension results in one or more feasible alignments that show sufficient similarity between the read and the reference genome. candidate regions are then ranked by their coverage of read bases, calculated from the seeds that make up the clusters. sequential processing of these prioritized candidate regions halts when either a high number of feasible alignments has been found, a series of consecutive candidate regions failed to produce an acceptable alignment or read coverage drops below a certain threshold. an exception is made for regions containing seeds that are unique in the read. if no feasible alignments could be found, alfalfa may invoke several rescue procedures that decrease the restrictions imposed on candidate regions and, if necessary, find a larger set of seeds.
+
+chaining and alignment
+read mappers employ optimized dynamic programming algorithms to verify that candidate regions contain acceptable alignments. such optimizations are needed since this is one of the most time-consuming steps in the read mapping process. the dimensions of a dynamic programming matrix correspond to the bounds of a candidate region, but computations are often restricted to a band around the main diagonal of the matrix. the width of this band depends on the minimal alignment score required.
+
+alfalfa further reduces the dimensions of the matrix by forming a collinear chain of a subset of the seeds that make up a candidate region. dynamic programming can then be restricted to fill the gaps in between consecutive non-overlapping seeds. this technique has proven its value in whole genome alignment  <cit>  and read mapping  <cit> . an example of the computational reduction achieved by chain-guided alignment can be seen in figure  <dig> 
+
+
+the chaining algorithm starts from an anchor seed and greedily adds new seeds that do not exhibit a high skew to the chain. the skew is defined as the difference of the distances between two seeds on the read sequence and the reference genome. the amount of skew allowed is automatically decided based on the gap between the seeds and the parameters that influence the feasibility of an alignment. alfalfa allows multiple chains per candidate region, based on the available anchor seeds. anchor selection is based on seed length and seeds contained in chains can no longer be used as anchors in successive chain construction.
+
+in evaluating candidate regions, alfalfa supports both end-to-end and local alignment. each of these alignment procedures starts with calculating a collinear chain of seeds and uses the same banded dynamic programming algorithm with a configurable scoring function that may take into account affine gap penalties. insertions, deletions and single nucleotide polymorphisms in between consecutive non-overlapping seeds are handled without invoking the dynamic programming routine to avoid superfluous computations.
+
+the final alignment and the mapping qualities are generated in a post-processing phase. by default, alfalfa performs chain-guided alignment to obtain the cigar string, but an option can be enabled to use a banded dynamic programming routine over the full length of the read instead. doing so increases the quality of the alignment, at the cost of a slightly reduced performance. we have found that the chain-guided alignment in this phase of the algorithm is on average  <dig>  times faster than the banded dynamic programming approach.
+
+paired-end reads
+alfalfa supports multiple strategies for mapping paired-end reads. the default strategy is commonly employed by read mappers: both ends are mapped independently of one another and alignments having corresponding orientations and locations with respect to certain insert size restrictions are subsequently paired. we have also implemented and tested several other strategies that concurrently map paired-end reads. one of these strategies has been used by bowtie  <dig>  among others, and maps one of the reads and then performs full dynamic programming to obtain the bridging alignment for the mate. the other strategies first identify candidate regions for both mates and then either prioritize extension based on the best regions of both mates or filter the list using the paired-end criteria. similar to the single-end alignment algorithm, the paired-end algorithms can invoke rescue procedures if no concordant pair was found. in this case, the rescue procedures call upon one of the other strategies rather than decreasing the restrictiveness of some heuristics. tests have shown that the best overall approach is the one that independently maps paired-end reads.
+
+RESULTS
+execution speed, memory footprint and accuracy of alfalfa have been scrutinized in a benchmark study that includes five other state-of-the-art long read mappers. all tests were run on a cluster with dual-socket quad-core intel xeon nehalem  processors at clock speed  <dig>  ghz and  <dig> gb ram/node running scientific linux  <dig> . executables for alfalfa v <dig> , bowtie v 2− <dig> . <dig>  bwa v  <dig> .9a and cushaw v <dig> . <dig> were built from source using gcc v <dig> . <dig>  build  <dig>   of gem was obtained from its website, as source code was not available at the time of writing.
+
+two configurations of all read mappers were tested. first, read mappers were configured to produce a maximum of  <dig> alignments per read, if possible. second, read mappers were configured to produce a single best alignment per read. other parameters were kept to their default settings, unless the authors suggested specific settings for certain types of data .
+
+the human genome is used as reference genome to map a large array of moderately sized reads generated by current sequencing platforms and artificial reads generated by two simulators covering lengths expected to become commonplace in the near future. these simulated data sets are also crucial in evaluating mapping accuracy, which otherwise could not be evaluated objectively on true data. care was taken to cover a broad range of error models observed in read sets generated by current sequencing technologies.
+
+the wgsim simulator v <dig> .1-r <dig>  <cit>  — developed for samtools, but now a standalone project — was used to generate a series of single-end reads with lengths of one, five and ten thousand base pairs. errors were introduced at rates between 2% and 10% of the total read length, with varying indel/mutation frequencies. reads ranging from  <dig> bp to  <dig> kbp and abiding to specific error models induced by illumina and  <dig> technologies were generated using the mason simulator v <dig> . <dig>  <cit> . default parameter settings were used to generate reads of length  <dig> bp and  <dig> bp and parameter settings from the literature  <cit>  were used for longer read data sets.
+
+memory footprint
+an index of the human genome assembly grch <dig> was constructed by all read mappers using their default parameter settings, except for gem. a pre-built gem index was downloaded from the gem website as the indexer of this mapper ran into a fatal error on our test environment. memory requirements of read mappers are mainly dependent on the memory footprint of the index structures they use. an overview of the index structure memory requirements can be found in table  <dig>  in this table, bwa-sw and bwa-mem are reported as bwa, as they both use the same index structure. from the table, it can be seen that most tools require 3− <dig> gb of memory, both for storing the index on disk and for the peak memory during mapping a data set of 1kbp reads. among the tested read mappers, cushaw <dig> seems to be the most memory efficient one. in contrast, alfalfa requires twice as much memory as the other tools when configured with lower sparseness setting. the default setting  is competitive in terms of memory requirements with the other tools. the last column of table  <dig> also shows index construction time, which is lowest for alfalfa.
+
+performance
+wall times of test runs were measured using the gnu/linux time command. performance results for most simulated and real data sets can be found in the upper barcharts in figure  <dig>  expressed in milliseconds per read. runtime results for the complete benchmark can be found in additional file  <dig> 
+
+
+alfalfa is the fastest read mapper. it is only outperformed by gem and bwa-mem for the shortest reads and by gem for a single data set of 1kbp reads. the lower performance of alfalfa for shorter reads might be explained by an increased number of shorter mem seeds and failure of one or more filtering heuristics when using the default parameters. the difference in runtime between alfalfa and the other mappers increases with read length. for reads longer than 1kbp, alfalfa, bwa-mem and bwa-sw become orders of magnitude faster than the other mappers. even compared to bwa-mem, the second fastest mapper, alfalfa is on average three times faster and up to five times faster for reads of at least 1kbp long. this can partially be explained by our automatic tuning of the minimum seed length, candidate region filtering heuristics and chain-guided alignment strategy. if memory is abundant, the runtime of alfalfa can be further improved by lowering the sparseness of the index. alfalfa is up to twice as fast when the sparseness is lowered from the default value of  <dig> to  <dig>  the lowest setting tested.
+
+the performance of gem is mostly affected by the user-set error rate. for illumina reads with low error rates and low error reads simulated with wgsim, gem is among the fastest algorithms. for high error rate data sets, however, gem becomes much slower. the performance of cushaw <dig> could be higher on hardware that supports sse <dig> operations, which cushaw <dig> uses by default. however, cushaw <dig> is known to focus more on accuracy than speed  <cit> . for longer reads, the performance of bowtie  <dig> is hampered by its dynamic programming alignment subroutine, whose runtime has a quadratic dependency on the read length. in addition, runtimes of cushaw <dig> dramatically increase when multiple alignments per read are requested . the performance of bowtie  <dig> and bwa-mem is also influenced by the number of alignments per read requested, but the increase in runtime is less significant.
+
+for most mappers, there is no loss in performance when mapping single and paired-end reads. the exceptions are cushaw <dig> and bowtie  <dig>  whose performance is much lower when mapping paired-end reads due to the high read length and large insert size window and the fact that these mappers perform full dynamic programming to find an alignment for the mate of a mapped read.
+
+we also assessed the scalability of alfalfa with respect to the number of threads. to do so, we compared the speedup of alfalfa to that of other read mappers for both single and paired-end read data sets. for  <dig> threads, the speedup of alfalfa is on average  <dig> , which is slightly lower than that of bwa-mem  and cushaw <dig> , but higher than the speedup gained by bwa-sw , gem  and bowtie  <dig> . more details are shown in additional file 1: figure s <dig> 
+
+accuracy on simulated data
+on simulated reads, accuracy was measured using the recall rate and our own definition of accuracy. recall rate is defined as the number of reads for which an alignment is found within 10bp of the simulated origin. our accuracy measure is less stringent and considers a read to be mapped correctly if an alignment either fulfills the recall rate requirements or has an edit distance that is not higher than the number of simulated differences to the reference genome. the lower bars in figure  <dig> represent the recall rate in case each mapper reported a single alignment per read. when returning multiple alignments per read, a read is considered to be mapped correctly if at least one of the returned alignments fulfills the requirements imposed by our own accuracy measure. these additional results, together with the results using our own definition of accuracy, can be found in additional file  <dig> 
+
+in contrast to the performance results, the difference in accuracy between the evaluated read mappers is small. all tested mappers exhibit both a high recall rate and accuracy when reporting either a single or up to four alignments per read. we will therefore refer to accuracy for both measures, unless we want to stress the difference between the two accuracy measures used. in general, cushaw <dig>  bwa-mem and alfalfa are the most accurate mappers, with bwa-sw and bowtie  <dig> having a somewhat lower accuracy. in most cases, either cushaw <dig>  bwa-mem or gem is the most accurate mapper, by a small margin.
+
+the accuracy of gem is highly dependent on the command line parameter settings. we have tried several parameter settings to optimize the time-accuracy trade-off, but it is possible that gem reaches a more optimal trade-off for untested parameter settings. as a result, the accuracy of gem can vary greatly, being the highest for some data sets, but the lowest for other data sets. for example, on the 1kbp data sets with 2% errors, setting the parameters to this maximum error value results in a very low accuracy. in contrast, on 5% and 10% error rates, gem has the highest recall rate for the data sets with low numbers of indel errors. the effect of the sparseness of the essa index on the accuracy of alfalfa is depicted in additional file 1: figure s <dig>  but is rather small in general.
+
+from the results of the wgsim data sets in figure  <dig>  it can be seen that the accuracy of all mappers drops with increasing error rate. a noticable exception is gem, whose accuracy depends on the chosen parameter settings. the effect of increasing error rate seems smallest for bwa-mem, whereas cushaw <dig> does not perform well for reads with 10% errors. it is, however, possible to increase the accuracy of cushaw <dig> using command line parameters, as by default cushaw <dig> allows only 10% errors.
+
+in addition to the raw error rate, an increase in the number of indel type errors has also a detrimental effect on accuracy. this effect seems smallest for bowtie  <dig>  whereas it has the highest effect on gem.
+
+in contrast to the above, an increase in read length has a predominantly positive effect on accuracy. for the longest reads, accuracy is almost 100% for most mappers. note, however, that several of the results for bowtie  <dig>  cushaw <dig> and gem were obtained on a smaller data set due to a forced timeout in our testing environment of  <dig> hours. nonetheless, a few samples on a different machine indicated that these mappers indeed have a high accuracy at the cost of performance.
+
+the type of errors also has an impact on accuracy. wgsim simulated reads have a uniformly distributed error model, which differs from the illumina and  <dig> error models. for equal read length, the accuracy on simulated reads with an illumina error profile is lower than the accuracy on reads with a  <dig> error profile. for illumina reads, cushaw <dig> is more accurate than bwa-mem and alfalfa, whereas the reverse in true on  <dig> reads.
+
+the effect of paired-end read mapping on accuracy can be seen for the mason simulated reads. as expected, paired-end read data sets exhibit a higher accuracy than single end read data sets. gem hugely benefits from illumina type paired-end reads. the only exception is bwa-sw, which performs worse for paired-end reads. this might be explained by the fact that bwa-sw automatically tries to estimate insert size, whereas other mappers trust on users to present insert size boundaries.
+
+from the additional tables in additional file  <dig>  we have found that the difference between the accuracy and recall rate measures is noticable for most mappers. the biggest effect was present in bwa-sw, bowtie  <dig> and cushaw <dig>  whereas the lowest effect was measured for gem.
+
+if multiple alignments per read are reported , the accuracy of several mappers increases significantly. the effect is the greatest for cushaw <dig> and alfalfa, whereas it is lower for bwa-mem and gem. as a result, alfalfa becomes the most accurate mapper for some data sets in this setting. in contrast, the accuracy of bowtie  <dig> drops frequently, as the -k mode that is required to return multiple alignments works differently from the regular mode. finally, bwa-sw does not offer an option to return multiple alignments per read.
+
+mapping quality
+in addition to accuracy and recall rate, we compared the sensitivity and specitivity of alfalfa against that of other mappers. these evaluated measures are represented in receiver operating characteristic  curves in which the true positive rate is plotted against the false positive rate in terms of mapping quality values . for these plots, we limited ourselves to the wgsim simulated reads and used the evaluation script in the wgsim package to generate the data points. in addition to the wgsim simulated read data sets presented in figure  <dig>  we used a data set of single-end reads of length  <dig> bp with a small  error rate.
+
+overall, bowtie  <dig> has the highest sensitivity, which reaches 100%. however, bowtie  <dig> is also less able to distinguish between good and bad alignments. cushaw <dig>  bwa-mem and alfalfa exhibit the best trade-off between true positives and false positives. figures  <dig> and  <dig> display the results for respectively the 600bp data set and a data set of  <dig> kbp reads with a 5% error rate.
+
+
+for the  <dig> bp data set, cushaw <dig> is most sensitive for high mapping quality, whereas bwa-mem becomes more sensitive for lower mapping quality values. alfalfa obtains a trade-off that fluctuates between that of cushaw <dig> and bwa-mem. for the  <dig> kbp data set with higher error rate, bwa-mem is best able to distinguish between true and false positive hits, with alfalfa a close second.
+
+performance and accuracy on real data
+to validate our findings on simulated data, we also compared the performance of alfalfa on one real illumina read data set and one real  <dig> data set. the results can be found in table  <dig>  because the real origin of the reads cannot be indisputably determined, we use the sensitivity, i.e. the number of mapped reads as an accuracy measure.benchmark comparison of long read mappers on two real data sets
+
+
+illumina reads
+ <dig> reads
+runtime
+sensitivity
+runtime
+sensitivity
+the illumina paired-end read data set  consists of 2× <dig> bp reads and the reads of the  <dig> single-end data set  are on average  <dig> bp long. performance measures are runtime in h:mm and percentage of mapped reads .
+
+
+
+as our focus was on long reads, the illumina read data set that consists of 2× <dig> bp paired-end reads falls out of the scope of alfalfa . as a result, it is outperformed by bwa-mem and gem in terms of mapping time and bwa-mem, bwa-sw and cushaw <dig> in terms of sensitivity.
+
+the single-end  <dig> reads have an average length of  <dig>  which is well within the scope of our mapper. for this data set, alfalfa is by far the fastest mapper. in addition, it also has the highest sensitivity. this is consistent with the good accuracy of alfalfa for the simulated  <dig> reads.
+
+CONCLUSIONS
+in this paper, we presented a novel long read mapper, called alfalfa. the name is an acronym for “a long fragment aligner/a long fragment aligner". it is repeated twice as a pun on repetitive and overlapping fragments observed in genome sequences that heavily distort read mapping and genome assembly.
+
+at a high level, alfalfa is similar to other read mappers, as it implements the widely used seed-and-extend approach. however, alfalfa featurs a novel index structure used for simultaneously finding mems and smems, whose minimum length is automatically tuned to the read length and the number of errors. the seeds are used for identifying and selecting candidate alignment regions, taking into account the frequency of occurrence of the seeds in the reference sequence. in addition, the seeds are reused in a chain-guided alignment between the read and candidate alginment region. a more detailed algorithmic comparison between alfalfa, bwa-mem and cushaw <dig> is given in additional file 1: table s <dig> 
+
+evaluation of read mapping algorithms requires a joint assessment of their accuracy, performance and memory footprint. depending on specific properties of the test data, read mappers will often present different trade-offs between these evaluation criteria.
+
+the benchmark results demonstrate that alfalfa is extremely fast at mapping long reads, while still being competitive for moderately sized reads. together with bwa-sw and bwa-mem, it is one of a few mappers that scale well for read lengths up to several kilobases.
+
+measuring mapping accuracy can only be done objectively based on simulated reads whose original location on the reference genome is known. as mapping of long sequencing reads has not yet been benchmarked and sequencing platforms show various rates and types of errors, we examined a broad range of different read lengths and error models using two existing read simulators. these benchmark results show that in general all tested mappers have a high mapping accuracy for many of the tested data sets. in most of the test cases, alfalfa is among the top most accurate mappers, with bwa-mem, cushaw <dig> and gem being slightly more accurate.
+
+memory requirements of alfalfa are only slightly higher than most other long read mappers. in addition, alfalfa features an interesting and easily tunable speed-memory trade-off by allowing users to specify the sparseness factor of the index.
+
+although the read lengths examined here are considered long at this moment, it would be interesting to evaluate the performance of alfalfa and other read mappers for even longer reads, such as  <dig> kbp or  <dig> mbp reads. as the alignment of such reads would approach the global alignment problem, other problems should be taken into account. for example, the presence of genomic rearrangements would require a more complex chaining algorithm.
+
+in addition, a high number of errors, such as present in reads produced by pacific biosciences and oxford nanopore sequencers, remains a challenge to read mapping algorithms. currently, alfalfa relies on finding a few long exact seeds, and constructing chains of seeds with a small skew. to accomodate for these high error rates, we will investigate the use of inexact matches as seeds, and experiment with less restrictive chaining algorithms. furthermore, additional information, such as base qualities and information on expected gap length could be incorporated to prioritize candidate region extension and to improve the dynamic programming subroutine and scoring system.
+
+availability and requirements
+project name: alfalfa
+
+project home page:http://alfalfa.ugent.be
+
+operating systems: tested on linux operating systems
+
+programming language: c++
+
+other requirements: gcc v <dig> . <dig> or higher
+
+license: new bsd license
+
+any restrictions to use by non-academics: none
+
+
+
+additional file
+additional file  <dig> 
+document containing supplementary results, methods, protocol and program usage information. this document contains several additional sections, tables, and figures. the tables contain full benchmark results. the supplementary methods section contains in-depth information on the alfalfa mapping algorithm. the supplementary protocol section lists the details of the benchmark study, including a description of the read simulation process and parameters settings used for tuning the read mappers. the supplementary data section provides details on the command line options that can be used to tweak alfalfa, their default settings and general usage tips.
+
+
+
+abbreviations
+alfalfaa long fragment aligner/a long fragment aligner
+
+bpbase pairs
+
+ebieuropean bioinformatics institute
+
+essaenhanced sparse suffix array
+
+gbgigabyte
+
+ghzgigahertz
+
+gnugnu’s not unix
+
+indelinsertion or deletion
+
+kbpkilo-base pair
+
+mbpmega-base pair
+
+memmaximal exact match
+
+ncbinational center for biotechnology information
+
+ramrandom-access memory
+
+samsequence alignment map
+
+smemsuper-maximal exact match
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+mv designed and implemented algorithms and conducted benchmark experiments. all authors designed the study, wrote and proofread the manuscript. all authors read and approved the final manuscript.
+

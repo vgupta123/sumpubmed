@@ -1,0 +1,340 @@
+BACKGROUND
+stochastic modeling of biochemical and ecological systems has become increasingly popular due to its ability to represent system dynamics correctly at a detailed level, especially when species are present at low population. deterministic models, on the other hand, are easier to analyze, yet they may fail to capture even the average behavior when the represented system exhibits nonlinearity  <cit>  or is near extinction. recent advancements in cloud computing platforms  <cit>  and gpu computing  <cit>  have significantly increased the affordability of computational resources. this enables development and use of stochastic algorithms that would have been deemed computationally infeasible in the past. however, there is still a void in stochastic methods that can answer scientifically interesting questions. one such application is in determining reaction rate configurations that yield an event of interest with a set success probability. most parameter estimation algorithms in stochastic chemical kinetics setting take time-series data as an input and compute a set of reaction rate parameters that most closely reproduce the data. methods used to determine these reaction rate parameters include maximum likelihood ratio  <cit> , gradient decent  <cit> , and moment closure  <cit> . while these algorithms are useful in its own right, scientists are often interested in knowing all parameter combinations that yield a specific event of interest. for gene regulatory models, knowledge of all pathways to achieve a specific event, such as bistable transition of lac operon in e. coli  <cit> , may be used to guide laboratory experiments. in epidemiological models, all intervention parameter combinations that achieve eradication can be combined with econometrics in computing the most cost-effective strategy for eradicating a disease  <cit> . to authors’ knowledge, no algorithm has been developed in stochastic chemical kinetics setting that computes such parameter combinations.
+
+in this paper, we present stochastic parameter search for events  that finds a parametric hyperplane of reaction rates conferring a user-specified event with prescribed success rate and error tolerance. our algorithm is robust in that it accurately computes the solution hyperplane for low probability events as well as high probability events. it is also trivial to parallelize the algorithm; initial parameter sets do not need to communicate with each other to find the direction to the unknown solution hyperplane. once the algorithm finds a point in the solution hyperplane, the ratio between the initial and final rates can be used as the biasing parameters by the doubly weighted stochastic simulation algorithm   <cit>  to compute the probability of observing the target event with its success rate under the original system description. this allows calculation of the target event probabilities under the original parameters as a powerful side benefit of the algorithm. lastly, the sparse runtime per parameter sample is of the same order as that of the stochastic simulation algorithm , i.e., the algorithm complexity is independent of the number of unknown parameters for a given system. this is achieved by combining a novel modification of dwssa  <cit> , rubinstein’s cross-entropy method  <cit> , and exponential interpolation of biasing parameters. this feature provides substantial benefits when searching multi-dimensional parameter space.
+
+methods
+doubly weighted stochastic simulation
+we begin with a brief review of the dwssa; detailed derivation and applications can be found in daigle et al.  <cit> . throughout this paper we assume a well-stirred system at constant temperature with n species s <dig> …,sn and m reactions r <dig> …,rm. the state of the system at time t is represented as x=, where xi is the population of species si. using the “direct method” implementation of gillespie’s stochastic simulation algorithm   <cit> , the system moves forward in time by sequentially firing one of rj, j∈{ <dig> …,m} reactions, whose propensity at time t is aj) and its sum a0=∑j=1maj). here, the next reaction is chosen with a categorical random variable j′ and the time to the next reaction with an exponential random variable τ. we also assume that all trajectories are run until the smaller of the final simulation time tf and the first time  is observed, where  is the event of interest. denoting the stopping time of a trajectory as , the probability of a complete trajectory j=t <dig> j1′,…,tnt,jnt′ given x=x <dig> under ssa is as follows:   pssaj=∏i=1nta0)e−a0)τidτi×aji′)a0)=∏i=1ntaji′)e−a0)τidτi, 
+
+with ti≡∑j=1iτj and nt the total number of reactions fired in .
+
+the dwssa uses predilection functions to increase the number of trajectories that reach :   bj)≡γjaj),b0)=∑j=1mbj), 
+
+where γj∈ℝ+ is a biasing parameter for rj. the probability of the same trajectory j under the dwssa is then given by   pdwssa=∏i=1ntb0)e−b0)τidτi×bji′)b0)=∏i=1ntbji′)e−b0)τidτi, 
+
+and the bias incurred by using the predilection function is corrected with   wdwssaj=∏i=1ntaji′)e−a0)τibji′)e−b0)τi=∏i=1ntexpb0)−a0)τi×− <dig>  
+
+it is straightforward to confirm that the product of  and  equals .
+
+the monte carlo estimator for pdwssa, the probability that the system reaches  by time t given the initial state x <dig>  is   p^dwssa=1n∑i=1ni{ji∩e}wdwssa, 
+
+where n is the total number of trajectories, ji represents the ith simulated dwssa trajectory, and i{ji∩e} takes a value of  <dig> if  is visited by ji and  <dig> otherwise. the quantity in  can be interpreted as the weighted average of successful trajectories, i.e., trajectories reaching , where the weight is computed according to . a good set of biasing parameters would yield successful trajectories with weights close to the true probability and thus reduce variance in the probability estimator. the dwssa computes low variance biasing parameters by minimizing cross entropy using a modified version of rubinstein’s multilevel cross-entropy method  <cit> . the advantage of minimizing cross entropy over minimizing variance is that the former yields biasing parameters with a closed-form solution for  where the latter does not. having a closed-form solution is of practical necessity, as the alternative would be to solve a large set of nonlinear equations, significantly decreasing the efficiency of the algorithm if not making the simulation infeasible.
+
+following derivations presented in daigle et al.  <cit> , the dwssa biasing parameter for rj is computed as   γ^j=∑i′wdwssaji;γ^×nij∑i′wdwssaji;γ^×∑k=1ntkajxiτik, 
+
+where nij is the total number of times reaction j fires in the ith trajectory, ∑i′ iterates only over trajectories reaching , and l is the stage index in multilevel cross-entropy method. computation for γ^ terminates when intermediate rare event reaches , at which point we set γ^≡γ^∗.
+
+the objective of the dwssa necessitates computation of the likelihood ratio  as its probability estimator is with respect to the initial reaction rates k. on the other hand, the objective of sparse is to compute a set of reaction rates k∗∈ℝm+ such that   pe−1n∑i=1ni{fi)∩e}≤εpe, 
+
+where pe is the desired probability of observing  by time t, i{fi)∩e} an indicator function for observing  during ith trajectory, and εpe a user-specified absolute error tolerance on pe. unlike the dwssa where the biasing parameters are updated each level of the multilevel cross-entropy method according to , in sparse reaction rates are updated instead. we note that it is possible to use the dwssa monte carlo estimator  in  and update γ instead of k. however unless k is sufficiently close to k∗, the likelihood ratio  may become extremely small, i.e., degenerate, and updating reaction rates avoids this problem. we discuss the criteria for updating k in the following section.
+
+multilevel cross-entropy method
+the modification of multilevel cross-entropy method in sparse is similar to that of ref  <cit> . however, there are three major differences between the multilevel cross-entropy method employed by dwssa and by sparse:  dwssa only computes a single intermediate event ξ and the corresponding set of biasing parameters γ while sparse may compute multiple such quantities,  sparse can calculate biasing parameters for initial reaction rates that either over- or under-perturb the system with respect to pe. for an over-perturbed system, it applies inverse biasing to reaction rates to convert  from a “sure event” to a “rarer event”, and  dwssa updates biasing parameters γ while sparse updates reaction rates k. the following subsection explains the first two differences and highlights how sparse achieves the same time complexity as dwssa for computing quantities in . the next subsection focuses on  and its effect on simulation details.
+
+concurrent computation of multiple intermediate events and biasing parameters
+in dwssa, n trajectories in level l of multilevel cross-entropy method are run until either the final simulation time tfinal or the first occurrence of ξ, where ξ is an intermediate rare event chosen by the top ⌈ρn⌉ trajectories that evolve farthest in the direction of . typical value of ρ used in dwssa is  <dig>  for n= <dig>  although any value ρ∈ can be used in theory  <cit> . the role of ρ can be thought as a knob that controls the tradeoff between the speed of convergence to  and accuracy in γ^∗. for ρ′<ρ, we get |e−ξ|≤|e−ξ|, thus smaller values for ρ can potentially drive the system toward  faster. however the number of trajectories reaching ξ is less than the number of trajectories reaching ξ since ⌈ρ′n⌉<⌈ρn⌉. having fewer data to compute γ^ reduces the confidence on the estimate, therefore it is advised to keep ⌈ρn⌉ above a set threshold  in practice. on the other hand, larger value of ρ  implies a less selective intermediate rare event. the resulting biasing parameters may not push the system closer to , causing a failure in convergence to the target event. in our experience, ρ< <dig>  and ⌈ρn⌉> <dig> yield both reliable computation of biasing parameters and acceptable convergence to .
+
+in order to determine ξ, it is necessary to determine the direction of bias in addition to ρ. this is done by grouping the initial state x <dig> into two categories according to its distance with respect to the event of interest:   ϕtype=1iffxt0≤e−1otherwise, 
+
+where f) is an event function. two requirements for f) are that it takes x as an input and can be used to evaluate the distance between the current state and  . the value of ϕtype indicates initial position of x with respect to  at t= <dig>  when ϕtype is equal to  <dig>  maximum value of f) in each trajectory is recorded, and n such values are sorted in descending order at the end of the simulation. the reasoning for this is that since fxt0≤e, we need to encourage higher f) values to get closer to . similarly, minimum f) values are recorded and sorted in ascending order when ϕtype is - <dig>  for convenience we refer to the sorted array of extreme f) values as vk, where k is the reaction rates used to generate x.
+
+we now define a sparse probability estimator for :   p^sparse=1n∑i=1ni{fi)∩e}, 
+
+where fi) are event function evaluated with ith ssa trajectory generated with reaction rates k and i{fi)∩e} takes a value of  <dig> if fi) contains  and  <dig> otherwise. once n trajectories are simulated, we can expect one of the following outcomes:  the inequality in  is satisfied,  p^sparse<pe−εpe, or  pe+εpe<p^sparse.
+
+in the first case, sparse exits and returns k as a successful output, i.e., a point in the solution hyperplane . in the second case, we need to choose extreme values of f) evolving furthest to , and we can view  as a “rare event” as in the dwssa. thus intermediate events and its respective biasing parameters are computed iteratively, each time taking the system closer to  with success rate pe. the last case corresponds to parameter sets that “over-perturb” the system, as  was reached with probability greater than pe. the method used to determine an intermediate event in the classical multilevel cross-entropy method cannot be applied here because we do not want trajectories that produce extreme values of f). however, the information gathered from such trajectories can be used to quantify the behavior we do not want to observe. we achieve this by collecting the extreme values of f) as in case , except that each ssa simulation is run until the final simulation time without stopping when  is observed. once intermediate events are chosen and their corresponding biasing parameters are computed, we update jth reaction rate kj with 1/γj. this inverse biasing discourages over-perturbation with respect to pe. algorithms  <dig> and  <dig> in appendix b of additional file  <dig> contain pseudocode for  and , respectively.
+
+unlike the multilevel cross-entropy method used by dwssa, where only one intermediate event is computed in each level of multilevel ce method, sparse may choose multiple intermediate events. while it is not necessary to compute multiple intermediate events to reach the solution hyperplane, doing so greatly improves algorithm efficiency. the caveat here is that the efficiency gain occurs only when the biasing parameters for the multiple intermediate events are computed simultaneously. we start by describing the method sparse uses to choose multiple intermediate events, all of which can be reached by n trajectories with sufficient frequency. this is attained by choosing multiple values for ρ that is a function of the distance to the desired target event probability pe. denoting the distance as δ≡pe−p^sparse, we have two different methods for choosing ρ: one for case  and the other for case . handling of the two cases differ, as the result of inverse biasing is not as obvious as the normal biasing for case  is. in normal biasing strategy, updating intermediate reaction rates with a particular set of biasing parameters redistributes vk such that the corresponding intermediate event becomes the mode. however, the inverse biasing operates on the heuristics of discouraging over-perturbation without knowing the exact effect on vk. thus more conservative values for ρ are used in  to compensate for this difference. lastly, we note that each of these cases can be detected by comparing the sign of δ to the value of ϕtype, where the equality represents case .
+
+for sgn)==ϕtype  ρ=if <dig> <|δ|if <dig> <|δ|≤ <dig> otherwise 
+
+for sgn)≠ϕtype  ρ=if <dig> <|δ|if <dig> <|δ|≤ <dig> otherwise 
+
+as the distance to the target event decreases, sparse selects less extreme values for intermediate events and vice versa. this reduces the risk of over- and under-perturbations. we note that the number of elements in ρ does not necessarily correspond to the number of intermediate events chosen. for example, elements corresponding to positions ⌈ <dig> ∗n⌉ and ⌈ <dig> ∗n⌉ of vk may be the same. we also note that a custom function can be used to compute ρ to better suit a specific system. however, the above default values work well for all examples presented in this paper. lastly, n can be chosen as a function of min and c, where c is the minimum number of data points desired to reliably compute γ, i.e., n≥c/ min.
+
+once intermediate events are computed, they are sorted in ascending order of its probability, i.e., prob) ≤⋯≤prob), where q is the number of unique intermediate events chosen at level l. we note that this sorting is done automatically if elements of ρ are sorted in ascending order, which  are.
+
+now we describe how biasing parameters for all intermediate events are computed concurrently in a single ensemble of n simulations. in each simulation, we check for ξ. if ξ is observed, the statistics gathered up to the time at which ξ was reached are used to compute γ. then the trajectory continues its course of simulation, this time checking for ξ while keeping the cumulative statistics. this process repeats until the smaller of tfinal and the time at which ξ is observed . when q== <dig>  this method is identical to the one used by dwssa. although a single trajectory runtime for q> <dig> is slightly longer than the runtime for q== <dig>  the additional resources spent on concurrent computation is negligible compared to the savings of ·n simulations. we note that this process yields biasing parameter sets that are correlated because γ is computed with a subset of data used to compute γ. however, this correlation does not affect the validity or the accuracy of the final output as only one set is selected at each level to update the reaction rates, the process for which we explain in the next section.
+
+updating intermediate reaction rates
+sparse propagates the system towards the solution hyperplane by iteratively updating reaction rates during the modified multilevel cross-entropy method. the update process requires choosing one set of biasing parameters from possibly many sets, where the set size is determined by the number of unique intermediate events. the current intermediate reaction rates are then multiplied element-wise by the chosen set to produce the next intermediate reaction rates. the criterion sparse adopts is straightforward; at level l it chooses the biasing parameter set that, when multiplied to the current intermediate reaction rates, takes the system closest to  while preserving the sign of δ),g= <dig> ⋯,l.
+
+without loss of generality, we define k as the intermediate reaction rates at an arbitrary level l. in order to update the intermediate reaction rates for the next stage, we evaluate how each candidate biasing parameter set γ performs with respect to the update criterion. we define k as
+
+  kj=kj·γjifsgnδk==ϕtypekj·1/γjotherwise,j∈ <dig> ⋯,m,i∈ <dig> ⋯,q, 
+
+where q is the number of unique intermediate events. we recall that sgn))≠ϕtype corresponds to the case when pe+εpe<p^sparse,e;t), which requires inverse biasing to reduce over-perturbation.
+
+starting with i= <dig>  we compute p^sparse,e;t). if |p^sparsek−pe|≤εpe, then the algorithm exits with k∗=k. otherwise, we traverse through available sets of biasing parameters to find minrp^sparse)<pe−εpe for sgn))==ϕtype and maxrpe+εpe<p^sparse) for sgn))≠ϕtype. since ξ are sorted in ascending order of its probability, k is expected to produce more extreme f) values than k. thus it is not necessary to evaluate all possible p^sparsek. for the case of under-perturbation we can stop the evaluation at the first occurrence of k that satisfies the inequality and set k←k. for the case of over-perturbation, however, we stop the simulation at the first occurrence of k that violates the inequality and set k←k.
+
+it is possible that all candidate biasing parameter sets fail to satisfy the update criterion. the failure indicates pe lies between p^sparsek and p^sparsek. furthermore, this failure is a direct result of many-to-one relationship between k∈ℝ>0m and ξ∈ℝ. trajectories simulated with two different sets of reaction rates k and k′=k+ε are likely to differ from each other, resulting in vk≠vk′. however, both vk and vk′ may yield the same intermediate events, since they are determined solely by the value of the sorted array at positions ⌈ρn⌉. despite the identical ξ, sparse estimates computed with k and k′ will differ if the proportion of occurrences of  is not the same in the two arrays.
+
+in summary, the modified multilevel cross-entropy method for sparse comprises of  <dig> steps. first we determine intermediate events for the current reaction rates using the ssa. we then employ dwssa simulations to compute biasing parameters for each of the intermediate events. lastly we follow steps described in this section to choose one set of biasing parameters to update reaction rates for the next iteration. this process repeats until either k∗ is found or until intermediate reaction rates cannot be updated any more. for computational efficiency, we can combine the first and the last steps by computing vk at the same time as computing p^sparsek. we discard vk if the estimate does not satisfy the required inequality or if k is not the best candidate for the next intermediate reaction rates.
+
+lastly we point out that the original dwssa formula  for computing γ requires computation of a trajectory weight, which is the product of the likelihood ratio between the propensity function and the predilection function. we recall that the predilection function in the multilevel cross-entropy method used by dwssa is characterized with the biasing parameters from level . however, we do not need to compute the trajectory weight in sparse because its objective is to find a new set of reaction rates that confer the event specifications regardless of k, which is used only as a starting position in the path to find k∗. the intermediate reaction rates in level l of sparse reflect cumulative amount of bias applied to the original system up to stage l− <dig> as quantified in . thus the propensity function at level l does not require additional biasing. this leads to using ssa to determine intermediate events and dwssa to compute γ with γj= <dig> j∈{ <dig> ⋯,m}. therefore the formula  for sparse simplifies to   γ^j=∑i′nij∑i′∑k=1ntkajxil−1tikτik. 
+
+exponential interpolation of biasing parameters
+iteratively updating intermediate reaction rates via the modified multilevel cross-entropy method described in the previous section may not find k that satisfies . possible reasons for the failure include poor choice of ρ, insufficient n, and nonexistence of candidate intermediate reaction rates that satisfy the update criterion. the first two aligned can lead to slow convergence to , especially for systems near a deterministic regime or for simulations that demand high accuracy . setting a limit on the maximum number of iterations for the multilevel cross-entropy method can detect slow or non-converging reaction rates, and increasing n and/or modifying ρ will increase the rate of convergence in most aligned. the last phenomenon occurs when no suitable biasing parameters exist to update the reaction rates. here we have p^)+εpe<pe<p^)−εpe, where p^)=minp^sparse),p^sparse) and p^)=maxp^sparse),p^sparse), i = <dig> ⋯,q. the target probability lies between the two estimates p^) and p^), and the multilevel cross-entropy method is unable to fine-tune intermediate reaction rates to achieve pe within the specified error tolerance εpe.
+
+it is reasonable to assume that a linear combination of k and k may result in k∗. a more sophisticated method for approximating k∗ would be to fit an interpolant through past intermediate reaction rates. by making the following two assumptions, sparse computes candidate biasing parameters such that when multiplied to k, they may satisfy .
+
+assumption <dig> 
+k∗ exists such that kj≤kj∗≤kj for 1<kj or kj≤kj∗≤kj for kj< <dig>  j∈{ <dig> ⋯,m}.
+
+assumption <dig> 
+kj∗ can be computed independently from kh∗ for j≠h.
+
+we note that a single dwssa trajectory likelihood ratio at level l of the multilevel cross-entropy method is   ldwssa=∏i=1ntexpa0x−a0)τi×γji′− <dig>  
+
+where a0) and a0) are the propensity sum of the trajectory j at time t generated with k and k, respectively, and γ is the biasing parameter used to update the intermediate reaction rates, i.e., kj=kj×γj,j∈{ <dig> ⋯,m}. the quantity inside the exponential term is a function of the system state, which is in turn a function of intermediate reaction rates. in order to compare sparse estimates generated with different intermediate reaction rates, we rewrite them as a function of the initial reaction rates and normalized intermediate biasing parameters, i.e., kj=kj×γj, and γj= <dig>  the purpose here is to quantify the relationship between different values of γ and its corresponding estimates p^sparse,e;t). considering the form of the likelihood ratio in , a natural form for the interpolant is   gγj=qj·exppj×γj, 
+
+where pj and qj are constants and γj are normalized version of the intermediate biasing parameters used to compute past sparse estimates. output data used in constructing interpolants are the corresponding sparse estimates p^sparse,e;t) multiplied by n, the total number of simulations. this particular form allows for fast solving of pj and qj with a first order polynomial curve fitting method. we first transform the data to logarithmic scale, compute for two coefficients in the first order polynomial, and then retransform the output with exponentiation. the reason for scaling the output data with n is to preserve as many significant digits as possible, as logarithmic y-scale is used to compute the polynomial coefficients. while other forms of interpolant may yield more accurate interpolation,  allows for fast computation while satisfying assumption , as an exponential function is monotonic.
+
+the number of past intermediate reaction rates available for interpolation varies by factors such as k, εpe, and n. although all past estimates can be used for interpolation, confining the number of data to x closest estimates of pe  while having at least one estimate on either side of the target probability is recommended, as the accuracy of interpolation may degrade with estimates that are far from the target probability. due to the construction of the algorithm, there exists at least one estimate on either side of pe when the algorithm enters the exponential interpolation stage. however, we note that the total number of past intermediate reaction rates can be as few as  <dig>  once the values of pj and qj in  are determined for all m interpolants, sparse executes the following steps to further increase the efficiency of simulation. step 1: for each j∈{ <dig> ⋯,m}, project g×n) onto the x axis of the interpolant to compute candidate biasing parameters γ¯j, where the first element  in the superscript is the interpolation iteration index and s∈{ <dig> ⋯,7} is the index of the candidates.
+
+step 2: compute candidate intermediate reaction rates k¯, where k¯j=kj×γ¯j
+
+step 3: constrain k¯j to satisfy kj≤k¯j≤kj for 1<kj or kj≤k¯j≤kj for kj< <dig>  j∈{ <dig> ⋯,m}, if necessary. reverse the signs in inequalities for sgn)≠ϕtype.
+
+
+
+starting with s= <dig>  we compute p^sparse). we note that k¯ corresponds to the reaction rates computed from projecting the exact target probability to the interpolating function. if executing step  <dig> results in duplicate candidates, we eliminate the duplicate set and assign the starting index to s such that qj·exppj×γ¯j=pen.
+
+if p^sparse) confers the target event probability within εpe, sparse exits with k∗=k¯. otherwise, we compute the next estimate with k¯ for p^sparse)<pe−εpe, and k¯ for pe+εpe<p^sparse). the interpolation stage continues until either k∗ is found or the end of candidate reaction rates is reached, at which point an additional interpolation may be executed with updated data. on a rare occasion, k∗ lies between two candidate reaction rates without satisfying the error tolerance. this can lead to infinite loop of incrementing and decrementing s by  <dig> without converging to k∗, but the cycle can easily be detected with a mask vector. sparse implements one by creating a zero vector whose size is equal to the number of candidate biasing parameter sets. every time a sparse estimate is computed with candidate reaction rates at index s, we increment sth position of the mask vector. once the magnitude of any mask vector position becomes greater than  <dig>  we conclude that k∗ lies between two candidate biasing reaction rates. at this point, we have refined an upper and lower bound on k∗, as all candidate biasing parameters computed satisfy the inequality in assumption  <dig>  once the bounds are sufficiently small, an alternative to an additional interpolation is to take a weighted average of the two candidate reaction rates, where the weight is the distance between the sparse estimate and pe. for the examples presented in the following section, we did not encounter any initial reaction rates that required such treatment.
+
+RESULTS
+we illustrate sparse performance on the following three examples of increasing complexity: a birth-death process, a reversible isomerization process and a susceptible-infectious-recovered-susceptible  disease transmission model. the first two examples were chosen to demonstrate the algorithm’s accuracy against the exact solution, which for these examples can be computed using the master equation or the infinitesimal generator matrix  <cit> . we then progress to a more complex sirs model, which has no closed-form analytical solution. for each system, we analyze the sparse performance on all possible combinations of pe∈{ <dig> , <dig> , <dig> } and εpe∈{ <dig> , <dig> , <dig> }, where pe and εpe denote a desired probability for event  and its error tolerance, respectively. we then compare the result with that from comparable ssa simulations whose reaction rates are selected using uniform random sampling . sparse also employs urs but only to generate a number of initial reaction rates as a starting point, here set to  <dig>  the number of simulations, n, used to estimate pe per parameter sample is set to 5× <dig> unless mentioned otherwise. we also test the robustness of sparse by assessing its performance on a low probability event, pe= <dig>  and εpe= <dig>  for the birth-death process, and a high probability event, pe= <dig>  and εpe= <dig>  for the reversible isomerization process. the number of samples generated for ssa simulations with urs equals the total number of sparse ensembles computed for a specific simulation scenario, which is the sum of the following quantities: the number of intermediate event computations, the number of estimates computed for each intermediate event, and the number of estimates computed in the exponential interpolation stage. since the same number of trajectories is used for computing an intermediate event and a sparse estimate, it is straightforward to compare the two strategies with computational fairness. for each simulation scenario, we provide four metrics on performance: the total number of sparse estimates needed for all  <dig> initial parameter samples, the number of initial parameters that did not reach the solution hyperplane within  <dig> iterations of multilevel cross-entropy method or  <dig> iterations of exponential interpolation, the number of parameter sets that required interpolation in addition to the multilevel cross-entropy method, and the number of successful parameter sets generated by ssa simulations using urs for sampling reaction rates. lastly, we provide movie files of sparse ensemble simulations for two test scenarios: birth-death with pe= <dig>  and εpe= <dig>  and sirs with pe= <dig>  and εpe= <dig> .
+
+all computations were run on a desktop with intel®; xeon®; cpu e5- <dig>   <dig>  ghz processor with  <dig> cores and  <dig> gb of ram. we utilized matlab’s parallel computing toolbox™  and the coder™. the pct™ was used to simulate  <dig> sparse ensembles in parallel while the coder™ was used to convert frequently-used custom matlab functions into low-level c functions for faster computation.
+
+birth-death process
+our first example is a birth-death process.  ∅→k1y, <dig> ≤k1≤ <dig> y→k2∅, <dig> ≤k2≤ <dig>  
+
+with x0= <cit>  and the target event  being molecular count of y reaching  <dig> before t= <dig>  table  <dig> summarizes the results for the  <dig> standard test aligned, where sparse achieved 100% success rate in finding k∗, a vector of reaction rates k1∗k2∗ that confers desired pe and εpe, for  <dig> test aligned. for pe= <dig>  and εpe= <dig> , two of thirty samples, k3= <dig> . <dig> and k27= <dig> . <dig> , failed to converge after three rounds of exponential interpolations. we discuss the details of the failure in appendix c of additional file  <dig> table  <dig> 
+results of sparse applied to the birth-death process
+
+
+
+pe
+εpe
+sparse samples
+interpolations
+failures
+successful
+urs
+the first column denotes the target probability, the second column absolute error tolerance, the third column the total number of sparse samples computed for the  <dig> initial parameter sets with the number inside the parenthesis indicating the total number of intermediate event computations, the fourth the number of initial reaction rate parameter sets that required exponential interpolation, the fifth the number of initial sets that did not converge to the solution hyperplane, and the sixth the number of successful parameter sets generated with urs. for the fourth column, four numbers inside the bracket indicate the number of parameter sets that required  <dig>   <dig>   <dig>  and  <dig> interpolations, respectively. n =  <dig> ×  <dig> 
+
+
+
+we picked one of  <dig> initial reaction rates for pe= <dig> andεpe= <dig>  to illustrate a complete progression of the algorithm. figure  <dig> contains a flow chart of a sparse run with k14= <dig> . <dig>  this particular set required two rounds of multilevel cross-entropy method and one exponential interpolation, which required computing two sparse estimates  to reach the solution hyperplane k∗= <dig> . <dig>  figure  <dig> shows an illustration of the interpolation results. we see from table  <dig> that this particular scenario required  <dig> sparse estimates  in addition to  <dig> intermediate event computations in order to reach the solution hyperplane. an ensemble result is displayed in figure  <dig>  where the values of z axis are set to the probability of the target event, which is computed using k <dig> and k <dig> values defined by the data’s x and y coordinates, respectively. together the figure shows the contour of the event probability surface for different values of k <dig> and k <dig>  despite a rapid change in the event probability around pe= <dig> , sparse was able to find a point in the solution hyperplane for all  <dig> sets of initial reaction rates.figure  <dig> 
+flow chart of sparse simulation on the birth-death process with
+pe= <dig> ,εpe= <dig> ,k= <dig> .02445
+, and
+n
+=5×10
+4
+. arrows represent sequential steps taken by the algorithm.
+illustration of exponential interpolation for the birth-death process with
+pe= <dig> 
+,
+εpe= <dig> ,k=
+, and
+n
+=5×10
+4
+. yellow horizontal dotted line is the desired number of successful trajectories, i.e., n×pe=3× <dig>  blue and green circles denote the past intermediate biasing parameters for r
+ <dig> and r
+ <dig>  respectively, normalized with respect to k
+. blue and green dashed lines are the interpolants constructed from the past intermediate basing parameters, and the red triangles are candidate biasing parameters computed according to step  <dig> in subsection updating intermediate reaction rates.
+ensemble result for the birth-death process with
+pe= <dig> ,εpe= <dig> 
+, and
+n
+=5×10
+4
+. sparse required a total of  <dig> samples . the green dashed line denotes the exact solution for pe= <dig>  and the green dotted lines represent ± <dig>  absolute error tolerance band. initial reaction rates are represented by orange squares, intermediate reaction rates by white squares, and k
+∗s by red squares. orange dashed lines connect any two subsequent reaction rates originated from the same k
+. white dashed lines represent the parameter ranges specified prior to simulation.
+
+
+
+next we illustrate the robustness of sparse by choosing a very small target probability pe= <dig>  and εpe= <dig>  . for this problem, we increased n to 2× <dig> to reduce the relative uncertainty in the estimate  <cit> . table  <dig> summarizes the results. we see that all  <dig> initial sets of reaction rates successfully converged to the solution hyperplane while ssa-urs yielded only  <dig> successful samples. figure  <dig> displays all  <dig> sparse samples  for this scenario. figure  <dig> displays result of the same simulation scenario using ssa-urs, except that it contains  <dig> additional data to accommodate the total number of intermediate event computations sparse required. we note that the parameter ranges shown in figure  <dig> differ from that in figure  <dig>  whose data obey parametric constraints specified in the model description . these constraints are shown as white dashed lines in figure  <dig>  the reason figure  <dig> contains data outside the perimeter of white dashed lines is that our implementation of sparse does not utilize the parametric constraints other than to generate initial sets of reaction rates. changing the implementation of sparse to enforce the parametric constraints throughout the simulation requires the user to provide a parametric region that contains the solution hyperplane. in this alternate implementation, if the solution hyperplane does not exist within the user-specified region, all computations are wasted. the current implementation allows for computation of the solution hyperplane regardless of its location while exploiting the user’s knowledge in generating initial reaction rates.figure  <dig> 
+sparse ensemble result for the birth-death process with
+pe= <dig> ,εpe= <dig> 
+, and
+n
+=2×10
+5
+. sparse required a total of  <dig> samples . the green dashed line denotes the exact solution for pe= <dig>  and the green dotted lines ± <dig>  absolute error tolerance band. final reaction rates k
+∗ are encircled in red. white dashed lines represent the parameter ranges specified prior to simulation.
+ssa-urs ensemble result for the birth-death process with
+pe= <dig> ,εpe= <dig> 
+, and
+n
+=2×10
+5
+. color of each square represents pe given its k
+ <dig> and k
+ <dig> values according to the color bar given on the right. legend identities match those of figure  <dig> 
+results of sparse applied to the birth-death process
+
+
+
+pe
+εpe
+sparse samples
+interpolations
+failures
+successful
+urs
+the column identities match those of table  <dig>  n =  <dig> ×  <dig> 
+
+
+
+reversible isomerization process
+our next example concerns a reversible isomerization process, where two conformational isomers a and b are interconverted by rotation about single bonds:  a→k1b, <dig> ≤k1≤ <dig> b→k2a, <dig> ≤k2≤ <dig> ,  with x0= , i.e., all molecules are initially in a form. the target event is set to population of b reaching  <dig> before t= <dig>  table  <dig> summarizes the results from  <dig> standard test scenarios, all of which attained 100% convergence to the solution hyperplane. we see that the total number of sparse samples required for pe∈{ <dig> , <dig> } is comparable between the birth-death and the reversible isomerization processes. however, the latter required considerably more number of samples for pe= <dig> . this is due to the difference in the contour of target event probability surface between the two processes. figure  <dig> compares ensemble results between the two processes for pe= <dig>  and εpe= <dig> . figure 6a represents the birth-death process and figure 6b the reversible isomerization process. we see that the reversible isomerization process contains a significantly larger parametric region that corresponds to pe> <dig> , and that the probability in this region changes slowly . only two over-perturbing initial reaction rates  were generated for the birth-death process while eleven such rates were generated for the reversible isomerization process. intermediate reaction rates  of these eleven samples are close together due to the slowly changing probability in their vicinity. lastly we note that none of the data in figure 6b left the original parameter ranges stated in the model description. this confirms that even for simple systems such as birth-death process and reversible isomerization process, it is nontrivial to predict parameter ranges that form a convex bound.figure  <dig> 
+sparse ensemble result comparison for
+pe= <dig> ,εpe= <dig> 
+, and
+n
+=5×10
+4
+.
+a and b correspond to the birth-death process and the reversible isomerization process, respectively. legend identities match those of figure  <dig> 
+results of sparse applied to the reversible isomerization process
+
+
+
+pe
+εpe
+sparse samples
+interpolations
+failures
+successful
+urs
+the column identities match those of table  <dig>  n =  <dig> ×  <dig> 
+
+
+
+next we choose a high probability target of pe= <dig>  and εpe= <dig>  with n= <dig>  table  <dig> summarizes the result. we see that one of  <dig> samples failed to converge. sparse was not able to find k∗ for k27= <dig> . <dig> after  <dig> rounds of exponential interpolations. the qualitative explanation for the failure is the same as with the birth-death process for pe= <dig>  and εpe= <dig> , which is discussed in appendix c of additional file  <dig> table  <dig> 
+results of sparse applied to the reversible isomerization process
+
+
+
+pe
+εpe
+sparse samples
+interpolations
+failures
+successful
+urs
+the column identities match those of table  <dig>  n=1× <dig> 
+
+
+
+it is worth pointing out that the number of successful parameter sets generated with ssa-urs varies widely from simulation to simulation. the expected number, however, is the volume of the solution hyperplane  divided by the total volume, multiplied by the total number of reaction rate samples generated with urs. here the prescribed parameter ranges are used to compute both volumes . since the acceptable solution volume increases with larger εpe, the number of uniform random samples that reside in the solution hyperplane should increase as well. similarly the expected number of intermediate reaction rates used by sparse to reach the solution hyperplane decreases because the need for fine-tuning, i.e., exponential interpolation, declines with larger εpe. this trend is confirmed by the simulation results for all three examples presented in this paper .table  <dig> 
+results of sparse applied to the sirs model
+
+
+
+pe
+εpe
+sparse samples
+interpolations
+failures
+successful
+urs
+the column identities match those of table  <dig>  n =  <dig> ×  <dig> 
+
+
+
+simple sirs disease dynamics
+the final example is susceptible-infectious-recovered-susceptible  disease transmission model, which consists of the following three reactions:  s+i→β2i, <dig> ≤β≤ <dig> i→γr, <dig> ≤γ≤ <dig> r→ωs, <dig> ≤ω≤ <dig>   with x0= <cit> , where x=. this model describes a homogenous, fixed population setting where members of s become infected by members of i, who recover from the infection at rate γ. once recovered, members of r have immunity against the infection. however, the immunity wanes at rate ω, and this transition from recovered to susceptible compartment replenishes the population of s. the target event for this system is set to the population of i reaching  <dig> before t= <dig>  unlike the first two examples, there is no closed-form analytical solution for this model. in order to construct the probability voxel for the specified parameter ranges, we divided each parameter region into  <dig> uniformly-spaced grids and computed each combination with the ssa, where each of  <dig>  ensembles was simulated with n= <dig>  we then further refined the resolution of the probability volume to a 70×70× <dig> grid using interp <dig> function in matlab, which applied linear interpolation to the 3-dimensional mesh data from ssa simulations. figure  <dig> displays the final solution volume, where the color of each point represents the target event probability according to the color bar on the right of the figure.figure  <dig> 
+probability volume  for the sirs model after applying matlab’s interp <dig> function to the 30×30× <dig> data simulated with ssa. color of each voxel represents pe given its β, γ, and ω values according to the color bar given on the right.
+
+
+
+as with the previous examples, we tested sparse on all possible combinations of pe∈{ <dig> , <dig> , <dig> } and εpe∈{ <dig> , <dig> , <dig> } and measured the same quantities as in table  <dig>  table  <dig> summarizes the results. we see that sparse achieved 100% success rate for all scenarios tested. however, statistics on column  <dig> demonstrates that the total number of estimates computed for any sirs scenario is greater than the one for the first two examples with the same target probability and error tolerance. sirs ensembles required up to  <dig> more samples, except for pe= <dig> and εpe= <dig> , which required one fewer sample than the birth-death process. if we ignore the intermediate event computations, the number of samples required by all three examples are comparable to each other . in addition, quantities in column  <dig> of tables  <dig>   <dig> and  <dig> indicate that sparse required fewer interpolations on the sirs model than it did on the other two examples. these results imply that the multilevel cross-entropy method applied to the sirs model made conservative moves to reach the solution hyperplane; the algorithm required many intermediate event computations to approach the vicinity of pe but fewer fine-tuning steps . although the same ρ values were used for all three examples, we see that its effect differs depending on the underlying system.
+
+two expected trends emerge from table 5; the total number of sparse samples and the total number of exponential interpolations required to reach the solution hyperplane decrease with increasing εpe. although numbers in columns  <dig> and  <dig> differ among tables  <dig>   <dig>  and  <dig>  qualitative algorithmic behavior as a function of εpe remain the same for all three examples. as for its performance, sparse outperformed ssa-urs  on all scenarios except one. for pe=. <dig> and εpe= <dig> , ssa with urs yielded  <dig> successful sets, while sparse yielded  <dig>  we note that the maximum number of successful sets for sparse cannot exceed the number of initial parameter sets, which is  <dig> for all examples presented in this paper. also, the parameter ranges we chose for the sirs model result in an uneven distribution of the target probability. from figure  <dig>  we see that a significant portion of the probability volume belongs to high  or low  probability region. since the ssa-urs success probability is determined solely by the ratio between the volume of the solution hyperplane and the total volume defined by the specified parameter ranges, this particular scenario is biased to be more favorable toward ssa-urs. for general applications involving a target event, however, we cannot expect the solution hyperplane to lie within the user-specified parameter ranges, to which ssa-urs samples are confined. if this region does not contain the solution hyperplane, ssa-urs is unable to produce k∗ regardless of the number of samples generated. the current implementation of sparse, on the other hand, is highly likely to find the closest point  in the solution hyperplane through multilevel cross-entropy method and exponential interpolation stages, both of which are not limited by the user-specified parameter ranges. in practical situations, it is likely that the user does not have enough systematic insight to identify a region that contains the solution hyperplane for a particular target event. we expect sparse to be more efficient than ssa-urs by orders of magnitude in such aligned, as the performance of sparse is much less sensitive to the dimensionality of the search space and the volume within εpe of the solution hyperplane than the performance of ssa-urs is.
+
+we picked one scenario, pe= <dig>  and εpe= <dig> , for visual comparison between sparse and ssa-urs outcomes outcomes . figure  <dig> display the ensemble result for each method. the solution hyperplane for pe= <dig>  is represented by a cyan-colored surface, which was obtained by applying isosurface function in matlab to the probability volume. we have omitted displaying the region corresponding to pe±εpe for clear visualization of data. we see that the volume of the solution hyperplane for this particular scenario is small relative to the volume of the entire voxel. thus we expect poor performance from ssa-urs, which is confirmed by statistics in table  <dig>  ssa-urs generated only  <dig> successful parameter combinations out of  <dig> samples, while sparse generated  <dig>  since one point in the solution hyperplane corresponds to one set of initial reaction rates in sparse, this indicates 100% convergence. the number of data in figure 8a and 8b are  <dig> and  <dig>  respectively. figure b contains  <dig> more data to compensate for the total number of intermediate event computations required by sparse. despite having fewer data, sparse produced not only  <dig> times the number of k∗ but also data that are closely scattered around the solution hyperplane. the latter fact offers couple advantages. first, having good resolution near pe±εpe enables more accurate mapping of the solution hyperplane, as it is unknown or computationally infeasible to be computed even for moderately sized systems . in addition if we were to run another set of simulations on the identical scenario, we can generate initial reaction rates that are near the solution hyperplane using the past simulation results.figure  <dig> 
+sirs ensemble result comparison between sparse and ssa-urs for
+pe= <dig> ,εpe= <dig> 
+, and
+n=5×10
+4
+. cyan-colored surface represents the solution hyperplane for the target event. a represents the result of sparse applied to the sirs model. orange squares represent the initial reaction rates, white squares intermediate reaction rates, and red squares the final reaction rates on the solution hyperplane. orange dashed lines connect any two subsequent reaction rates originated from the same initial reaction rates. b represents the result of ssa-urs applied to the sirs model. color of each rectangle represents the target event probability from the represented parameter combination according to the color bar given on the right. out of  <dig> samples, only  <dig> lie on the solution hyperplane. these  <dig> successful parameter sets are encircled in black. due to the 3-dimensional nature of this figure, there is no single angle where both the solution hyperplane and the  <dig> sets are easily visible.
+
+
+
+lastly, we chose one of  <dig> initial reaction rates to illustrate a complete progression of sparse on the sirs model. unlike the set of initial reaction rates chosen for the birth-death process = with pe= <dig>  and εpe= <dig> ) in figure  <dig>  which under-perturbs the system, the set of initial reaction rates chosen here, k26=, over-perturbs the system. figure  <dig> displays the flow chart of sparse simulations for this scenario, and figure  <dig> illustrates the results from the first and second exponential interpolations, respectively. the interpolants for all three reactions exhibit a good fit with respect to the past biasing parameters, and the quality of fit improves in the second iteration with updated past estimates closer to the target probability. according to the flow chart and figure 10a, sparse entered the first iteration of exponential interpolation with four past estimates, three of which under-perturbed the system . after exhausting the candidate biasing parameters from the first iteration, all of which produced estimates greater than  <dig> , sparse entered a second iteration of exponential interpolation. at this point, the top five closest estimates to pe= <dig>  all came from over-perturbing biasing parameter sets. sparse then removed the most over-perturbing set and inserted the least under-perturbing set in attempt to improve the quality of the interpolant. figure 10b reflects these modifications. the last candidate from the second interpolation produced an estimate within εpe= <dig> , at which point the algorithm exited with the final reaction rates ∗= <dig> . <dig> ). we note that the slope of the interpolants in figure  <dig> are opposite from the ones in figure  <dig>  this is because inverse biasing technique is used for over-perturbing reaction rates, as described by equation  <dig> figure  <dig> 
+flow chart of sparse simulation on the sirs model with
+pe= <dig> ,εpe= <dig> ,k= <dig> . <dig> 
+, and
+n
+=5×10
+4
+. this particular simulation required three stages of multilevel cross-entropy method and two rounds of exponential interpolation. arrows represent sequential steps taken by the algorithm.
+illustrations of first exponential interpolation  and second exponential interpolation  for the sirs model with
+pe= <dig> 
+,
+εpe= <dig> ,k=
+, and
+n
+=5×10
+4
+. yellow horizontal dotted line is the desired number of successful trajectories, i.e., n×pe=3× <dig>  blue, green, and red circles denote the past intermediate biasing parameters for r
+ <dig>  r
+ <dig>  and r
+ <dig>  respectively, normalized with respect to k
+. blue, green, and red dashed lines are the interpolants constructed from the past intermediate basing parameters, and the purple triangles are candidate biasing parameters computed according to step  <dig> in subsection updating intermediate reaction rates.
+
+
+
+CONCLUSIONS
+in this paper, we presented sparse–a novel stochastic parameter estimation algorithm for events. sparse contains two main research contributions. first, it presents a novel modification of the multilevel cross-entropy method that  concurrently computes multiple intermediate events as well as their corresponding biasing parameters, and  handles over-perturbing initial reaction rates as well as under-perturbing ones. second, it uses information from past simulations to automatically find a path to the parametric hyperplane corresponding to the target event with user-specified probability and absolute error tolerance.
+
+by introducing a novel heuristic for handling reaction rates that over-perturb the system, sparse can handle target events whose probability does not need to be rare with respect to the initial reaction rates k. if the user wishes to compute the probability of observing pe with respect to k, however, it can be done by simply running the dwssa with biasing parameters that are the ratio between the final reaction rates k∗ from sparse and k. no additional multilevel cross-entropy simulations are required by the dwssa to determine biasing parameters since the final set of reaction rates computed by sparse contains this information. for this reason, sparse improves upon the dwssa in that it can handle an additional type of rare event. the only class of rare events whose probability dwssa can estimate is the one that is seldom reached by the system using the original reaction rates. sparse, on the other hand, can also compute the probability of events that are reached too often with respect to the target probability using the original reaction rates. average frequency of observing such target event with k would be much higher than the desired frequency ×n), and therefore the probability of observing  with success rate pe±εpe and reaction rates k would be very small, yet its biasing parameters are uncomputable with the dwssa, but are computable with sparse.
+
+it is important to note that the computational complexity of sparse is independent of the number of parameters to be estimated. like the dwssa  <cit> , sparse utilizes information-theoretic concept of cross-entropy to concurrently compute biasing parameters for all reactions in the system. moreover, sparse avoids serial computation of biasing parameters for multiple intermediate events at any given stage of multilevel cross-entropy method by introducing a clever ordering of intermediate events and data management. figures  <dig>   <dig> and  <dig> illustrate that sparse not only is more efficient than ssa-urs in finding k∗ but also gives a better resolution of the area near the solution hyperplane. this is because intermediate reaction rates computed by sparse are guaranteed to be closer to k∗ than k is. thus intermediate reaction rates near k∗ can be used to improve the quality of interpolation in constructing the solution hyperplane. another computational asset of sparse is that it is highly parallelizable. in large scale application, multiple sets of initial reaction rates can be dispatched separately since each set finds its way to the solution hyperplane independently from each other. in smaller scale, sparse estimate computation or an ensemble of multilevel cross-entropy method simulations also can be parallelized. in simulating examples presented in this paper, we have chosen the latter method; each set of n simulations was distributed among  <dig> cores using the parallel computing toolbox™ in matlab. lastly, a single sparse trajectory from the multilevel cross-entropy method without any biasing  generates the same number of uniform random numbers as the ssa does. the only difference is that sparse requires additional data management for recording biasing parameter information , which is used in the next round of multilevel cross-entropy method. it is difficult to compare the exact computational cost between the two methods when sparse utilizes γ≠1⃗; depending on the amount of bias applied per reaction, the number of random numbers generated per trajectory will differ between the two methods even if the same reaction rates were used. for the exponential interpolation stage in sparse, ssa is used to compute p^sparse, thus the computational cost of sparse and ssa trajectory are identical for a given set of reaction rates.
+
+one of the inputs required by sparse is a range of values each parameter can take. there is no theoretical limit on the parameter range sparse can manage; however, it is required for the following practical reasons. first, the volume of the solution hyperplane could be infinite if we do not confine parameter ranges. for the reversible isomerization process presented in the previous section, all solution hyperplanes from the  <dig> standard test scenarios are defined by the ratio between the two reaction rate parameters; infinitely many pairs exist that keep this ratio conserved. in addition, a range is required to sample initial reaction rates. if a user wishes to use a distribution other than the uniform distribution to generate initial reaction rates, different statistics  may be needed.
+
+we remind our readers that although parameter ranges are used to constrain the position of initial reaction rates, the same ranges are not enforced on the final reaction rates on the solution hyperplane. the main reason for this is that there is no guarantee the solution hyperplane intersects with the volume defined by the user-specified parameter ranges. by not limiting the final reaction rates to reside within the user-specified region, sparse is able to find a set of reaction rates that lie on the solution hyperplane that are close to the user-specified parameter ranges. for example, in figure  <dig>  white dashed lines represent parameter ranges specified prior to the simulation. we see that  <dig> of  <dig> initial sets reached the solution hyperplane but are outside this region. we also see that some intermediate reaction rates  escape the region but return to it by the time k∗  is found. for most practical applications, we know neither the curvature of the solution hyperplane nor the existence of it within the prescribed parameter ranges. the parameter ranges for all examples in this paper were chosen such that all possible values in  are captured while the volume of a solution hyperplane for any particular pe is well-defined within this region. therefore we expect the computational gain from employing sparse over ssa-urs to be much higher for an arbitrary problem where the user is unable to provide informative parameter ranges for the target event of interest and its desired probability.
+
+future work will focus on two main areas whose improvement will substantially benefit the algorithm. first, the multilevel cross-entropy method for sparse can improve from employing an adaptive ρ function, whose values for determining intermediate events would change as the simulation progresses. while sparse proved to be computationally efficient for all three examples presented in this paper, their results demonstrated that the same ρ function can produce qualitatively different behavior on how the system approaches the solution hyperplane. we can use past values of ρ and its effect on p^sparse to estimate the speed of convergence toward the solution hyperplane. this can potentially reduce the number of multilevel cross-entropy method iterations, where reduction of each iteration saves 2×n simulations. the second area of future research will be on efficient sampling of initial reaction rates. once sparse finishes simulating first sets of k, positions of resulting k∗ may be far away from each other and thus insufficient to construct an accurate picture of the solution hyperplane. instead of randomly sampling the next set of initial reaction rates, we can utilize information from the prior ensemble of sparse simulations to improve the positioning of the next set of k. for example, we can construct a rough interpolation  of the solution hyperplane using k∗s from the first ensemble, and sample the next set from the estimated solution hyperplane, which could be constrained by the user-specified parameter ranges if necessary. a more sophisticated method would be required for high-dimensional systems or for target events with discontinuity in the solution hyperplane.
+
+additional files
+additional file  <dig> 
+appendix. appendix is composed of three parts: tables, pseudocode, and discussion of failure in convergence. table i contains the definition of variables used in methods section, and table ii provides a list of input parameters for sparse and its default value when applicable. table iii contains the definition of variables exclusively used in pseudocode. in the second part, sparse pseudocode is provided in a format of five separate algorithms for easy of reading and reproducibility. lastly, we discuss in detail the three failures in results and discussion section.
+
+
+
+additional file  <dig> 
+this file contains an animated illustration of sparse simulations for birth-death process with
+pe= <dig> 
+ and
+εpe= <dig> .
+
+
+
+
+additional file  <dig> 
+this file contains an animated illustration of sparse simulations for sirs disease dynamics model with
+pe= <dig> 
+ and
+εpe= <dig> .
+
+
+
+
+competing interests
+
+the authors declare that they have no competing interests.
+
+authors’ contributions
+
+mr conceived of the method, coded the algorithm to carry out numerical experiments, and prepared figures and tables. pe participated in the design of the numerical experiments and revising the manuscript. both authors read and approved the final manuscript.
+

@@ -1,0 +1,201 @@
+BACKGROUND
+a key step toward understanding an organism's metabolism is the construction of a comprehensive model of the network of metabolic reactions taking place in the organism. although a number of such models have been constructed through painstaking literature-based manual curation  <cit> , such an approach obviously cannot scale to hundreds of sequenced genomes. therefore, methods are needed for computational characterization of metabolic networks.
+
+that task can involve two subtasks.  the reactome prediction problem: given the annotated genome for an organism, predict the set of metabolic reactions catalyzed by the organism; that is, predict associations between enzymes and the reactions they catalyze.  the pathway prediction problem: given the reactome of an organism and its annotated genome, predict the set of metabolic pathways present in the organism. in the current work we take the reactome as predetermined by other methods, and focus on developing improved pathway prediction methods. pathway prediction can involve predicting pathways that were previously known in other organisms, or predicting novel pathways that have not been previously observed . our methodology does the former, predicting pathways from a curated reference database.
+
+we have previously developed a method, called pathologic  <cit> , for automatically constructing a pathway/genome database  describing the metabolic network of an organism, meaning the metabolic reactions catalyzed by enzymes in the organism and their organization into pathways. based on the assumption that experimentally defined metabolic pathways are conserved between organisms, pathologic uses the metacyc  <cit>  reference pathway database as a template for predicting the metabolic pathways of a newly sequenced organism. metacyc version  <dig>  contains  <dig>  experimentally characterized pathways curated from the literature for all domains of life.
+
+prediction of metabolic pathways in addition to the reaction network is important because pathways provide a higher level of organization that facilitates human comprehension of the network, and pathways suggest reactions and enzymes that may be initially missing from the model because of omissions in the genome annotation  <cit> . prediction of pathways is hard for three reasons.  errors and omissions in genome annotations introduce noise into the primary source of evidence for pathways, namely, the set of metabolic enzymes in the genome.  enzymes that catalyze "promiscuous" reactions -- reactions that participate in multiple pathways -- are ambiguous in supporting the presence of more than one pathway. in the version of metacyc used for this work,  <dig>  reactions participate in pathways. of these,  <dig> reactions  appear in at least two pathways.  groups of variant pathways in metacyc  often share several reactions, making it difficult to distinguish which variant is present.
+
+at the core of pathologic is an algorithm for predicting which subset of pathways from metacyc is present in the organism. the algorithm incorporates rules and heuristics developed and tuned over several years, using feedback from biologists to improve the accuracy of the predictions.
+
+however, the pathologic algorithm suffers from several limitations, which we aim to address in this work.  as metacyc grew in size, pathologic began to make more false positive pathway predictions.  the logic of the pathologic algorithm is hard-coded, with complicated interactions between various rules, making the algorithm difficult to maintain and extend.  pathologic provides limited explanations to the user as to why a particular pathway was included in, or excluded from, its predictions. better quality explanations are needed.  the algorithm is limited to boolean predictions and only a coarse measure of prediction confidence is provided by the number of reactions in the pathway whose enzymes are known in the organism. thus, it is difficult to filter the predictions with a probability cutoff.
+
+our goal, therefore, is to develop a pathway prediction algorithm that is data-driven, transparent, and tunable. by data-driven we mean that the parameters determining the interaction of various predictive features are separate from the detailed logic of the predictor, and can be trained and modified at will. by transparent we mean that the evidence for or against a given pathway's presence can be presented to the user. by tunable, we mean that the algorithm provides a fine-grained measure of prediction confidence, such that by varying a threshold at which a prediction is made, the user can trade off sensitivity for specificity. to satisfy these goals, we have carried out the following work.  to quantify the performance of our new prediction algorithms, and compare them to the existing methods, we constructed a large pathway "gold standard" containing data on the presence or absence of metabolic pathways in various organisms.  we designed and implemented  <dig> features for evaluation in the new prediction algorithms. this set includes features used by pathologic, but consists mostly of new features.  we applied several commonly used machine learning  algorithms to the pathway prediction problem. the best resulting ml-based algorithm achieved a small improvement over the performance of pathologic.
+
+methods
+construction of a gold standard pathway collection
+to train our machine learning algorithms and validate them against existing methods , we constructed a "gold standard" dataset containing known information about which pathways are present and absent in a variety of organisms. the full gold standard dataset can be found in additional file 1; here we describe the content and construction of the dataset.
+
+the gold standard dataset currently contains  <dig>  entries that describe pathway presence and absence in six organisms: escherichia coli k- <dig> mg <dig>  arabidopsis thaliana columbia, saccharomyces cerevisiae s288c, mus musculus, bos taurus, and synechococcus elongatus pcc  <dig>  the data are derived mainly from the corresponding pgdbs for these organisms: ecocyc  <cit>  version  <dig> , aracyc  <cit>  version  <dig> , yeastcyc  <cit>  version march  <dig>  mousecyc  <cit>  version  <dig> , cattlecyc  <cit>  version  <dig> , and synelcyc version  <dig> . <dig> , all of which have undergone significant manual curation. data from ecocyc are entirely derived from manual literature curation. aracyc and yeastcyc were built using an older version of pathologic, but have undergone extensive manual curation to remove false positive pathway predictions and to introduce additional pathways from the literature that were not present in metacyc. mousecyc, cattlecyc, and synelcyc were built within the past  <dig> to  <dig> years using pathologic and have undergone subsequent manual curation: mousecyc by curators at the jackson laboratory, cattlecyc at the university of illinois, and synelcyc in our group at sri international.
+
+each element of the gold standard dataset is a triple of the form , asserting that a pathway  is present in or absent from an organism, depending on whether is-present? is "true" or "false". table  <dig> shows the number of positive and negative instances for each organism in the gold standard.
+
+as noted, different methods were used to construct the pgdbs for the organisms represented in the gold standard, and these have undergone differing amounts of curation. for this reason, different rules were used to select examples from each organism to include in the gold standard. two rules, however, applied to all organisms. first, we added as positive examples in the gold standard for each organism o all pathways that have been curated in metacyc as being present in o. that is, metacyc explicitly records the organism in which each pathway was experimentally studied. second, we added as gold standard negative examples for o all pathways p in metacyc such that none of the reactions of p had identifiable enzymes in the most recent genome annotation for o.
+
+for e. coli we added as positives all pathways present in ecocyc. we added as negatives all pathways not annotated in metacyc to be present in any strain of escherichia coli. a similar approach was used for a. thaliana. we added as positives all pathways in aracyc with noncomputational evidence . all pathways not present in aracyc and not annotated in metacyc to any subspecies of a. thaliana were added to the negative set. both ecocyc and aracyc have undergone extensive manual curation, and data is frequently propagated and synchronized between these databases and metacyc. we therefore expect these sets of examples to be relatively complete and robust.
+
+yeastcyc is also extensively curated, but since its curation is not closely synchronized with curation of metacyc, we have been more cautious in adding yeast pathways to the gold standard dataset. the main source of positive examples for yeast is metacyc, which includes approximately  <dig> curated yeast pathways. in addition, we included all pathways from yeastcyc that were reviewed by a yeastcyc curator and are present in metacyc. a number of pathways in yeastcyc are not included in metacyc. work is in progress on synchronizing yeastcyc and metacyc, and these pathways will be added to the gold standard as they are imported into metacyc. as negative examples, we included a set of pathways reported by the yeastcyc curators to have been deleted from yeastcyc. we also obtained an earlier version of yeastcyc, and included as negative examples pathways in the older version of yeastcyc that are no longer present in yeastcyc but still exist in metacyc .
+
+for mousecyc, cattlecyc, and synelcyc, all pathways present were added to the gold standard as positive examples. pathways reported by the mousecyc and cattlecyc curators to have been deleted were added as negatives, along with pathways recorded as deleted by the  internal database logging mechanisms of pathway tools. the same was done for synelcyc, although we were able to more carefully track pathway deletions because of our oversight of this process.
+
+evidence gathering and the pathologic algorithm
+pathologic is the state-of-the-art pathway prediction algorithm included in the pathway tools software suite  <cit> . broadly, this program accepts as input the annotated genome of an organism, and outputs a database containing objects representing the genes, proteins, metabolites, reactions, and pathways of an organism. the batch mode of pathologic is used to construct the biocyc database collection  <cit> , currently containing  <dig> pgdbs.
+
+an important step in metabolic network reconstruction is reactome inference: deriving associations between the proteins encoded by the genome and the reactions catalyzed by those proteins. these associations are the main source of evidence for the pathway inferences of both pathologic and our newer machine learning-based algorithms. as such, the quality of the inferred metabolic network is highly dependent on the completeness and correctness of the genome annotation and on the reaction associations. linking of proteins with reactions is performed by the "enzyme matching" component of pathologic, which uses enzyme commission  numbers, gene ontology  annotations, and protein function or product names to link proteins in an annotated genome with metacyc reactions.
+
+the pathologic algorithm selects as candidates for pathway prediction all pathways in metacyc that contain at least one reaction catalyzed by an enzyme in the target organism. the algorithm then iterates through the list of candidates, using a collection of manually derived rules  <cit>  to decide whether or not to include a pathway in the new pgdb . at each iteration the evidence for or against each remaining candidate pathway is recomputed based on the other remaining pathways. 
+
+the algorithm terminates when no more candidate pathways can be kept or pruned by the rules. if any undecided candidate pathways remain, pathologic errs on the side of inclusiveness, keeping all the candidates in the database. in the early development of pathologic, it was expected that most new pgdbs would be extensively reviewed by human curators, for whom it would be easier to remove false positives from the new pgdb than to comprehensively identify false negatives in metacyc. although this is still a common use case, a primary motivation for the current work is to develop an algorithm in which the tradeoff between false positives and false negatives can be tuned for either meticulous individual database curation, or for high-throughput pgdb construction.
+
+feature extraction and processing
+on the basis of our past experience with the pathway prediction problem, we enumerated during this project a set of  <dig> alternative features that we thought might be relevant to this problem. the pathologic algorithm defines a set of  <dig> basic features which are combined in its rules for keeping or deleting pathways. in our research we used existing pathologic features, implemented new variations of pathologic features, and defined many novel features not used by the existing pathologic algorithm. many of the features are quite similar to one another. the features include both categorical  features and numeric features. more fully, a feature can be a function of the pathway as well as the organism in which the pathway's presence is being predicted . some features do not depend on evidence in the target organism, but are only properties of pathways in the reference database, metacyc.  a full description of all features considered can be found in section  <dig> of additional file  <dig>  we expect that many of the feature names will be self-explanatory, but for concreteness we describe a subset of the features used in more detail below. many features test whether reactions in pathways are present; this is true if the reaction is linked to an enzyme in the target database , or if the reaction is annotated in the reference db as occurring spontaneously. a unique reaction occurs in only one pathway. a unique enzyme catalyzes reactions in only one pathway. reaction uniqueness is computed by pathologic with respect to the current set of candidate pathways, which changes throughout the algorithm.  since our algorithms do not currently have the notion of a changing candidate set, uniqueness is computed with respect to all metacyc pathways.
+
+many of the  <dig> features can be grouped into the following broad categories:
+
+• reaction evidence. features based on the identification in the genome annotation of enzymes catalyzing reactions.
+
+• pathway holes. features based on the pattern of holes  in a pathway. is the pathway split by holes into several fragments? does the pathway have long runs of holes? does a biosynthetic pathway end with a hole, or a degradation pathway begin with one?
+
+• pathway connectivity. features based on the context of the metabolic network .
+
+• genome context. features based on the position of the genes involved in each pathway in the target genome. for example, are there two reactions in the pathway whose enzymes are encoded by genes that are adjacent on the genome?
+
+• pathway variants. features comparing the evidence for a pathway to alternative pathways  that accomplish roughly the same biological function. for example, are the enzymes present in a pathway v <dig> a subset of the enzymes for a variant v2?
+
+• taxonomic range. features based on the curated taxonomic range of the pathway. the taxonomic range is defined as the set of organisms in which the pathway is most likely to be present, and is specified by the metacyc curators.
+
+• pathologic-derived features. features used by pathologic but not classified in any of the previous categories.
+
+• pathway properties. features computed based on pathway properties such as the number of reactions, and type of pathway .
+
+example features include the following:
+
+• some-initial-reactions-present: this feature is true if some initial reaction of the pathway - a reaction with no preceding reactions in the pathway - is present.
+
+• taxonomic-range-includes-target: indicates whether the expected taxonomic range of the pathway  includes the target organism; false if the taxonomic range is not annotated, or if it does not include the target organism.
+
+• best-fraction-reactions-present-in-linear-path: computes the fraction of reactions present along each path from an input compound to an output compound in the pathway; returns the maximum such value. if the pathway is linear, this is equivalent to fraction-reactions-present.
+
+• evidence-info-content-norm-all: some reactions in metabolic networks participate in several pathways while other reactions belong to a single pathway. the more pathways a reaction participates in, the weaker is the evidence that an enzyme for that reaction provides for the presence of any one of those pathways. thus, we defined several "information content"-based features, as exemplified here.
+
+let m be the number of reactions in pathway p; let rpres = {r <dig>  ..., rk} be the set of reactions present in p. let n be the number of pathways in which reaction ri appears. then the " normalized evidence information content" is defined as  
+
+this feature measures how strongly the evidence for pathway p is specific to p; reactions that are present in p and appear in few other pathways contribute greater weight. normalizing by m downweights pathways with several promiscuous reactions, relative to pathways with unique reactions, but fewer of them present. other variations omit the normalizing constant, or normalize by the number of reactions present.
+
+feature transformations were applied for use in some of the predictors. for the naïve bayes predictors, numeric features were discretized using the following method. each feature was discretized individually by considering each possible threshold between observed values of the feature in the training set. for each threshold, the information gain obtained by discretizing at that threshold is computed, and the threshold maximizing the information gain is selected. for the k-nearest neighbor predictors, feature values were standardized, subtracting from each feature value the mean value of that feature and dividing by its standard deviation.
+
+performance evaluation
+for evaluating the performance of both individual features and prediction methods, we employed several widely used performance measures.
+
+performance of boolean features or predictions is summarized by measures that depend on the number of true positive, false positive, true negative, and false negative predictions made. let these numbers be tp, fp, tn, and fn. also let p = tp + fn be the total number of positives, n = fp + tn the total number of negatives, and g = p + n the total number of examples. we computed the following measures:  
+
+where h is the binary entropy function:   
+
+used here as a measure of the purity of a collection of positive and negative examples.
+
+for numeric features or predictions , we compute the accuracy or f-measure obtained by optimizing over all possible thresholds of the feature or prediction value. the sensitivity and specificity are reported at the threshold that maximizes the accuracy, and the precision and recall are reported at the threshold that maximizes the f-measure. an additional performance measure specific to numeric predictions is the area under the roc curve , where the receiver operating characteristic  curve plots sensitivity versus specificity over the entire range of prediction values.
+
+to obtain unbiased estimates of the expected performance of our algorithms on new datasets, we do not report predictor performance on the entire gold standard dataset. rather, we split the gold standard into training and test sets; we train each predictor  on the training set and compute its performance based on its predictions on the test set. the training/test split is done at random, with 50% of the examples selected for training and 50% held out for test. each set of predictor performance results represents the average performance over  <dig> random training/test splits. the decision to use just 50% of the dataset for training was justified by learning curve experiments , in which we varied the fraction of examples used for training and examined performance on the held-out test data. we observed that performance increased rapidly up to approximately  <dig> to  <dig> examples, after which it increased only slightly.
+
+training and prediction
+we evaluated four commonly used prediction algorithms: naïve bayes, k nearest neighbors, decision trees, and logistic regression.
+
+the naïve bayes  predictor is a simplified probabilistic model of the input features and the output to be predicted. the input features and output are represented as random variables, and the inputs are assumed to be conditionally independent given the output. bayes' rule is used to compute the posterior probability that the pathway is present, given the observed input features. let y be a binary random variable indicating whether a given pathway is present; let x <dig>  ..., xn be a collection of features with observed values x <dig>  ..., xn. then bayes' rule gives us  
+
+where p is the prior probability that a pathway is present. the prior probability is multiplied by the likelihood of the observed data, and divided by the normalization factor   
+
+to obtain the posterior probability. in this work, we assume that all the observed features have been discretized to binary values. to obtain the full probability distribution p would require estimating an exponential number of parameters. the naïve bayes model assumes that the feature variables xi are conditionally independent, given the output variable y, so that posterior probability simplifies to  
+
+and   
+
+here, the number of parameters is linear in the number of features n. the parameters are estimated from the training data using maximum likelihood with pseudocounts.
+
+the k nearest neighbor  predictor is an instance-based prediction method. the "training" phase simply involves recording the observed input and output data for the training instances. the predictor is parameterized by a positive integer k and a distance function f. to predict whether a given pathway is present, we select the k training instances that are most similar to the instance being classified; similarity is defined by applying the distance function f to the vectors of input feature values. given the k nearest neighbors, a boolean prediction is computed by majority vote of their output values. a numeric prediction can be computed as the fraction of the k nearest neighbors that are present.
+
+we have omitted the performance results for knn predictors, as initial experiments found knn predictors to perform significantly worse than the naïve bayes and decision tree predictors.
+
+a decision tree  predictor consists of a tree data structure where each internal node of the tree represents a test of one of the input features used for prediction, for example, testing whether the value of a boolean feature is true, or whether the value of a numeric feature is less than a threshold value stored at the node. for each possible outcome of the test, there is a corresponding subtree. each leaf node in the tree stores the numbers of present and absent training instances that satisfy all the tests between the root node and that leaf node. the decision tree prediction algorithm involves traversing the tree structure by applying the node tests to the instance being classified, starting with the test at the root of the tree, and continuing on to the subtree selected by the test. when a leaf node is reached, the counts of training examples at the leaf are used to make either a boolean prediction  or a numeric prediction .
+
+we used the ind software package  <cit>  for constructing decision trees and classifying instances using these trees. several variations of the tree construction procedure were tried, including the use of different pruning techniques, and the use of bayesian smoothing to obtain more accurate probability estimates at leaf nodes. in the results, we report only the best-performing trees; for both single trees and bagged trees, these were the trees built using the bayesian smoothed variant of the strict minimum message length  principle. the smml training procedure aims to construct the tree for which the encoding cost of the tree plus the training data is minimized  <cit> .
+
+logistic regression  is a linear discriminative prediction method that models the logit of the output probability as a linear function of the features. let π = p. then we assume that   
+
+where β and x are vector forms of the parameters:  and feature values:  . solving for π, we have the predicted probability that a pathway is present as   
+
+the maximum likelihood estimates of β are obtained using the iteratively reweighted least-squares  algorithm .
+
+feature selection
+the set of  <dig> input features described in the section "feature extraction and processing" includes many groups of features whose values are highly correlated with each other. to remove bias from the predictions, and to obtain a more computationally tractable set of features, it is necessary to perform feature selection to remove redundant features.
+
+for decision tree predictors, feature selection is built into the tree construction methods, in the form of heuristics for deciding which feature to split on at each node, and which nodes to prune after a large tree has been built.
+
+for naïve bayes and logistic regression predictors, we used greedy hill-climbing  search to perform forward selection against either of two information criteria: the akaike   <cit>  or bayes   <cit> . each of these criterion functions takes the form of a penalized log-likelihood, where models with greater numbers of parameters are penalized more heavily to avoid overfitting.
+
+ensemble methods
+in addition to using individual predictors, we investigated ensemble methods for prediction. these methods define procedures for training a collection of several different predictors; the prediction made by the ensemble is obtained by combining the predictions made by the members of the ensemble: either by taking a majority vote  or by averaging . the particular ensemble methods used were bagging  <cit>  and random forests  <cit> .
+
+in bagging , the training dataset is resampled  and a predictor is trained on the resampled dataset. this procedure  is repeated r times, and the resulting set of r predictors is taken as an ensemble.
+
+in more detail, for the naïve bayes and logistic regression predictors, the resampled dataset was used to perform feature selection as described in the section "feature selection", and parameters for the resulting predictor were also computed from the resampled dataset.
+
+the random forest method is an extension of bagging where, in addition to resampling the dataset, an additional element of randomness is introduced into the training procedure. for nb and lr models, we simply selected features at random. for decision trees we used the method described in  <cit> , where rather than choosing the best of all features when splitting a node in the tree, we select the best feature from a small random subset of the features.
+
+RESULTS
+feature performance
+tables  <dig>   <dig>  and  <dig> show the highest-performing boolean features, numeric features, and numeric features discretized as described in the section "feature extraction and processing". the boolean and discretized numeric features are ranked according to the information gain, and the numeric features according to the auc; these measures are described in the section "performance evaluation". for comparison, table  <dig> shows the performance of the existing pathologic algorithm.
+
+see section "feature extraction and processing" and section  <dig> of additional file  <dig> for description of features.
+
+columns  <dig> through  <dig> correspond to various performance measures: acc = accuracy; sn = sensitivity; sp = specificity; fm = f-measure; pr = precision; rc = recall; ig = information gain.
+
+see section "feature extraction and processing" and section  <dig> of additional file  <dig> for description of features.
+
+columns  <dig> through  <dig> correspond to various performance measures: auc = area under the roc curve; max. acc = maximum thresholded accuracy; sn  = sensitivity at maximum-accuracy threshold; sp = specificity at maximum-accuracy threshold; max. fm = maximum thresholded f-measure; pr  = precision at maximum-f-measure threshold; rc  = recall at maximum-f-measure threshold.
+
+see section "feature extraction and processing" and section  <dig> of additional table  <dig> for description of features. see table  <dig> for explanation of column headings.
+
+see table  <dig> for explanation of column headings.
+
+predictor performance
+see table  <dig> for description of column headings. hc-bic = hill-climbing on bayes information criterion; hc-aic = hill-climbing on akaike information criterion.
+
+for the bagged predictors with feature selection, we varied the number of components from  <dig> to  <dig>  and found optimal performance over this range at approximately c =  <dig> 
+
+see table  <dig> for description of column headings. hc-bic = hill-climbing on bayes information criterion; hc-aic = hill-climbing on akaike information criterion.
+
+see table  <dig> for description of column headings.
+
+discussion
+our results demonstrate that machine learning methods perform as well as pathologic. note that the results presented here do not show a full picture of the performance of the ml methods, which provide a tradeoff between sensitivity and specificity  by virtue of providing estimates of the probabilities of pathways being present in an organism, rather than simply binary present/absent calls. the performance of the ml methods can be slightly increased by using the pathologic prediction itself as an input feature.
+
+the main cause of false negative classifications  was inability of the enzyme matcher component of pathway tools  to find enzymes catalyzing some reactions in the pathway. in some cases, this failure can be attributed to incompleteness in the genome annotation. for example, many enzymes lack ec number annotations. other enzymes have product names referring to several reactions; our enzyme name matcher currently ignores these names. even for e. coli, where the annotation in ecocyc is of high quality, our enzyme matching software cannot recover all enzyme/reaction matches, so that some evidence for pathway presence is missed. issues with enzyme matching also contribute significantly to false positive predictions. go function terms and ec numbers often refer to multiple metacyc reactions, which may participate in different pathways. this inability to distinguish which of several reactions an enzyme catalyzes inflates the evidence for some pathways. these observations suggest that an important direction for further improvement of the pathway prediction methods described here lies in improving the accuracy of enzyme/reaction mapping. directions for this work might include extending genome annotation inputs to include confidence scores from upstream annotation methods. data from sequence similarity or profile hmm search could also be incorporated into the pathway prediction process, using methods similar to those used in the pathway hole filler component of pathway tools  <cit> .
+
+another factor contributing to prediction errors is the existence of promiscuous reactions. the problem of promiscuous reactions can be addressed in part by making use of features involving the taxonomic range of a pathway and its key reactions. most pathways in metacyc are annotated with an expected taxonomic range; if pathways sharing reactions have disjoint taxonomic ranges, this can help distinguish which pathway should appear in a given organism. pathologic enforces taxonomic range constraints rather strictly, by pruning pathways that are outside their expected taxonomic range, except those in which all reactions are present. we found that taxonomic range features were selected very frequently by our predictors; in decision trees, these features typically appeared very close to the root of the tree.  however, it appears that our predictors do not penalize as strongly as pathologic pathways that are outside their taxonomic range.
+
+key reactions are those reactions in a pathway for which the lack of enzyme is considered a very strong indication that the pathway does not occur in the organism. key reaction features are frequently selected by our predictors. however, their current effect on pathway predictions is limited, because only  <dig> pathways in metacyc are currently annotated with key reactions . this will improve as we curate more key reaction data into metacyc.
+
+related work
+the seed  <cit>  projects subsystems  into genomes. an algorithm infers proposed subsystems, which are checked and refined by curators. the inference algorithm has not been published, nor has its accuracy been measured. a related research algorithm is described  <cit> . reactome  <cit>  performs prediction of metabolic pathways based on genome information, but we have not been able to find a description of their algorithm nor an evaluation of its accuracy. kegg  <cit>  projects "pathway maps" based on genome information. kegg pathway maps encompass multiple metabolic pathways from multiple organisms  <cit> ; therefore, kegg faces the pathway map prediction problem rather than the pathway prediction problem. we have been unable to find a description of kegg's algorithm for map prediction or an evaluation of its accuracy. methods for constructing flux-balance models usually predict the metabolic reaction network, but do not predict metabolic pathways  <cit> .
+
+large-scale metabolic reconstructions at the pathway level have been used to perform phylogenetic reconstruction  <cit>  and to associate metabolic pathways with phenotypes  <cit> . these efforts have typically used simple rules or scores for assessing the presence or absence of pathways. liao et al.  <cit>  required all reactions in a pathway to have enzymes in order for the pathway to be considered present. kastenmüller et al.  <cit>  developed a score similar to the "information content" features used in our predictors, computing the fraction of reactions present in the pathway, weighted according to the uniqueness of the reaction. we expect that such analyses could be improved by using the probabilities of pathway presence computed by our methods.
+
+several groups have developed methods for the reactome prediction problem; these methods include identics  <cit> , metashark  <cit> , and pathway analyst  <cit> , which use various sequence analysis techniques to assign enzymes to the reactions they catalyze. published descriptions of identics and metashark do not discuss how enzyme/reaction mappings are use to judge the presence or absence of pathways in an organism. pathway analyst considers a pathway present if and only if at least one reaction in the pathway has an enzyme. while such a rule may be acceptable for small-scale predictions , it will not have sufficient accuracy for building hundreds of pgdbs from a large reference pathway database such as metacyc.
+
+a number of techniques for discovering  novel pathways have been proposed, including search-based methods  which identify plausible paths between given input and output metabolites. other approaches include searching for frequently-occurring patterns of molecular functions in biological networks  <cit>  or kernel-based methods for learning associations between enzymes catalyzing successive functions in metabolic pathways  <cit> . these methods provide useful resources for identifying novel pathways, which are targets for experimental validation and inclusion in curated pathway databases such as metacyc. in this respect, pathway discovery methods are a useful complement to the pathway prediction methods we have described here.
+
+CONCLUSIONS
+we have demonstrated the application of machine learning methods to the problem of metabolic pathway prediction from an annotated genome. a key product of this work has been the development of a large "gold standard" pathway prediction dataset, which we have used to validate our methods. the development of the gold standard pathway dataset provides a important foundation for future work on pathway prediction, by our group and by others working on this important task.
+
+our results show that general machine learning methods, provided with a well-designed collection of input features, can equal the performance of an algorithm that has been developed and refined over approximately a decade. we observed that a small number of features carry most of the information about whether a pathway occurs in a target organism. in particular, the fraction of reactions in the pathway with enzymes was the single most informative numeric feature. whether the curated taxonomic range of the pathway includes the target organism - a test introduced into pathologic since the previous published description  <cit>  - is also highly informative. all of the ml predictors we evaluated tended to include these features. the predictors often also included other features - newly developed in this work - which are less informative individually, but can contribute to prediction performance in the context of an automatically trained ml predictor.
+
+moreover, the machine learning approach has several benefits over the older algorithm. the machine learning approach decomposes the problem into three essential steps:  procuring labeled training data;  developing a modular library of useful features;  applying a general prediction algorithm.  each of these steps can be optimized in the future to yield continued improvements in pathway prediction performance. as more pgdb curation is performed, the set of available training data will grow.
+
+new features can easily be implemented and tested in combination with existing features. new prediction algorithms can be implemented and tested. the machine learning algorithms we have applied do not simply call each pathway present or absent, but rather provide an estimate of the probability that a pathway is present. thus, the resulting pathway predictions can be tuned by the user to suit different preferences for sensitivity versus specificity. furthermore, the structure and parameters of the model are accessible, and can be used to explain predictions to users of the pathway prediction software.
+
+authors' contributions
+jmd, lp, and pdk designed the research. jmd and lp carried out the research. jmd, lp, and pdk wrote the manuscript. all authors have read and approved the final manuscript.
+
+supplementary material
+additional file 1
+gold standard pathway dataset. a table containing the gold standard pathway dataset. each entry is described by organism name, ncbi taxonomy id, pathway name, pathway id in the metacyc database, and pathway status . tab-delimited text format.
+
+click here for file
+
+ additional file 2
+supplementary material, including additional tables and figures.
+
+click here for file
+
+ acknowledgements
+we are grateful to ron caspi for extensive discussions of the pathway prediction problem, review of the gold standard dataset, and assistance with examination of pathway prediction errors. this work was funded by grant lm <dig> from the national institutes of health. the contents of this publication are solely the responsibility of the authors and do not necessarily represent the official views of the national institutes of health.

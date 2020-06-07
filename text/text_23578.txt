@@ -1,0 +1,288 @@
+BACKGROUND
+multiplexed deep sequencing is a cost-saving and time-saving technology used with next generation sequencing that combines and sequences multiple dna samples as one. this method relies on labeling genomic sequences from separate samples with specific tags, also known as barcodes
+. these barcodes are short sequences,  <dig> to  <dig> nucleotides in length, that are distinct from each other and can have error-correcting properties to protect against the sequence alterations introduced during synthesis, amplification, or sequencing  <cit> . recently, two of us proposed the sequence-levenshtein distance barcode design that corrects a pre-defined number of insertions, deletions, and substitutions while taking into account any possible dna sequence that might follow the barcode sequence  <cit> . it can be easily shown that sequence-levenshtein distance-based barcode sets with a minimal distance of  <dig> or more will correct at least one error.
+
+however, even with the best possible barcode design, recognition of short barcode sequences in the dna context is often problematic. for example, in many cases the identification of barcode sequences alone cannot be done properly because large genomes provide a full set of all possible combinations of short subsequences  of up to  <dig> nt length  <cit> , including those reserved for barcodes. frequencies of words in the genome are neither equal nor random  <cit>  and absent words  could be found for large genomes starting from  <dig> nt to  <dig> nt  <cit> . curiously, unwords have not received any attention as potential barcodes, whereas small and potentially redundant dna sequences are largely used instead.
+
+at the moment, the main strategy for recovering short barcodes relies not only on the sequence identity, but also on the expected position of the barcode, which is usually found at the beginning of the sequence either behind a sequencing primer or in front of a pcr primer. this strategy was successfully implemented for illumina hiseq machines and roche pyrosequencing platforms. for instance, illumina uses a strategy of separating the barcodes from the analyzed sequence by putting them on different ends of the sequencing adapter  <cit> . therefore, the barcode and genomic sequence may be read separately in mutually opposite directions. this approach however is also prone to sequencing errors and barcode misassignments  <cit> . for example, substitution errors might occur. also, the beginning of the barcode may be shifted by one or more positions which then appears as an insertion or deletion error in the barcode.
+
+some newer machines generate longer reads using smaller amount of dna in the sample. these improvements, however, come with new challenges. the pacbio platform can sequence several kilobases of dna in one piece  <cit> . however, the platform is prone to insertion and deletion errors and adds a deliberate time delay before the onset of dna sequencing, resulting in each dna molecule having its dna polymerase positioned at a different location at the start of sequencing  <cit> . consequently, the recognition of the barcode position on the basis of primer position alone is imperiled. theoretically, any sequence can be decoded as a barcode. therefore a naive decoding of the start of every read would potentially lead to a large number of reads being assigned to the wrong samples or left un-assigned. this decreases the power of the experiment in a multiplexed setup, and cross-contaminates different samples with invalid, precision-decreasing reads. obviously, such damage to the experimental results is highly undesirable. thus the detection of barcoded reads in these technologies or in circumstances such as unknown positions of barcodes is an interesting and challenging task.
+
+the problem of detecting the originally attached barcode sequence, the so-called barcode reference sequences, in a large number of reads belongs to the category of large-scale inference problems  that have been previously successfully approached in statistics using false discovery rate  methods, for example by benjamini and hochberg  <cit> , efron  <cit> , and storey  <cit> . when thousands and millions of statistical hypothesis tests are calculated at the same time, statistically significant results may occur due to random chance . in these fdr methods, the expected proportion of erroneously rejected null hypotheses among the rejected ones is estimated and used as a decision criterion for truly significant results. when some of the hypotheses are indeed incorrectly rejected, fdr methods potentially offer a higher sensitivity than naive or family wise error correction methods that estimate the probability of one or more false discoveries instead  <cit> .
+
+a common approach of fdr methods is to estimate the parameters and shapes of the distributions of null and alternative hypotheses. from the estimated cumulative distribution function, the false discovery rate  is inferred to determine the level of confidence in the significance of an alternative test. this fdr variant is commonly called tail area-based fdr and is shortened to “fdr” to distinguish it from other fdr variants  <cit> . a similar strategy can be applied to the problem of detecting barcoded reads. every comparison of a read to the experimental barcode set is a statistical test that determines whether the read is barcoded or not. applying the test to thousands of reads inevitably results in many false detections due to random chance and naturally occurring similar dna or rna sequences, so that fdr methods are applicable. however, directly applying the fdr methods mentioned above is not possible, as the distributions of similarities between reads and barcode sets do not follow the assumptions required by these methods. for example, efron’s method requires a normal distribution of z-values  <cit> , and storey’s solution requires a uniform distribution of p-values under the null hypothesis  <cit> . both methods require that the majority of tests  belong to the null hypotheses, while no such prerequisite can be made for the detection of barcoded reads.
+
+therefore, our goal was to develop a solution tailored towards making a particular distinction between reads that still contain the attached barcode sequence , and reads that start with or within the genomic insert . the method provides a way to estimate and control the fdr of the detection of barcoded reads. detection of barcoded reads is only the first step in the demultiplexing pipeline, so we further investigated the quality of correcting errors in the detected barcode sequence and thus assigning reads to their original samples.
+
+our method is intended to be applicable to different sequencing technologies. for demonstration purposes we have tested and investigated the application of the method to a particular technology, which in our case is pacbio smrt with continuous long reads .
+
+approach
+calculation of the minimal distance δ between a read and a set of reference barcodes is a statistical hypothesis test and δ is its test statistic. a high minimal distance corresponds to a low likelihood for the read to start with a barcode , while a low minimal distance corresponds to a high likelihood of the read to start with a barcode . detecting barcodes in a huge number of experimental reads is a form of multiple hypothesis testing where a high rate of false detections  is expected. our approach is to estimate and control the tail area-based fdr from the frequency function of minimal distances δ of the whole empirical set of reads.
+
+the frequency of minimal distances δ between barcode reference sequences and reads follows a discrete irregular distribution. this empirical distribution is the mixture of two entities: 1) the distribution of orphaned reads forphaned ) and 2) the distribution of barcoded reads fbarcoded ). estimating the shape and mixing proportions of these two distributions allows us to calculate the fdr and sensitivity from the estimated cumulative distribution functions  and  when using a distance δt as threshold to distinguish barcoded reads  from orphaned reads . we estimate these two sub-distributions by fitting a set of simulated barcoded and orphaned reads to empirical data. in our model, six parameters influence the simulated distributions: the fraction of barcoded reads, the sequencing error rate, the variance of the sequencing error rate and the ratios of insertions, deletions, and substitutions. for parameter search, we decided to use an evolutionary algorithm which finds a set of parameters that best fits the simulated data to the empirical data. details of this algorithm are presented in the methods section.
+
+lastly, we validate the method using real multiplexed dna sequencing data obtained on the pacbio smrt platform, which includes the detection of barcoded reads, assigning barcoded reads to their samples and finding sequence variants.figure  <dig> depicts an overview of the approach in practice.figure  <dig> 
+overview of the approach.
+ a multiplexed sequencing experiment is conducted on the pacbio smrt platform  the similarity between the obtained reads and the used barcode sequences is calculated. we show it as a histogram of distances.  we simulate orphaned reads and barcoded reads. the input to the orphaned reads simulation are fragments of the empirical reads. input to the barcoded reads simulation are known barcode sequences attached to reference sequences.  simulations are repeated for different parameter combinations. we modify parameters until the simulated data closely matches the empirical data.  the false discovery rate is estimated from the proportions of barcoded and orphaned reads for each possible distance value.  a satisfying false discovery rate  is used to choose a threshold for the highest acceptable dissimilarity between reads and the barcode sequences. all reads with a higher distance to the used barcodes are discarded.  reads are matched with their original samples .
+
+
+
+methods
+barcode preparation
+the sequence-levenshtein distance between two dna sequences a and b is the minimal number of insertions, deletions, and substitutions necessary to transform one sequence into any prefix of the other or vice versa. this property makes it suitable for use in dna context . the prefix of a sequence can be an empty sequence, the sequence itself, or any subsequence starting from position  <dig> up to any end position. a fast dynamic algorithm was available for the calculation of the sequence-levenshtein distance dsl between any two sequences a and b .
+
+the minimum sequence-levenshtein distance δ between a set of barcodes bc and a sequence s is the minimum of the distances between the barcodes and the sequence:
+  
+
+barcode sets were built to ensure the sequence-levenshtein distance between every pair of barcodes to be at least . such a barcode set allows the correction of at least  <dig> insertion, deletion, or substitution in dna context. for the experiment, a set of  <dig> 7-nt-long dna multiplexing barcodes based on the sequence-levenshtein distance was prepared .
+
+we decided not to use pacbio’s original set of 16-nt-long dna multiplexing barcodes for the following reason. in previous work, we have shown that more errors accumulate in longer sequences. furthermore, we did not find information whether pacbio-barcodes were systematically engineered to optimise their robustness under such adverse conditions. thus, we decided to use our own barcode design  <cit> . it was specifically designed to optimize the robustness and length of sequences for a given number of samples.
+
+in the following, we will identify barcode sets by the length of their barcodes and the minimal sequence-levenshtein distance between them. we denominate a set with barcodes of length l and minimal sequence-levenshtein distance d as “ barcode set”. hence, the aforementioned experimental barcode set will be called “ <cit>  barcode set”. for simulation purposes, other barcode sets of various set size or barcode length  were generated using the same algorithm.
+
+the barcode sets were generated heuristically: first, we generated an initial set of eligible fixed-length dna sequences excluding those with a gc-content of less than 40% or more than 60%, perfect self-complementation, or more than two sequential repetitions of the same base. second, from the eligible dna sequences we randomly chose a set of three sequences with a pairwise sequence-levenshtein distance of at least three . third, we scanned dna sequences in lexicographic order and added a sequence to the seed if the newly added dna sequence had a sequence-levenshtein distance of  <dig> from each sequence already in the set  <cit> . we repeated the third step for a large number of iterations with different random and randomly modified seeds  <cit> .
+
+when necessary for comprehension, we will denominate known barcodes as “barcode reference sequences” or “reference barcodes”. in our terminology, sets of barcodes are without exception sets of reference barcodes.
+
+similarity of barcodes and barcoded primers to unbarcoded mrna and dna
+the reference genome of mus musculus, reference mrna for all m.musculus transcripts, and the reference sequence of the murine atp1a <dig> transcript of the gene for na+/k+-atpase  were acquired from ncbi . for similarity simulations, we sampled  <dig> million random 50-nt-long subsequences from the reference transcripts.
+
+similarities are tested between the aforementioned set of subsequences and sets of barcodes or so-called barcoded pcr primer sequences. the latter are concatenations of reference barcodes and primer sequences that were used to amplify the atp1a <dig> transcript in our experimental validation . the degree of similarity between these barcodes or barcoded pcr primers and sampled subsequences was established by counting the frequency of their minimum sequence-levenshtein distances δ .
+
+formally, the frequency function f of the minimal sequence-levenshtein distances δ between a set s of sequences and a set bc of barcodes or barcoded pcr primers was defined as:
+  <dig>  
+
+.
+
+the cumulative distribution function of f was defined as:
+  
+
+simulation of barcoded and orphaned pacbio reads
+we begin with a set of experimental reads semp which we want to simulate for further analysis .
+
+the set ssim of simulated reads is a union between a set  of barcoded reads and a set  of orphaned reads. the purpose of the simulated read set ssim is to closely resemble the properties of the targeted set of the empirical reads semp in regards to the minimal distances δ between the reads and the respective reference barcode set bc.
+
+simulations of reads must to be individually adapted to the particular simulated technology. here, we target pacbio continuous long reads  for which we developed our own read simulation. our simulation assumptions rely on findings of ono et al.  <cit> :
+
+accuracies of reads are normally distributed
+
+probabilities of sequencing errors per base are uniformly distributed over positions
+
+probabilities for insertions, deletions, and substitutions are possibly unequal
+
+differences in spatial distribution patterns of insertions, deletions, and substitutions are negligible
+
+
+
+hence, the following parameters governed the composition and traits of the read sets:
+
+the number m of reads in the set ssim
+
+the fraction π <dig> of reads that started with a barcode
+
+the average base sequencing error rate μerror
+
+the standard deviation of the base sequencing error rate σerror
+
+the ratios r={rins,rdel,rsub} of insertions, deletions, and substitutions.
+
+
+
+set ssim of all simulated reads was thus described as:
+  
+
+in the simulation and for a given set of parameters m,π <dig> μerror,σerror, and r, sets  and  were generated as follows:
+
+for set , we constructed ⌊π1·m⌉ reads by choosing barcode reference sequences randomly from set bc and appending the reference sequence of the experimentally targeted insert. we then mutated the bases of each read randomly. the per-base sequencing error probability was  with perror being fixed for each sequence. the respective probabilities of individual operations op∈{ins,del,sub} were then
+  
+
+set  of orphaned reads was generated by choosing ⌊·m⌉ random 50-nt-long subsequences of the experimental reads semp starting after position  <dig>  we chose this particular simulation set as we could reasonably assume these subsequences do not start with a barcode and have almost identical characteristics to the experimental orphaned reads.
+
+frequency of test statistic in simulated data
+the frequency distribution of such a set ssim was the sum of the frequency distributions of both sets  and :
+  
+
+for the purpose of this method, we defined the frequency distribution of barcoded reads as the estimate of the alternative hypothesis distribution and the frequency distribution of orphaned reads as the estimate of the null hypothesis distribution, so that
+  
+
+and
+  
+
+the cumulative distribution functions were respectively
+  
+
+and
+  
+
+the estimated cumulative distribution function was then given by:
+  
+
+fitting simulated read sets to empirical read sets
+in the next step, we fitted one set of simulated reads ssim to the set of empirical reads semp. parameter m was predetermined by the number of reads in the empirical data set .
+
+the parameter r of ratios between insertions, deletions, and substitutions had to be supplied by the user, for example, based on information supplied by the manufacturer or experimentally derived knowledge. we chose to estimate these ratios from those reads that had a very high likelihood of having been barcoded, identified as reads with a minimal distance of exactly δ= <dig> to the set of barcodes. for these reads we determined the sequencing errors that corrupted the barcoded reference primer sequence through alignment and calculated the ratios of sequencing error types.
+
+to fit one set of simulated reads to the set of empirical reads, we used an evolutionary algorithm to search for the remaining parameter set  that best explained the encountered frequency of similarities femp of the experimental sequences  <cit> . the fitness  of a particular parameter set was the root mean square  euclidean distance between the simulated frequency distribution of minimal barcode distances fsim and the experimental frequency distribution of barcode distances femp:
+  
+
+the parameter set with the best observed fitness  was selected to generate the simulated data set that was the closest to the empirical data set.
+
+tail area-based false discovery rate
+by adjusting the highest acceptable minimal distance δt  between a set of reads and set of barcodes to distinguish between barcoded and orphaned reads, we manipulated  the false discovery rate of detecting barcoded reads. we defined the tail area-based false discovery rate  as follows:
+  
+
+for the interpretation of biological results, we preferred to work with precision values  which were given by:
+  
+
+sensitivity  was then defined as:
+  
+
+precision and sensitivity of assigning reads to samples
+experimental reads are classified as starting with a barcode when their minimal barcode distance δ is equal to or below a chosen threshold distance δt. we equivalently simulated this form of detection of barcoded reads by calculating an estimated set of barcoded reads  as a subset of all simulated reads ssim:
+  
+
+in this step, we decoded the  barcode that starts the read and assign the read to its original sample accordingly. when decoding only those reads in the set  and comparing the decoded barcodes with the reference barcodes used to generate set , we defined precision  and sensitivity  as:
+  
+
+experimental validation
+to validate the fdr approach, we asked whether we could successfully identify single-nucleotide variants  within the genomic portion of samples that were sequenced in multiplexed fashion. c57bl/ <dig> murine melanocytes were plated in  <dig> mm culture dishes at  <dig> - <dig> /cm <dig> and  <dig> hrs later they were exposed in pbs to  <dig>   <dig>   <dig>   <dig>  or  <dig> j/m <dig> of narrowband uvb radiation . after allowing 2- <dig> days for mutation expression , cells were incubated for  <dig> or  <dig> days in medium containing  <dig> mm ouabain octahydate  to select for cells mutated in the na+/k+-atpase sodium pump  <cit> . clones larger than  <dig> cells were isolated and expanded. for  <dig> of the clones, total rna was isolated, reverse transcribed to cdna, and pcr amplified. because uv mutation frequencies are ∼10- <dig> per gene, each clone is expected to have only  <dig> mutation  in the atp1a <dig> gene. a heterozygous mutation confers ouabain resistance, so the snv is expected to be present in ∼50% of the mrna material, with the remainder wildtype. pcr amplicons were sequenced by pacbio single-molecule sequencing as follows.
+
+twenty barcoded pcr primer pairs were synthesized for the murine atp1a <dig> gene. each pair consisted of one 7-nt-long barcode 5′nnnnnnn 3′  followed by the 20-nt-long sequence 5′gggagctgctctcttctctt 3′  and the same 5′nnnnnnn 3′ followed by 5′tataaaccttgcccgctgtc 3′ .
+
+total rna was isolated from cells , reverse transcribed to cdna , and the  <dig>  kb atp1a <dig> cdna spanning the start and stop codons amplified by pcr  and gel purified without uv illumination. the pico green assay  was used to mix equal dna amounts from the  <dig> samples, and the mixture was ligated to pacific biosciences  smrt adapters to create circular molecules for single-molecule sequencing in two smrt cells using continuous long read mode  <cit> . raw reads were pre-processed by pacbio by cutting of raw reads at the sequencing adapters to generate so called subreads, henceforth just “reads”.
+
+a complete and unaltered forward read would be the concatenation of a barcode, the forward primer, the atp1a <dig> transcript sequence, the reverse complement primer, and the reverse complement of the same barcode. in practice, reads typically begin internal to the atp1a <dig> transcript sequence.
+
+for detection of barcoded reads, we assembled the set semp of all empirical reads as the union of the read sequences and their reverse complements, because a complete read was supposed to have the identical barcode both at the 5’ and 3’ end. the frequency of minimal distances δ between semp and a set of reference barcodes or reference barcoded primers bc is named femp and calculated as described in subsection “similarity of barcodes and barcoded primers to unbarcoded mrna and dna”.
+
+final assignment of reads to their respective samples was executed by finding the reference barcode with the minimal sequence-levenshtein distance to either the 5’ or 3’ end of the read, provided this distance was below or equal to the previously determined threshold δt. if no such reference barcode was found or more than one reference barcode with such a minimal distance was found, the read was not assigned to any sample.
+
+variant calling
+the reads of the  <dig> samples were stripped of their barcodes and then aligned to the mus musculus reference mrna using the software package bwa-mem . variant calling was performed using the software package samtools . parameter details are elaborated in additional file  <dig>  section s <dig>  variants with a phred quality score below  <dig> , or less than  <dig> high-quality aligned reads  were filtered out.
+
+RESULTS
+coincidental barcode similarities in the reference mus musculusdna database
+all our experimental and simulation barcode sets were designed to correct one insertion, deletion, or substitution error. however, dna sequences of such length are frequently similar to naturally occurring subsequences of a mus musculus genome. figure  <dig> depicts the frequency of the similarity between a set of  <dig>  <cit> . sequence levenshtein barcodes and  <dig> million random 50-nt-long subsequences of the mus musculus reference dna database. in  <dig> , <dig> cases one of the reference barcodes was equal to the reference subsequence or had a distance of only one ≤1). using this arbitrary threshold of δt= <dig>  to distinguish between barcoded and unbarcoded subsequences, we would have wrongly identified approximately  <dig> % of subsequences as having been barcoded . we will call this threshold δt= <dig> the naive threshold and compare it to the fdr method that we have developed.figure  <dig> 
+similarities between  <dig> million random subsequences of the
+mus musculus
+dna database and barcode sets of different sizes and barcode lengths.
+ distribution of minimal distances f between  <dig>  <cit>  barcodes and subsequences. the separation by a naive threshold δ
+t= <dig> is illustrated by a vertical dashed line.  falsely detected subsequences as proportion of all tested subsequences based on a threshold of δ
+t=d
+sl≤ <dig> for different sizes of the barcode set and barcodes of length  <dig> nt,  <dig> nt and  <dig> nt  falsely detected subsequences as proportion of all tested subsequences based on a threshold of δ
+t=d
+sl≤ <dig> for different barcode lengths.
+
+
+
+analyzing  <cit>  barcode sets of different sizes , we found a linear increase in proportion of subsequences that were falsely detected as barcoded based on the naive threshold of δt= <dig>  while only  <dig> subsequences  were falsely detected as barcoded when compared to the set of  <dig> barcodes, the ratio increased to  <dig> % when the maximum set of  <dig>  barcodes was tested ). the linear increase in proportion of falsely detected subsequences holds true for other barcode sets of  <dig> nt and  <dig> nt in length.
+
+for a constant set size, the proportion of falsely detected subsequences decreased when the barcode length increased ). when using a set of  <dig> short  <cit>  barcodes,  <dig> % of subsequences were falsely detected to be barcoded, while this was true in approximately  <dig> % of the subsequences when using the longer  <cit>  barcode set that had the same number of elements. the relationship between barcode length and wrongly detected subsequences holds true for different barcode set sizes. if no information about inserts are available and only known barcode sequences are used for barcode detection, the results suggest to use at least 10-nt-long barcodes for  <dig> samples, 11-nt-long barcodes for  <dig> samples, 12-nt-long barcodes for  <dig> samples and even longer barcodes for larger sample sizes. it should be noted that longer barcodes come with problems of their own, as more mutations aggregate in longer barcodes. we will show in section “influence of attached reference pcr primer sequence on detection of barcoded reads” that a shorter barcode can be combined with knowledge about the insert template to alleviate the problems addressed in this section.
+
+coincidental and genuine barcode similarities in atp1a1sequencing data
+in the experimental data, the expected complete size of the atp1a <dig> insert was  <dig>  bp . we collected  <dig>  reads with an average length of  <dig>  bp, and 95% of the reads were between  <dig> bp and  <dig>  bp long. 89% of the reads were shorter than the expected complete coding sequence fragment and consequently many reads must have lacked a complete pcr primer and barcode at one or both ends. reads longer than the targeted insert can also indicate other problems, for example a missed split at the smrt adapter that may have led to absent or non-detectable barcodes.
+
+coincidental similarities in the atp1a <dig> genomefrequencies of minimal distances. frequencies of minimal distances from members of the  <cit>  experimental reference barcode set or members of the  <dig> nt primer sequence set to randomly chosen subsequences of the unbarcoded gene atp1a <dig> , or minimal distances to experimentally observed reads of atp1a <dig> ).
+
+
+
+as in the previous examples of coincidental barcode similarities, using the  <cit>  barcode set and an arbitrary threshold distance of δt= <dig> would have led to detecting barcodes incorrectly in approximately 6% of the subsequences ). with the complete barcoded 27-nt-long reference pcr primer, similarities to subsequences of the atp1a <dig> transcript were much smaller and more seldom, with no subsequence having had a minimal distance of  <dig> or smaller to the set of barcoded pcr primers ).
+
+coincidental and real similarities in experimental atp1a <dig> reads
+in the experimentally obtained atp1a <dig> sequence reads, at least a certain percentage of reads must have actually started with a barcode. we expect the reads to be a complex mix of correctly barcoded unaltered inserts, inserts with present but corrupted barcodes, and accidentally similar sequences. we repeated the previous similarity analysis with all experimental reads and their reverse complements, depicted as a histogram in figure 3; and the minimal distance to each of the  <dig> 27-nt-long barcoded pcr primers is shown in figure  <dig> 
+
+as figure  <dig> shows, there was no obvious visible separation value to distinguish barcoded from orphaned reads when using solely the  <cit>  barcode set. notably, the relative frequency of barcodes with no distance or a distance of  <dig> to the read was substantially higher than in figure  <dig>  yet it is unclear how many of the actual barcoded reads we could accurately detect by using a simple threshold value of δt= <dig> or δt= <dig> 
+
+in previous work, we have shown that in some situations it was possible to correct altered barcodes with a higher distance than the designated fault tolerance of the code , because the average distance between reference barcodes was higher than  <dig>  <cit> . however, judging from the distribution depicted in figure  <dig>  a threshold of δt= <dig> would have included too many orphaned reads: at least 49% of the reads would not have started with an actual  barcode and these reads would have been assigned to random clones, putting the variant calling step at risk.
+
+in figure  <dig>  we depict the frequencies of minimal distances between the set of 27-nt-long barcoded reference pcr primers and the reads. a bi-modal distribution stands out, with one peak at a minimal sequence levenshtein distance δ= <dig> and another peak at a minimal sequence levenshtein distance of δ= <dig>  the left peak is at approximately half the mean sequence levenshtein distance between every barcoded reference pcr primer of the used set  and the right peak is at approximately half the length of the barcoded reference pcr primer . the right peak is visibly consistent with the distribution in figure  <dig>  so we assumed this to be the distribution of the orphaned reads. the left distribution was accordingly assumed to be the distribution of correct and altered barcoded reads . to summarize, a search for 7-nt-long reference barcodes in experimental sequencing data is problematic as no obvious separation could be found to distinguish barcoded and orphaned reads, even though such separation was clearly visible following a search for the barcode reference sequence with the attached pcr primer reference sequence. defining a strategy to separate these two distributions for both the reference barcode set and the barcoded reference pcr primer set, and quantifying the quality of this separation was therefore the next important step.
+
+detection of barcoded reads by fdr
+figures  <dig> and  suggest that there is an extremely low likelihood to find orphaned reads that have a minimal distance of only  <dig> to one of the 27-nt-long barcoded reference pcr primers. we therefore used these particular reads to determine the ratio between insertions, deletions, and substitutions in this particular set of experimental data. we found that 55% of sequencing errors were insertions,  <dig> % were deletions, and  <dig> % were substitutions.
+frequency distribution of similarities of experimental reads and simulated reads to the  <cit>  barcode set and to the 27-nt-long barcoded pcr primer set. the orange bars depict the frequency distribution of the minimal distances of the barcode or barcoded pcr primer set to the experimentally established reads f
+emp resp. ). the slate blue and lime green bars depict the frequency distribution derived from a simulation, with the slate blue bar depicting the distribution of barcoded reads  and the lime green bar the distribution of orphaned reads . bars of simulated frequencies were stacked.
+
+
+
+we report that for this fit of simulated distributions to the empirical distribution the percentage of barcoded reads  was approximately 34%. on average, μerror≈ <dig> % of the bases were altered by either an insertion, a deletion, or a substitution. this particular base sequencing error rate varied with a standard deviation of σerror≈ <dig> % between reads. the parameter solution was found reliably in every repetition of the simulation after a sufficient number of  iterations to within a very small tolerance . a common pitfall of evolutionary algorithms is the existence of “local solutions” . no such local solution was found in our simulations. the most resistant and reliable parameter found was the proportion of barcoded reads, as the form of the right distribution  only depended on the proportion of barcoded reads . thus, the behaviour of the algorithm was very robust when applied on our data set.
+
+for this method, any read with a minimal sequence-levenshtein below or equal to a specific value  was considered to be barcoded . the simulation distribution allowed us to estimate the precision  and sensitivity of detecting barcoded reads in the experimental sequencing data  for every possible threshold value. this simulation was repeated using both the  <cit>  reference barcode set and the set of 27-nt-long barcoded reference pcr primers.figure  <dig> 
+precision  and sensitivity of detection of barcodes in reads and their reverse complements. tests were conducted with the  <cit>  reference barcode set  and the barcoded 27-nt-long reference pcr primers   precision of detection of barcoded reads for different thresholds  sensitivity of detection of barcoded reads for different thresholds  precision and sensitivity plotted against each other.
+
+
+
+for thresholding based on the  <cit>  barcode set, the precision of detecting barcoded reads was very high  at the threshold of δt= <dig> , while sensitivity of detection of barcoded reads stood at 46%. the use of such a threshold would have been ill-advised, as the purpose of using the error-correcting barcode was to correct at least one insertion, deletion, or substitution. at a threshold of δt= <dig> detection precision fell below 53%. the compromise threshold of δt= <dig> put the sensitivity of detection at approximately 82%, with a precision of 89%.
+
+using the complete barcoded 27-nt-long pcr primer reference sequence instead of the barcode reference sequence increased the quality of barcode detection substantially. the usage of the 27-nt-long barcoded pcr primer allowed a higher precision at equal sensitivity and reached a higher sensitivity at equal precision compared to using the  <cit>  barcode set. the distance threshold δt= <dig> was the highest to have a precision of more than 95%. at this threshold, detection sensitivity surpassed 99%.
+
+influence of attached reference pcr primer sequence on detection of barcoded reads
+knowing that using the complete barcoded pcr primer reference sequence increased the quality of barcode retrieval, we tested detection of barcodes using concatenations of barcode reference sequences plus adjacent primer reference sequence fragments of different lengths, pictured in figure  <dig>  sensitivity of assignment to experiments increased considerably with the use of the 17-nt-long barcoded reference pcr primer fragment  rather than only the 7-nt-long reference barcode set. using longer barcoded reference pcr primer fragments increased the detection rate marginally, and it plateaued at approximately 20-nt-long barcoded reference pcr primers. as the computational cost did not prohibitively increase with increased lengths of the barcoded reference pcr primer sequence , the full known barcoded primer sequence could be used. although some implementation adaptions to the sequence simulation of method  <dig> may be necessary for very long pcr primer sequences. in our particular case, a 20-nt-long barcoded pcr primer would have been sufficient.figure  <dig> 
+sensitivity of detecting reads with barcodes depending on length of barcoded reference primer. sensitivity was calculated for two different precision levels over barcoded reference primer lengths from  <dig> nt  to  <dig> nt . the staircase effect occurs due to discrete threshold steps and fixed precision levels.
+
+
+
+assigning barcoded reads to their original samples
+detecting barcoded reads is only the first step in the demultiplexing protocol. in the next step, barcodes are decoded  and reads are assigned to the correct original sample.
+precision and sensitivity of assigning reads to samples. tests were conducted with the  <cit>  barcode set  and the set of barcoded 27-nt-long pcr primers   precision of assigning reads to samples for different thresholds  sensitivity of assigning reads to samples for different thresholds  precision and sensitivity plotted against each other.
+
+
+
+for the variant analysis of the experimental data, we decided on a threshold based on the set of barcoded 27-nt-long pcr primers that balanced high sensitivity with a high precision. we took into consideration that insufficient precision could have led to false variant calling, and insufficient sensitivity could have led to no variant calling at all. in the case of this experiment, sensitivity barely increased at a threshold higher than  <dig>  and precision was very high . at that threshold, we could correctly assign 91% of reads that actually contained at least one barcode.
+
+of the  <dig>  reads, we assigned  <dig>   to their respective samples. an unambiguous assignment was not possible for  <dig>   of the remaining reads which had different barcodes with the same minimal sequence levenshtein distance attached to the 5’ and 3’ end. the remaining  <dig>   reads were classified as having no barcode at either end. importantly, the median length of reads without any barcode was  <dig>  nt, compared to a median length of  <dig>  nt for those reads with at least one barcode at either end . this supports the hypothesis that the former had genuinely no barcode at either end of the read. the median number of reads assigned per sample was  <dig> . <dig> .
+
+variant calling
+a search for atp1a <dig> sequence variants in the experimental data helped us to examine if our method was actually applicable to the real experimental design and how well it performed at avoiding cross-contaminating samples or reducing the number of usable sequence reads per sample. detection of variants revealed five distinct single nucleotide variants  in the gene atp1a <dig> in  <dig> of the  <dig> original samples and two further snv in the remaining two samples . the former detected variants were consistent with the hypothesis of a single mutation in 50% of the mrna material per sample. the snv having two base changes one nucleotide apart, observed in two clones, is consistent with non-tandem double mutations occasionally caused by polymerase errors at and near a single dna damage site after ultraviolet light.
+
+each variant call was supported by a large number of high-quality aligned reads, with coverage ranging from  <dig> to  <dig> . the quality of variant calls was consistently high, with all phred quality scores reaching  <dig>  
+
+no changes in called variants were found when slightly lower or higher thresholds were tested . as figure  <dig> shows, the 27-nt-long barcoded pcr primer is very resilient to small changes in the threshold. still, a close examination of aligned reads assigned with different thresholds  showed signs of cross-contamination with reads that had a differing snv. a screenshot is available in additional file  <dig> 
+
+discussion
+multiplexed deep sequencing technologies are popular among researchers due to high information output and steadily decreasing processing time and costs. in multiplexing experiments, proper design of the barcodes is highly important. careful consideration must be given to their physico-chemical and biological properties as well as to their error-correction capabilities. here we demonstrated that using short barcode sequences exclusively is inefficient at assigning sequence reads to their respective dna/rna samples at high precision and sensitivity. instead, additional information is needed such as the position of the barcode or adjacent primer sequences. available deep sequencing platforms differ in their approaches to this problem. in illumina hiseq, for example, the genomic insert and barcode sequence are placed on different ends of an “index read primer” so that the sequence and the barcode are read separately  <cit> . however, this approach is not completely error-free. in addition, using positional information is not always possible either, since that technique is restricted to specific platforms and applications. if that technique is not available, a barcode is likely attached to the amplification/sequencing primer so that the primer sequence information can be used for barcode detection. although this approach looks intuitively obvious, it is not clear what can be taken as the optimal solution for the choice of barcodes, primers, and detection algorithms. additionally, sequencing errors add more noise to the data, which in turn requires proper thresholding for correct sequence assignment.
+
+our presented solution is built on the idea of controlling the tail area-based false discovery rate fdr, and offers researchers a versatile tool to find an optimal threshold for detecting barcoded sequences. additionally, it gives researchers a reliable impression of the quality of their threshold decision and the trade-off between precision and sensitivity, as well as facilitating further conclusions on the validity of the demultiplexing processing step. the method is generally usable for this particular problem, yet it needs to be modified to the specific technology and circumstances. the part of the method that needs to be adapted is the simulation of reads. read simulation algorithms and analyses of read properties of common next generation sequencing technologies can be found in the literature .
+
+the approach of controlling the false discovery rate for a discrete test is new and still in an experimental stage. nonetheless, recent development in the field of fdr controlling procedures give the impression that exploiting the discreteness of the data increases reliability and sensitivity  <cit> .
+
+in this work, we focused on the specific advantages and issues of the pacbio smrt platform, a next generation technology specialized in sequencing single large molecules  <cit> . our protocol preferred sequencing primers attached to both ends of the dna target. in this setup, barcodes can be easily added to the 5’-end of the pcr primers  so that a complete read has two identical barcodes from each sequencing end. in reality, for several reasons actual reads are quite infrequent in the expected form. one out of two barcodes is frequently missing. technologically, with pacbio smrt, the extension of the sequence by the immobilized polymerase and the reading may not be well synchronized. if the polymerase has been too fast or the deliberate time delay too long, the start of the insert could have been missed together with the barcode and the pcr primer. in some cases, the polymerase does not continue the reaction all the way to the end of the sequence. this means that the reverse complemented barcode at the end of the sequence may be missing as well  <cit> . finally, occasionally irrelevant mrna/dna fragments can be amplified during the pcr which allows further irrelevant reads without any barcodes to occur.
+
+having calculated similarities between barcodes or barcoded primers to the mus musculus reference genome database, we see that longer barcode sequences generally show less randomly occurring similarities. this advantage is derogated by the number of barcodes used in the experiment: more barcodes increase the likelihood of coincidental similarities. the solution to this problem is to use longer barcodes or to concatenate barcodes with adjacent primer sequences.
+
+here we demonstrate the major dilemma of the optimality of the barcode design and identification. on the one hand, barcode sequences should be short and distinct to minimize different kinds of sequencing errors. on the other hand, a short barcode sequence is not unique in a genomic context and requires additional information for correct identification. for example, the barcode sequence itself can be extended by adding an adjacent primer sequence. this minimizes the false discovery rate due to decreased risk of coincidental similarities.
+
+in this work, we found that using additional information from the pcr primer sequence improved barcode recovery tremendously. in future work, the experiment should be designed to handle the case where no such information is available. firstly, adding an identical artificial sequence  to each barcode sequence solves the problem presented by redundancy of the words in big genomes. the best choice of stop-words is based on its dissimilarity to the targeted genome or insert. furthermore, it is conceivable to generate sequence-levenshtein distance-based barcodes that, in combination with a known stop-word, creates an increased mean distance, which further increases the barcode set’s error-resilience. secondly, sets of longer barcodes with error-correction capabilities beyond one error can be generated, which are beneficial to the overall statistics of the true barcode recovery.
+
+the fdr has to be calculated once per experimental data set, which includes the the simulation of reads and matching them to the experimental data. computational complexity of the method grows quadratically over the length of the used barcode or barcoded primers. we found that longer barcoded primers increase sensitivity compared to shorter barcoded primers, while computational time was moderate in all cases. additionally, we found that the increase in sensitivity plateaued for very long barcoded primers. therefore, we believe that using a moderately long barcoded primer  offers the best reachable sensitivity performance and will still be computational feasible.
+
+the statistical approach described here provides a solid method for finding an optimal threshold to separate barcoded and orphaned reads in real sequencing data sets. in addition to our main theme, the sample assignment of the genetic material was sufficiently precise and sensitive to generate a large number of high-quality and well-aligned reads. consequently, exactly one snv in the majority of samples and two snvs in the remaining samples were found. the structure of the results indicated very low cross-contamination of insert read assignments caused by incorrect barcode calls and high-quality calls due to the large number of aligned reads at the respective snv position.
+
+pacbio offers their own method for the detection of barcodes in circular consensus reads  as part of their quiver analysis software  <cit> . it is based on scores generated by a hidden markov model . our method can be considered as an alternative approach to the same problem. in addition it offers additional benefits, such as a statistical insight in the reliablity of the decision in the context of hundreds of thousands of reads as well as the systematic discovery of an eligible threshold.
+
+CONCLUSIONS
+we presented a method for enhancing the detection of barcoded reads that can be adapted to different sequencing technologies and protocols. the method is based on false discovery rate statistics that were designed to assess the likelihood of true positives in an ocean of coincidental positives. based on the precision-sensitivity estimates derived with our method, individual users can decide on a proper cutoff  to detect sequence reads as being barcoded. users can quantify the quality of the assignment of reads to samples. additionally, they can select their particular trade-off between precision and sensitivity, thereby increasing the confidence in the results even in highly error-prone situations. depending on the outcome, performance of the method can be further improved by the use of longer barcodes with higher error-correcting properties, or elongating the barcode by utilizing adjacent adapter or pcr primer sequences during computational detection to increase sensitivity.
+
+electronic supplementary material
+additional file 1:
+dynamic algorithm of sequence-levenshtein distance. a fast algorithm to calculate the sequence-levenshtein distance between sequences a and b. 
+
+ additional file 2:
+supplement. the supplement contains an exact definition of the sequence levenshtein distance, the list of experimental barcodes and primers, software parameters, more examples of coincidental similarities between barcodes, primers, and random subsequences of the mus musculus dna database, tables of detected variants, and tables of precision/sensitivity results. 
+
+ additional file 3:
+distribution of read lengths. the figure depicts the distribution of read lengths, grouped in regard to their status as being barcoded at neither, one, or both ends. 
+
+ additional file 4:
+variant calls. this archive contains the variant calls in bcf file format as exported by samtools. 
+
+ additional file 5:
+evidence of cross contamination. this screenshot from the genome viewer igv shows signs of cross contamination in the aligned reads when a small threshold, middle threshold, and very high threshold was used. the depicted sample “accagaa” had an snv at position  <dig>  the screenshot shows variants at position  <dig>  which is an snv that was reliably found in other samples. 
+
+ competing interests
+
+the university of dresden has been granted a patent on the sequence-levenshtein technology used in this work, for which tb is registered as inventor. the id is de  <dig>  <dig>  <dig>  <dig> 
+
+authors’ contributions
+
+deb raised the multiplexing/demultiplexing problem, lvb initiated the systematic approach, tb developed the method and developed, ran, and analysed the simulations, and deb and rz designed and performed the mutation experiments. tb, lvb, and deb wrote the manuscript. all authors read and approved the final manuscript.
+

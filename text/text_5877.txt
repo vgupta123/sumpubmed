@@ -1,0 +1,266 @@
+BACKGROUND
+advances in biotechnology have made it possible to collect vast amounts of genetic data. although extensive research has been done on numerical and statistical methods to infer the relationship among genes, which we call gene networks, methods for analyzing such data visualizing large gene networks has received less attention.
+
+there exists significant former literature on general graph layout algorithms such as orthogonal drawing, planar embedding, force-directed layout  <cit> . similarly, metabolic networks with relatively small numbers of nodes  have received significant attention, with notable algorithms being proposed by karp  <cit> , and  <cit> . however, these algorithms are designed with fundamentally different goals than those for gene networks. well known fast graph-theoretic algorithms such as sugiyama  <cit> , radial tree  <cit>  are capable of drawing large graphs, but give degenerate results for large and dense graphs. on the other hand, force based algorithms such as spring embedder  <cit>  are able to produce symmetric and aesthetic results, but become intractable in the case of large datasets, and fail to represent biological datasets. former work in incorporating biologically information  <cit>  applies simple positional constraints, but do not scale well to large networks. it has also been noted that such algorithms fail to produce compact layouts  <cit> .
+
+optimizing algorithms rely on minimizing an underlying metric, and have been used to great success. grid-layout  <cit>  has been used in cellular circuits to incorporate complex constraints, while multidimensional scaling  <cit>  along with planar subgraph extraction  <cit> , which maps an artificial metric to euclidean space, has been used to create fast algorithms incorporating biological attributes.
+
+all of the above approaches have their drawbacks; they either fail to reflect biological relationships in the layout or fail to scale for large problems. this problem arises because utilizing biological facts is a computationally expensive operation  <cit>  which most algorithms are not designed for. grid layout  <cit>  for example, requires satisfying biologically meaningful component placements.
+
+this paper introduces a fast, biologically relevant layout algorithm using the concept called betweenness.
+
+betweenness is most commonly used as a way of analyzing social networks  <cit> . this metric was first proposed by freeman et al.  <cit>  as a way to characterize sparsely connected graphs. betweenness centrality for certain types of flow is known as an indicator of traffic through a certain node or edge  <cit> . the index has previously been used in ranking websites and clustering in social networks  <cit> .
+
+biologically, betweenness is useful when the digraph relationship correspond to information flow. in this case modules from betweenness represents informationally isolated modules while the high betweenness nodes and edges are hubs and links with high betweenenss.
+
+bfl is of interest in large gene, and protein networks. protein and gene networks allow for a straightforward attack with bfl, in that a straightforward weighted layout will produce biologically relevant results, as they represent interaction networks. metabolic networks on the other hand should first be analyzed with modularity analysis  <cit> . this is because the genes of interest are often not those with the highest information content  but rather those which function uniquely.
+
+specifically, given σst defined as the number of shortest paths between nodes s and t, and σst defined as the number of shortest paths passing through v , betweenness is defined as the sum of σst/σst for all nodes s and t in the graph. in other words, betweenness is the sum of the probabilities of v being in the shortest path between any two nodes. this definition of node betweenness has been extended to edges by newman et al. as a way to extract community structures  <cit> . edge betweenness is similarly defined as above by taking the sum of σst/σst, where σst is defined as the number of shortest paths between s and t passing through edge e.
+
+recently, betweenness has become of interest in bioinformatics because of its biological importance in gene and protein networks. specifically, it has been shown that betweenness values correctly identify bridge proteins  <cit> , protein modules  <cit> , and essential proteins  <cit> .
+
+although there are other measures which fulfill the above measures, such as random walk betweenness  <cit>  and eigenvector centrality  <cit> , these measures have a higher runtime complexity and produce similar values. in some isolated cases, such as an extremely dense graph, these measures may result in better layout, although we consider that in general the runtime trade-off is unnecessary.
+
+these results imply first that clusters generated with girvan-newman's algorithm  <cit>  using edge betweenness accurately represent clusters in protein function  <cit> . second, high betweenness value nodes are biologically important to the function of the gene network. finally, betweenness based layout correctly identifies bridges, which is valuable to graph layout techniques. we attach a standard biological dataset by luo et al.  <cit>  to show these properties.
+
+the remainder is organized as follows. in the methods section, we first define betweenness and then we demonstrate an efficient parallel algorithm for calculating betweenness. we then present a new node and edge betweenness based fast layout algorithm  and the specific score methods. lastly, we present the expected runtime of the layout methods. in the results and discussion section, we show the effects of graph size and confirm the effectiveness of our approach on runtime. we then compare the run-times and outputs of various networks with other layout algorithms, and also show that betweenness is crucial to our algorithm.
+
+methods
+definition of betweenness
+we will use the same notation originally developed by brandes  <cit>  to describe node and edge betweenness calculations. first, let g =  be a connected directed graph. we define σab to be the number of shortest paths between nodes a and b in g. we then define σab as the number of shortest paths between a and b which go through n ∈ v. in this paper, for each edge e ∈ e, we denote ep and ec to be the originating and destination nodes respectively.
+
+the node betweenness for node v is defined as
+
+  nb=∑vi∈v∑vj∈v\{vi}σvivjσvivj 
+
+the edge betweenness for edge e is defined as
+
+  eb=∑vi∈v∑vj∈v\{vi}σvivjσvivj 
+
+in order to calculate these betweennesses, brandes  <cit>  proposed an efficient backwards algorithm which starts at the leaf nodes of a tree of shortest paths from a source in v  and accumulates the betweenness values to the root node. the following two properties of tsp is used in  <cit> :
+
+ if the graph is a tsp, following property is satisfied for a, b ∈ v with a as an ascendant of b.
+
+  σab = σan·σnb. 
+
+ similarly for each edge e ∈ e, we define the sigma operator σab to be the number of paths from a to b which pass through edge e. in a tsp, we have
+
+  σab=σaep⋅σecb. 
+
+we propose a new forward algorithm where we start at the root node and propagate downwards. this allows us to parallelize the operations in a much more straightforward way compared to the backwards algorithm as in the next section.
+
+parallelized betweenness calculation
+brandes  <cit>  previously showed an implementation for calculating edge betweenness values. we show that the forward algorithm operates upon the same principle while allowing for parallelism.
+
+given a graph g, we start by running dijkstra's algorithm on each node v and storing all shortest paths from node v to all other nodes. this gives us a tsp t comprises of shortest paths from v.
+
+our algorithm attempts to break down the betweenness calculation for shortest paths starting at each node v in a recurrent relation.
+
+the node betweenness nb for a node v ∈ v consists of the internal sum and the external sum . given the tsp t containing the shortest paths from v ∈ v, we can obtain the internal sum of the node betweenness, i.e. ∑vj∈v/{v}σvivjσvivj. for this node v, we can derive a recursive relation for σvivj in terms of the number of paths through its destination k as,
+
+ σvivjσvivj=∑kσvivj). 
+
+the first term can be seen as the additional contribution made from the new edge between v and k. the latter term can be seen as the contributions of all nodes downstream of k. a proof of the correctness of the backwards form of this equation is given in  <cit> .
+
+we then derive the recursive formula for edge betweenness in a similar manner. substituting equation  <dig> into equation  <dig>  we can rewrite the betweenness of an edge e as:
+
+ eb=∑vi∈v∑vj∈v\{vi}σviepσecvjσvivj. 
+
+if we let v in the previous derivation equal to ep and k equal to ec, we have that
+
+ eb=∑vi∈v∑vj∈v\{vi}σvivσepecσviec⋅σvivjσvivj. 
+
+since σepec =  <dig>  we have that
+
+ eb=∑vi∈v∑vj∈v\{vi}σvivσviec⋅σvivjσvivj. 
+
+this equation implies that the operations involved in calculating node betweenness can be used for edge betweenness values.
+
+this algorithm can be parallelized for each v ∈ v since the operations from each tsp t are independent. therefore, this is a more efficient algorithm than many of the current methods, which depend on calculating node betweenness before edge betweenness.
+
+the method presented in  <cit>  relied upon this approach, but started at vj rather than vi. this is an obstacle for parallelization since the values of some vj cannot be fixed unlike those for vi.
+
+for large networks, betweenness values become extremely large for central nodes, while terminal nodes with no children have zero centrality. in order to make this metric more suited for layout, we take the log centrality for both edge and betweenness ).
+
+edge and node betweenness based fast layout algorithm bfl
+after calculating the betweenness scores, our edge and node betweenness based fast layout algorithm  is executed as in tables  <dig> and  <dig> 
+
+table above shows the type and usage of each global variable as well as parameters
+
+as described in introduction section, for the bfl layout algorithm, we mainly care following two points;  the important elements  should be emphasized in the resulting layout,  the layout algorithm should run in real-time for large scale gene networks .
+
+a naïve implementation of betweenness would scale scores as part of an optimizing algorithm. such a naïve method was initially investigated, but incorporating betweenness in a global optimization algorithm caused significant slowdowns ). the global optimization incurred a large penalty because the scaling forced high-betweenness nodes with strict tolerances to be optimized in a sea of lower-betweenness nodes.
+
+for the above reason, instead of using a global optimization approach in bfl, we created a local optimization procedure which took advantage of the properties of betweenness and minimized the loss of quality. bfl places one node at a time in order of descending betweenness instead of placing all nodes at once . in bfl, simulated annealing is used to place the inserted node by minimizing the score function .
+
+the execution steps of bfl in tables  <dig> and  <dig> is summarized as follows. initially, bfl stores all nodes to the priority queue q, in which each node is prioritized with the node betweenness value  and creates an empty set s that is used to store the already placed nodes. in the first step, dequeue the top node in q, put the node to s, and set the position of the node to . in the main recursive loop , dequeue the current head node v in q and check whether or not s contains a neighbor of v.  if s does not contain a neighbor, all edges connected to v are inserted into a map h  and is not added the v to s.  if s contains a neighbor of v , the v is inserted to s  and one node v' in s is with the highest edge betweenness is selected and placed the v at the initial coordinate randomly drawn from a gaussian centered at v with variance c1·nodebc <dig> . the initial coordinate is optimized by using the annealing method described in the next section . in , all nodes connected to v in h are also placed in the same manner . we separate execution branches  and  in order to resolve orphan nodes. since insertion order depends only on betweenness, there are some nodes which are disconnected from the currently placed graph s. in this case we put this node on a dependency queue, and place the node as soon as the dependency is fulfilled.
+
+this significantly speeds up bfl layout since only nodes directly connected to the newly inserted node is needed to calculate the score function in each insertion step, i.e. pairwise effects elsewhere on the graph do not need to be calculated at all.
+
+bfl runtime is further shorten by using following two properties. in the beginning phase, few nodes are already placed and score calculation proceeds quickly. later, on the other hand, the inserted nodes will have few edges , leading to much looser score tolerances and fewer children to process .
+
+simulated annealing with betweenness based score function
+for the insertion step of each node in bfl, we use simulated annealing to optimize the location of a newly inserted node vi ∈ v by optimizing the following score function 
+
+shows scoring functions for each aesthetic parameter, weighted by betweenness scores.
+
+ score=k1⋅nodedensity+k2⋅edgelength+k3⋅edgecross, 
+
+where evi is the connected edges to the node vi, g′i= is the subgraph before inserting node vi, and k <dig> + k <dig> + k <dig> =  <dig> .
+
+similar metrics have been used in  <cit>  and there have been aesthetic justifications for their use. simulated annealing is even more suited in this case because of its robustness and single-point performance. while there are very efficient algorithms such as genetic, particle swarm, or ant colony optimization for parallel optimization procedures, bfl reduces global optimization to a series of local optimization problems, which removes the need for parallel optimization. in this case, nearly all stochastic optimization problems become a variant of simulated annealing. on the other hand, hill climbing and bfgs based numerical optimization procedures are not robust enough for this problem. the optimization landscape is extremely multimodal  and therefore the chance of local minima are extremely high.
+
+in our score function, values of node and edge betweennesses are effectively used to ensure that high betweenness nodes are given more emphasis than low-betweenness ones with low calculation cost.
+
+node density function
+in addition to the traditional notion that high node density makes graphs hard to read, we concluded that high betweenness nodes should contribute more to the local density score than low betweenness nodes. we therefore define a density function for placing vi into a set of already placed nodes v′i
+
+ nodedensity=∑v′i∈v′i||vi−v′i||⋅nb⋅nb, 
+
+where nb=∑vi∈v∑vj∈v\{vi}σvivjσvivj is the euclidean distance of nodes vi and v′i.
+
+the density function will create a multi-scale layout; high betweenness nodes are separately positioned as core nodes and low-betweenness nodes are positioned around them.
+
+we can efficiently implement a localized variant of this by using quad-trees . for a graph with i nodes, we can query a bucket in log amortized runtime.  <cit> 
+
+this pseudo code shows modifications needed to query local densities and speed overall runtime.
+
+edge length function
+in  <cit> , the average edge length is used to counterbalance the density and prevent a space-inefficient layout. in bfl, each edge length is scaled by its betweenness score, which forces nodes to shorten high betweenness edges over low betweenness ones. edge lengths therefore as a aesthetic measure of the contribution of an edge to the node betweenness.
+
+we define an edge length function for edges evi connected to the newly inserted node vi,
+
+ edgelength=∑evi∈evi||evi||⋅eb, 
+
+where ||evi|| is the euclidean length of the edge evi.
+
+edge crossing function
+in order to achieve , the important elements should be emphasized in the resulting layout. edge crossings high betweenness edges should be minimized, while crossings among low betweenness edges can be tolerated . for this reason, each edge crossing is scaled by its betweenness score. similarly, for newly inserted edges evi, we define an edge crossing function,
+
+ edgecross=∑evi∈evi∑e′i∈e′i\{evi}δ⋅eb⋅eb , 
+
+where δ is an indicator function which returns  <dig> if edgecross=∑evi∈evi∑e′i∈e′i\{evi}δ⋅eb⋅eb , and e′i cross and otherwise returns  <dig>  in order to calculate the number of crossings, we use the efficient ray shooting algorithm proposed by  <cit> .
+
+for our simulated annealing loop, a polynomial cooling scheme is specified by defining the temperature t as
+
+ t = n, 
+
+where kmax is the maximum iteration count and k is the current loop . former literature  <cit>  and our tests suggested that n =  <dig> was reasonable for most cases.
+
+general annealing implementation is shown here with a cubic cooling schedule.
+
+layout algorithm runtime analysis
+since the betweenness calculation can be cached into the network file for repeated uses, we only consider the runtime of the layout algorithm itself. the runtime of the layout is dominated by evaluation of the scoring function which is called |v| times.
+
+let f be the runtime of scoring function. the total runtime is given as
+
+ ∑i=0|v|−1f. 
+
+while nodes are sequentially inserted according to the value of the node betweenness, we cannot know the exact values of |evi|, |v′i|, and |e′i| in advance. thus, we evaluate the expected total runtime to analyze its asymptotic behavior,
+
+  e)=∑i=0|v|−1e). 
+
+the runtime of the score function can be expressed by the sum of its component run-times, which is
+
+ f=nodedensity+edgelength+edgecross. 
+
+the runtime for the first term nodedensity takes o) since the quad-tree based density calculation method takes o) time to query the bucket and sum all the nodes  <cit> . the second term edgelength takes o time to query all new edges. the last term edgecross is a ray-shooting problem which can be solved in o2) time  <cit> . thus, the expected total runtime in equation  <dig> can be given as:
+
+ ∑i=0|v|−1e)=∑i=0|v|−1e+edgelength+edgecross).=∑i=0|v|−1+e+e2)). 
+
+ =∑i=0|v|−1+e+e2)). 
+
+since e is log, we remove the expectation of the first term to get,
+
+ =∑i=0|v|−1+e+e2)). 
+
+the expectation of |evi| must be the average degree d of graph g since e is the expected number of edges, which the newly inserted node vi brings. this leaves the expectation of |e′i|. since |e′i| is concave, by jensen's inequality and e = di we have,
+
+ e2)<elog⁡)2=dilog⁡ <dig>  
+
+which dominates the density term, giving us an asymptotic runtime of
+
+ ∑i=0|v|−12)=d|v|+∑i=0|v|−1di/log⁡ <dig>  
+
+we claim that the expression
+
+ ∑i=0nilog⁡2=ζ−ζ, 
+
+where ζ is the 2nd derivative of generalized zeta function with respect to x.
+
+proof of claim. the generalized zeta function is given by
+
+ ζ=∑i=0∞1x 
+
+taking the second derivative with respect to x,
+
+ ζ=∑i=∞−xlog⁡ <dig>  
+
+plugging x = -1/ <dig> 
+
+ ζ=∑i=0∞i+ylog⁡ <dig>  
+
+ ζ−ζ=∑i=0∞ilog⁡2−∑i=0∞i+n+1log⁡2=∑i=0nilog⁡ <dig> 
+
+now by simple manipulation we can take into account the degree and make   □
+
+ ∑i=0|v|−1dilog⁡2=d+log⁡)2)=d2+∑i=0|v|−1ilog⁡2+2∑i=0|v|−1log⁡log⁡)=d2∑i=0|v|−1i−2log⁡−ζ)−ζ−ζ). 
+
+removing negligible terms, we have
+
+ ≃−dζ+dlog⁡2∑i=0|v|−1i. 
+
+using l'hopitel's rule and the knowledge that ζ is zero,
+
+ lim⁡|v|→∞−ζ|v|2=lim⁡|v|→∞−ζ2|v|= <dig>  
+
+which shows that, the runtime grows slower than d log with respect to degree d and slower than |v| <dig> for node size |v|, or in little o notation,
+
+ ζ = o. 
+
+the estimated result o implies that our algorithm has an asymptotic complexity better than many fast optimizing algorithms with respect to node size. edge crossing calculation can be ignored in many cases leading to an even faster runtime log) if degree is constant, which is asymptotically equal to |v|log and is the current standard for the fastest layout algorithms.
+
+this speedup would not be possible without the sequential layout from the betweenness algorithm.
+
+RESULTS
+methods and datasets
+the algorithm was implemented in java with files stored in cell system markup language  format  <cit> . a fibonacci heap was used for the priority queue, all other data structures used library implementations available in the jdk.
+
+runtime tests were done on a 8-core intel xeon  <dig> x <dig>  <dig> ghz machine with  <dig> gbs ram, with random graphs generated by methods given by rodionov et al.  <cit> . comparisons to other programs were made on one sparse graph , two dense graphs  and one estimated gene regulatory network  on an athlon x <dig>  <dig>  ghz machine with  <dig> gbs ram running on windows xp. for the last gene regulatory network , the microarray data of the ultradian oscillation  clock in mouse presomitic mesoderm cells by dequeant et al  <cit>  is used. we generated graphs in csml, gml, net, and tlp files for various programs and used the same graph to compare run-times and outputs. these graph data files used in our simulation are available in the additional file  <dig> 
+
+for all tests, cached costs were not calculated , as we are concerned with the time to layout.
+
+bfl runtime dependency on node size
+runtime for random graphs of degree three from size  <dig> to  <dig> are shown in figure  <dig>  as the cores could not be load-isolated, the runtime fluctuations at the larger sizes are a result of parallel loads on the cluster. even with the fluctuations however, the maximum runtime for layout is less than  <dig> seconds for a graph with  <dig> nodes and  <dig> edges. betweenness calculations take more time, but such calculations were cached for this test since we evaluate solely the performance of the layout algorithm. the runtime graph seems to show that for constant degree, runtime rises near linearly from  <dig> nodes to  <dig> nodes, which is consistent with our previous analysis that the runtime for layout should be less than n <dig>  we also note that the error bars grow, which is to be expected as the larger graphs have high variability with respect to graph structure and therefore can have highly unbalanced graphs, leading to longer run-times.
+
+bfl runtime dependency on betweenness
+in order to show that sequential insertion with betweenness order leads to a lower runtime, we corrupted the betweenness values with zero-mean fixed-variance gaussian noise prior to ordering the nodes in the queue. figure  <dig> shows the effect of such perturbation on runtime for a graph of  <dig> nodes and  <dig> edges. the runtime shows expected behavior as the runtime jumps when gaussian noise becomes large enough to cause perturbations in the large-betweenness nodes. we also note that 1000-variance noise  caused zero losses in runtime, and therefore future algorithms could use a heuristic version of betweenness calculated by random walk or approximative methods. our algorithm would perform as well given low-noise approximations.
+
+bfl runtime dependency on graph density
+while bfl is optimized for sparse networks, we show that bfl performance may actually improve with dense networks. in is not usual that the most of the nodes of the biological networks have high degrees. instead, this is reasonable to consider parts nodes have high degrees in the network since they work as hub genes in the network  <cit> . thus, we have applied our layout algorithms to the following graph. 10% of the node has high degree m . for a random graph with  <dig> nodes  and  <dig> edges, we have created two graphs by adding   <dig> edges to 10% nodes ) and   <dig> edges to 10% nodes ). for those graphs as in table  <dig>  the runtimes are reasonable as   <dig>  s and   <dig>  s.
+
+runtime of the proposed method is compared to those fo existing methods  for several graphs. dense graph 2000/ <dig> and dense graph 2000/ <dig> were generated by adding  <dig> and  <dig> edges respectively to 10% nodes in random graph 2000/ <dig> 
+
+bfl compared to existing algorithms
+resulting layout of bfl compared to those of others
+we show layouts of uo analysis using gem-tulip , pajek , rsdfp-interviewer  and our algorithm bfl on cell illustrator   <cit> . the graph was not of extremely high degree; however, pajek and interviewer both produce layouts with no discernible network structure. tulip with automatic sizing performs better, sorting all of the unconnected networks to the outside; however the program took eleven minutes, an order of magnitude more than any other program. our betweenness-based algorithm was the fastest and also produced a readable layout. our algorithm can naturally create a multi-scale layout, making low-betweenness nodes smaller to give space for large betweenness nodes and edges. figure  <dig> shows an enlargement of a section of the graph, demonstrating this feature of our algorithm. magnification shows that the complexity of the graph is simply stored at smaller sizes. in contrast, all other algorithms fail to create such a layering.
+
+we also note that the runtime of this set was significantly lower  for the betweenness algorithm compared to the others. the betweenness algorithm performs drastically better than others with sparse and multiscale datasets, while the competing algorithms have similar performance in randomly generated graphs.
+
+betweenness is critical to bfl layout structure
+in order to show that betweenness enforces aesthetic constraints of density and compactness, we compared bfl to a modified version which did not weight scores based upon betweenness. figures  <dig> and  <dig> respectively show the original and modified version of bfl. while the unweighted density, edge length and crossing parameters were similar in both runs, the unmodified bfl is visually superior because of its ability to force lower betweenness nodes to conform to larger betweenness nodes.
+
+CONCLUSIONS
+our bfl layout algorithm mainly achieved following two points:  the important elements  are emphasized in the resulting layout,  the layout algorithm runs in real-time for large scale gene networks . for a graph with n nodes, this approach reduces the expected runtime of the algorithm to o when considering edge crossings, and to o when considering only density and edge lengths. we also compared against fast graph layout algorithms and approaches requiring intensive optimizations. for gene networks, our algorithm was faster than all layout algorithms tested while providing readability on par with intensive optimization algorithms. we achieve a  <dig>  second runtime for a graph with  <dig> nodes and  <dig> edges on a standard desktop computer. we will develop an effective tuning method for scaling parameters automatically in response to change in graph degree and optimize the algorithm further. we also intend to show that the layout algorithm provides a rough metric of functional relations, where betweenness separates functionally unrelated units and identifies hub genes.
+
+authors' contributions
+basic idea was conceived by mn. idea was developed and implemented by th, with kk and mn advising. the manuscript was written by th and revised by mn and kk. sm supervised throughout. manuscript was read and approved by all authors.
+
+supplementary material
+additional file 1
+network data. uo analysis dataset used for layout comparison in gml, tul, net, and csml file. csml file has been stripped of all metadata not related to the graph structure. zip file should be extracted for all data.
+
+click here for file
+
+ acknowledgements
+computation time was provided by the super computer system, human genome center, institute of medical science, university of tokyo.
