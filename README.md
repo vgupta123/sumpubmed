@@ -30,7 +30,7 @@ Please cite the below paper if you intent to use the dataset for your research.
 @article{bharti2020,
   title={SUMPUBMED: Summarization Dataset of PubMed Scientific Article},
   author={Bharti, Prerna and Gupta, Vivek and Nokhiz, Pegah and Karnick, Harish},
-  url={https://vgupta123.github.io/docs/submubmed.pdf}
+  url={https://vgupta123.github.io/docs/submubmed_mainpaper.pdf}
   year={2020}
 }
 ```
