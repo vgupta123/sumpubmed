@@ -6,6 +6,10 @@ SUMPUBMED is a dataset for abstractive summarization over scientific article. Th
 
 For creating SUMPUBMED, we downloaded around 33,772 documents identified as BMC literature. BMC (BIO MED CENTRAL) literature incorporates BMC health services research papers related to medicine, pharmacy, nursing, dentistry, health care, and so on. 
 
+### Pipeline
+
+<p align="center"><img width="80%" src="flowchart.png" /></p>
+
 ### DataSet Structure
 
 After downloading, you have multiple sub-folders with several text files. Datasets contains the following four folders as described below :
