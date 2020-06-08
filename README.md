@@ -35,5 +35,5 @@ Please cite the below paper if you intent to use the dataset for your research.
 Carefully read the ***LICENCE*** and the ***Datasheet*** for non-academic usage. This dataset is licensed under the terms of the MIT license. Feel free to use the dataset for non-commercial academic purpose.
 
 ```
-Note: Associated scripts for the baseline models would soon be available.
+Note: Associated scripts for the baseline models would soon be available. The script for preprocessing is available in scripts folder as format_function.py
 ```
