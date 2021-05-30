@@ -27,10 +27,13 @@ human_annotation.tsv : human annotation of random 50 examples
 Please cite the below paper if you intent to use the dataset for your research.
 
 ```
-@article{bharti2020,
+@inproceedings{bharti2020,
+  booktitle = "Proceedings of the 2021 Conference of the Association for Computational Linguistics: Student Research Workshop",
   title={SUMPUBMED: Summarization Dataset of PubMed Scientific Article},
   author={Bharti, Prerna and Gupta, Vivek and Nokhiz, Pegah and Karnick, Harish},
-  url={https://vgupta123.github.io/docs/sumpubmed_mainpaper.pdf}
+  publisher = "Association for Computational Linguistics",
+  year = "2021",
+  url={https://vgupta123.github.io/docs/121-paper.pdf}
   year={2020}
 }
 ```
