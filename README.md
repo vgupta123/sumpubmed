@@ -1,6 +1,6 @@
 <p align="center"><img width="80%" src="logo.png" /></p>
 
-## SUMPUBMED: Summarization Dataset of PubMed Scientific Article
+## [SUMPUBMED: Summarization Dataset of PubMed Scientific Article](https://vgupta123.github.io/docs/121-paper.pdf)
 
 SUMPUBMED is a dataset for abstractive summarization over scientific article. The dataset use the [PubMed bio-medical article](https://catalog.data.gov/dataset/pubmed) to create the SUMPUBMED summarization dataset. PubMed comprises of more than 26 million citations for biomedical literature from MEDLINE, life science journals, and online books. Citations may include links to full-text content from PubMed Central and publisher web sites. 
 
@@ -30,7 +30,7 @@ Please cite the below paper if you intent to use the dataset for your research.
 @inproceedings{bharti2020,
   booktitle = "Proceedings of the 2021 Conference of the Association for Computational Linguistics: Student Research Workshop",
   title={SUMPUBMED: Summarization Dataset of PubMed Scientific Article},
-  author={Bharti, Prerna and Gupta, Vivek and Nokhiz, Pegah and Karnick, Harish},
+  author={Gupta, Vivek and Bharti, Prerna and Nokhiz, Pegah and Karnick, Harish},
   publisher = "Association for Computational Linguistics",
   year = "2021",
   url={https://vgupta123.github.io/docs/121-paper.pdf}
